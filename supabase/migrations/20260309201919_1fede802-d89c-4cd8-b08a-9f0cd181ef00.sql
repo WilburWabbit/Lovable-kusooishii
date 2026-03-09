@@ -1,0 +1,1 @@
+ALTER TABLE public.inbound_receipt_line ADD COLUMN condition_grade text;
