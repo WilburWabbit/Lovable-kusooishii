@@ -163,10 +163,14 @@ export function QboSettingsPanel() {
                 Last token update: {new Date(status.last_updated).toLocaleString()}
               </p>
             )}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Purchases
+              </Button>
+              <Button size="sm" onClick={syncSales} disabled={syncingSales || !user}>
+                {syncingSales ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                Sync Sales
               </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
