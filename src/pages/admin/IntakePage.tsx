@@ -43,6 +43,7 @@ const statusColor: Record<string, string> = {
 
 export function IntakePage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [lineEdits, setLineEdits] = useState<Record<string, string>>({});
