@@ -268,23 +268,39 @@ Deno.serve(async (req) => {
 
     const itemCache = new Map<string, any>();
     const itemIdArray = Array.from(uniqueItemIds);
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 5;
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
+      // Pause between batches to avoid QBO 429 rate limits
+      if (i + BATCH_SIZE < itemIdArray.length) {
+        await new Promise(r => setTimeout(r, 250));
+      }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items`);
 
     let autoProcessed = 0;
     let leftPending = 0;
     let skippedExisting = 0;
+    let skippedNoItems = 0;
     const pendingReasons: string[] = [];
 
     for (const purchase of purchases) {
       const qboPurchaseId = purchase.Id;
+
+      // Skip purchases with no item-based lines (pure account expenses)
+      const hasItemLines = (purchase.Line ?? []).some(
+        (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
+      );
+      if (!hasItemLines) {
+        skippedNoItems++;
+        continue;
+      }
+
       const vendorName = purchase.EntityRef?.name ?? null;
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
+      const currency = purchase.CurrencyRef?.value ?? "GBP";
       const currency = purchase.CurrencyRef?.value ?? "GBP";
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
@@ -380,6 +396,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Clean up existing pending receipts that have zero stock lines
+    const { data: pendingReceipts } = await supabaseAdmin
+      .from("inbound_receipt")
+      .select("id")
+      .eq("status", "pending");
+
+    let cleanedUp = 0;
+    for (const pr of (pendingReceipts ?? [])) {
+      const { count } = await supabaseAdmin
+        .from("inbound_receipt_line")
+        .select("id", { count: "exact", head: true })
+        .eq("inbound_receipt_id", pr.id)
+        .eq("is_stock_line", true);
+      if (count === 0) {
+        await supabaseAdmin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", pr.id);
+        await supabaseAdmin.from("inbound_receipt").delete().eq("id", pr.id);
+        cleanedUp++;
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -387,6 +423,8 @@ Deno.serve(async (req) => {
         auto_processed: autoProcessed,
         left_pending: leftPending,
         skipped_existing: skippedExisting,
+        skipped_no_items: skippedNoItems,
+        cleaned_up: cleanedUp,
         pending_reasons: pendingReasons,
         items_cached: itemCache.size,
       }),
