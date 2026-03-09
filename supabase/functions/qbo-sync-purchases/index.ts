@@ -256,7 +256,25 @@ Deno.serve(async (req) => {
     const purchaseData = await purchaseRes.json();
     const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
 
+    // --- Pre-fetch all unique QBO item IDs in parallel ---
+    const uniqueItemIds = new Set<string>();
+    for (const purchase of purchases) {
+      for (const line of (purchase.Line ?? [])) {
+        if (line.DetailType === "ItemBasedExpenseLineDetail" && line.ItemBasedExpenseLineDetail?.ItemRef?.value) {
+          uniqueItemIds.add(line.ItemBasedExpenseLineDetail.ItemRef.value);
+        }
+      }
+    }
+
     const itemCache = new Map<string, any>();
+    const itemIdArray = Array.from(uniqueItemIds);
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
+      const batch = itemIdArray.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
+    }
+    console.log(`Pre-fetched ${itemCache.size} QBO items`);
+
     let autoProcessed = 0;
     let leftPending = 0;
     let skippedExisting = 0;
