@@ -52,6 +52,9 @@ interface WishlistItemRow {
   } | null;
 }
 
+type SortKey = "mpn" | "name" | "theme_name" | "subtheme_name" | "release_year";
+type SortDir = "asc" | "desc";
+
 const ALL_VALUE = "__all__";
 
 export default function WishlistTab({ userId }: WishlistTabProps) {
