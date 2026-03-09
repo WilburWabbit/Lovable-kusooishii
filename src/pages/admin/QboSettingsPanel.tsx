@@ -31,25 +31,21 @@ export function QboSettingsPanel() {
     fetchStatus();
   }, []);
 
-  const connectQbo = () => {
-    // Build Intuit OAuth URL
-    const clientId = import.meta.env.VITE_QBO_CLIENT_ID;
-    const redirectUri = `${window.location.origin}/admin/qbo-callback`;
-    const scope = "com.intuit.quickbooks.accounting";
-    const state = crypto.randomUUID();
-
-    // If we don't have the client ID on the frontend, show instructions
-    if (!clientId) {
+  const connectQbo = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("qbo-auth", {
+        body: { action: "authorize_url" },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      window.location.href = data.url;
+    } catch (err) {
       toast({
-        title: "Configuration needed",
-        description: "Set VITE_QBO_CLIENT_ID in your environment to enable OAuth redirect. For now, use the sandbox connect flow.",
+        title: "Connection failed",
+        description: err instanceof Error ? err.message : "Could not generate authorization URL",
         variant: "destructive",
       });
-      return;
     }
-
-    const url = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}`;
-    window.location.href = url;
   };
 
   const syncPurchases = async () => {

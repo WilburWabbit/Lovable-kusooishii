@@ -38,10 +38,19 @@ Deno.serve(async (req) => {
     });
     if (!isAdmin) throw new Error("Forbidden: admin only");
 
-    const { action, code, redirect_uri, realm_id } = await req.json();
+    const body = await req.json();
+    const { action, code, redirect_uri, realm_id } = body;
+
+    if (action === "authorize_url") {
+      const actualRedirect = redirect_uri || `${req.headers.get("origin")}/admin/qbo-callback`;
+      const state = crypto.randomUUID();
+      const url = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&redirect_uri=${encodeURIComponent(actualRedirect)}&response_type=code&scope=com.intuit.quickbooks.accounting&state=${state}`;
+      return new Response(JSON.stringify({ url }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (action === "exchange") {
-      // Exchange authorization code for tokens
       if (!code || !redirect_uri || !realm_id) {
         throw new Error("Missing code, redirect_uri, or realm_id");
       }
