@@ -626,10 +626,11 @@ export type Database = {
       sku: {
         Row: {
           active_flag: boolean
-          catalog_product_id: string
+          catalog_product_id: string | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at: string
           id: string
+          name: string | null
           price: number | null
           qbo_item_id: string | null
           saleable_flag: boolean
@@ -638,10 +639,11 @@ export type Database = {
         }
         Insert: {
           active_flag?: boolean
-          catalog_product_id: string
+          catalog_product_id?: string | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          name?: string | null
           price?: number | null
           qbo_item_id?: string | null
           saleable_flag?: boolean
@@ -650,10 +652,11 @@ export type Database = {
         }
         Update: {
           active_flag?: boolean
-          catalog_product_id?: string
+          catalog_product_id?: string | null
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          name?: string | null
           price?: number | null
           qbo_item_id?: string | null
           saleable_flag?: boolean

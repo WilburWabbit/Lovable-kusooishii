@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin
         .from("stock_unit")
         .select(
-          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, catalog_product:catalog_product_id(name))"
+          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
