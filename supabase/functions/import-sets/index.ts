@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse products — now with img_url and subtheme_name
-    const products = dataLines.map((line) => {
+    const rawProducts = dataLines.map((line) => {
       const cols = parseCSVLine(line);
       return {
         mpn: cols[0],
@@ -98,6 +98,13 @@ Deno.serve(async (req) => {
         product_type: "set",
       };
     }).filter((p) => p.mpn && p.name);
+
+    // Deduplicate by MPN — keep last occurrence
+    const deduped = new Map<string, typeof rawProducts[0]>();
+    for (const p of rawProducts) {
+      deduped.set(p.mpn, p);
+    }
+    const products = Array.from(deduped.values());
 
     // Upsert products by mpn to preserve manually added products
     const BATCH = 500;
