@@ -24,6 +24,7 @@ import {
   AuditPage,
   SettingsPage,
 } from "./pages/admin/AdminPages";
+import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
