@@ -272,6 +272,10 @@ Deno.serve(async (req) => {
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
+      // Pause between batches to avoid QBO 429 rate limits
+      if (i + BATCH_SIZE < itemIdArray.length) {
+        await new Promise(r => setTimeout(r, 250));
+      }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items`);
 
