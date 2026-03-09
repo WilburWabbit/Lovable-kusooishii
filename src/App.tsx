@@ -24,6 +24,7 @@ import {
   AuditPage,
   SettingsPage,
 } from "./pages/admin/AdminPages";
+import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -61,6 +62,7 @@ const App = () => (
             <Route path="/admin/analytics" element={<AnalyticsPage />} />
             <Route path="/admin/audit" element={<AuditPage />} />
             <Route path="/admin/settings" element={<SettingsPage />} />
+            <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

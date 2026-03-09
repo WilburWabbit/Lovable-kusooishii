@@ -9,6 +9,7 @@ import {
   FileSearch,
   TrendingUp,
   CreditCard,
+  Users,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -40,6 +41,7 @@ const operationalItems = [
 
 const settingsItems = [
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Users", url: "/admin/settings/users", icon: Users },
 ];
 
 export function BackOfficeSidebar() {
