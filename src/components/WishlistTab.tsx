@@ -88,7 +88,7 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
     queryFn: async () => {
       const { data } = await supabase
         .from("wishlist_item")
-        .select("id, catalog_product_id, notify_on_stock, preferred_grade, max_price, notes, catalog_product:catalog_product_id(mpn, name, retired_flag, img_url, subtheme_name)")
+        .select("id, catalog_product_id, notify_on_stock, preferred_grade, max_price, notes, catalog_product:catalog_product_id(mpn, name, retired_flag, img_url, subtheme_name, release_year, theme:theme_id(name))")
         .eq("wishlist_id", wishlistId!);
       return (data as any) || [];
     },
