@@ -133,6 +133,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "authorize_url") {
+      const { redirect_uri } = await req.json().catch(() => ({})) || {};
+      const actualRedirect = redirect_uri || `${req.headers.get("origin")}/admin/qbo-callback`;
+      const state = crypto.randomUUID();
+      const url = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&redirect_uri=${encodeURIComponent(actualRedirect)}&response_type=code&scope=com.intuit.quickbooks.accounting&state=${state}`;
+      return new Response(JSON.stringify({ url }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "status") {
       const realmId = Deno.env.get("QBO_REALM_ID");
       if (!realmId) {
