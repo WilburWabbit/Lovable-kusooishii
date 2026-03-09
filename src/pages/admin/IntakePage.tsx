@@ -355,7 +355,7 @@ export function IntakePage() {
                       <TableCell className="font-display text-xs text-right font-semibold">
                         £{apportionment.totalOverhead.toFixed(2)}
                       </TableCell>
-                      <TableCell colSpan={3} className="font-body text-[10px] text-muted-foreground italic">
+                      <TableCell colSpan={4} className="font-body text-[10px] text-muted-foreground italic">
                         pro-rata by line total
                       </TableCell>
                     </TableRow>
