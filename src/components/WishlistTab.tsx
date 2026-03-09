@@ -152,6 +152,21 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
     },
   });
 
+  const sortedResults = useMemo(() => {
+    if (!sortKey) return searchResults;
+    return [...searchResults].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [searchResults, sortKey, sortDir]);
+
   // Add to wishlist
   const addMutation = useMutation({
     mutationFn: async (catalogProductId: string) => {
