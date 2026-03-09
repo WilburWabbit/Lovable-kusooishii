@@ -183,7 +183,6 @@ async function autoProcessReceipt(
         condition_grade: conditionGrade,
         status: "received",
         landed_cost: landedCost,
-        carrying_value: landedCost,
         supplier_id: vendorName ?? null,
       });
     }
