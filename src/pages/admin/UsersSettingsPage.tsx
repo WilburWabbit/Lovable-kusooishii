@@ -46,7 +46,7 @@ export default function UsersSettingsPage() {
   const toggleRole = async (userId: string, role: string, currentlyHas: boolean) => {
     const { error } = await supabase.rpc("admin_set_user_role", {
       target_user_id: userId,
-      target_role: role,
+      target_role: role as "admin" | "staff" | "member",
       assign: !currentlyHas,
     });
     if (error) {
