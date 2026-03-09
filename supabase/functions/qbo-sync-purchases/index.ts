@@ -392,6 +392,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Clean up existing pending receipts that have zero stock lines
+    const { data: pendingReceipts } = await supabaseAdmin
+      .from("inbound_receipt")
+      .select("id")
+      .eq("status", "pending");
+
+    let cleanedUp = 0;
+    for (const pr of (pendingReceipts ?? [])) {
+      const { count } = await supabaseAdmin
+        .from("inbound_receipt_line")
+        .select("id", { count: "exact", head: true })
+        .eq("inbound_receipt_id", pr.id)
+        .eq("is_stock_line", true);
+      if (count === 0) {
+        await supabaseAdmin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", pr.id);
+        await supabaseAdmin.from("inbound_receipt").delete().eq("id", pr.id);
+        cleanedUp++;
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -399,6 +419,8 @@ Deno.serve(async (req) => {
         auto_processed: autoProcessed,
         left_pending: leftPending,
         skipped_existing: skippedExisting,
+        skipped_no_items: skippedNoItems,
+        cleaned_up: cleanedUp,
         pending_reasons: pendingReasons,
         items_cached: itemCache.size,
       }),
