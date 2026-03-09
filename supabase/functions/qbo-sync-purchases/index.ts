@@ -278,6 +278,7 @@ Deno.serve(async (req) => {
     let autoProcessed = 0;
     let leftPending = 0;
     let skippedExisting = 0;
+    let skippedNoItems = 0;
     const pendingReasons: string[] = [];
 
     for (const purchase of purchases) {
