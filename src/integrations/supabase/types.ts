@@ -77,6 +77,111 @@ export type Database = {
         }
         Relationships: []
       }
+      brickeconomy_collection: {
+        Row: {
+          acquired_date: string | null
+          collection_name: string | null
+          condition: string | null
+          created_at: string
+          currency: string
+          current_value: number | null
+          growth: number | null
+          id: string
+          item_number: string
+          item_type: string
+          minifigs_count: number | null
+          name: string | null
+          paid_price: number | null
+          pieces_count: number | null
+          released_date: string | null
+          retail_price: number | null
+          retired_date: string | null
+          subtheme: string | null
+          synced_at: string
+          theme: string | null
+          year: number | null
+        }
+        Insert: {
+          acquired_date?: string | null
+          collection_name?: string | null
+          condition?: string | null
+          created_at?: string
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number: string
+          item_type: string
+          minifigs_count?: number | null
+          name?: string | null
+          paid_price?: number | null
+          pieces_count?: number | null
+          released_date?: string | null
+          retail_price?: number | null
+          retired_date?: string | null
+          subtheme?: string | null
+          synced_at?: string
+          theme?: string | null
+          year?: number | null
+        }
+        Update: {
+          acquired_date?: string | null
+          collection_name?: string | null
+          condition?: string | null
+          created_at?: string
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number?: string
+          item_type?: string
+          minifigs_count?: number | null
+          name?: string | null
+          paid_price?: number | null
+          pieces_count?: number | null
+          released_date?: string | null
+          retail_price?: number | null
+          retired_date?: string | null
+          subtheme?: string | null
+          synced_at?: string
+          theme?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
+      brickeconomy_portfolio_snapshot: {
+        Row: {
+          currency: string
+          current_value: number | null
+          id: string
+          period_data: Json | null
+          snapshot_type: string
+          synced_at: string
+          total_count: number | null
+          unique_count: number | null
+        }
+        Insert: {
+          currency?: string
+          current_value?: number | null
+          id?: string
+          period_data?: Json | null
+          snapshot_type: string
+          synced_at?: string
+          total_count?: number | null
+          unique_count?: number | null
+        }
+        Update: {
+          currency?: string
+          current_value?: number | null
+          id?: string
+          period_data?: Json | null
+          snapshot_type?: string
+          synced_at?: string
+          total_count?: number | null
+          unique_count?: number | null
+        }
+        Relationships: []
+      }
       catalog_product: {
         Row: {
           brickeconomy_id: string | null
