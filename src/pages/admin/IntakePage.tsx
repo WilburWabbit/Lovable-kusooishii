@@ -61,6 +61,7 @@ export function IntakePage() {
       if (error) throw error;
       return data as Receipt[];
     },
+    enabled: !!user,
   });
 
   const { data: lines, isLoading: linesLoading } = useQuery({

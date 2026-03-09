@@ -76,6 +76,7 @@ export function InventoryPage() {
       if (error) throw error;
       return (data ?? []) as unknown as StockRow[];
     },
+    enabled: !!user,
   });
 
   const filtered = useMemo(() => {
