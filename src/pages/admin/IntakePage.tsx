@@ -95,8 +95,12 @@ export function IntakePage() {
   };
 
   const handleMpnChange = (lineId: string, mpn: string) => {
-    setLineEdits((prev) => ({ ...prev, [lineId]: mpn }));
+    setLineEdits((prev) => ({ ...prev, [lineId]: { ...prev[lineId], mpn } }));
     setMpnValid((prev) => ({ ...prev, [lineId]: null }));
+  };
+
+  const handleGradeChange = (lineId: string, grade: string) => {
+    setLineEdits((prev) => ({ ...prev, [lineId]: { ...prev[lineId], grade } }));
   };
 
   const saveMpnMapping = async (lineId: string) => {
