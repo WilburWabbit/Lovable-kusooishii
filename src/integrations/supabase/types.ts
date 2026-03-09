@@ -336,6 +336,165 @@ export type Database = {
         }
         Relationships: []
       }
+      sales_order: {
+        Row: {
+          club_commission_amount: number
+          club_discount_amount: number
+          club_id: string | null
+          created_at: string
+          currency: string
+          discount_total: number
+          gross_total: number
+          guest_email: string | null
+          guest_name: string | null
+          id: string
+          merchandise_subtotal: number
+          notes: string | null
+          order_number: string
+          origin_channel: string
+          origin_reference: string | null
+          payment_reference: string | null
+          shipping_city: string
+          shipping_country: string
+          shipping_county: string | null
+          shipping_line_1: string
+          shipping_line_2: string | null
+          shipping_name: string
+          shipping_postcode: string
+          shipping_total: number
+          status: Database["public"]["Enums"]["order_status"]
+          tax_total: number
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          club_commission_amount?: number
+          club_discount_amount?: number
+          club_id?: string | null
+          created_at?: string
+          currency?: string
+          discount_total?: number
+          gross_total: number
+          guest_email?: string | null
+          guest_name?: string | null
+          id?: string
+          merchandise_subtotal: number
+          notes?: string | null
+          order_number?: string
+          origin_channel?: string
+          origin_reference?: string | null
+          payment_reference?: string | null
+          shipping_city?: string
+          shipping_country?: string
+          shipping_county?: string | null
+          shipping_line_1?: string
+          shipping_line_2?: string | null
+          shipping_name?: string
+          shipping_postcode?: string
+          shipping_total?: number
+          status?: Database["public"]["Enums"]["order_status"]
+          tax_total?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          club_commission_amount?: number
+          club_discount_amount?: number
+          club_id?: string | null
+          created_at?: string
+          currency?: string
+          discount_total?: number
+          gross_total?: number
+          guest_email?: string | null
+          guest_name?: string | null
+          id?: string
+          merchandise_subtotal?: number
+          notes?: string | null
+          order_number?: string
+          origin_channel?: string
+          origin_reference?: string | null
+          payment_reference?: string | null
+          shipping_city?: string
+          shipping_country?: string
+          shipping_county?: string | null
+          shipping_line_1?: string
+          shipping_line_2?: string | null
+          shipping_name?: string
+          shipping_postcode?: string
+          shipping_total?: number
+          status?: Database["public"]["Enums"]["order_status"]
+          tax_total?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_order_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "club"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_order_line: {
+        Row: {
+          created_at: string
+          id: string
+          line_discount: number
+          line_total: number
+          quantity: number
+          sales_order_id: string
+          sku_id: string
+          stock_unit_id: string | null
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          line_discount?: number
+          line_total: number
+          quantity?: number
+          sales_order_id: string
+          sku_id: string
+          stock_unit_id?: string | null
+          unit_price: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          line_discount?: number
+          line_total?: number
+          quantity?: number
+          sales_order_id?: string
+          sku_id?: string
+          stock_unit_id?: string | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sku: {
         Row: {
           active_flag: boolean
