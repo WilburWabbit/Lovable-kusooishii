@@ -254,6 +254,7 @@ export function IntakePage() {
                     <TableHead className="font-display text-xs text-right">Total</TableHead>
                     <TableHead className="font-display text-xs text-right">Landed/unit</TableHead>
                     <TableHead className="font-display text-xs">MPN</TableHead>
+                    <TableHead className="font-display text-xs">Grade</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
