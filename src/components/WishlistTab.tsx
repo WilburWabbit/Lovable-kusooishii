@@ -122,7 +122,7 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
   // Fetch search results
   const { data: searchResults = [], isFetching: searching } = useQuery<CatalogResult[]>({
     queryKey: ["wishlist_search", debouncedSearch, selectedTheme, selectedSubtheme, selectedYear],
-    enabled: hasActiveFilters,
+    enabled: !!hasActiveFilters,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("search_catalog_for_wishlist", {
         search_term: debouncedSearch || null,
