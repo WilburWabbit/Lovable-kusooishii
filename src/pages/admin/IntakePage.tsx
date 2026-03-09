@@ -54,10 +54,9 @@ export function IntakePage() {
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("inbound_receipt")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "list-receipts" },
+      });
       if (error) throw error;
       return data as Receipt[];
     },
