@@ -325,12 +325,10 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
         <CardHeader>
           <CardTitle className="font-display text-sm font-semibold">
             Your Wishlist
-            {wishlistItems.length > 0 && (
-              <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary font-body text-[10px] font-bold text-primary-foreground">
-                {wishlistItems.length}
-              </span>
-            )}
           </CardTitle>
+          {wishlistItems.length > 0 && (
+            <p className="font-body text-xs text-muted-foreground">{wishlistItems.length} sets saved</p>
+          )}
         </CardHeader>
         <CardContent>
           {wishlistItems.length === 0 ? (
