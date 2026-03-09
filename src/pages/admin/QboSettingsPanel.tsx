@@ -85,9 +85,12 @@ export function QboSettingsPanel() {
     try {
       const data = await invokeWithAuth("qbo-sync-purchases");
       if (data?.error) throw new Error(data.error);
+      const parts = [`${data.auto_processed ?? 0} auto-processed`];
+      if (data.left_pending) parts.push(`${data.left_pending} pending review`);
+      if (data.skipped_existing) parts.push(`${data.skipped_existing} unchanged`);
       toast({
         title: "Sync complete",
-        description: `Synced ${data.total} purchases from QuickBooks.`,
+        description: `${data.total} purchases: ${parts.join(", ")}.`,
       });
       fetchStatus();
     } catch (err) {

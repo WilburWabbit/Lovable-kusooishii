@@ -49,7 +49,6 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
   return conn.access_token;
 }
 
-/** Fetch a QBO Item by ID, using a cache to avoid duplicate requests */
 async function fetchQboItem(
   itemId: string,
   cache: Map<string, any>,
@@ -57,13 +56,9 @@ async function fetchQboItem(
   accessToken: string
 ): Promise<any | null> {
   if (cache.has(itemId)) return cache.get(itemId);
-
   try {
     const res = await fetch(`${baseUrl}/item/${itemId}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
     if (!res.ok) {
       console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
@@ -81,7 +76,6 @@ async function fetchQboItem(
   }
 }
 
-/** Parse a SKU string like "75192.3" into { mpn, conditionGrade } */
 function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   const trimmed = sku.trim();
   const dotIndex = trimmed.indexOf(".");
@@ -101,6 +95,116 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   }
 
   return { mpn, conditionGrade };
+}
+
+/** Auto-process a pending receipt: create SKUs + stock_units, mark processed */
+async function autoProcessReceipt(
+  supabaseAdmin: any,
+  receiptId: string,
+  vendorName: string | null,
+  lineRows: Array<{
+    is_stock_line: boolean;
+    mpn: string | null;
+    condition_grade: string | null;
+    line_total: number;
+    quantity: number;
+    unit_cost: number;
+  }>
+): Promise<{ processed: boolean; skipped: string[] }> {
+  const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
+  const overheadLines = lineRows.filter(l => !l.is_stock_line);
+
+  if (stockLines.length === 0) {
+    return { processed: false, skipped: ["No mapped stock lines"] };
+  }
+
+  // Check if all stock lines have MPNs (lines marked as stock but missing MPN = exception)
+  const unmappedStockLines = lineRows.filter(l => l.is_stock_line && (!l.mpn || !l.condition_grade));
+  if (unmappedStockLines.length > 0) {
+    return { processed: false, skipped: [`${unmappedStockLines.length} stock line(s) missing MPN/grade`] };
+  }
+
+  const totalOverhead = overheadLines.reduce((sum, l) => sum + Number(l.line_total), 0);
+  const totalStockCost = stockLines.reduce((sum, l) => sum + Number(l.line_total), 0);
+
+  const skipped: string[] = [];
+  let unitsCreated = 0;
+  const validGrades = ["1", "2", "3", "4", "5"];
+
+  for (const line of stockLines) {
+    const conditionGrade = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
+
+    const { data: product } = await supabaseAdmin
+      .from("catalog_product")
+      .select("id, mpn")
+      .eq("mpn", line.mpn)
+      .single();
+
+    if (!product) {
+      skipped.push(`MPN ${line.mpn}: not found in catalog`);
+      continue;
+    }
+
+    const lineTotal = Number(line.line_total);
+    const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
+    const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
+    const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
+
+    const skuCode = `${product.mpn}-G${conditionGrade}`;
+    let { data: sku } = await supabaseAdmin
+      .from("sku")
+      .select("id")
+      .eq("catalog_product_id", product.id)
+      .eq("condition_grade", conditionGrade)
+      .single();
+
+    if (!sku) {
+      const { data: newSku, error: skuErr } = await supabaseAdmin
+        .from("sku")
+        .insert({
+          catalog_product_id: product.id,
+          condition_grade: conditionGrade,
+          sku_code: skuCode,
+          price: landedCost,
+          active_flag: true,
+          saleable_flag: true,
+        })
+        .select("id")
+        .single();
+      if (skuErr) throw skuErr;
+      sku = newSku;
+    }
+
+    const stockUnits = [];
+    for (let i = 0; i < line.quantity; i++) {
+      stockUnits.push({
+        sku_id: sku!.id,
+        mpn: product.mpn,
+        condition_grade: conditionGrade,
+        status: "received",
+        landed_cost: landedCost,
+        carrying_value: landedCost,
+        supplier_id: vendorName ?? null,
+      });
+    }
+
+    const { error: suErr } = await supabaseAdmin.from("stock_unit").insert(stockUnits);
+    if (suErr) throw suErr;
+    unitsCreated += stockUnits.length;
+  }
+
+  // If any MPN was missing from catalog, leave pending
+  if (skipped.length > 0) {
+    return { processed: false, skipped };
+  }
+
+  // Mark as processed
+  await supabaseAdmin
+    .from("inbound_receipt")
+    .update({ status: "processed", processed_at: new Date().toISOString() })
+    .eq("id", receiptId);
+
+  return { processed: true, skipped: [] };
 }
 
 Deno.serve(async (req) => {
@@ -142,10 +246,7 @@ Deno.serve(async (req) => {
     // Query purchases
     const query = encodeURIComponent("SELECT * FROM Purchase MAXRESULTS 1000");
     const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
 
     if (!purchaseRes.ok) {
@@ -156,21 +257,31 @@ Deno.serve(async (req) => {
     const purchaseData = await purchaseRes.json();
     const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
 
-    // Item cache for QBO Item lookups
     const itemCache = new Map<string, any>();
-    let created = 0;
+    let autoProcessed = 0;
+    let leftPending = 0;
+    let skippedExisting = 0;
+    const pendingReasons: string[] = [];
 
     for (const purchase of purchases) {
-      const itemLines = purchase.Line?.filter(
-        (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
-      ) ?? [];
-      if (itemLines.length === 0) continue;
-
       const qboPurchaseId = purchase.Id;
       const vendorName = purchase.EntityRef?.name ?? null;
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
+
+      // Check if receipt already exists and its status
+      const { data: existingReceipt } = await supabaseAdmin
+        .from("inbound_receipt")
+        .select("id, status")
+        .eq("qbo_purchase_id", qboPurchaseId)
+        .single();
+
+      // Skip already-processed receipts entirely
+      if (existingReceipt?.status === "processed") {
+        skippedExisting++;
+        continue;
+      }
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
@@ -211,16 +322,13 @@ Deno.serve(async (req) => {
         let conditionGrade: string | null = null;
 
         if (isStockLine && detail.ItemRef?.value) {
-          // Fetch the full QBO Item record to get its Sku field
           const qboItem = await fetchQboItem(detail.ItemRef.value, itemCache, baseUrl, accessToken);
-
           const skuField = qboItem?.Sku;
           if (skuField && String(skuField).trim()) {
             const parsed = parseSku(String(skuField));
             mpn = parsed.mpn;
             conditionGrade = parsed.conditionGrade;
           } else if (detail.ItemRef?.name) {
-            // Fallback: parse ItemRef.name
             const parsed = parseSku(String(detail.ItemRef.name));
             mpn = parsed.mpn;
             conditionGrade = parsed.conditionGrade;
@@ -244,11 +352,34 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from("inbound_receipt_line").insert(lineRows);
       }
 
-      created++;
+      // Auto-process the receipt
+      try {
+        const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRows);
+        if (result.processed) {
+          autoProcessed++;
+        } else {
+          leftPending++;
+          if (result.skipped.length > 0) {
+            pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
+          }
+        }
+      } catch (procErr) {
+        console.error(`Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
+        leftPending++;
+        pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
+      }
     }
 
     return new Response(
-      JSON.stringify({ success: true, total: purchases.length, created, items_cached: itemCache.size }),
+      JSON.stringify({
+        success: true,
+        total: purchases.length,
+        auto_processed: autoProcessed,
+        left_pending: leftPending,
+        skipped_existing: skippedExisting,
+        pending_reasons: pendingReasons,
+        items_cached: itemCache.size,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
