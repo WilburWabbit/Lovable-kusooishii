@@ -283,9 +283,20 @@ Deno.serve(async (req) => {
 
     for (const purchase of purchases) {
       const qboPurchaseId = purchase.Id;
+
+      // Skip purchases with no item-based lines (pure account expenses)
+      const hasItemLines = (purchase.Line ?? []).some(
+        (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
+      );
+      if (!hasItemLines) {
+        skippedNoItems++;
+        continue;
+      }
+
       const vendorName = purchase.EntityRef?.name ?? null;
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
+      const currency = purchase.CurrencyRef?.value ?? "GBP";
       const currency = purchase.CurrencyRef?.value ?? "GBP";
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
