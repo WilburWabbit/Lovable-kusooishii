@@ -336,35 +336,40 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
               Your wishlist is empty. Use the search above to find sets and add them.
             </p>
           ) : (
-            <div className="space-y-3">
-              {wishlistItems.map((item) => (
-                <div key={item.id} className="flex items-center gap-3 border-b border-border pb-3">
-                  {item.catalog_product?.img_url ? (
-                    <img src={item.catalog_product.img_url} alt={item.catalog_product.name} className="h-10 w-10 object-contain" loading="lazy" />
-                  ) : (
-                    <div className="h-10 w-10 bg-muted" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-display text-sm font-semibold text-foreground truncate">
-                      {item.catalog_product?.name}
-                    </p>
-                    <p className="font-body text-xs text-muted-foreground">
-                      {item.catalog_product?.mpn}
-                      {item.preferred_grade && ` · Grade ${item.preferred_grade}`}
-                      {item.max_price && ` · Max £${item.max_price}`}
-                    </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {wishlistItems.map((item) => {
+                const cp = item.catalog_product as any;
+                const themeName = cp?.theme?.name;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 rounded-md border border-border p-3">
+                    {cp?.img_url ? (
+                      <img src={cp.img_url} alt={cp.name} className="h-12 w-12 shrink-0 object-contain" loading="lazy" />
+                    ) : (
+                      <div className="h-12 w-12 shrink-0 bg-muted rounded" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-display text-sm font-semibold text-foreground truncate">
+                        {cp?.name}
+                      </p>
+                      <p className="font-body text-xs text-muted-foreground truncate">
+                        #{cp?.mpn}
+                        {themeName && ` • ${themeName}`}
+                        {cp?.subtheme_name && ` • ${cp.subtheme_name}`}
+                        {cp?.release_year && ` • ${cp.release_year}`}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      disabled={removeMutation.isPending}
+                      onClick={() => removeMutation.mutate(item.id)}
+                    >
+                      <Heart className="h-4 w-4 fill-destructive text-destructive" />
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    disabled={removeMutation.isPending}
-                    onClick={() => removeMutation.mutate(item.id)}
-                  >
-                    <Heart className="h-4 w-4 fill-destructive text-destructive" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
