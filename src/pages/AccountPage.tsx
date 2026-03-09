@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { User, Heart, MapPin, Package, LogOut } from "lucide-react";
+import WishlistTab from "@/components/WishlistTab";
 
 export default function AccountPage() {
   const { user, profile, loading, signOut } = useAuth();
