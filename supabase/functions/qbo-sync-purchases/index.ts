@@ -283,8 +283,19 @@ Deno.serve(async (req) => {
           },
           { onConflict: "qbo_purchase_id" }
         )
-        .select("id")
+        .select("id, status")
         .single();
+
+      if (receiptErr) {
+        console.error(`Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
+        continue;
+      }
+
+      // Already processed — skip line rebuild and auto-processing
+      if (receipt.status === "processed") {
+        skippedExisting++;
+        continue;
+      }
 
       if (receiptErr) {
         console.error(`Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
