@@ -48,6 +48,4 @@ export function AuditPage() {
   return <AdminPlaceholder title="Audit Explorer" description="Immutable audit trail with full event lineage and raw payload inspection." />;
 }
 
-export function SettingsPage() {
-  return <AdminPlaceholder title="Settings" description="Integrations, credentials, schedules, pricing rules, shipping tables, and configuration." />;
-}
+export { SettingsPage } from "./SettingsPageFull";

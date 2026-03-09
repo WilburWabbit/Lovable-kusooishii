@@ -64,6 +64,7 @@ const App = () => (
             <Route path="/admin/audit" element={<AuditPage />} />
             <Route path="/admin/settings" element={<SettingsPage />} />
             <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
+            <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
