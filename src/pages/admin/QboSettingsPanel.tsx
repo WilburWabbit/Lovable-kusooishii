@@ -25,6 +25,7 @@ export function QboSettingsPanel() {
   const [status, setStatus] = useState<{ connected: boolean; realm_id?: string; last_updated?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
   const fetchStatus = async () => {
@@ -106,6 +107,36 @@ export function QboSettingsPanel() {
     }
   };
 
+
+
+  const syncSales = async () => {
+    setSyncingSales(true);
+    try {
+      const data = await invokeWithAuth("qbo-sync-sales");
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      if (data.sales_created) parts.push(`${data.sales_created} sales imported`);
+      if (data.sales_skipped) parts.push(`${data.sales_skipped} sales unchanged`);
+      if (data.stock_matched) parts.push(`${data.stock_matched} stock matched`);
+      if (data.stock_missing) parts.push(`${data.stock_missing} stock missing`);
+      if (data.refunds_created) parts.push(`${data.refunds_created} refunds imported`);
+      if (data.refunds_skipped) parts.push(`${data.refunds_skipped} refunds unchanged`);
+      toast({
+        title: "Sales sync complete",
+        description: parts.length > 0 ? parts.join(", ") + "." : "No new records.",
+      });
+      fetchStatus();
+    } catch (err) {
+      toast({
+        title: "Sales sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingSales(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -132,10 +163,14 @@ export function QboSettingsPanel() {
                 Last token update: {new Date(status.last_updated).toLocaleString()}
               </p>
             )}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Purchases
+              </Button>
+              <Button size="sm" onClick={syncSales} disabled={syncingSales || !user}>
+                {syncingSales ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                Sync Sales
               </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
