@@ -107,6 +107,12 @@ Deno.serve(async (req) => {
     let updated = 0;
 
     for (const purchase of purchases) {
+      // Skip purchases without item-based lines (non-stock expenses)
+      const itemLines = purchase.Line?.filter(
+        (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
+      ) ?? [];
+      if (itemLines.length === 0) continue;
+
       const qboPurchaseId = purchase.Id;
       const vendorName = purchase.EntityRef?.name ?? null;
       const txnDate = purchase.TxnDate ?? null;
