@@ -85,6 +85,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          img_url: string | null
           mpn: string
           name: string
           piece_count: number | null
@@ -93,6 +94,7 @@ export type Database = {
           release_year: number | null
           retired_flag: boolean
           status: string
+          subtheme_name: string | null
           theme_id: string | null
           updated_at: string
           version_descriptor: string | null
@@ -104,6 +106,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          img_url?: string | null
           mpn: string
           name: string
           piece_count?: number | null
@@ -112,6 +115,7 @@ export type Database = {
           release_year?: number | null
           retired_flag?: boolean
           status?: string
+          subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
           version_descriptor?: string | null
@@ -123,6 +127,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          img_url?: string | null
           mpn?: string
           name?: string
           piece_count?: number | null
@@ -131,6 +136,7 @@ export type Database = {
           release_year?: number | null
           retired_flag?: boolean
           status?: string
+          subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
           version_descriptor?: string | null
@@ -783,6 +789,19 @@ export type Database = {
           total_stock: number
         }[]
       }
+      catalog_filter_options: {
+        Args: {
+          filter_subtheme?: string
+          filter_theme?: string
+          filter_year?: number
+          search_term?: string
+        }
+        Returns: {
+          subthemes: string[]
+          themes: string[]
+          years: number[]
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -798,6 +817,23 @@ export type Database = {
           sku_code: string
           sku_id: string
           stock_count: number
+        }[]
+      }
+      search_catalog_for_wishlist: {
+        Args: {
+          filter_subtheme?: string
+          filter_theme?: string
+          filter_year?: number
+          search_term?: string
+        }
+        Returns: {
+          img_url: string
+          mpn: string
+          name: string
+          product_id: string
+          release_year: number
+          subtheme_name: string
+          theme_name: string
         }[]
       }
     }
