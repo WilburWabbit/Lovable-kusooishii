@@ -104,12 +104,18 @@ export function IntakePage() {
   };
 
   const saveMpnMapping = async (lineId: string) => {
-    const mpn = lineEdits[lineId];
-    if (!mpn) return;
+    const edits = lineEdits[lineId];
+    const mpn = edits?.mpn;
+    const grade = edits?.grade;
+
+    const updates: Record<string, any> = {};
+    if (mpn !== undefined) updates.mpn = mpn;
+    if (grade !== undefined) updates.condition_grade = grade;
+    if (Object.keys(updates).length === 0) return;
 
     const { error } = await supabase
       .from("inbound_receipt_line")
-      .update({ mpn })
+      .update(updates)
       .eq("id", lineId);
 
     if (error) {
@@ -117,14 +123,18 @@ export function IntakePage() {
       return;
     }
 
-    const { data: product } = await supabase
-      .from("catalog_product")
-      .select("id")
-      .eq("mpn", mpn)
-      .single();
+    if (mpn) {
+      const { data: product } = await supabase
+        .from("catalog_product")
+        .select("id")
+        .eq("mpn", mpn)
+        .single();
+      setMpnValid((prev) => ({ ...prev, [lineId]: !!product }));
+      toast({ title: "Saved", description: product ? `Matched to catalog` : `Warning: MPN not found in catalog` });
+    } else {
+      toast({ title: "Saved" });
+    }
 
-    setMpnValid((prev) => ({ ...prev, [lineId]: !!product }));
-    toast({ title: "MPN saved", description: product ? `Matched to catalog` : `Warning: MPN not found in catalog` });
     queryClient.invalidateQueries({ queryKey: ["receipt-lines", selectedReceipt?.id] });
   };
 
