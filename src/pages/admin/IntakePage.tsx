@@ -54,10 +54,9 @@ export function IntakePage() {
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("inbound_receipt")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "list-receipts" },
+      });
       if (error) throw error;
       return data as Receipt[];
     },
@@ -68,11 +67,9 @@ export function IntakePage() {
     queryKey: ["receipt-lines", selectedReceipt?.id],
     queryFn: async () => {
       if (!selectedReceipt) return [];
-      const { data, error } = await supabase
-        .from("inbound_receipt_line")
-        .select("*")
-        .eq("inbound_receipt_id", selectedReceipt.id)
-        .order("created_at");
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "receipt-lines", receipt_id: selectedReceipt.id },
+      });
       if (error) throw error;
       return data as ReceiptLine[];
     },
