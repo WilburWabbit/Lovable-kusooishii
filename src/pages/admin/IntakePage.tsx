@@ -47,9 +47,8 @@ export function IntakePage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
-  const [lineEdits, setLineEdits] = useState<Record<string, string>>({});
+  const [lineEdits, setLineEdits] = useState<Record<string, { mpn?: string; grade?: string }>>({});
   const [mpnValid, setMpnValid] = useState<Record<string, boolean | null>>({});
-  const [conditionGrade, setConditionGrade] = useState("3");
   const [processing, setProcessing] = useState(false);
 
   const { data: receipts, isLoading } = useQuery({
