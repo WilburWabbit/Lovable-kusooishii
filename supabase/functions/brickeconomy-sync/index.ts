@@ -155,22 +155,22 @@ Deno.serve(async (req) => {
     await admin.from("brickeconomy_portfolio_snapshot").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
     const snapshots = [];
-    if (setsData.total_count !== undefined || setsData.unique_count !== undefined) {
+    if (setsData.sets_count !== undefined || setsData.sets_unique_count !== undefined) {
       snapshots.push({
         snapshot_type: "sets",
-        total_count: setsData.total_count ?? setItems.length,
-        unique_count: setsData.unique_count ?? null,
+        total_count: setsData.sets_count ?? setItems.length,
+        unique_count: setsData.sets_unique_count ?? null,
         current_value: setsData.current_value ?? null,
         currency: "GBP",
         period_data: setsData.periods ?? null,
         synced_at: now,
       });
     }
-    if (minifigsData.total_count !== undefined || minifigsData.unique_count !== undefined) {
+    if (minifigsData.minifigs_count !== undefined || minifigsData.minifigs_unique_count !== undefined) {
       snapshots.push({
         snapshot_type: "minifigs",
-        total_count: minifigsData.total_count ?? minifigItems.length,
-        unique_count: minifigsData.unique_count ?? null,
+        total_count: minifigsData.minifigs_count ?? minifigItems.length,
+        unique_count: minifigsData.minifigs_unique_count ?? null,
         current_value: minifigsData.current_value ?? null,
         currency: "GBP",
         period_data: minifigsData.periods ?? null,
