@@ -97,6 +97,10 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   return { mpn, conditionGrade };
 }
 
+function cleanQboName(raw: string): string {
+  return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
 /** Auto-process a pending receipt: create SKUs + stock_units, mark processed.
  *  QBO is authoritative — SKUs are created standalone when no catalog match exists. */
 async function autoProcessReceipt(
@@ -163,7 +167,7 @@ async function autoProcessReceipt(
           catalog_product_id: product?.id ?? null,
           condition_grade: conditionGrade,
           sku_code: skuCode,
-          name: line.description ?? mpn,
+          name: cleanQboName(line.description ?? mpn),
           price: landedCost,
           active_flag: true,
           saleable_flag: !!product, // only saleable if catalog-linked

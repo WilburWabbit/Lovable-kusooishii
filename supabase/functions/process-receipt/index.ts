@@ -6,6 +6,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function cleanQboName(raw: string): string {
+  return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -137,7 +141,7 @@ Deno.serve(async (req) => {
             catalog_product_id: product?.id ?? null,
             condition_grade: conditionGrade,
             sku_code: skuCode,
-            name: line.description ?? mpn,
+            name: cleanQboName(line.description ?? mpn),
             price: landedCost,
             active_flag: true,
             saleable_flag: !!product,
