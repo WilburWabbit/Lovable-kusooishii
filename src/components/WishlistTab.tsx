@@ -388,33 +388,33 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
                 const cp = item.catalog_product as any;
                 const themeName = cp?.theme?.name;
                 return (
-                  <div key={item.id} className="flex flex-col gap-3 rounded-md border border-border p-4">
-                    <div className="flex items-start gap-4">
-                      {cp?.img_url ? (
-                        <img src={cp.img_url} alt={cp.name} className="h-24 w-24 shrink-0 object-contain" loading="lazy" />
-                      ) : (
-                        <div className="h-24 w-24 shrink-0 bg-muted rounded" />
-                      )}
-                      <div className="flex-1 min-w-0 pt-1">
+                  <div key={item.id} className="flex rounded-md border border-border p-4 gap-4">
+                    {cp?.img_url ? (
+                      <img src={cp.img_url} alt={cp.name} className="h-24 w-24 shrink-0 object-contain" loading="lazy" />
+                    ) : (
+                      <div className="h-24 w-24 shrink-0 bg-muted rounded" />
+                    )}
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      <div className="flex items-start justify-between gap-2">
                         <p className="font-display text-sm font-semibold text-foreground leading-snug">
                           {cp?.name}
                         </p>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          disabled={removeMutation.isPending}
+                          onClick={() => removeMutation.mutate(item.id)}
+                        >
+                          <Heart className="h-4 w-4 fill-destructive text-destructive" />
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        disabled={removeMutation.isPending}
-                        onClick={() => removeMutation.mutate(item.id)}
-                      >
-                        <Heart className="h-4 w-4 fill-destructive text-destructive" />
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-4 font-body text-xs text-muted-foreground">
-                      <span>#{cp?.mpn}</span>
-                      {themeName && <span>{themeName}</span>}
-                      {cp?.subtheme_name && <span>{cp.subtheme_name}</span>}
-                      {cp?.release_year && <span>{cp.release_year}</span>}
+                      <p className="font-body text-xs text-muted-foreground">
+                        #{cp?.mpn}
+                        {themeName && ` · ${themeName}`}
+                        {cp?.subtheme_name && ` · ${cp.subtheme_name}`}
+                        {cp?.release_year && ` · ${cp.release_year}`}
+                      </p>
                     </div>
                   </div>
                 );
