@@ -107,7 +107,7 @@ export function QboSettingsPanel() {
     }
   };
 
-  const [syncingSales, setSyncingSales] = useState(false);
+
 
   const syncSales = async () => {
     setSyncingSales(true);
