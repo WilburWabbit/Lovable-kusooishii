@@ -388,28 +388,28 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
                 const cp = item.catalog_product as any;
                 const themeName = cp?.theme?.name;
                 return (
-                  <div key={item.id} className="flex rounded-md border border-border p-4 gap-4">
+                  <div key={item.id} className="flex items-center rounded-md border border-border p-3 gap-3">
                     {cp?.img_url ? (
-                      <img src={cp.img_url} alt={cp.name} className="h-24 w-24 shrink-0 object-contain" loading="lazy" />
+                      <img src={cp.img_url} alt={cp.name} className="h-16 w-16 shrink-0 object-contain" loading="lazy" />
                     ) : (
-                      <div className="h-24 w-24 shrink-0 bg-muted rounded" />
+                      <div className="h-16 w-16 shrink-0 bg-muted rounded" />
                     )}
-                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                       <div className="flex items-start justify-between gap-2">
-                        <p className="font-display text-sm font-semibold text-foreground leading-snug">
+                        <p className="font-display text-xs font-semibold text-foreground leading-snug line-clamp-2">
                           {cp?.name}
                         </p>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 shrink-0"
+                          className="h-7 w-7 shrink-0"
                           disabled={removeMutation.isPending}
                           onClick={() => removeMutation.mutate(item.id)}
                         >
-                          <Heart className="h-4 w-4 fill-destructive text-destructive" />
+                          <Heart className="h-3.5 w-3.5 fill-destructive text-destructive" />
                         </Button>
                       </div>
-                      <p className="font-body text-xs text-muted-foreground">
+                      <p className="font-body text-[11px] text-muted-foreground">
                         #{cp?.mpn}
                         {themeName && ` · ${themeName}`}
                         {cp?.subtheme_name && ` · ${cp.subtheme_name}`}
