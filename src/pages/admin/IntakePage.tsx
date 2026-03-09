@@ -367,24 +367,9 @@ export function IntakePage() {
 
           {selectedReceipt?.status === "pending" && (
             <DialogFooter className="flex items-center gap-3 sm:justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-body text-xs text-muted-foreground">Grade:</span>
-                <Select value={conditionGrade} onValueChange={setConditionGrade}>
-                  <SelectTrigger className="h-7 w-16 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["1", "2", "3", "4", "5"].map((g) => (
-                      <SelectItem key={g} value={g} className="text-xs">
-                        {g}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <span className="font-body text-[10px] text-muted-foreground">
-                  {mappedCount}/{apportionment.stockLines.length} lines mapped
-                </span>
-              </div>
+              <span className="font-body text-[10px] text-muted-foreground">
+                {mappedCount}/{apportionment.stockLines.length} lines mapped
+              </span>
               <Button size="sm" onClick={handleProcess} disabled={!canProcess} className="text-xs">
                 {processing && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
                 Process Receipt
