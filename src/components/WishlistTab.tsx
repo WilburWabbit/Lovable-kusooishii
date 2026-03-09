@@ -388,32 +388,34 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
                 const cp = item.catalog_product as any;
                 const themeName = cp?.theme?.name;
                 return (
-                  <div key={item.id} className="flex items-center gap-3 rounded-md border border-border p-3">
-                    {cp?.img_url ? (
-                      <img src={cp.img_url} alt={cp.name} className="h-12 w-12 shrink-0 object-contain" loading="lazy" />
-                    ) : (
-                      <div className="h-12 w-12 shrink-0 bg-muted rounded" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-display text-sm font-semibold text-foreground truncate">
-                        {cp?.name}
-                      </p>
-                      <p className="font-body text-xs text-muted-foreground truncate">
-                        #{cp?.mpn}
-                        {themeName && ` • ${themeName}`}
-                        {cp?.subtheme_name && ` • ${cp.subtheme_name}`}
-                        {cp?.release_year && ` • ${cp.release_year}`}
-                      </p>
+                  <div key={item.id} className="flex flex-col gap-3 rounded-md border border-border p-4">
+                    <div className="flex items-start gap-4">
+                      {cp?.img_url ? (
+                        <img src={cp.img_url} alt={cp.name} className="h-24 w-24 shrink-0 object-contain" loading="lazy" />
+                      ) : (
+                        <div className="h-24 w-24 shrink-0 bg-muted rounded" />
+                      )}
+                      <div className="flex-1 min-w-0 pt-1">
+                        <p className="font-display text-sm font-semibold text-foreground leading-snug">
+                          {cp?.name}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        disabled={removeMutation.isPending}
+                        onClick={() => removeMutation.mutate(item.id)}
+                      >
+                        <Heart className="h-4 w-4 fill-destructive text-destructive" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      disabled={removeMutation.isPending}
-                      onClick={() => removeMutation.mutate(item.id)}
-                    >
-                      <Heart className="h-4 w-4 fill-destructive text-destructive" />
-                    </Button>
+                    <div className="flex items-center gap-4 font-body text-xs text-muted-foreground">
+                      <span>#{cp?.mpn}</span>
+                      {themeName && <span>{themeName}</span>}
+                      {cp?.subtheme_name && <span>{cp.subtheme_name}</span>}
+                      {cp?.release_year && <span>{cp.release_year}</span>}
+                    </div>
                   </div>
                 );
               })}
