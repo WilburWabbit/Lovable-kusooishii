@@ -37,7 +37,6 @@ Deno.serve(async (req) => {
     const userId = user.id;
 
     // Check role using service role client (bypasses RLS)
-    const admin = createClient(supabaseUrl, serviceRoleKey);
     const { data: roles } = await admin
       .from("user_roles")
       .select("role")
