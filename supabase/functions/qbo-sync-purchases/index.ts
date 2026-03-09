@@ -297,11 +297,6 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (receiptErr) {
-        console.error(`Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
-        continue;
-      }
-
       await supabaseAdmin
         .from("inbound_receipt_line")
         .delete()
