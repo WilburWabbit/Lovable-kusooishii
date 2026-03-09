@@ -41,6 +41,7 @@ const operationalItems = [
 
 const settingsItems = [
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Users", url: "/admin/settings/users", icon: Users },
 ];
 
 export function BackOfficeSidebar() {
