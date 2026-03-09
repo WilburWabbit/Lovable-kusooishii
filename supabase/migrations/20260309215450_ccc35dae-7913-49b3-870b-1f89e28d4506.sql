@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX idx_sales_order_origin_unique ON public.sales_order (origin_channel, origin_reference) WHERE origin_reference IS NOT NULL;
