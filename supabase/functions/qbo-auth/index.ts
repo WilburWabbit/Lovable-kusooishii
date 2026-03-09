@@ -17,15 +17,44 @@ Deno.serve(async (req) => {
     const clientId = Deno.env.get("QBO_CLIENT_ID");
     const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
 
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const body = await req.json();
+    const { action, code, redirect_uri, realm_id } = body;
+
+    // Status check doesn't require authentication — it's read-only
+    if (action === "status") {
+      const realmId = Deno.env.get("QBO_REALM_ID");
+      if (!realmId) {
+        return new Response(JSON.stringify({ connected: false }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: conn } = await supabaseAdmin
+        .from("qbo_connection")
+        .select("realm_id, token_expires_at, updated_at")
+        .eq("realm_id", realmId)
+        .single();
+
+      return new Response(
+        JSON.stringify({
+          connected: !!conn,
+          realm_id: conn?.realm_id ?? null,
+          token_expires_at: conn?.token_expires_at ?? null,
+          last_updated: conn?.updated_at ?? null,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // All other actions require admin auth
     if (!clientId || !clientSecret) {
       throw new Error("QBO_CLIENT_ID or QBO_CLIENT_SECRET not configured");
     }
 
-    // Verify caller is admin
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) throw new Error("Unauthorized");
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
     const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -37,9 +66,6 @@ Deno.serve(async (req) => {
       _role: "admin",
     });
     if (!isAdmin) throw new Error("Forbidden: admin only");
-
-    const body = await req.json();
-    const { action, code, redirect_uri, realm_id } = body;
 
     if (action === "authorize_url") {
       const actualRedirect = redirect_uri || `${req.headers.get("origin")}/admin/qbo-callback`;
