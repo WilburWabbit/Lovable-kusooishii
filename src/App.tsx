@@ -14,7 +14,6 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AccountPage from "./pages/AccountPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
-  InventoryPage,
   ListingsPage,
   OrdersPage,
   ReconciliationPage,
@@ -23,6 +22,7 @@ import {
   AuditPage,
   SettingsPage,
 } from "./pages/admin/AdminPages";
+import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
