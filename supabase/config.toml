@@ -1,1 +1,7 @@
 project_id = "gcgrwujfyurgetvqlmbf"
+
+[functions.qbo-auth]
+verify_jwt = false
+
+[functions.qbo-sync-purchases]
+verify_jwt = false

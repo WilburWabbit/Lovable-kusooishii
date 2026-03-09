@@ -18,9 +18,7 @@ function AdminPlaceholder({ title, description }: AdminPlaceholderProps) {
   );
 }
 
-export function IntakePage() {
-  return <AdminPlaceholder title="Intake" description="Receipt ingestion, fee apportionment, and stock-unit creation from QBO purchases." />;
-}
+// IntakePage moved to src/pages/admin/IntakePage.tsx
 
 export function InventoryPage() {
   return <AdminPlaceholder title="Inventory" description="Unit-level stock tracking, grading, valuation adjustments, and disposition management." />;
@@ -50,6 +48,4 @@ export function AuditPage() {
   return <AdminPlaceholder title="Audit Explorer" description="Immutable audit trail with full event lineage and raw payload inspection." />;
 }
 
-export function SettingsPage() {
-  return <AdminPlaceholder title="Settings" description="Integrations, credentials, schedules, pricing rules, shipping tables, and configuration." />;
-}
+export { SettingsPage } from "./SettingsPageFull";
