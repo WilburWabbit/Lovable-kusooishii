@@ -270,19 +270,6 @@ Deno.serve(async (req) => {
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
 
-      // Check if receipt already exists and its status
-      const { data: existingReceipt } = await supabaseAdmin
-        .from("inbound_receipt")
-        .select("id, status")
-        .eq("qbo_purchase_id", qboPurchaseId)
-        .single();
-
-      // Skip already-processed receipts entirely
-      if (existingReceipt?.status === "processed") {
-        skippedExisting++;
-        continue;
-      }
-
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
         .upsert(
