@@ -20,32 +20,24 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const userId = claimsData.claims.sub;
-
-    // Check admin/staff role
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .eq("user_id", userId);
+      .eq("user_id", user.id);
 
     const userRoles = (roles ?? []).map((r: any) => r.role);
     if (!userRoles.includes("admin") && !userRoles.includes("staff")) {
@@ -63,7 +55,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Validate condition grade
     const validGrades = ["1", "2", "3", "4", "5"];
     if (!validGrades.includes(condition_grade)) {
       return new Response(JSON.stringify({ error: "Invalid condition_grade" }), {
@@ -93,25 +84,33 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fetch lines with MPN
-    const { data: lines, error: linesErr } = await supabaseAdmin
+    // Fetch ALL lines for this receipt
+    const { data: allLines, error: linesErr } = await supabaseAdmin
       .from("inbound_receipt_line")
       .select("*")
-      .eq("inbound_receipt_id", receipt_id)
-      .not("mpn", "is", null);
+      .eq("inbound_receipt_id", receipt_id);
 
     if (linesErr) throw linesErr;
-    if (!lines || lines.length === 0) {
-      return new Response(JSON.stringify({ error: "No mapped lines to process" }), {
+
+    // Split into stock lines (with MPN) and account/overhead lines
+    const stockLines = (allLines ?? []).filter((l: any) => l.is_stock_line && l.mpn);
+    const overheadLines = (allLines ?? []).filter((l: any) => !l.is_stock_line);
+
+    if (stockLines.length === 0) {
+      return new Response(JSON.stringify({ error: "No mapped stock lines to process" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Calculate overhead pool and stock base for pro-rata apportionment
+    const totalOverhead = overheadLines.reduce((sum: number, l: any) => sum + Number(l.line_total), 0);
+    const totalStockCost = stockLines.reduce((sum: number, l: any) => sum + Number(l.line_total), 0);
+
     let unitsCreated = 0;
     const skipped: string[] = [];
 
-    for (const line of lines) {
+    for (const line of stockLines) {
       // Look up catalog_product by MPN
       const { data: product } = await supabaseAdmin
         .from("catalog_product")
@@ -123,6 +122,16 @@ Deno.serve(async (req) => {
         skipped.push(`MPN ${line.mpn}: not found in catalog`);
         continue;
       }
+
+      // Calculate apportioned overhead per unit for this line
+      const lineTotal = Number(line.line_total);
+      const lineOverhead = totalStockCost > 0
+        ? totalOverhead * (lineTotal / totalStockCost)
+        : 0;
+      const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
+      const landedCostPerUnit = Number(line.unit_cost) + overheadPerUnit;
+      // Round to 2 decimal places
+      const landedCost = Math.round(landedCostPerUnit * 100) / 100;
 
       // Find or create SKU for this product + condition grade
       const skuCode = `${product.mpn}-G${condition_grade}`;
@@ -140,7 +149,7 @@ Deno.serve(async (req) => {
             catalog_product_id: product.id,
             condition_grade,
             sku_code: skuCode,
-            price: line.unit_cost,
+            price: landedCost,
             active_flag: true,
             saleable_flag: true,
           })
@@ -159,8 +168,8 @@ Deno.serve(async (req) => {
           mpn: product.mpn,
           condition_grade,
           status: "received",
-          landed_cost: line.unit_cost,
-          carrying_value: line.unit_cost,
+          landed_cost: landedCost,
+          carrying_value: landedCost,
           supplier_id: receipt.vendor_name ?? null,
         });
       }
@@ -185,6 +194,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         units_created: unitsCreated,
+        total_overhead_apportioned: Math.round(totalOverhead * 100) / 100,
         skipped,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
