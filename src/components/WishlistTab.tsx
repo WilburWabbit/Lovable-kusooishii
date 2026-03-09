@@ -64,6 +64,32 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
   const [selectedTheme, setSelectedTheme] = useState("");
   const [selectedSubtheme, setSelectedSubtheme] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = useCallback((key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }, [sortKey]);
+
+  const sortedResults = useMemo(() => {
+    if (!sortKey) return searchResults;
+    return [...searchResults].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [searchResults, sortKey, sortDir]);
 
   // Debounce search
   useEffect(() => {
