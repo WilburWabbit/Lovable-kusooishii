@@ -142,6 +142,48 @@ export type Database = {
           },
         ]
       }
+      club: {
+        Row: {
+          active: boolean
+          city: string | null
+          commission_rate: number
+          created_at: string
+          discount_rate: number
+          id: string
+          location_description: string | null
+          name: string
+          postcode: string | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          city?: string | null
+          commission_rate?: number
+          created_at?: string
+          discount_rate?: number
+          id?: string
+          location_description?: string | null
+          name: string
+          postcode?: string | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          city?: string | null
+          commission_rate?: number
+          created_at?: string
+          discount_rate?: number
+          id?: string
+          location_description?: string | null
+          name?: string
+          postcode?: string | null
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       media_asset: {
         Row: {
           alt_text: string | null
@@ -184,6 +226,113 @@ export type Database = {
           original_url?: string
           provenance?: string | null
           width?: number | null
+        }
+        Relationships: []
+      }
+      member_address: {
+        Row: {
+          city: string
+          country: string
+          county: string | null
+          created_at: string
+          id: string
+          is_default: boolean
+          label: string
+          line_1: string
+          line_2: string | null
+          postcode: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          city: string
+          country?: string
+          county?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          label?: string
+          line_1: string
+          line_2?: string | null
+          postcode: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          city?: string
+          country?: string
+          county?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          label?: string
+          line_1?: string
+          line_2?: string | null
+          postcode?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      member_club_link: {
+        Row: {
+          approved: boolean
+          club_id: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          approved?: boolean
+          club_id: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          approved?: boolean
+          club_id?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_club_link_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "club"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profile: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          phone: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          phone?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -348,6 +497,82 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      wishlist: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wishlist_item: {
+        Row: {
+          catalog_product_id: string
+          created_at: string
+          id: string
+          max_price: number | null
+          notes: string | null
+          notify_on_stock: boolean
+          preferred_grade: Database["public"]["Enums"]["condition_grade"] | null
+          wishlist_id: string
+        }
+        Insert: {
+          catalog_product_id: string
+          created_at?: string
+          id?: string
+          max_price?: number | null
+          notes?: string | null
+          notify_on_stock?: boolean
+          preferred_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          wishlist_id: string
+        }
+        Update: {
+          catalog_product_id?: string
+          created_at?: string
+          id?: string
+          max_price?: number | null
+          notes?: string | null
+          notify_on_stock?: boolean
+          preferred_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          wishlist_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wishlist_item_catalog_product_id_fkey"
+            columns: ["catalog_product_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_product"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wishlist_item_wishlist_id_fkey"
+            columns: ["wishlist_id"]
+            isOneToOne: false
+            referencedRelation: "wishlist"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
