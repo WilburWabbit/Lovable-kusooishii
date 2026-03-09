@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
           sku_id: sku!.id,
           mpn,
           condition_grade: conditionGrade,
-          status: "received",
+          status: "available",
           landed_cost: landedCost,
           supplier_id: receipt.vendor_name ?? null,
         });
