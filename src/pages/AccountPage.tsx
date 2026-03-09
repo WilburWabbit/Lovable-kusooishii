@@ -150,40 +150,7 @@ export default function AccountPage() {
 
             {/* Wishlist Tab */}
             <TabsContent value="wishlist">
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="font-display text-sm font-semibold">My Wishlist</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {wishlistItems.length === 0 ? (
-                    <p className="font-body text-sm text-muted-foreground">
-                      Your wishlist is empty. Browse sets and add ones you're interested in.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {wishlistItems.map((item: any) => (
-                        <div key={item.id} className="flex items-center justify-between border-b border-border pb-3">
-                          <div>
-                            <p className="font-display text-sm font-semibold text-foreground">
-                              {item.catalog_product?.name}
-                            </p>
-                            <p className="font-body text-xs text-muted-foreground">
-                              {item.catalog_product?.mpn}
-                              {item.preferred_grade && ` · Grade ${item.preferred_grade}`}
-                              {item.max_price && ` · Max £${item.max_price}`}
-                            </p>
-                          </div>
-                          {item.notify_on_stock && (
-                            <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-primary">
-                              Alert on
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <WishlistTab userId={user.id} />
             </TabsContent>
 
             {/* Addresses Tab */}
