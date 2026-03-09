@@ -81,22 +81,26 @@ Deno.serve(async (req) => {
       throw new Error(`BrickEconomy minifigs endpoint returned ${minifigsRes.status}: ${txt}`);
     }
 
-    const setsData = await setsRes.json();
-    const minifigsData = await minifigsRes.json();
+    const setsRaw = await setsRes.json();
+    const minifigsRaw = await minifigsRes.json();
+
+    // Unwrap the data envelope
+    const setsData = setsRaw.data ?? setsRaw;
+    const minifigsData = minifigsRaw.data ?? minifigsRaw;
 
     // --- Process sets ---
-    const setItems = (setsData.items ?? []).map((item: Record<string, unknown>) => ({
+    const setItems = (setsData.sets ?? []).map((item: Record<string, unknown>) => ({
       item_type: "set",
       item_number: String(item.set_number ?? ""),
-      name: item.set_name ?? item.name ?? null,
+      name: item.name ?? null,
       theme: item.theme ?? null,
       subtheme: item.subtheme ?? null,
       year: item.year ?? null,
-      pieces_count: item.pieces ?? null,
-      minifigs_count: item.minifigs ?? null,
+      pieces_count: item.pieces_count ?? null,
+      minifigs_count: item.minifigs_count ?? null,
       condition: item.condition ?? null,
-      collection_name: item.collection ?? null,
-      acquired_date: item.acquired_date ?? null,
+      collection_name: item.collection_name ?? null,
+      acquired_date: item.aquired_date ?? null, // API typo
       paid_price: item.paid_price ?? null,
       current_value: item.current_value ?? null,
       growth: item.growth ?? null,
@@ -108,18 +112,18 @@ Deno.serve(async (req) => {
     }));
 
     // --- Process minifigs ---
-    const minifigItems = (minifigsData.items ?? []).map((item: Record<string, unknown>) => ({
+    const minifigItems = (minifigsData.minifigs ?? []).map((item: Record<string, unknown>) => ({
       item_type: "minifig",
-      item_number: String(item.minifig_number ?? item.set_number ?? ""),
-      name: item.minifig_name ?? item.name ?? null,
+      item_number: String(item.minifig_number ?? ""),
+      name: item.name ?? null,
       theme: item.theme ?? null,
       subtheme: item.subtheme ?? null,
       year: item.year ?? null,
-      pieces_count: item.pieces ?? null,
+      pieces_count: item.pieces_count ?? null,
       minifigs_count: null,
       condition: item.condition ?? null,
-      collection_name: item.collection ?? null,
-      acquired_date: item.acquired_date ?? null,
+      collection_name: item.collection_name ?? null,
+      acquired_date: item.aquired_date ?? null, // API typo
       paid_price: item.paid_price ?? null,
       current_value: item.current_value ?? null,
       growth: item.growth ?? null,
@@ -151,22 +155,22 @@ Deno.serve(async (req) => {
     await admin.from("brickeconomy_portfolio_snapshot").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
     const snapshots = [];
-    if (setsData.total_count !== undefined || setsData.unique_count !== undefined) {
+    if (setsData.sets_count !== undefined || setsData.sets_unique_count !== undefined) {
       snapshots.push({
         snapshot_type: "sets",
-        total_count: setsData.total_count ?? setItems.length,
-        unique_count: setsData.unique_count ?? null,
+        total_count: setsData.sets_count ?? setItems.length,
+        unique_count: setsData.sets_unique_count ?? null,
         current_value: setsData.current_value ?? null,
         currency: "GBP",
         period_data: setsData.periods ?? null,
         synced_at: now,
       });
     }
-    if (minifigsData.total_count !== undefined || minifigsData.unique_count !== undefined) {
+    if (minifigsData.minifigs_count !== undefined || minifigsData.minifigs_unique_count !== undefined) {
       snapshots.push({
         snapshot_type: "minifigs",
-        total_count: minifigsData.total_count ?? minifigItems.length,
-        unique_count: minifigsData.unique_count ?? null,
+        total_count: minifigsData.minifigs_count ?? minifigItems.length,
+        unique_count: minifigsData.minifigs_unique_count ?? null,
         current_value: minifigsData.current_value ?? null,
         currency: "GBP",
         period_data: minifigsData.periods ?? null,
