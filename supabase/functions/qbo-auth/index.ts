@@ -168,31 +168,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (action === "status") {
-      const realmId = Deno.env.get("QBO_REALM_ID");
-      if (!realmId) {
-        return new Response(JSON.stringify({ connected: false }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: conn } = await supabaseAdmin
-        .from("qbo_connection")
-        .select("realm_id, token_expires_at, updated_at")
-        .eq("realm_id", realmId)
-        .single();
-
-      return new Response(
-        JSON.stringify({
-          connected: !!conn,
-          realm_id: conn?.realm_id ?? null,
-          token_expires_at: conn?.token_expires_at ?? null,
-          last_updated: conn?.updated_at ?? null,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     throw new Error(`Unknown action: ${action}`);
   } catch (err) {
     console.error("qbo-auth error:", err);
