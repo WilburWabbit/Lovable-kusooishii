@@ -68,18 +68,26 @@ Deno.serve(async (req) => {
 
     // Verify caller is admin/staff
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Unauthorized");
+    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const authClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) throw new Error("Unauthorized");
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) throw new Error("Unauthorized");
 
-    const { data: isAdmin } = await supabaseAdmin.rpc("has_role", { _user_id: user.id, _role: "admin" });
-    const { data: isStaff } = await supabaseAdmin.rpc("has_role", { _user_id: user.id, _role: "staff" });
-    if (!isAdmin && !isStaff) throw new Error("Forbidden");
+    const userId = claimsData.claims.sub as string;
+    const { data: roles } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    const hasAccess = (roles ?? []).some(
+      (r: { role: string }) => r.role === "admin" || r.role === "staff"
+    );
+    if (!hasAccess) throw new Error("Forbidden");
 
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
 
