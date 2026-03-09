@@ -76,20 +76,6 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
     }
   }, [sortKey]);
 
-  const sortedResults = useMemo(() => {
-    if (!sortKey) return searchResults;
-    return [...searchResults].sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      const cmp = typeof av === "number" && typeof bv === "number"
-        ? av - bv
-        : String(av).localeCompare(String(bv));
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [searchResults, sortKey, sortDir]);
 
   // Debounce search
   useEffect(() => {
