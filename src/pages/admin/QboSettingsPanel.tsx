@@ -88,6 +88,8 @@ export function QboSettingsPanel() {
       const parts = [`${data.auto_processed ?? 0} auto-processed`];
       if (data.left_pending) parts.push(`${data.left_pending} pending review`);
       if (data.skipped_existing) parts.push(`${data.skipped_existing} unchanged`);
+      if (data.skipped_no_items) parts.push(`${data.skipped_no_items} non-stock skipped`);
+      if (data.cleaned_up) parts.push(`${data.cleaned_up} empty receipts cleaned up`);
       toast({
         title: "Sync complete",
         description: `${data.total} purchases: ${parts.join(", ")}.`,
