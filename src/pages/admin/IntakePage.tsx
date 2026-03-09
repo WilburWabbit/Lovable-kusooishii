@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -76,6 +76,24 @@ export function IntakePage() {
     enabled: !!selectedReceipt,
   });
 
+  // Compute apportionment preview
+  const apportionment = useMemo(() => {
+    if (!lines) return { stockLines: [], overheadLines: [], totalOverhead: 0, totalStockCost: 0 };
+    const stockLines = lines.filter((l) => l.is_stock_line);
+    const overheadLines = lines.filter((l) => !l.is_stock_line);
+    const totalOverhead = overheadLines.reduce((s, l) => s + Number(l.line_total), 0);
+    const totalStockCost = stockLines.reduce((s, l) => s + Number(l.line_total), 0);
+    return { stockLines, overheadLines, totalOverhead, totalStockCost };
+  }, [lines]);
+
+  const getLandedCost = (line: ReceiptLine) => {
+    const { totalOverhead, totalStockCost } = apportionment;
+    if (totalStockCost <= 0 || !line.is_stock_line) return null;
+    const lineOverhead = totalOverhead * (Number(line.line_total) / totalStockCost);
+    const perUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
+    return Math.round((Number(line.unit_cost) + perUnit) * 100) / 100;
+  };
+
   const handleMpnChange = (lineId: string, mpn: string) => {
     setLineEdits((prev) => ({ ...prev, [lineId]: mpn }));
     setMpnValid((prev) => ({ ...prev, [lineId]: null }));
@@ -95,7 +113,6 @@ export function IntakePage() {
       return;
     }
 
-    // Validate MPN exists in catalog
     const { data: product } = await supabase
       .from("catalog_product")
       .select("id")
@@ -122,10 +139,13 @@ export function IntakePage() {
       const skippedMsg = data.skipped?.length
         ? ` (${data.skipped.length} lines skipped)`
         : "";
+      const overheadMsg = data.total_overhead_apportioned > 0
+        ? ` | £${data.total_overhead_apportioned.toFixed(2)} overhead apportioned`
+        : "";
 
       toast({
         title: "Receipt processed",
-        description: `${data.units_created} stock units created${skippedMsg}`,
+        description: `${data.units_created} stock units created${skippedMsg}${overheadMsg}`,
       });
 
       queryClient.invalidateQueries({ queryKey: ["inbound-receipts"] });
@@ -137,7 +157,7 @@ export function IntakePage() {
     }
   };
 
-  const mappedCount = lines?.filter((l) => l.mpn).length ?? 0;
+  const mappedCount = apportionment.stockLines.filter((l) => l.mpn).length;
   const canProcess = selectedReceipt?.status === "pending" && mappedCount > 0 && !processing;
 
   return (
@@ -199,7 +219,7 @@ export function IntakePage() {
 
       {/* Receipt detail dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={(o) => !o && setSelectedReceipt(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-sm">
               Receipt: {selectedReceipt?.qbo_purchase_id} — {selectedReceipt?.vendor_name ?? "Unknown"}
@@ -209,53 +229,106 @@ export function IntakePage() {
           {linesLoading ? (
             <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="font-display text-xs">Description</TableHead>
-                  <TableHead className="font-display text-xs text-right">Qty</TableHead>
-                  <TableHead className="font-display text-xs text-right">Unit Cost</TableHead>
-                  <TableHead className="font-display text-xs text-right">Total</TableHead>
-                  <TableHead className="font-display text-xs">MPN</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lines?.map((line) => {
-                  const isValid = mpnValid[line.id];
-                  const hasMpn = !!(lineEdits[line.id] ?? line.mpn);
-                  return (
-                    <TableRow key={line.id}>
-                      <TableCell className="font-body text-xs max-w-[200px] truncate">{line.description ?? "—"}</TableCell>
-                      <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
-                      <TableCell className="font-body text-xs text-right">{Number(line.unit_cost).toFixed(2)}</TableCell>
-                      <TableCell className="font-body text-xs text-right">{Number(line.line_total).toFixed(2)}</TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="font-display text-xs">Type</TableHead>
+                    <TableHead className="font-display text-xs">Description</TableHead>
+                    <TableHead className="font-display text-xs text-right">Qty</TableHead>
+                    <TableHead className="font-display text-xs text-right">Unit Cost</TableHead>
+                    <TableHead className="font-display text-xs text-right">Total</TableHead>
+                    <TableHead className="font-display text-xs text-right">Landed/unit</TableHead>
+                    <TableHead className="font-display text-xs">MPN</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* Stock lines first */}
+                  {apportionment.stockLines.map((line) => {
+                    const isValid = mpnValid[line.id];
+                    const hasMpn = !!(lineEdits[line.id] ?? line.mpn);
+                    const landed = getLandedCost(line);
+                    return (
+                      <TableRow key={line.id}>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                            Item
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-body text-xs max-w-[180px] truncate">{line.description ?? "—"}</TableCell>
+                        <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
+                        <TableCell className="font-body text-xs text-right">{Number(line.unit_cost).toFixed(2)}</TableCell>
+                        <TableCell className="font-body text-xs text-right">{Number(line.line_total).toFixed(2)}</TableCell>
+                        <TableCell className="font-body text-xs text-right font-medium">
+                          {landed !== null ? `£${landed.toFixed(2)}` : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              className="h-7 text-xs w-24"
+                              placeholder="e.g. 75192"
+                              defaultValue={line.mpn ?? ""}
+                              onChange={(e) => handleMpnChange(line.id, e.target.value)}
+                              disabled={selectedReceipt?.status !== "pending"}
+                            />
+                            {isValid === true && <Check className="h-3.5 w-3.5 text-green-600" />}
+                            {isValid === false && <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" />}
+                            {!hasMpn && <AlertTriangle className="h-3 w-3 text-muted-foreground/50" />}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {selectedReceipt?.status === "pending" && (
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>
+                              Save
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+
+                  {/* Account/overhead lines */}
+                  {apportionment.overheadLines.map((line) => (
+                    <TableRow key={line.id} className="bg-muted/30">
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Input
-                            className="h-7 text-xs w-24"
-                            placeholder="e.g. 75192"
-                            defaultValue={line.mpn ?? ""}
-                            onChange={(e) => handleMpnChange(line.id, e.target.value)}
-                            disabled={selectedReceipt?.status !== "pending"}
-                          />
-                          {isValid === true && <Check className="h-3.5 w-3.5 text-green-600" />}
-                          {isValid === false && <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" />}
-                          {!hasMpn && <AlertTriangle className="h-3 w-3 text-muted-foreground/50" />}
-                        </div>
+                        <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">
+                          Acct
+                        </Badge>
                       </TableCell>
-                      <TableCell>
-                        {selectedReceipt?.status === "pending" && (
-                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>
-                            Save
-                          </Button>
-                        )}
+                      <TableCell className="font-body text-xs max-w-[180px] truncate italic text-muted-foreground">
+                        {line.description ?? "—"}
+                      </TableCell>
+                      <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
+                      <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
+                      <TableCell className="font-body text-xs text-right text-muted-foreground">
+                        {Number(line.line_total).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="font-body text-xs text-right text-muted-foreground italic">
+                        apportioned
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                    </TableRow>
+                  ))}
+
+                  {/* Summary row */}
+                  {apportionment.totalOverhead > 0 && (
+                    <TableRow className="border-t-2 border-border">
+                      <TableCell colSpan={4} className="font-display text-xs text-right">
+                        Overhead to apportion:
+                      </TableCell>
+                      <TableCell className="font-display text-xs text-right font-semibold">
+                        £{apportionment.totalOverhead.toFixed(2)}
+                      </TableCell>
+                      <TableCell colSpan={3} className="font-body text-[10px] text-muted-foreground italic">
+                        pro-rata by line total
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  )}
+                </TableBody>
+              </Table>
+            </>
           )}
 
           {selectedReceipt?.status === "pending" && (
@@ -275,7 +348,7 @@ export function IntakePage() {
                   </SelectContent>
                 </Select>
                 <span className="font-body text-[10px] text-muted-foreground">
-                  {mappedCount}/{lines?.length ?? 0} lines mapped
+                  {mappedCount}/{apportionment.stockLines.length} lines mapped
                 </span>
               </div>
               <Button size="sm" onClick={handleProcess} disabled={!canProcess} className="text-xs">
