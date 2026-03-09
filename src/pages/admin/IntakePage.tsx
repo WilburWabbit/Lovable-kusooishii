@@ -33,6 +33,7 @@ interface ReceiptLine {
   qbo_item_id: string | null;
   mpn: string | null;
   is_stock_line: boolean;
+  condition_grade: string | null;
 }
 
 const statusColor: Record<string, string> = {
@@ -46,9 +47,8 @@ export function IntakePage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
-  const [lineEdits, setLineEdits] = useState<Record<string, string>>({});
+  const [lineEdits, setLineEdits] = useState<Record<string, { mpn?: string; grade?: string }>>({});
   const [mpnValid, setMpnValid] = useState<Record<string, boolean | null>>({});
-  const [conditionGrade, setConditionGrade] = useState("3");
   const [processing, setProcessing] = useState(false);
 
   const { data: receipts, isLoading } = useQuery({
@@ -95,17 +95,27 @@ export function IntakePage() {
   };
 
   const handleMpnChange = (lineId: string, mpn: string) => {
-    setLineEdits((prev) => ({ ...prev, [lineId]: mpn }));
+    setLineEdits((prev) => ({ ...prev, [lineId]: { ...prev[lineId], mpn } }));
     setMpnValid((prev) => ({ ...prev, [lineId]: null }));
   };
 
+  const handleGradeChange = (lineId: string, grade: string) => {
+    setLineEdits((prev) => ({ ...prev, [lineId]: { ...prev[lineId], grade } }));
+  };
+
   const saveMpnMapping = async (lineId: string) => {
-    const mpn = lineEdits[lineId];
-    if (!mpn) return;
+    const edits = lineEdits[lineId];
+    const mpn = edits?.mpn;
+    const grade = edits?.grade;
+
+    const updates: Record<string, any> = {};
+    if (mpn !== undefined) updates.mpn = mpn;
+    if (grade !== undefined) updates.condition_grade = grade;
+    if (Object.keys(updates).length === 0) return;
 
     const { error } = await supabase
       .from("inbound_receipt_line")
-      .update({ mpn })
+      .update(updates)
       .eq("id", lineId);
 
     if (error) {
@@ -113,14 +123,18 @@ export function IntakePage() {
       return;
     }
 
-    const { data: product } = await supabase
-      .from("catalog_product")
-      .select("id")
-      .eq("mpn", mpn)
-      .single();
+    if (mpn) {
+      const { data: product } = await supabase
+        .from("catalog_product")
+        .select("id")
+        .eq("mpn", mpn)
+        .single();
+      setMpnValid((prev) => ({ ...prev, [lineId]: !!product }));
+      toast({ title: "Saved", description: product ? `Matched to catalog` : `Warning: MPN not found in catalog` });
+    } else {
+      toast({ title: "Saved" });
+    }
 
-    setMpnValid((prev) => ({ ...prev, [lineId]: !!product }));
-    toast({ title: "MPN saved", description: product ? `Matched to catalog` : `Warning: MPN not found in catalog` });
     queryClient.invalidateQueries({ queryKey: ["receipt-lines", selectedReceipt?.id] });
   };
 
@@ -130,7 +144,7 @@ export function IntakePage() {
 
     try {
       const { data, error } = await supabase.functions.invoke("process-receipt", {
-        body: { receipt_id: selectedReceipt.id, condition_grade: conditionGrade },
+        body: { receipt_id: selectedReceipt.id },
       });
 
       if (error) throw error;
@@ -157,7 +171,7 @@ export function IntakePage() {
     }
   };
 
-  const mappedCount = apportionment.stockLines.filter((l) => l.mpn).length;
+  const mappedCount = apportionment.stockLines.filter((l) => l.mpn && l.condition_grade).length;
   const canProcess = selectedReceipt?.status === "pending" && mappedCount > 0 && !processing;
 
   return (
@@ -240,6 +254,7 @@ export function IntakePage() {
                     <TableHead className="font-display text-xs text-right">Total</TableHead>
                     <TableHead className="font-display text-xs text-right">Landed/unit</TableHead>
                     <TableHead className="font-display text-xs">MPN</TableHead>
+                    <TableHead className="font-display text-xs">Grade</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
@@ -247,7 +262,9 @@ export function IntakePage() {
                   {/* Stock lines first */}
                   {apportionment.stockLines.map((line) => {
                     const isValid = mpnValid[line.id];
-                    const hasMpn = !!(lineEdits[line.id] ?? line.mpn);
+                    const currentMpn = lineEdits[line.id]?.mpn ?? line.mpn;
+                    const currentGrade = lineEdits[line.id]?.grade ?? line.condition_grade ?? "1";
+                    const hasMpn = !!currentMpn;
                     const landed = getLandedCost(line);
                     return (
                       <TableRow key={line.id}>
@@ -276,6 +293,22 @@ export function IntakePage() {
                             {isValid === false && <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" />}
                             {!hasMpn && <AlertTriangle className="h-3 w-3 text-muted-foreground/50" />}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={currentGrade}
+                            onValueChange={(v) => handleGradeChange(line.id, v)}
+                            disabled={selectedReceipt?.status !== "pending"}
+                          >
+                            <SelectTrigger className="h-7 w-14 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["1", "2", "3", "4", "5"].map((g) => (
+                                <SelectItem key={g} value={g} className="text-xs">{g}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell>
                           {selectedReceipt?.status === "pending" && (
@@ -309,6 +342,7 @@ export function IntakePage() {
                       </TableCell>
                       <TableCell />
                       <TableCell />
+                      <TableCell />
                     </TableRow>
                   ))}
 
@@ -321,7 +355,7 @@ export function IntakePage() {
                       <TableCell className="font-display text-xs text-right font-semibold">
                         £{apportionment.totalOverhead.toFixed(2)}
                       </TableCell>
-                      <TableCell colSpan={3} className="font-body text-[10px] text-muted-foreground italic">
+                      <TableCell colSpan={4} className="font-body text-[10px] text-muted-foreground italic">
                         pro-rata by line total
                       </TableCell>
                     </TableRow>
@@ -333,24 +367,9 @@ export function IntakePage() {
 
           {selectedReceipt?.status === "pending" && (
             <DialogFooter className="flex items-center gap-3 sm:justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-body text-xs text-muted-foreground">Grade:</span>
-                <Select value={conditionGrade} onValueChange={setConditionGrade}>
-                  <SelectTrigger className="h-7 w-16 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["1", "2", "3", "4", "5"].map((g) => (
-                      <SelectItem key={g} value={g} className="text-xs">
-                        {g}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <span className="font-body text-[10px] text-muted-foreground">
-                  {mappedCount}/{apportionment.stockLines.length} lines mapped
-                </span>
-              </div>
+              <span className="font-body text-[10px] text-muted-foreground">
+                {mappedCount}/{apportionment.stockLines.length} lines mapped
+              </span>
               <Button size="sm" onClick={handleProcess} disabled={!canProcess} className="text-xs">
                 {processing && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
                 Process Receipt

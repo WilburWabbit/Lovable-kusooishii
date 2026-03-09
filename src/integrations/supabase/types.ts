@@ -234,6 +234,7 @@ export type Database = {
       }
       inbound_receipt_line: {
         Row: {
+          condition_grade: string | null
           created_at: string
           description: string | null
           id: string
@@ -246,6 +247,7 @@ export type Database = {
           unit_cost: number
         }
         Insert: {
+          condition_grade?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -258,6 +260,7 @@ export type Database = {
           unit_cost?: number
         }
         Update: {
+          condition_grade?: string | null
           created_at?: string
           description?: string | null
           id?: string
