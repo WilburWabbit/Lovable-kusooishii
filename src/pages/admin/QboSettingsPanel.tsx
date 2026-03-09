@@ -25,6 +25,7 @@ export function QboSettingsPanel() {
   const [status, setStatus] = useState<{ connected: boolean; realm_id?: string; last_updated?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
   const fetchStatus = async () => {
