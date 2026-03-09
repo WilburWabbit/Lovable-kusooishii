@@ -1,29 +1,68 @@
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useState, useMemo } from "react";
 
-const mockSets = [
-  { mpn: "75367-1", name: "Venator-Class Republic Attack Cruiser", theme: "Star Wars", grade: 1, price: 649.99, retired: true, stock: 1 },
-  { mpn: "10497-1", name: "Galaxy Explorer", theme: "Icons", grade: 2, price: 119.99, retired: false, stock: 3 },
-  { mpn: "21330-1", name: "Home Alone", theme: "Ideas", grade: 1, price: 349.99, retired: true, stock: 1 },
-  { mpn: "42151-1", name: "Bugatti Bolide", theme: "Technic", grade: 1, price: 54.99, retired: false, stock: 5 },
-  { mpn: "10305-1", name: "Lion Knights' Castle", theme: "Icons", grade: 2, price: 449.99, retired: true, stock: 1 },
-  { mpn: "75341-1", name: "Luke Skywalker's Landspeeder", theme: "Star Wars", grade: 1, price: 249.99, retired: true, stock: 2 },
-  { mpn: "21334-1", name: "Jazz Quartet", theme: "Ideas", grade: 3, price: 89.99, retired: false, stock: 4 },
-  { mpn: "76240-1", name: "Daily Bugle", theme: "Marvel", grade: 1, price: 399.99, retired: true, stock: 1 },
-  { mpn: "10300-1", name: "Back to the Future Time Machine", theme: "Icons", grade: 2, price: 199.99, retired: false, stock: 2 },
+const gradeOptions = [
+  { value: null, label: "All" },
+  { value: "1", label: "1 — Mint" },
+  { value: "2", label: "2 — Excellent" },
+  { value: "3", label: "3 — Good" },
+  { value: "4", label: "4 — Acceptable" },
 ];
 
-const themes = ["All", "Star Wars", "Icons", "Ideas", "Technic", "Marvel"];
-const grades = ["All", "1 — Mint", "2 — Excellent", "3 — Good", "4 — Acceptable"];
-
-const gradeLabels: Record<number, string> = {
-  1: "Mint", 2: "Excellent", 3: "Good", 4: "Acceptable",
+const gradeLabels: Record<string, string> = {
+  "1": "Mint", "2": "Excellent", "3": "Good", "4": "Acceptable", "5": "Fair",
 };
 
 export default function BrowsePage() {
+  const [search, setSearch] = useState("");
+  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
+  const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
+
+  // Debounced search
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useMemo(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetch themes
+  const { data: themes } = useQuery({
+    queryKey: ["themes"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("theme").select("id, name").order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch browse data
+  const { data: products, isLoading } = useQuery({
+    queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("browse_catalog", {
+        search_term: debouncedSearch || null,
+        filter_theme_id: selectedThemeId || null,
+        filter_grade: selectedGrade || null,
+        filter_retired: retiredFilter,
+      });
+      if (error) throw error;
+      return data as {
+        product_id: string; mpn: string; name: string; theme_name: string | null;
+        theme_id: string | null; retired_flag: boolean; release_year: number | null;
+        piece_count: number | null; min_price: number | null; best_grade: string | null;
+        total_stock: number;
+      }[];
+    },
+  });
+
   return (
     <StorefrontLayout>
       <div className="bg-background">
@@ -32,7 +71,7 @@ export default function BrowsePage() {
           <div className="container">
             <h1 className="font-display text-2xl font-bold text-foreground">Browse Sets</h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">
-              {mockSets.length} sets available · condition graded · version tracked
+              {isLoading ? "Loading…" : `${products?.length ?? 0} sets available`} · condition graded · version tracked
             </p>
           </div>
         </div>
@@ -55,7 +94,12 @@ export default function BrowsePage() {
                   </label>
                   <div className="relative mt-2">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Set name or MPN..." className="pl-8 font-body text-sm" />
+                    <Input
+                      placeholder="Set name or MPN..."
+                      className="pl-8 font-body text-sm"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
                   </div>
                 </div>
 
@@ -65,16 +109,27 @@ export default function BrowsePage() {
                     Theme
                   </label>
                   <div className="mt-2 flex flex-col gap-1">
-                    {themes.map((t) => (
+                    <button
+                      onClick={() => setSelectedThemeId(null)}
+                      className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
+                        selectedThemeId === null
+                          ? "bg-foreground text-background"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      All
+                    </button>
+                    {themes?.map((t) => (
                       <button
-                        key={t}
+                        key={t.id}
+                        onClick={() => setSelectedThemeId(t.id)}
                         className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
-                          t === "All"
+                          selectedThemeId === t.id
                             ? "bg-foreground text-background"
                             : "text-muted-foreground hover:bg-muted hover:text-foreground"
                         }`}
                       >
-                        {t}
+                        {t.name}
                       </button>
                     ))}
                   </div>
@@ -86,16 +141,17 @@ export default function BrowsePage() {
                     Condition
                   </label>
                   <div className="mt-2 flex flex-col gap-1">
-                    {grades.map((g) => (
+                    {gradeOptions.map((g) => (
                       <button
-                        key={g}
+                        key={g.label}
+                        onClick={() => setSelectedGrade(g.value)}
                         className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
-                          g === "All"
+                          selectedGrade === g.value
                             ? "bg-foreground text-background"
                             : "text-muted-foreground hover:bg-muted hover:text-foreground"
                         }`}
                       >
-                        {g}
+                        {g.label}
                       </button>
                     ))}
                   </div>
@@ -107,9 +163,23 @@ export default function BrowsePage() {
                     Status
                   </label>
                   <div className="mt-2 flex gap-1">
-                    <button className="rounded bg-foreground px-3 py-1.5 font-body text-xs text-background">All</button>
-                    <button className="rounded px-3 py-1.5 font-body text-xs text-muted-foreground hover:bg-muted">Retired</button>
-                    <button className="rounded px-3 py-1.5 font-body text-xs text-muted-foreground hover:bg-muted">Current</button>
+                    {([
+                      { value: null, label: "All" },
+                      { value: true, label: "Retired" },
+                      { value: false, label: "Current" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={String(opt.value)}
+                        onClick={() => setRetiredFilter(opt.value)}
+                        className={`rounded px-3 py-1.5 font-body text-xs transition-colors ${
+                          retiredFilter === opt.value
+                            ? "bg-foreground text-background"
+                            : "text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -117,47 +187,75 @@ export default function BrowsePage() {
 
             {/* Product grid */}
             <div className="flex-1">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {mockSets.map((set) => (
-                  <Link
-                    key={set.mpn}
-                    to={`/sets/${set.mpn}`}
-                    className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
-                  >
-                    <div className="aspect-square bg-kuso-mist p-6">
-                      <div className="flex h-full items-center justify-center">
-                        <span className="font-display text-3xl font-bold text-muted-foreground/20">
-                          {set.mpn.split("-")[0]}
-                        </span>
+              {isLoading ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="border border-border">
+                      <Skeleton className="aspect-square w-full rounded-none" />
+                      <div className="p-3 space-y-2">
+                        <Skeleton className="h-3 w-24" />
+                        <Skeleton className="h-4 w-40" />
+                        <Skeleton className="h-5 w-16" />
                       </div>
                     </div>
-
-                    <div className="absolute left-2 top-2 flex gap-1">
-                      {set.retired && (
-                        <span className="bg-primary px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-primary-foreground">
-                          Retired
-                        </span>
-                      )}
-                      <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
-                        G{set.grade}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-1 flex-col p-3">
-                      <p className="font-body text-[11px] text-muted-foreground">{set.theme} · {set.mpn}</p>
-                      <h3 className="mt-0.5 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">
-                        {set.name}
-                      </h3>
-                      <div className="mt-auto flex items-baseline justify-between pt-2">
-                        <span className="font-display text-base font-bold text-foreground">£{set.price.toFixed(2)}</span>
-                        <span className="font-body text-[11px] text-muted-foreground">
-                          {set.stock} in stock
-                        </span>
+                  ))}
+                </div>
+              ) : products && products.length > 0 ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {products.map((set) => (
+                    <Link
+                      key={set.product_id}
+                      to={`/sets/${set.mpn}`}
+                      className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
+                    >
+                      <div className="aspect-square bg-kuso-mist p-6">
+                        <div className="flex h-full items-center justify-center">
+                          <span className="font-display text-3xl font-bold text-muted-foreground/20">
+                            {set.mpn.split("-")[0]}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+
+                      <div className="absolute left-2 top-2 flex gap-1">
+                        {set.retired_flag && (
+                          <span className="bg-primary px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-primary-foreground">
+                            Retired
+                          </span>
+                        )}
+                        {set.best_grade && (
+                          <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
+                            G{set.best_grade}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-1 flex-col p-3">
+                        <p className="font-body text-[11px] text-muted-foreground">
+                          {set.theme_name ?? "Uncategorised"} · {set.mpn}
+                        </p>
+                        <h3 className="mt-0.5 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                          {set.name}
+                        </h3>
+                        <div className="mt-auto flex items-baseline justify-between pt-2">
+                          <span className="font-display text-base font-bold text-foreground">
+                            {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
+                          </span>
+                          <span className="font-body text-[11px] text-muted-foreground">
+                            {set.total_stock} in stock
+                          </span>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="font-display text-lg font-semibold text-foreground">No sets found</p>
+                  <p className="mt-1 font-body text-sm text-muted-foreground">
+                    Try adjusting your filters or search term.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
