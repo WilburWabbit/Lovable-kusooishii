@@ -105,18 +105,15 @@ Deno.serve(async (req) => {
 
     for (const line of stockLines) {
       const conditionGrade = validGrades.includes(line.condition_grade) ? line.condition_grade : "1";
+      const mpn = line.mpn;
+      const skuCode = `${mpn}-G${conditionGrade}`;
 
-      // Look up catalog_product by MPN
+      // Optionally link to catalog_product if MPN matches
       const { data: product } = await supabaseAdmin
         .from("catalog_product")
         .select("id, mpn")
-        .eq("mpn", line.mpn)
+        .eq("mpn", mpn)
         .single();
-
-      if (!product) {
-        skipped.push(`MPN ${line.mpn}: not found in catalog`);
-        continue;
-      }
 
       // Calculate apportioned overhead per unit for this line
       const lineTotal = Number(line.line_total);
@@ -126,25 +123,24 @@ Deno.serve(async (req) => {
       const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
       const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
 
-      // Find or create SKU for this product + condition grade
-      const skuCode = `${product.mpn}-G${conditionGrade}`;
+      // Find or create SKU by sku_code (unique constraint)
       let { data: sku } = await supabaseAdmin
         .from("sku")
         .select("id")
-        .eq("catalog_product_id", product.id)
-        .eq("condition_grade", conditionGrade)
+        .eq("sku_code", skuCode)
         .single();
 
       if (!sku) {
         const { data: newSku, error: skuErr } = await supabaseAdmin
           .from("sku")
           .insert({
-            catalog_product_id: product.id,
+            catalog_product_id: product?.id ?? null,
             condition_grade: conditionGrade,
             sku_code: skuCode,
+            name: line.description ?? mpn,
             price: landedCost,
             active_flag: true,
-            saleable_flag: true,
+            saleable_flag: !!product,
           })
           .select("id")
           .single();
@@ -158,11 +154,10 @@ Deno.serve(async (req) => {
       for (let i = 0; i < line.quantity; i++) {
         stockUnits.push({
           sku_id: sku!.id,
-          mpn: product.mpn,
+          mpn,
           condition_grade: conditionGrade,
           status: "received",
           landed_cost: landedCost,
-          carrying_value: landedCost,
           supplier_id: receipt.vendor_name ?? null,
         });
       }

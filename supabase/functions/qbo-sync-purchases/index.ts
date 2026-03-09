@@ -97,7 +97,8 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   return { mpn, conditionGrade };
 }
 
-/** Auto-process a pending receipt: create SKUs + stock_units, mark processed */
+/** Auto-process a pending receipt: create SKUs + stock_units, mark processed.
+ *  QBO is authoritative — SKUs are created standalone when no catalog match exists. */
 async function autoProcessReceipt(
   supabaseAdmin: any,
   receiptId: string,
@@ -109,6 +110,7 @@ async function autoProcessReceipt(
     line_total: number;
     quantity: number;
     unit_cost: number;
+    description?: string | null;
   }>
 ): Promise<{ processed: boolean; skipped: string[] }> {
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
@@ -118,7 +120,7 @@ async function autoProcessReceipt(
     return { processed: false, skipped: ["No mapped stock lines"] };
   }
 
-  // Check if all stock lines have MPNs (lines marked as stock but missing MPN = exception)
+  // Lines marked as stock but missing MPN/grade = exception
   const unmappedStockLines = lineRows.filter(l => l.is_stock_line && (!l.mpn || !l.condition_grade));
   if (unmappedStockLines.length > 0) {
     return { processed: false, skipped: [`${unmappedStockLines.length} stock line(s) missing MPN/grade`] };
@@ -127,47 +129,44 @@ async function autoProcessReceipt(
   const totalOverhead = overheadLines.reduce((sum, l) => sum + Number(l.line_total), 0);
   const totalStockCost = stockLines.reduce((sum, l) => sum + Number(l.line_total), 0);
 
-  const skipped: string[] = [];
   let unitsCreated = 0;
   const validGrades = ["1", "2", "3", "4", "5"];
 
   for (const line of stockLines) {
     const conditionGrade = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
+    const mpn = line.mpn!;
+    const skuCode = `${mpn}-G${conditionGrade}`;
 
+    // Optionally link to catalog_product if MPN matches
     const { data: product } = await supabaseAdmin
       .from("catalog_product")
       .select("id, mpn")
-      .eq("mpn", line.mpn)
+      .eq("mpn", mpn)
       .single();
-
-    if (!product) {
-      skipped.push(`MPN ${line.mpn}: not found in catalog`);
-      continue;
-    }
 
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
     const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
 
-    const skuCode = `${product.mpn}-G${conditionGrade}`;
+    // Find-or-create SKU by sku_code (unique constraint)
     let { data: sku } = await supabaseAdmin
       .from("sku")
       .select("id")
-      .eq("catalog_product_id", product.id)
-      .eq("condition_grade", conditionGrade)
+      .eq("sku_code", skuCode)
       .single();
 
     if (!sku) {
       const { data: newSku, error: skuErr } = await supabaseAdmin
         .from("sku")
         .insert({
-          catalog_product_id: product.id,
+          catalog_product_id: product?.id ?? null,
           condition_grade: conditionGrade,
           sku_code: skuCode,
+          name: line.description ?? mpn,
           price: landedCost,
           active_flag: true,
-          saleable_flag: true,
+          saleable_flag: !!product, // only saleable if catalog-linked
         })
         .select("id")
         .single();
@@ -179,7 +178,7 @@ async function autoProcessReceipt(
     for (let i = 0; i < line.quantity; i++) {
       stockUnits.push({
         sku_id: sku!.id,
-        mpn: product.mpn,
+        mpn,
         condition_grade: conditionGrade,
         status: "received",
         landed_cost: landedCost,
@@ -192,12 +191,7 @@ async function autoProcessReceipt(
     unitsCreated += stockUnits.length;
   }
 
-  // If any MPN was missing from catalog, leave pending
-  if (skipped.length > 0) {
-    return { processed: false, skipped };
-  }
-
-  // Mark as processed
+  // All lines processed — mark receipt done
   await supabaseAdmin
     .from("inbound_receipt")
     .update({ status: "processed", processed_at: new Date().toISOString() })

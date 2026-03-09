@@ -26,6 +26,7 @@ type StockRow = {
   created_at: string;
   sku: {
     sku_code: string;
+    name: string | null;
     catalog_product: { name: string } | null;
   } | null;
 };
