@@ -301,7 +301,6 @@ Deno.serve(async (req) => {
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
-      const currency = purchase.CurrencyRef?.value ?? "GBP";
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
