@@ -144,7 +144,7 @@ export function IntakePage() {
 
     try {
       const { data, error } = await supabase.functions.invoke("process-receipt", {
-        body: { receipt_id: selectedReceipt.id, condition_grade: conditionGrade },
+        body: { receipt_id: selectedReceipt.id },
       });
 
       if (error) throw error;
