@@ -68,11 +68,9 @@ export function InventoryPage() {
   const { data: units = [], isLoading } = useQuery({
     queryKey: ["stock-units"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("stock_unit")
-        .select("id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, catalog_product:catalog_product_id(name))")
-        .order("created_at", { ascending: false })
-        .limit(1000);
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "list-stock-units" },
+      });
       if (error) throw error;
       return (data ?? []) as unknown as StockRow[];
     },

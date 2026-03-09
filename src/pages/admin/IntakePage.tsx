@@ -67,11 +67,9 @@ export function IntakePage() {
     queryKey: ["receipt-lines", selectedReceipt?.id],
     queryFn: async () => {
       if (!selectedReceipt) return [];
-      const { data, error } = await supabase
-        .from("inbound_receipt_line")
-        .select("*")
-        .eq("inbound_receipt_id", selectedReceipt.id)
-        .order("created_at");
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "receipt-lines", receipt_id: selectedReceipt.id },
+      });
       if (error) throw error;
       return data as ReceiptLine[];
     },
