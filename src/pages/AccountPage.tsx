@@ -35,23 +35,6 @@ export default function AccountPage() {
   useEffect(() => {
     if (!user) return;
 
-    // Fetch wishlist items
-    const fetchWishlist = async () => {
-      const { data: wishlists } = await supabase
-        .from("wishlist")
-        .select("id")
-        .eq("user_id", user.id)
-        .limit(1);
-
-      if (wishlists && wishlists.length > 0) {
-        const { data: items } = await supabase
-          .from("wishlist_item")
-          .select("*, catalog_product:catalog_product_id(mpn, name, retired_flag)")
-          .eq("wishlist_id", wishlists[0].id);
-        setWishlistItems(items || []);
-      }
-    };
-
     // Fetch addresses
     const fetchAddresses = async () => {
       const { data } = await supabase
@@ -62,7 +45,6 @@ export default function AccountPage() {
       setAddresses(data || []);
     };
 
-    fetchWishlist();
     fetchAddresses();
   }, [user]);
 
