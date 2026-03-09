@@ -154,6 +154,27 @@ Deno.serve(async (req) => {
 
       const lineRows = lines.map((line: any) => {
         const detail = line.ItemBasedExpenseLineDetail ?? line.AccountBasedExpenseLineDetail ?? {};
+        const isStockLine = line.DetailType === "ItemBasedExpenseLineDetail";
+
+        // Parse MPN and condition_grade from ItemRef.name using '.' delimiter
+        let mpn: string | null = null;
+        let conditionGrade: string | null = null;
+        if (isStockLine && detail.ItemRef?.name) {
+          const rawName = String(detail.ItemRef.name).trim();
+          const dotIndex = rawName.indexOf(".");
+          if (dotIndex > 0) {
+            mpn = rawName.substring(0, dotIndex);
+            conditionGrade = rawName.substring(dotIndex + 1) || "1";
+          } else {
+            mpn = rawName;
+            conditionGrade = "1";
+          }
+          // Validate grade is 1-5, default to 1
+          if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) {
+            conditionGrade = "1";
+          }
+        }
+
         return {
           inbound_receipt_id: receipt.id,
           description: line.Description ?? detail.ItemRef?.name ?? "No description",
@@ -161,7 +182,9 @@ Deno.serve(async (req) => {
           unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
           line_total: line.Amount ?? 0,
           qbo_item_id: detail.ItemRef?.value ?? null,
-          is_stock_line: line.DetailType === "ItemBasedExpenseLineDetail",
+          is_stock_line: isStockLine,
+          mpn,
+          condition_grade: conditionGrade,
         };
       });
 

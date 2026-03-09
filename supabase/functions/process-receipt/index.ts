@@ -47,17 +47,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { receipt_id, condition_grade = "3" } = await req.json();
+    const { receipt_id } = await req.json();
     if (!receipt_id) {
       return new Response(JSON.stringify({ error: "receipt_id is required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const validGrades = ["1", "2", "3", "4", "5"];
-    if (!validGrades.includes(condition_grade)) {
-      return new Response(JSON.stringify({ error: "Invalid condition_grade" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -92,8 +84,8 @@ Deno.serve(async (req) => {
 
     if (linesErr) throw linesErr;
 
-    // Split into stock lines (with MPN) and account/overhead lines
-    const stockLines = (allLines ?? []).filter((l: any) => l.is_stock_line && l.mpn);
+    // Split into stock lines (with MPN and grade) and overhead lines
+    const stockLines = (allLines ?? []).filter((l: any) => l.is_stock_line && l.mpn && l.condition_grade);
     const overheadLines = (allLines ?? []).filter((l: any) => !l.is_stock_line);
 
     if (stockLines.length === 0) {
@@ -109,8 +101,11 @@ Deno.serve(async (req) => {
 
     let unitsCreated = 0;
     const skipped: string[] = [];
+    const validGrades = ["1", "2", "3", "4", "5"];
 
     for (const line of stockLines) {
+      const conditionGrade = validGrades.includes(line.condition_grade) ? line.condition_grade : "1";
+
       // Look up catalog_product by MPN
       const { data: product } = await supabaseAdmin
         .from("catalog_product")
@@ -129,17 +124,15 @@ Deno.serve(async (req) => {
         ? totalOverhead * (lineTotal / totalStockCost)
         : 0;
       const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
-      const landedCostPerUnit = Number(line.unit_cost) + overheadPerUnit;
-      // Round to 2 decimal places
-      const landedCost = Math.round(landedCostPerUnit * 100) / 100;
+      const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
 
       // Find or create SKU for this product + condition grade
-      const skuCode = `${product.mpn}-G${condition_grade}`;
+      const skuCode = `${product.mpn}-G${conditionGrade}`;
       let { data: sku } = await supabaseAdmin
         .from("sku")
         .select("id")
         .eq("catalog_product_id", product.id)
-        .eq("condition_grade", condition_grade)
+        .eq("condition_grade", conditionGrade)
         .single();
 
       if (!sku) {
@@ -147,7 +140,7 @@ Deno.serve(async (req) => {
           .from("sku")
           .insert({
             catalog_product_id: product.id,
-            condition_grade,
+            condition_grade: conditionGrade,
             sku_code: skuCode,
             price: landedCost,
             active_flag: true,
@@ -166,7 +159,7 @@ Deno.serve(async (req) => {
         stockUnits.push({
           sku_id: sku!.id,
           mpn: product.mpn,
-          condition_grade,
+          condition_grade: conditionGrade,
           status: "received",
           landed_cost: landedCost,
           carrying_value: landedCost,

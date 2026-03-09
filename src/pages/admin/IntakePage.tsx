@@ -33,6 +33,7 @@ interface ReceiptLine {
   qbo_item_id: string | null;
   mpn: string | null;
   is_stock_line: boolean;
+  condition_grade: string | null;
 }
 
 const statusColor: Record<string, string> = {
