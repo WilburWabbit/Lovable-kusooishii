@@ -262,7 +262,9 @@ export function IntakePage() {
                   {/* Stock lines first */}
                   {apportionment.stockLines.map((line) => {
                     const isValid = mpnValid[line.id];
-                    const hasMpn = !!(lineEdits[line.id] ?? line.mpn);
+                    const currentMpn = lineEdits[line.id]?.mpn ?? line.mpn;
+                    const currentGrade = lineEdits[line.id]?.grade ?? line.condition_grade ?? "1";
+                    const hasMpn = !!currentMpn;
                     const landed = getLandedCost(line);
                     return (
                       <TableRow key={line.id}>
@@ -291,6 +293,22 @@ export function IntakePage() {
                             {isValid === false && <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" />}
                             {!hasMpn && <AlertTriangle className="h-3 w-3 text-muted-foreground/50" />}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={currentGrade}
+                            onValueChange={(v) => handleGradeChange(line.id, v)}
+                            disabled={selectedReceipt?.status !== "pending"}
+                          >
+                            <SelectTrigger className="h-7 w-14 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["1", "2", "3", "4", "5"].map((g) => (
+                                <SelectItem key={g} value={g} className="text-xs">{g}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell>
                           {selectedReceipt?.status === "pending" && (
