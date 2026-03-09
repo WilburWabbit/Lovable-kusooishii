@@ -15,13 +15,13 @@ import AccountPage from "./pages/AccountPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
   ListingsPage,
-  OrdersPage,
   ReconciliationPage,
   DemandPage,
   AnalyticsPage,
   AuditPage,
   SettingsPage,
 } from "./pages/admin/AdminPages";
+import { OrdersPage } from "./pages/admin/OrdersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";

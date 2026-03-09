@@ -26,9 +26,7 @@ export function ListingsPage() {
   return <AdminPlaceholder title="Listings" description="Multi-channel listing orchestration, coverage tracking, and publish queue." />;
 }
 
-export function OrdersPage() {
-  return <AdminPlaceholder title="Orders" description="Cross-channel order management, fulfilment tracking, and refund processing." />;
-}
+// OrdersPage moved to src/pages/admin/OrdersPage.tsx
 
 export function ReconciliationPage() {
   return <AdminPlaceholder title="Reconciliation" description="Settlement matching, payout reconciliation, and exception management." />;
