@@ -83,6 +83,7 @@ export type Database = {
           bricklink_item_no: string | null
           brickowl_boid: string | null
           created_at: string
+          description: string | null
           id: string
           mpn: string
           name: string
@@ -101,6 +102,7 @@ export type Database = {
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
           created_at?: string
+          description?: string | null
           id?: string
           mpn: string
           name: string
@@ -119,6 +121,7 @@ export type Database = {
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
           created_at?: string
+          description?: string | null
           id?: string
           mpn?: string
           name?: string
@@ -502,6 +505,7 @@ export type Database = {
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at: string
           id: string
+          price: number | null
           qbo_item_id: string | null
           saleable_flag: boolean
           sku_code: string
@@ -513,6 +517,7 @@ export type Database = {
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          price?: number | null
           qbo_item_id?: string | null
           saleable_flag?: boolean
           sku_code: string
@@ -524,6 +529,7 @@ export type Database = {
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          price?: number | null
           qbo_item_id?: string | null
           saleable_flag?: boolean
           sku_code?: string
@@ -756,12 +762,43 @@ export type Database = {
         }
         Returns: undefined
       }
+      browse_catalog: {
+        Args: {
+          filter_grade?: string
+          filter_retired?: boolean
+          filter_theme_id?: string
+          search_term?: string
+        }
+        Returns: {
+          best_grade: string
+          min_price: number
+          mpn: string
+          name: string
+          piece_count: number
+          product_id: string
+          release_year: number
+          retired_flag: boolean
+          theme_id: string
+          theme_name: string
+          total_stock: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      product_detail_offers: {
+        Args: { p_mpn: string }
+        Returns: {
+          condition_grade: string
+          price: number
+          sku_code: string
+          sku_id: string
+          stock_count: number
+        }[]
       }
     }
     Enums: {
