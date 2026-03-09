@@ -47,6 +47,8 @@ interface WishlistItemRow {
     retired_flag: boolean;
     img_url: string | null;
     subtheme_name: string | null;
+    release_year: number | null;
+    theme_id: string | null;
   } | null;
 }
 
