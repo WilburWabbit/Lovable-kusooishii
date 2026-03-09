@@ -193,6 +193,92 @@ export type Database = {
         }
         Relationships: []
       }
+      inbound_receipt: {
+        Row: {
+          created_at: string
+          currency: string
+          id: string
+          processed_at: string | null
+          qbo_purchase_id: string
+          raw_payload: Json | null
+          status: Database["public"]["Enums"]["receipt_status"]
+          total_amount: number
+          txn_date: string | null
+          vendor_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          id?: string
+          processed_at?: string | null
+          qbo_purchase_id: string
+          raw_payload?: Json | null
+          status?: Database["public"]["Enums"]["receipt_status"]
+          total_amount?: number
+          txn_date?: string | null
+          vendor_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          id?: string
+          processed_at?: string | null
+          qbo_purchase_id?: string
+          raw_payload?: Json | null
+          status?: Database["public"]["Enums"]["receipt_status"]
+          total_amount?: number
+          txn_date?: string | null
+          vendor_name?: string | null
+        }
+        Relationships: []
+      }
+      inbound_receipt_line: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          inbound_receipt_id: string
+          is_stock_line: boolean
+          line_total: number
+          mpn: string | null
+          qbo_item_id: string | null
+          quantity: number
+          unit_cost: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          inbound_receipt_id: string
+          is_stock_line?: boolean
+          line_total?: number
+          mpn?: string | null
+          qbo_item_id?: string | null
+          quantity?: number
+          unit_cost?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          inbound_receipt_id?: string
+          is_stock_line?: boolean
+          line_total?: number
+          mpn?: string | null
+          qbo_item_id?: string | null
+          quantity?: number
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_receipt_line_inbound_receipt_id_fkey"
+            columns: ["inbound_receipt_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_receipt"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_asset: {
         Row: {
           alt_text: string | null
@@ -342,6 +428,36 @@ export type Database = {
           phone?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      qbo_connection: {
+        Row: {
+          access_token: string
+          created_at: string
+          id: string
+          realm_id: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          id?: string
+          realm_id: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          id?: string
+          realm_id?: string
+          refresh_token?: string
+          token_expires_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -865,6 +981,7 @@ export type Database = {
         | "partially_refunded"
         | "refunded"
         | "exception"
+      receipt_status: "pending" | "processed" | "error"
       stock_unit_status:
         | "pending_receipt"
         | "received"
@@ -1039,6 +1156,7 @@ export const Constants = {
         "refunded",
         "exception",
       ],
+      receipt_status: ["pending", "processed", "error"],
       stock_unit_status: [
         "pending_receipt",
         "received",
