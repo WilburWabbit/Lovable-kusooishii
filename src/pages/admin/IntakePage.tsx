@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Eye, Package, ChevronRight } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Package, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Receipt {
@@ -41,8 +42,12 @@ const statusColor: Record<string, string> = {
 
 export function IntakePage() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [lineEdits, setLineEdits] = useState<Record<string, string>>({});
+  const [mpnValid, setMpnValid] = useState<Record<string, boolean | null>>({});
+  const [conditionGrade, setConditionGrade] = useState("3");
+  const [processing, setProcessing] = useState(false);
 
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
@@ -73,6 +78,7 @@ export function IntakePage() {
 
   const handleMpnChange = (lineId: string, mpn: string) => {
     setLineEdits((prev) => ({ ...prev, [lineId]: mpn }));
+    setMpnValid((prev) => ({ ...prev, [lineId]: null }));
   };
 
   const saveMpnMapping = async (lineId: string) => {
@@ -86,10 +92,53 @@ export function IntakePage() {
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "MPN mapped", description: `Line mapped to ${mpn}` });
+      return;
+    }
+
+    // Validate MPN exists in catalog
+    const { data: product } = await supabase
+      .from("catalog_product")
+      .select("id")
+      .eq("mpn", mpn)
+      .single();
+
+    setMpnValid((prev) => ({ ...prev, [lineId]: !!product }));
+    toast({ title: "MPN saved", description: product ? `Matched to catalog` : `Warning: MPN not found in catalog` });
+    queryClient.invalidateQueries({ queryKey: ["receipt-lines", selectedReceipt?.id] });
+  };
+
+  const handleProcess = async () => {
+    if (!selectedReceipt) return;
+    setProcessing(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("process-receipt", {
+        body: { receipt_id: selectedReceipt.id, condition_grade: conditionGrade },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const skippedMsg = data.skipped?.length
+        ? ` (${data.skipped.length} lines skipped)`
+        : "";
+
+      toast({
+        title: "Receipt processed",
+        description: `${data.units_created} stock units created${skippedMsg}`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["inbound-receipts"] });
+      setSelectedReceipt(null);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setProcessing(false);
     }
   };
+
+  const mappedCount = lines?.filter((l) => l.mpn).length ?? 0;
+  const canProcess = selectedReceipt?.status === "pending" && mappedCount > 0 && !processing;
 
   return (
     <BackOfficeLayout title="Intake">
@@ -172,29 +221,76 @@ export function IntakePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lines?.map((line) => (
-                  <TableRow key={line.id}>
-                    <TableCell className="font-body text-xs max-w-[200px] truncate">{line.description ?? "—"}</TableCell>
-                    <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
-                    <TableCell className="font-body text-xs text-right">{Number(line.unit_cost).toFixed(2)}</TableCell>
-                    <TableCell className="font-body text-xs text-right">{Number(line.line_total).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Input
-                        className="h-7 text-xs w-24"
-                        placeholder="e.g. 75192"
-                        defaultValue={line.mpn ?? ""}
-                        onChange={(e) => handleMpnChange(line.id, e.target.value)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>
-                        Save
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {lines?.map((line) => {
+                  const isValid = mpnValid[line.id];
+                  const hasMpn = !!(lineEdits[line.id] ?? line.mpn);
+                  return (
+                    <TableRow key={line.id}>
+                      <TableCell className="font-body text-xs max-w-[200px] truncate">{line.description ?? "—"}</TableCell>
+                      <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
+                      <TableCell className="font-body text-xs text-right">{Number(line.unit_cost).toFixed(2)}</TableCell>
+                      <TableCell className="font-body text-xs text-right">{Number(line.line_total).toFixed(2)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            className="h-7 text-xs w-24"
+                            placeholder="e.g. 75192"
+                            defaultValue={line.mpn ?? ""}
+                            onChange={(e) => handleMpnChange(line.id, e.target.value)}
+                            disabled={selectedReceipt?.status !== "pending"}
+                          />
+                          {isValid === true && <Check className="h-3.5 w-3.5 text-green-600" />}
+                          {isValid === false && <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" />}
+                          {!hasMpn && <AlertTriangle className="h-3 w-3 text-muted-foreground/50" />}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {selectedReceipt?.status === "pending" && (
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>
+                            Save
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
+          )}
+
+          {selectedReceipt?.status === "pending" && (
+            <DialogFooter className="flex items-center gap-3 sm:justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-body text-xs text-muted-foreground">Grade:</span>
+                <Select value={conditionGrade} onValueChange={setConditionGrade}>
+                  <SelectTrigger className="h-7 w-16 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["1", "2", "3", "4", "5"].map((g) => (
+                      <SelectItem key={g} value={g} className="text-xs">
+                        {g}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="font-body text-[10px] text-muted-foreground">
+                  {mappedCount}/{lines?.length ?? 0} lines mapped
+                </span>
+              </div>
+              <Button size="sm" onClick={handleProcess} disabled={!canProcess} className="text-xs">
+                {processing && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                Process Receipt
+              </Button>
+            </DialogFooter>
+          )}
+
+          {selectedReceipt?.status === "processed" && (
+            <div className="text-center py-2">
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 text-xs">
+                ✓ Processed
+              </Badge>
+            </div>
           )}
         </DialogContent>
       </Dialog>
