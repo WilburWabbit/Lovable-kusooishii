@@ -190,7 +190,7 @@ export function InventoryPage() {
                   {filtered.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell className="font-mono text-xs">{u.sku?.sku_code ?? "—"}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{u.sku?.catalog_product?.name ?? "—"}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{u.sku?.catalog_product?.name ?? u.sku?.name ?? "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{u.mpn}</TableCell>
                       <TableCell>{GRADE_LABELS[u.condition_grade] ?? u.condition_grade}</TableCell>
                       <TableCell>
