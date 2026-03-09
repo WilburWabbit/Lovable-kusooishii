@@ -81,22 +81,26 @@ Deno.serve(async (req) => {
       throw new Error(`BrickEconomy minifigs endpoint returned ${minifigsRes.status}: ${txt}`);
     }
 
-    const setsData = await setsRes.json();
-    const minifigsData = await minifigsRes.json();
+    const setsRaw = await setsRes.json();
+    const minifigsRaw = await minifigsRes.json();
+
+    // Unwrap the data envelope
+    const setsData = setsRaw.data ?? setsRaw;
+    const minifigsData = minifigsRaw.data ?? minifigsRaw;
 
     // --- Process sets ---
-    const setItems = (setsData.items ?? []).map((item: Record<string, unknown>) => ({
+    const setItems = (setsData.sets ?? []).map((item: Record<string, unknown>) => ({
       item_type: "set",
       item_number: String(item.set_number ?? ""),
-      name: item.set_name ?? item.name ?? null,
+      name: item.name ?? null,
       theme: item.theme ?? null,
       subtheme: item.subtheme ?? null,
       year: item.year ?? null,
-      pieces_count: item.pieces ?? null,
-      minifigs_count: item.minifigs ?? null,
+      pieces_count: item.pieces_count ?? null,
+      minifigs_count: item.minifigs_count ?? null,
       condition: item.condition ?? null,
-      collection_name: item.collection ?? null,
-      acquired_date: item.acquired_date ?? null,
+      collection_name: item.collection_name ?? null,
+      acquired_date: item.aquired_date ?? null, // API typo
       paid_price: item.paid_price ?? null,
       current_value: item.current_value ?? null,
       growth: item.growth ?? null,
@@ -108,18 +112,18 @@ Deno.serve(async (req) => {
     }));
 
     // --- Process minifigs ---
-    const minifigItems = (minifigsData.items ?? []).map((item: Record<string, unknown>) => ({
+    const minifigItems = (minifigsData.minifigs ?? []).map((item: Record<string, unknown>) => ({
       item_type: "minifig",
-      item_number: String(item.minifig_number ?? item.set_number ?? ""),
-      name: item.minifig_name ?? item.name ?? null,
+      item_number: String(item.minifig_number ?? ""),
+      name: item.name ?? null,
       theme: item.theme ?? null,
       subtheme: item.subtheme ?? null,
       year: item.year ?? null,
-      pieces_count: item.pieces ?? null,
+      pieces_count: item.pieces_count ?? null,
       minifigs_count: null,
       condition: item.condition ?? null,
-      collection_name: item.collection ?? null,
-      acquired_date: item.acquired_date ?? null,
+      collection_name: item.collection_name ?? null,
+      acquired_date: item.aquired_date ?? null, // API typo
       paid_price: item.paid_price ?? null,
       current_value: item.current_value ?? null,
       growth: item.growth ?? null,
