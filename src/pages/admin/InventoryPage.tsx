@@ -84,11 +84,12 @@ export function InventoryPage() {
     if (gradeFilter !== "all") list = list.filter((u) => u.condition_grade === gradeFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
+      const productName = (u: StockRow) => u.sku?.catalog_product?.name ?? u.sku?.name ?? "";
       list = list.filter(
         (u) =>
           u.mpn.toLowerCase().includes(q) ||
           u.sku?.sku_code.toLowerCase().includes(q) ||
-          u.sku?.catalog_product?.name.toLowerCase().includes(q),
+          productName(u).toLowerCase().includes(q),
       );
     }
     return list;
