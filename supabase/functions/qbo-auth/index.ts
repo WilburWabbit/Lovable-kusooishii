@@ -122,6 +122,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "disconnect") {
+      if (!realm_id) throw new Error("Missing realm_id");
+
+      const { error: delErr } = await supabaseAdmin
+        .from("qbo_connection")
+        .delete()
+        .eq("realm_id", realm_id);
+
+      if (delErr) throw new Error(`Disconnect failed: ${delErr.message}`);
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "refresh") {
       if (!realm_id) throw new Error("Missing realm_id");
 
