@@ -1,13 +1,27 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Link2, RefreshCw, Unplug } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+/** Invoke an edge function with the current session token explicitly */
+async function invokeWithAuth(fnName: string, body?: Record<string, unknown>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated – please log in again.");
+  const { data, error } = await supabase.functions.invoke(fnName, {
+    body,
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (error) throw error;
+  return data;
+}
+
 export function QboSettingsPanel() {
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
   const [status, setStatus] = useState<{ connected: boolean; realm_id?: string; last_updated?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -16,6 +30,7 @@ export function QboSettingsPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
+      // Status check doesn't need auth, safe to use default invoke
       const { data, error } = await supabase.functions.invoke("qbo-auth", {
         body: { action: "status" },
       });
@@ -34,10 +49,7 @@ export function QboSettingsPanel() {
 
   const connectQbo = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke("qbo-auth", {
-        body: { action: "authorize_url" },
-      });
-      if (error) throw error;
+      const data = await invokeWithAuth("qbo-auth", { action: "authorize_url" });
       if (data?.error) throw new Error(data.error);
       window.location.href = data.url;
     } catch (err) {
@@ -53,10 +65,7 @@ export function QboSettingsPanel() {
     if (!status?.realm_id) return;
     setDisconnecting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("qbo-auth", {
-        body: { action: "disconnect", realm_id: status.realm_id },
-      });
-      if (error) throw error;
+      const data = await invokeWithAuth("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
       if (data?.error) throw new Error(data.error);
       toast({ title: "Disconnected", description: "QuickBooks connection removed." });
       setStatus({ connected: false });
@@ -74,8 +83,7 @@ export function QboSettingsPanel() {
   const syncPurchases = async () => {
     setSyncing(true);
     try {
-      const { data, error } = await supabase.functions.invoke("qbo-sync-purchases");
-      if (error) throw error;
+      const data = await invokeWithAuth("qbo-sync-purchases");
       if (data?.error) throw new Error(data.error);
       toast({
         title: "Sync complete",
@@ -102,7 +110,7 @@ export function QboSettingsPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {loading ? (
+        {loading || authLoading ? (
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         ) : status?.connected ? (
           <div className="space-y-3">
@@ -120,18 +128,18 @@ export function QboSettingsPanel() {
               </p>
             )}
             <div className="flex gap-2">
-              <Button size="sm" onClick={syncPurchases} disabled={syncing}>
+              <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Purchases
               </Button>
-              <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting}>
+              <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
               </Button>
             </div>
           </div>
         ) : (
-          <Button size="sm" onClick={connectQbo}>
+          <Button size="sm" onClick={connectQbo} disabled={!user}>
             <Link2 className="mr-2 h-3.5 w-3.5" />
             Connect to QuickBooks
           </Button>
