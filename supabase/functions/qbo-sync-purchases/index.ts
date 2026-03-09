@@ -71,19 +71,14 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const authClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) throw new Error("Unauthorized");
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError || !user) throw new Error("Unauthorized");
 
-    const userId = claimsData.claims.sub as string;
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .eq("user_id", userId);
+      .eq("user_id", user.id);
     const hasAccess = (roles ?? []).some(
       (r: { role: string }) => r.role === "admin" || r.role === "staff"
     );
