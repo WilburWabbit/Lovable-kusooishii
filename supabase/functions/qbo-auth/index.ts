@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     if (!isAdmin) throw new Error("Forbidden: admin only");
 
     if (action === "authorize_url") {
-      const actualRedirect = redirect_uri || `${req.headers.get("origin")}/admin/qbo-callback`;
+      const actualRedirect = redirect_uri || "https://workspace-charm-market.lovable.app/admin/qbo-callback";
       const state = crypto.randomUUID();
       const url = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&redirect_uri=${encodeURIComponent(actualRedirect)}&response_type=code&scope=com.intuit.quickbooks.accounting&state=${state}`;
       return new Response(JSON.stringify({ url }), {
