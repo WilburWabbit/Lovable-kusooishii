@@ -1,0 +1,279 @@
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { BackOfficeLayout } from "@/components/BackOfficeLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  Collapsible, CollapsibleContent, CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight } from "lucide-react";
+import { format } from "date-fns";
+
+type OrderLineRow = {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  sku: {
+    sku_code: string;
+    name: string | null;
+    catalog_product: { name: string } | null;
+  } | null;
+};
+
+type OrderRow = {
+  id: string;
+  order_number: string;
+  origin_channel: string;
+  origin_reference: string | null;
+  status: string;
+  merchandise_subtotal: number;
+  gross_total: number;
+  currency: string;
+  guest_name: string | null;
+  guest_email: string | null;
+  created_at: string;
+  notes: string | null;
+  sales_order_line: OrderLineRow[];
+};
+
+const ORIGIN_COLORS: Record<string, string> = {
+  web: "bg-blue-100 text-blue-800",
+  qbo: "bg-emerald-100 text-emerald-800",
+  qbo_refund: "bg-red-100 text-red-800",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  pending_payment: "bg-yellow-100 text-yellow-800",
+  authorised: "bg-blue-100 text-blue-800",
+  paid: "bg-emerald-100 text-emerald-800",
+  complete: "bg-emerald-100 text-emerald-800",
+  cancelled: "bg-muted text-muted-foreground",
+  refunded: "bg-red-100 text-red-800",
+  exception: "bg-destructive/10 text-destructive",
+};
+
+const STATUS_OPTIONS = [
+  "pending_payment", "authorised", "paid", "picking", "packed",
+  "awaiting_dispatch", "shipped", "complete", "cancelled",
+  "partially_refunded", "refunded", "exception",
+];
+
+function fmt(v: number | null | undefined) {
+  if (v == null) return "—";
+  return `£${v.toFixed(2)}`;
+}
+
+export function OrdersPage() {
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const { data: orders = [], isLoading } = useQuery({
+    queryKey: ["admin-orders"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "list-orders" },
+      });
+      if (error) throw error;
+      return (data ?? []) as unknown as OrderRow[];
+    },
+    enabled: !!user,
+  });
+
+  const filtered = useMemo(() => {
+    let list = orders;
+    if (channelFilter !== "all") list = list.filter((o) => o.origin_channel === channelFilter);
+    if (statusFilter !== "all") list = list.filter((o) => o.status === statusFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (o) =>
+          o.order_number.toLowerCase().includes(q) ||
+          (o.origin_reference ?? "").toLowerCase().includes(q) ||
+          (o.guest_name ?? "").toLowerCase().includes(q) ||
+          (o.guest_email ?? "").toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [orders, channelFilter, statusFilter, search]);
+
+  const totalRevenue = useMemo(
+    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + o.gross_total, 0),
+    [orders],
+  );
+  const salesCount = orders.filter((o) => o.origin_channel !== "qbo_refund").length;
+  const refundCount = orders.filter((o) => o.origin_channel === "qbo_refund").length;
+
+  return (
+    <BackOfficeLayout title="Orders">
+      <div className="space-y-6 animate-fade-in">
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Total Orders</CardTitle>
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold font-display">{orders.length}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Total Revenue</CardTitle>
+              <PoundSterling className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold font-display">{fmt(totalRevenue)}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Sales</CardTitle>
+              <ArrowUpRight className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold font-display">{salesCount}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Refunds</CardTitle>
+              <ArrowDownLeft className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold font-display">{refundCount}</p></CardContent>
+          </Card>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Input
+            placeholder="Search order #, reference, customer…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="sm:max-w-xs"
+          />
+          <Select value={channelFilter} onValueChange={setChannelFilter}>
+            <SelectTrigger className="sm:w-44"><SelectValue placeholder="Channel" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All channels</SelectItem>
+              <SelectItem value="web">Web</SelectItem>
+              <SelectItem value="qbo">QBO Sale</SelectItem>
+              <SelectItem value="qbo_refund">QBO Refund</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="sm:w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Table */}
+        <Card>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No orders found.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8" />
+                    <TableHead>Order #</TableHead>
+                    <TableHead>Origin</TableHead>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-center">Items</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((o) => (
+                    <Collapsible key={o.id} open={expandedId === o.id} onOpenChange={(open) => setExpandedId(open ? o.id : null)} asChild>
+                      <>
+                        <CollapsibleTrigger asChild>
+                          <TableRow className="cursor-pointer">
+                            <TableCell className="w-8 px-2">
+                              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs font-medium">{o.order_number}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>
+                                {o.origin_channel.replace(/_/g, " ")}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{o.origin_reference ?? "—"}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={STATUS_COLORS[o.status] ?? ""}>
+                                {o.status.replace(/_/g, " ")}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center">{o.sales_order_line.length}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{fmt(o.merchandise_subtotal)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{fmt(o.gross_total)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</TableCell>
+                          </TableRow>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent asChild>
+                          <tr>
+                            <td colSpan={9} className="bg-muted/30 p-0">
+                              <div className="px-8 py-3">
+                                {o.guest_name || o.guest_email ? (
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Customer: {o.guest_name}{o.guest_email ? ` (${o.guest_email})` : ""}
+                                  </p>
+                                ) : null}
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="text-xs">SKU</TableHead>
+                                      <TableHead className="text-xs">Product</TableHead>
+                                      <TableHead className="text-xs text-center">Qty</TableHead>
+                                      <TableHead className="text-xs text-right">Unit Price</TableHead>
+                                      <TableHead className="text-xs text-right">Line Total</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {o.sales_order_line.map((l) => (
+                                      <TableRow key={l.id}>
+                                        <TableCell className="font-mono text-xs">{l.sku?.sku_code ?? "—"}</TableCell>
+                                        <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.catalog_product?.name ?? l.sku?.name ?? "—"}</TableCell>
+                                        <TableCell className="text-xs text-center">{l.quantity}</TableCell>
+                                        <TableCell className="text-xs text-right font-mono">{fmt(l.unit_price)}</TableCell>
+                                        <TableCell className="text-xs text-right font-mono">{fmt(l.line_total)}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </td>
+                          </tr>
+                        </CollapsibleContent>
+                      </>
+                    </Collapsible>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </BackOfficeLayout>
+  );
+}
+
+export default OrdersPage;
