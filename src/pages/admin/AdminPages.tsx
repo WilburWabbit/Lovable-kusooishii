@@ -20,9 +20,7 @@ function AdminPlaceholder({ title, description }: AdminPlaceholderProps) {
 
 // IntakePage moved to src/pages/admin/IntakePage.tsx
 
-export function InventoryPage() {
-  return <AdminPlaceholder title="Inventory" description="Unit-level stock tracking, grading, valuation adjustments, and disposition management." />;
-}
+// InventoryPage moved to src/pages/admin/InventoryPage.tsx
 
 export function ListingsPage() {
   return <AdminPlaceholder title="Listings" description="Multi-channel listing orchestration, coverage tracking, and publish queue." />;
