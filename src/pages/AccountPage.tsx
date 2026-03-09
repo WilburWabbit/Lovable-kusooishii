@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { User, Heart, MapPin, Package, LogOut } from "lucide-react";
+import WishlistTab from "@/components/WishlistTab";
 
 export default function AccountPage() {
   const { user, profile, loading, signOut } = useAuth();
@@ -34,23 +35,6 @@ export default function AccountPage() {
   useEffect(() => {
     if (!user) return;
 
-    // Fetch wishlist items
-    const fetchWishlist = async () => {
-      const { data: wishlists } = await supabase
-        .from("wishlist")
-        .select("id")
-        .eq("user_id", user.id)
-        .limit(1);
-
-      if (wishlists && wishlists.length > 0) {
-        const { data: items } = await supabase
-          .from("wishlist_item")
-          .select("*, catalog_product:catalog_product_id(mpn, name, retired_flag)")
-          .eq("wishlist_id", wishlists[0].id);
-        setWishlistItems(items || []);
-      }
-    };
-
     // Fetch addresses
     const fetchAddresses = async () => {
       const { data } = await supabase
@@ -61,7 +45,6 @@ export default function AccountPage() {
       setAddresses(data || []);
     };
 
-    fetchWishlist();
     fetchAddresses();
   }, [user]);
 
@@ -167,40 +150,7 @@ export default function AccountPage() {
 
             {/* Wishlist Tab */}
             <TabsContent value="wishlist">
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="font-display text-sm font-semibold">My Wishlist</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {wishlistItems.length === 0 ? (
-                    <p className="font-body text-sm text-muted-foreground">
-                      Your wishlist is empty. Browse sets and add ones you're interested in.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {wishlistItems.map((item: any) => (
-                        <div key={item.id} className="flex items-center justify-between border-b border-border pb-3">
-                          <div>
-                            <p className="font-display text-sm font-semibold text-foreground">
-                              {item.catalog_product?.name}
-                            </p>
-                            <p className="font-body text-xs text-muted-foreground">
-                              {item.catalog_product?.mpn}
-                              {item.preferred_grade && ` · Grade ${item.preferred_grade}`}
-                              {item.max_price && ` · Max £${item.max_price}`}
-                            </p>
-                          </div>
-                          {item.notify_on_stock && (
-                            <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-primary">
-                              Alert on
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <WishlistTab userId={user.id} />
             </TabsContent>
 
             {/* Addresses Tab */}

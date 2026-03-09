@@ -51,7 +51,6 @@ Deno.serve(async (req) => {
 
     const csvText = await fileData.text();
     const lines = csvText.split("\n").filter((l) => l.trim());
-    // Skip header
     const dataLines = lines.slice(1);
 
     // Extract unique theme names
@@ -67,7 +66,6 @@ Deno.serve(async (req) => {
       slug: slugify(name),
     }));
 
-    // Insert themes in batches, on conflict do nothing
     const THEME_BATCH = 200;
     for (let i = 0; i < themeRows.length; i += THEME_BATCH) {
       const batch = themeRows.slice(i, i + THEME_BATCH);
@@ -85,39 +83,37 @@ Deno.serve(async (req) => {
       themeMap.set(t.name, t.id);
     }
 
-    // Parse products
+    // Parse products — now with img_url and subtheme_name
     const products = dataLines.map((line) => {
       const cols = parseCSVLine(line);
       return {
         mpn: cols[0],
         name: cols[1],
         release_year: cols[2] ? parseInt(cols[2], 10) || null : null,
+        img_url: cols[3] || null,
         theme_id: cols[4] ? themeMap.get(cols[4]) || null : null,
+        subtheme_name: cols[5] || null,
         retired_flag: false,
         status: "active",
         product_type: "set",
       };
     }).filter((p) => p.mpn && p.name);
 
-    // Clear existing catalog_product data
-    const { error: delError } = await supabase
-      .from("catalog_product")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000"); // delete all
-    if (delError) console.error("Delete error:", delError.message);
-
-    // Insert products in batches
+    // Upsert products by mpn to preserve manually added products
     const BATCH = 500;
-    let inserted = 0;
+    let upserted = 0;
     let errors = 0;
     for (let i = 0; i < products.length; i += BATCH) {
       const batch = products.slice(i, i + BATCH);
-      const { error } = await supabase.from("catalog_product").insert(batch);
+      const { error } = await supabase.from("catalog_product").upsert(batch, {
+        onConflict: "mpn",
+        ignoreDuplicates: false,
+      });
       if (error) {
         console.error(`Batch ${i} error:`, error.message);
         errors++;
       } else {
-        inserted += batch.length;
+        upserted += batch.length;
       }
     }
 
@@ -125,7 +121,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         themes: themeRows.length,
         products_parsed: products.length,
-        products_inserted: inserted,
+        products_upserted: upserted,
         batch_errors: errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
