@@ -292,22 +292,39 @@ export default function WishlistTab({ userId }: WishlistTabProps) {
           )}
 
           {/* Results table */}
-          {hasActiveFilters && searchResults.length > 0 && (
+          {hasActiveFilters && sortedResults.length > 0 && (
             <div className="max-h-96 overflow-auto border border-border">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-muted">
                   <tr>
-                    <th className="px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground" />
-                    <th className="px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Set #</th>
-                    <th className="px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Name</th>
-                    <th className="hidden px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:table-cell">Theme</th>
-                    <th className="hidden px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground md:table-cell">Subtheme</th>
-                    <th className="hidden px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:table-cell">Year</th>
+                    <th className="px-3 py-2" />
+                    {([
+                      ["mpn", "Set #", ""],
+                      ["name", "Name", ""],
+                      ["theme_name", "Theme", "hidden sm:table-cell"],
+                      ["subtheme_name", "Subtheme", "hidden md:table-cell"],
+                      ["release_year", "Year", "hidden sm:table-cell"],
+                    ] as [SortKey, string, string][]).map(([key, label, hide]) => {
+                      const active = sortKey === key;
+                      const Icon = active ? (sortDir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+                      return (
+                        <th
+                          key={key}
+                          className={`${hide} cursor-pointer select-none px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground`}
+                          onClick={() => toggleSort(key)}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            {label}
+                            <Icon className={`h-3 w-3 ${active ? "text-foreground" : "opacity-40"}`} />
+                          </span>
+                        </th>
+                      );
+                    })}
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {searchResults.map((r) => {
+                  {sortedResults.map((r) => {
                     const inWishlist = wishlistProductIds.has(r.product_id);
                     return (
                       <tr key={r.product_id} className="border-t border-border hover:bg-muted/50">
