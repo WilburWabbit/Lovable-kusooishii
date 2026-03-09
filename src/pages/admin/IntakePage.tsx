@@ -171,7 +171,7 @@ export function IntakePage() {
     }
   };
 
-  const mappedCount = apportionment.stockLines.filter((l) => l.mpn).length;
+  const mappedCount = apportionment.stockLines.filter((l) => l.mpn && l.condition_grade).length;
   const canProcess = selectedReceipt?.status === "pending" && mappedCount > 0 && !processing;
 
   return (
