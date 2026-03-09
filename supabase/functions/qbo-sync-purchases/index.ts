@@ -15,7 +15,6 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
 
   if (error || !conn) throw new Error("No QBO connection found. Please connect to QBO first.");
 
-  // If token expires within 5 minutes, refresh
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
     const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
@@ -50,6 +49,60 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
   return conn.access_token;
 }
 
+/** Fetch a QBO Item by ID, using a cache to avoid duplicate requests */
+async function fetchQboItem(
+  itemId: string,
+  cache: Map<string, any>,
+  baseUrl: string,
+  accessToken: string
+): Promise<any | null> {
+  if (cache.has(itemId)) return cache.get(itemId);
+
+  try {
+    const res = await fetch(`${baseUrl}/item/${itemId}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
+      cache.set(itemId, null);
+      return null;
+    }
+    const data = await res.json();
+    const item = data?.Item ?? null;
+    cache.set(itemId, item);
+    return item;
+  } catch (err) {
+    console.error(`Error fetching QBO item ${itemId}:`, err);
+    cache.set(itemId, null);
+    return null;
+  }
+}
+
+/** Parse a SKU string like "75192.3" into { mpn, conditionGrade } */
+function parseSku(sku: string): { mpn: string; conditionGrade: string } {
+  const trimmed = sku.trim();
+  const dotIndex = trimmed.indexOf(".");
+  let mpn: string;
+  let conditionGrade: string;
+
+  if (dotIndex > 0) {
+    mpn = trimmed.substring(0, dotIndex);
+    conditionGrade = trimmed.substring(dotIndex + 1) || "1";
+  } else {
+    mpn = trimmed;
+    conditionGrade = "1";
+  }
+
+  if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) {
+    conditionGrade = "1";
+  }
+
+  return { mpn, conditionGrade };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -66,7 +119,6 @@ Deno.serve(async (req) => {
       throw new Error("QBO credentials not configured");
     }
 
-    // Verify caller is admin/staff
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
 
@@ -85,8 +137,6 @@ Deno.serve(async (req) => {
     if (!hasAccess) throw new Error("Forbidden");
 
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
-
-    // Use sandbox or production base URL
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
     // Query purchases
@@ -106,11 +156,11 @@ Deno.serve(async (req) => {
     const purchaseData = await purchaseRes.json();
     const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
 
+    // Item cache for QBO Item lookups
+    const itemCache = new Map<string, any>();
     let created = 0;
-    let updated = 0;
 
     for (const purchase of purchases) {
-      // Skip purchases without item-based lines (non-stock expenses)
       const itemLines = purchase.Line?.filter(
         (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
       ) ?? [];
@@ -122,7 +172,6 @@ Deno.serve(async (req) => {
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
 
-      // Upsert receipt header
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
         .upsert(
@@ -144,38 +193,41 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Delete existing lines then re-insert (idempotent)
       await supabaseAdmin
         .from("inbound_receipt_line")
         .delete()
         .eq("inbound_receipt_id", receipt.id);
 
-      const lines = purchase.Line?.filter((l: any) => l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail") ?? [];
+      const lines = purchase.Line?.filter((l: any) =>
+        l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
+      ) ?? [];
 
-      const lineRows = lines.map((line: any) => {
+      const lineRows = [];
+      for (const line of lines) {
         const detail = line.ItemBasedExpenseLineDetail ?? line.AccountBasedExpenseLineDetail ?? {};
         const isStockLine = line.DetailType === "ItemBasedExpenseLineDetail";
 
-        // Parse MPN and condition_grade from ItemRef.name using '.' delimiter
         let mpn: string | null = null;
         let conditionGrade: string | null = null;
-        if (isStockLine && detail.ItemRef?.name) {
-          const rawName = String(detail.ItemRef.name).trim();
-          const dotIndex = rawName.indexOf(".");
-          if (dotIndex > 0) {
-            mpn = rawName.substring(0, dotIndex);
-            conditionGrade = rawName.substring(dotIndex + 1) || "1";
-          } else {
-            mpn = rawName;
-            conditionGrade = "1";
-          }
-          // Validate grade is 1-5, default to 1
-          if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) {
-            conditionGrade = "1";
+
+        if (isStockLine && detail.ItemRef?.value) {
+          // Fetch the full QBO Item record to get its Sku field
+          const qboItem = await fetchQboItem(detail.ItemRef.value, itemCache, baseUrl, accessToken);
+
+          const skuField = qboItem?.Sku;
+          if (skuField && String(skuField).trim()) {
+            const parsed = parseSku(String(skuField));
+            mpn = parsed.mpn;
+            conditionGrade = parsed.conditionGrade;
+          } else if (detail.ItemRef?.name) {
+            // Fallback: parse ItemRef.name
+            const parsed = parseSku(String(detail.ItemRef.name));
+            mpn = parsed.mpn;
+            conditionGrade = parsed.conditionGrade;
           }
         }
 
-        return {
+        lineRows.push({
           inbound_receipt_id: receipt.id,
           description: line.Description ?? detail.ItemRef?.name ?? "No description",
           quantity: detail.Qty ?? 1,
@@ -185,8 +237,8 @@ Deno.serve(async (req) => {
           is_stock_line: isStockLine,
           mpn,
           condition_grade: conditionGrade,
-        };
-      });
+        });
+      }
 
       if (lineRows.length > 0) {
         await supabaseAdmin.from("inbound_receipt_line").insert(lineRows);
@@ -196,7 +248,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, total: purchases.length, created, updated }),
+      JSON.stringify({ success: true, total: purchases.length, created, items_cached: itemCache.size }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
