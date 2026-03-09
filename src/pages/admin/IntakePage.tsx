@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ const statusColor: Record<string, string> = {
 
 export function IntakePage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [lineEdits, setLineEdits] = useState<Record<string, string>>({});
@@ -59,6 +61,7 @@ export function IntakePage() {
       if (error) throw error;
       return data as Receipt[];
     },
+    enabled: !!user,
   });
 
   const { data: lines, isLoading: linesLoading } = useQuery({
