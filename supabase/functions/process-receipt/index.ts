@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
             catalog_product_id: product?.id ?? null,
             condition_grade: conditionGrade,
             sku_code: skuCode,
-            name: line.description ?? mpn,
+            name: cleanQboName(line.description ?? mpn),
             price: landedCost,
             active_flag: true,
             saleable_flag: !!product,
