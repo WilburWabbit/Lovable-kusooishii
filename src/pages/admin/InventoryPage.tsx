@@ -60,6 +60,7 @@ function fmt(v: number | null) {
 }
 
 export function InventoryPage() {
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [gradeFilter, setGradeFilter] = useState<string>("all");
