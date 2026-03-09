@@ -342,6 +342,7 @@ export function IntakePage() {
                       </TableCell>
                       <TableCell />
                       <TableCell />
+                      <TableCell />
                     </TableRow>
                   ))}
 
