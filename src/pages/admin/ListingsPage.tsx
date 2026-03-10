@@ -168,7 +168,7 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
   switch (key) {
     case "sku_code": return <span className="font-mono text-xs">{r.sku_code}</span>;
     case "product": return <span className="max-w-[200px] truncate block">{productName(r) || "—"}</span>;
-    case "mpn": return <span className="font-mono text-xs">{r.catalog_product?.mpn ?? "—"}</span>;
+    case "mpn": return <span className="font-mono text-xs">{r.product?.mpn ?? "—"}</span>;
     case "grade": return GRADE_LABELS[r.condition_grade] ?? r.condition_grade;
     case "price": return <span className="font-mono text-xs">{fmt(r.price)}</span>;
     case "stock": return <span className="font-mono text-xs">{r.stock_available}</span>;
