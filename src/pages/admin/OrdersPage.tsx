@@ -84,7 +84,7 @@ function lineVatAmount(l: OrderLineRow) {
   return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
-const ALL_COLUMNS = [
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
   { key: "order_number", label: "Order #" },
   { key: "origin_channel", label: "Origin" },

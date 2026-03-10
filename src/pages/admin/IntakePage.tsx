@@ -69,7 +69,7 @@ function lineVat(line: ReceiptLine) {
   return Math.round(line.line_total * (line.vat_rate_percent / 100) * 100) / 100;
 }
 
-const ALL_COLUMNS = [
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "qbo_purchase_id", label: "QBO ID" },
   { key: "vendor_name", label: "Vendor" },
   { key: "txn_date", label: "Date" },

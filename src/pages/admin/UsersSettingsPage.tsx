@@ -24,7 +24,7 @@ interface UserRow {
 
 const ALL_ROLES = ["admin", "staff", "member"] as const;
 
-const ALL_COLUMNS = [
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "user", label: "User" },
   { key: "email", label: "Email" },
   { key: "admin", label: "Admin", align: "center" as const },

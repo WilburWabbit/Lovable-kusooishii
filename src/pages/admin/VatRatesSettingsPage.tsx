@@ -50,7 +50,7 @@ async function invokeWithAuth(fnName: string, body?: Record<string, unknown>) {
   return data;
 }
 
-const RATE_COLUMNS = [
+const RATE_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "name", label: "Name" },
   { key: "qbo_tax_rate_id", label: "QBO Rate ID" },
   { key: "rate_percent", label: "Rate %", align: "right" as const },
