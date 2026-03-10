@@ -125,11 +125,9 @@ export function IntakePage() {
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-receipts" },
+      return await invokeWithAuth<Receipt[]>("admin-data", {
+        action: "list-receipts",
       });
-      if (error) throw error;
-      return data as Receipt[];
     },
     enabled: !!user,
   });
