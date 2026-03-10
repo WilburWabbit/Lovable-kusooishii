@@ -86,8 +86,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
 
     // Auth check
     const authHeader = req.headers.get("Authorization");
@@ -145,14 +145,14 @@ Deno.serve(async (req) => {
 
     const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gpt-4o",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userPrompt },
@@ -195,15 +195,9 @@ Deno.serve(async (req) => {
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI usage credits exhausted. Please add credits in Settings → Workspace → Usage." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
       const text = await response.text();
-      console.error("AI gateway error:", status, text);
-      throw new Error(`AI gateway returned ${status}`);
+      console.error("OpenAI error:", status, text);
+      throw new Error(`OpenAI returned ${status}`);
     }
 
     const data = await response.json();
