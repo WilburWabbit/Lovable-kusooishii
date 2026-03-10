@@ -388,6 +388,85 @@ Deno.serve(async (req) => {
         .eq("channel", "web");
       if (dErr) throw dErr;
       result = { success: true };
+
+    /* ── Media CRUD ── */
+
+    } else if (action === "list-product-media") {
+      const { product_id: pid } = params;
+      if (!pid) throw new Error("product_id is required");
+      const { data, error } = await admin
+        .from("product_media")
+        .select("id, sort_order, is_primary, media_asset:media_asset_id(id, original_url, alt_text, mime_type, width, height, file_size_bytes)")
+        .eq("product_id", pid)
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      result = (data ?? []).map((pm: any) => ({
+        id: pm.id,
+        sort_order: pm.sort_order,
+        is_primary: pm.is_primary,
+        ...pm.media_asset,
+        media_asset_id: pm.media_asset?.id,
+      }));
+
+    } else if (action === "delete-product-media") {
+      const { product_media_id, media_asset_id: maId } = params;
+      if (!product_media_id) throw new Error("product_media_id is required");
+
+      // Get the media asset to find storage path
+      if (maId) {
+        const { data: asset } = await admin.from("media_asset").select("original_url").eq("id", maId).maybeSingle();
+        if (asset?.original_url) {
+          // Extract storage path from URL
+          const url = asset.original_url;
+          const bucketSegment = "/storage/v1/object/public/media/";
+          const idx = url.indexOf(bucketSegment);
+          if (idx !== -1) {
+            const storagePath = url.substring(idx + bucketSegment.length);
+            await admin.storage.from("media").remove([storagePath]);
+          }
+        }
+        await admin.from("media_asset").delete().eq("id", maId);
+      }
+
+      // product_media row cascades from media_asset delete, but delete explicitly too
+      await admin.from("product_media").delete().eq("id", product_media_id);
+      result = { success: true };
+
+    } else if (action === "reorder-product-media") {
+      const { items } = params;
+      if (!Array.isArray(items)) throw new Error("items array is required");
+      for (const item of items) {
+        await admin.from("product_media").update({ sort_order: item.sort_order }).eq("id", item.id);
+      }
+      result = { success: true };
+
+    } else if (action === "update-media-alt-text") {
+      const { media_asset_id: maId, alt_text } = params;
+      if (!maId) throw new Error("media_asset_id is required");
+      const { error } = await admin.from("media_asset").update({ alt_text }).eq("id", maId);
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "set-primary-media") {
+      const { product_id: pid, product_media_id } = params;
+      if (!pid || !product_media_id) throw new Error("product_id and product_media_id required");
+
+      // Clear all primary flags for this product
+      await admin.from("product_media").update({ is_primary: false }).eq("product_id", pid);
+      // Set the chosen one
+      await admin.from("product_media").update({ is_primary: true }).eq("id", product_media_id);
+
+      // Update product.img_url from the media asset
+      const { data: pm } = await admin
+        .from("product_media")
+        .select("media_asset:media_asset_id(original_url)")
+        .eq("id", product_media_id)
+        .single();
+      if (pm?.media_asset) {
+        await admin.from("product").update({ img_url: (pm.media_asset as any).original_url }).eq("id", pid);
+      }
+      result = { success: true };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
