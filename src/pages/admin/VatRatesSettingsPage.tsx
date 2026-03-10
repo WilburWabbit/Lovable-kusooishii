@@ -40,6 +40,36 @@ export default function VatRatesSettingsPage() {
   const [rates, setRates] = useState<VatRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedRates = [...rates].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+    if (typeof av === "boolean" && typeof bv === "boolean") return (Number(av) - Number(bv)) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  });
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <ArrowUpDown className="ml-1 inline h-3 w-3 text-muted-foreground/50" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="ml-1 inline h-3 w-3" />
+      : <ArrowDown className="ml-1 inline h-3 w-3" />;
+  };
 
   const fetchRates = async () => {
     setLoading(true);
