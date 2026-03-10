@@ -272,6 +272,7 @@ export function OrdersPage() {
             <SelectContent>
               <SelectItem value="all">All channels</SelectItem>
               <SelectItem value="web">Web</SelectItem>
+              <SelectItem value="ebay">eBay</SelectItem>
               <SelectItem value="qbo">QBO Sale</SelectItem>
               <SelectItem value="qbo_refund">QBO Refund</SelectItem>
             </SelectContent>
