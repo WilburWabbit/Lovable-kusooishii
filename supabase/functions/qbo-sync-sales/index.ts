@@ -534,12 +534,12 @@ Deno.serve(async (req) => {
 
     const itemCache = new Map<string, any>();
     const itemIdArray = Array.from(uniqueItemIds);
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
       if (i + BATCH_SIZE < itemIdArray.length) {
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);
