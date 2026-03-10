@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+type SortKey = "name" | "qbo_tax_rate_id" | "rate_percent" | "description" | "active" | "synced_at";
+type SortDir = "asc" | "desc";
 
 interface VatRate {
   id: string;
@@ -37,6 +40,36 @@ export default function VatRatesSettingsPage() {
   const [rates, setRates] = useState<VatRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedRates = [...rates].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+    if (typeof av === "boolean" && typeof bv === "boolean") return (Number(av) - Number(bv)) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  });
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <ArrowUpDown className="ml-1 inline h-3 w-3 text-muted-foreground/50" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="ml-1 inline h-3 w-3" />
+      : <ArrowDown className="ml-1 inline h-3 w-3" />;
+  };
 
   const fetchRates = async () => {
     setLoading(true);
@@ -107,17 +140,31 @@ export default function VatRatesSettingsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="text-right">Rate %</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last Synced</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                      Name <SortIcon col="name" />
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("qbo_tax_rate_id")}>
+                      QBO Rate ID <SortIcon col="qbo_tax_rate_id" />
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none text-right" onClick={() => toggleSort("rate_percent")}>
+                      Rate % <SortIcon col="rate_percent" />
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("description")}>
+                      Description <SortIcon col="description" />
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("active")}>
+                      Status <SortIcon col="active" />
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("synced_at")}>
+                      Last Synced <SortIcon col="synced_at" />
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rates.map((rate) => (
+                  {sortedRates.map((rate) => (
                     <TableRow key={rate.id}>
                       <TableCell className="font-medium">{rate.name}</TableCell>
+                      <TableCell className="font-mono text-muted-foreground text-xs">{rate.qbo_tax_rate_id}</TableCell>
                       <TableCell className="text-right font-mono">
                         {Number(rate.rate_percent).toFixed(2)}%
                       </TableCell>
