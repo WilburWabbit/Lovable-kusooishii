@@ -254,7 +254,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
       const { data: newSku, error: skuErr } = await admin.from("sku").insert({
-        catalog_product_id: product?.id ?? null,
+        product_id: product?.id ?? null,
         condition_grade: cg,
         sku_code: skuCode,
         name: cleanQboName(line.description ?? line.mpn),
