@@ -263,7 +263,6 @@ export function ListingsPage() {
       await invokeWithAuth("ebay-sync", {
         action: "sync_inventory",
       });
-      if (error) throw error;
       toast.success("eBay sync triggered");
       refetch();
     } catch (err: any) {
