@@ -25,6 +25,8 @@ import { OrdersPage } from "./pages/admin/OrdersPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
+import { ProductsPage } from "./pages/admin/ProductsPage";
+import ProductDetailAdminPage from "./pages/admin/ProductDetailAdminPage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
@@ -59,6 +61,8 @@ const App = () => (
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/intake" element={<IntakePage />} />
             <Route path="/admin/inventory" element={<InventoryPage />} />
+            <Route path="/admin/products" element={<ProductsPage />} />
+            <Route path="/admin/products/:id" element={<ProductDetailAdminPage />} />
             <Route path="/admin/listings" element={<ListingsPage />} />
             <Route path="/admin/orders" element={<OrdersPage />} />
             <Route path="/admin/customers" element={<CustomersPage />} />
