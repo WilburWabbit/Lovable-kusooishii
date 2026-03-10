@@ -75,7 +75,7 @@ Constraints:
 - Description: 80–140 words.
 - CTA: single imperative sentence, 50 characters max.
 - Highlights: 3–6 bullets.
-- SEO title: 100 characters max.
+- SEO title: 60 characters max.
 - SEO body: 400 characters max, no line breaks.
 
 Structure rigid. Narrative persuasive. Tone adult but platform-safe.`;
@@ -166,7 +166,7 @@ Deno.serve(async (req) => {
               parameters: {
                 type: "object",
                 properties: {
-                  seo_title: { type: "string", description: "SEO title, max 100 characters" },
+                  seo_title: { type: "string", description: "SEO title, max 60 characters" },
                   seo_body: { type: "string", description: "SEO meta description, max 400 characters, no line breaks" },
                   hook: { type: "string", description: "Product hook, 1-2 lines max" },
                   description: { type: "string", description: "Narrative description, 80-140 words, single paragraph" },
