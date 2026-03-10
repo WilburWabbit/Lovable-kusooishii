@@ -46,6 +46,28 @@ export default function ProductDetailPage() {
     enabled: !!mpn,
   });
 
+  // Fetch product media
+  const { data: mediaItems = [] } = useQuery({
+    queryKey: ["product_media_storefront", product?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_media")
+        .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
+        .eq("product_id", product!.id)
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((pm: any) => ({
+        id: pm.id,
+        url: pm.media_asset?.original_url,
+        alt: pm.media_asset?.alt_text ?? "",
+        is_primary: pm.is_primary,
+      }));
+    },
+    enabled: !!product?.id,
+  });
+
+  const [selectedImage, setSelectedImage] = useState(0);
+
   const isLoading = productLoading || offersLoading;
   const themeName = product?.theme && typeof product.theme === "object" && !Array.isArray(product.theme)
     ? (product.theme as { name: string }).name
