@@ -59,7 +59,7 @@ const RATE_COLUMNS: { key: string; label: string; align?: "left" | "center" | "r
   { key: "synced_at", label: "Last Synced" },
 ];
 
-const CODE_COLUMNS = [
+const CODE_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "name", label: "Name" },
   { key: "qbo_tax_code_id", label: "QBO Code ID" },
   { key: "sales_rate", label: "Sales Rate" },
