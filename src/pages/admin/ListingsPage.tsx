@@ -217,11 +217,10 @@ export function ListingsPage() {
   const { data: rows = [], isLoading, refetch } = useQuery({
     queryKey: ["listings-coverage"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-listings" },
+      const data = await invokeWithAuth<ListingRow[]>("admin-data", {
+        action: "list-listings",
       });
-      if (error) throw error;
-      return (data ?? []) as ListingRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });
