@@ -28,6 +28,7 @@ type StockRow = {
   carrying_value: number | null;
   accumulated_impairment: number;
   created_at: string;
+  purchase_date: string | null;
   vat_rate_percent: number | null;
   sku: {
     sku_code: string;
@@ -86,7 +87,7 @@ const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "ri
   { key: "landed_inc", label: "Landed (inc VAT)", align: "right" },
   { key: "carrying", label: "Carrying", align: "right" },
   { key: "impairment", label: "Impairment", align: "right" },
-  { key: "created_at", label: "Created" },
+  { key: "purchase_date", label: "Purchased" },
 ];
 
 const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
@@ -106,7 +107,7 @@ function getSortValue(u: StockRow, key: string): unknown {
     case "landed_inc": return gross;
     case "carrying": return u.carrying_value;
     case "impairment": return u.accumulated_impairment;
-    case "created_at": return u.created_at;
+    case "purchase_date": return u.purchase_date ?? u.created_at;
     default: return null;
   }
 }
@@ -126,7 +127,10 @@ function renderCell(u: StockRow, key: string): React.ReactNode {
     case "landed_inc": return <span className="font-mono text-xs">{gross != null ? fmt(gross) : "—"}</span>;
     case "carrying": return <span className="font-mono text-xs">{fmt(u.carrying_value)}</span>;
     case "impairment": return <span className="font-mono text-xs">{fmt(u.accumulated_impairment)}</span>;
-    case "created_at": return <span className="text-xs text-muted-foreground">{format(new Date(u.created_at), "dd MMM yyyy")}</span>;
+    case "purchase_date": {
+      const d = u.purchase_date ?? u.created_at;
+      return <span className="text-xs text-muted-foreground">{format(new Date(d), "dd MMM yyyy")}</span>;
+    }
     default: return null;
   }
 }
