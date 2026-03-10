@@ -72,11 +72,17 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await admin.auth.getUser(token);
-    if (userError || !user) throw new Error("Unauthorized");
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some((r: any) => r.role === "admin" || r.role === "staff");
-    if (!hasAccess) throw new Error("Forbidden");
+    const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
+
+    if (!isWebhook) {
+      const { data: { user }, error: userError } = await admin.auth.getUser(token);
+      if (userError || !user) throw new Error("Unauthorized");
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+      const hasAccess = (roles ?? []).some((r: any) => r.role === "admin" || r.role === "staff");
+      if (!hasAccess) throw new Error("Forbidden");
+    } else {
+      console.log("Webhook-triggered sync (service role auth)");
+    }
 
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
