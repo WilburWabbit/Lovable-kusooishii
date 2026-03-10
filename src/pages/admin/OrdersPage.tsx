@@ -23,6 +23,7 @@ type OrderLineRow = {
   quantity: number;
   unit_price: number;
   line_total: number;
+  vat_rate_percent: number | null;
   sku: {
     sku_code: string;
     name: string | null;
@@ -37,6 +38,7 @@ type OrderRow = {
   origin_reference: string | null;
   status: string;
   merchandise_subtotal: number;
+  tax_total: number;
   gross_total: number;
   currency: string;
   guest_name: string | null;
@@ -71,6 +73,11 @@ const STATUS_OPTIONS = [
 function fmt(v: number | null | undefined) {
   if (v == null) return "—";
   return `£${v.toFixed(2)}`;
+}
+
+function lineVatAmount(l: OrderLineRow) {
+  if (l.vat_rate_percent == null) return null;
+  return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
 export function OrdersPage() {
@@ -196,7 +203,8 @@ export function OrdersPage() {
                     <TableHead>Reference</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-center">Items</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
+                    <TableHead className="text-right">VAT</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Date</TableHead>
                   </TableRow>
@@ -224,13 +232,14 @@ export function OrdersPage() {
                             </TableCell>
                             <TableCell className="text-center">{o.sales_order_line.length}</TableCell>
                             <TableCell className="text-right font-mono text-xs">{fmt(o.merchandise_subtotal)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{fmt(o.tax_total)}</TableCell>
                             <TableCell className="text-right font-mono text-xs">{fmt(o.gross_total)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</TableCell>
                           </TableRow>
                         </CollapsibleTrigger>
                         <CollapsibleContent asChild>
                           <tr>
-                            <td colSpan={9} className="bg-muted/30 p-0">
+                            <td colSpan={10} className="bg-muted/30 p-0">
                               <div className="px-8 py-3">
                                 {o.guest_name || o.guest_email ? (
                                   <p className="text-xs text-muted-foreground mb-2">
@@ -243,20 +252,30 @@ export function OrdersPage() {
                                       <TableHead className="text-xs">SKU</TableHead>
                                       <TableHead className="text-xs">Product</TableHead>
                                       <TableHead className="text-xs text-center">Qty</TableHead>
-                                      <TableHead className="text-xs text-right">Unit Price</TableHead>
-                                      <TableHead className="text-xs text-right">Line Total</TableHead>
+                                      <TableHead className="text-xs text-right">Unit (net)</TableHead>
+                                      <TableHead className="text-xs text-right">Line (net)</TableHead>
+                                      <TableHead className="text-xs text-right">VAT %</TableHead>
+                                      <TableHead className="text-xs text-right">VAT</TableHead>
+                                      <TableHead className="text-xs text-right">Line (inc VAT)</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {o.sales_order_line.map((l) => (
-                                      <TableRow key={l.id}>
-                                        <TableCell className="font-mono text-xs">{l.sku?.sku_code ?? "—"}</TableCell>
-                                        <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.catalog_product?.name ?? l.sku?.name ?? "—"}</TableCell>
-                                        <TableCell className="text-xs text-center">{l.quantity}</TableCell>
-                                        <TableCell className="text-xs text-right font-mono">{fmt(l.unit_price)}</TableCell>
-                                        <TableCell className="text-xs text-right font-mono">{fmt(l.line_total)}</TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {o.sales_order_line.map((l) => {
+                                      const vat = lineVatAmount(l);
+                                      const gross = vat != null ? l.line_total + vat : null;
+                                      return (
+                                        <TableRow key={l.id}>
+                                          <TableCell className="font-mono text-xs">{l.sku?.sku_code ?? "—"}</TableCell>
+                                          <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.catalog_product?.name ?? l.sku?.name ?? "—"}</TableCell>
+                                          <TableCell className="text-xs text-center">{l.quantity}</TableCell>
+                                          <TableCell className="text-xs text-right font-mono">{fmt(l.unit_price)}</TableCell>
+                                          <TableCell className="text-xs text-right font-mono">{fmt(l.line_total)}</TableCell>
+                                          <TableCell className="text-xs text-right">{l.vat_rate_percent != null ? `${l.vat_rate_percent}%` : "—"}</TableCell>
+                                          <TableCell className="text-xs text-right font-mono">{vat != null ? fmt(vat) : "—"}</TableCell>
+                                          <TableCell className="text-xs text-right font-mono">{gross != null ? fmt(gross) : "—"}</TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
                                   </TableBody>
                                 </Table>
                               </div>
