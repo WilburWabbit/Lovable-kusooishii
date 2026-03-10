@@ -245,7 +245,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     const line = stockLines[i];
     const cg = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     const skuCode = `${line.mpn}-G${cg}`;
-    const { data: product } = await admin.from("catalog_product").select("id").eq("mpn", line.mpn).maybeSingle();
+    const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
