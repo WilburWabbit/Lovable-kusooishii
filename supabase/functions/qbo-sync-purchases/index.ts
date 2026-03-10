@@ -311,17 +311,23 @@ Deno.serve(async (req) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) throw new Error("Unauthorized");
+    const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    const { data: roles } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some(
-      (r: { role: string }) => r.role === "admin" || r.role === "staff"
-    );
-    if (!hasAccess) throw new Error("Forbidden");
+    if (!isWebhook) {
+      const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+      if (userError || !user) throw new Error("Unauthorized");
+
+      const { data: roles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id);
+      const hasAccess = (roles ?? []).some(
+        (r: { role: string }) => r.role === "admin" || r.role === "staff"
+      );
+      if (!hasAccess) throw new Error("Forbidden");
+    } else {
+      console.log("Webhook-triggered sync (service role auth)");
+    }
 
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;

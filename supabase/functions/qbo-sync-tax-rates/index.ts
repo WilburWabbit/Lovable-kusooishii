@@ -67,33 +67,39 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const token = authHeader.replace("Bearer ", "");
+    const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    // Verify caller identity
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(
-      authHeader.replace("Bearer ", "")
-    );
-    if (claimsErr || !claimsData?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (!isWebhook) {
+      // Verify caller identity
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
-    }
-    const userId = claimsData.claims.sub;
+      const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+      if (claimsErr || !claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const userId = claimsData.claims.sub;
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+      const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    // Check admin/staff role
-    const { data: hasAdmin } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "admin" });
-    const { data: hasStaff } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "staff" });
-    if (!hasAdmin && !hasStaff) {
-      return new Response(JSON.stringify({ error: "Forbidden – admin or staff role required" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Check admin/staff role
+      const { data: hasAdmin } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "admin" });
+      const { data: hasStaff } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "staff" });
+      if (!hasAdmin && !hasStaff) {
+        return new Response(JSON.stringify({ error: "Forbidden – admin or staff role required" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      console.log("Webhook-triggered sync (service role auth)");
     }
+
+    const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // QBO credentials
     const clientId = Deno.env.get("QBO_CLIENT_ID")!;
