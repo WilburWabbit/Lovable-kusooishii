@@ -87,8 +87,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRoles([]);
   };
 
+  const isStaffOrAdmin = roles.includes("admin") || roles.includes("staff");
+
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, signOut, isStaffOrAdmin }}>
       {children}
     </AuthContext.Provider>
   );
