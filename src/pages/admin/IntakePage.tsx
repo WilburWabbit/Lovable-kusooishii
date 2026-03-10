@@ -19,6 +19,8 @@ interface Receipt {
   vendor_name: string | null;
   txn_date: string | null;
   total_amount: number;
+  tax_total: number;
+  global_tax_calculation: string | null;
   currency: string;
   status: string;
   created_at: string;
@@ -201,6 +203,8 @@ export function IntakePage() {
                     <TableHead className="font-display text-xs">Vendor</TableHead>
                     <TableHead className="font-display text-xs">Date</TableHead>
                     <TableHead className="font-display text-xs text-right">Total</TableHead>
+                    <TableHead className="font-display text-xs text-right">Tax</TableHead>
+                    <TableHead className="font-display text-xs">Tax Treatment</TableHead>
                     <TableHead className="font-display text-xs">Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -213,6 +217,18 @@ export function IntakePage() {
                       <TableCell className="font-body text-xs">{r.txn_date ?? "—"}</TableCell>
                       <TableCell className="font-body text-xs text-right">
                         {r.currency} {Number(r.total_amount).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="font-body text-xs text-right">
+                        {Number(r.tax_total).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        {r.global_tax_calculation ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            {r.global_tax_calculation === "TaxInclusive" ? "Inclusive" : r.global_tax_calculation === "TaxExcluded" ? "Excluded" : r.global_tax_calculation}
+                          </Badge>
+                        ) : (
+                          <span className="font-body text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${statusColor[r.status] ?? ""}`}>
