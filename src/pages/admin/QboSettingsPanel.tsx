@@ -111,6 +111,30 @@ export function QboSettingsPanel() {
   };
 
 
+  const syncCustomers = async () => {
+    setSyncingCustomers(true);
+    try {
+      const data = await invokeWithAuth("qbo-sync-customers");
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      if (data.upserted) parts.push(`${data.upserted} customers synced`);
+      if (data.skipped) parts.push(`${data.skipped} skipped`);
+      if (data.orders_linked) parts.push(`${data.orders_linked} orders linked`);
+      toast({
+        title: "Customer sync complete",
+        description: parts.length > 0 ? parts.join(", ") + "." : "No changes.",
+      });
+    } catch (err) {
+      toast({
+        title: "Customer sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingCustomers(false);
+    }
+  };
+
 
   const syncSales = async () => {
     setSyncingSales(true);
