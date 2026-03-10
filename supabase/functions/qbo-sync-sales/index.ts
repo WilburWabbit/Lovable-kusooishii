@@ -224,6 +224,7 @@ async function processSalesReceipt(
       currency,
       customer_id: customerId,
       txn_date: txnDate ?? null,
+      doc_number: receipt.DocNumber ?? null,
       notes: `Imported from QBO SalesReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")
