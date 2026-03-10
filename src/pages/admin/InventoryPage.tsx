@@ -107,7 +107,7 @@ function getSortValue(u: StockRow, key: string): unknown {
     case "landed_inc": return gross;
     case "carrying": return u.carrying_value;
     case "impairment": return u.accumulated_impairment;
-    case "created_at": return u.created_at;
+    case "purchase_date": return u.purchase_date ?? u.created_at;
     default: return null;
   }
 }
