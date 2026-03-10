@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.qbo-sync-tax-rates]
 verify_jwt = false
+
+[functions.qbo-sync-sales]
+verify_jwt = false

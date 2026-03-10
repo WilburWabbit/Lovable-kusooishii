@@ -302,11 +302,13 @@ export type Database = {
         Row: {
           created_at: string
           currency: string
+          global_tax_calculation: string | null
           id: string
           processed_at: string | null
           qbo_purchase_id: string
           raw_payload: Json | null
           status: Database["public"]["Enums"]["receipt_status"]
+          tax_total: number
           total_amount: number
           txn_date: string | null
           vendor_name: string | null
@@ -314,11 +316,13 @@ export type Database = {
         Insert: {
           created_at?: string
           currency?: string
+          global_tax_calculation?: string | null
           id?: string
           processed_at?: string | null
           qbo_purchase_id: string
           raw_payload?: Json | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          tax_total?: number
           total_amount?: number
           txn_date?: string | null
           vendor_name?: string | null
@@ -326,11 +330,13 @@ export type Database = {
         Update: {
           created_at?: string
           currency?: string
+          global_tax_calculation?: string | null
           id?: string
           processed_at?: string | null
           qbo_purchase_id?: string
           raw_payload?: Json | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          tax_total?: number
           total_amount?: number
           txn_date?: string | null
           vendor_name?: string | null
@@ -348,6 +354,7 @@ export type Database = {
           line_total: number
           mpn: string | null
           qbo_item_id: string | null
+          qbo_tax_code_ref: string | null
           quantity: number
           unit_cost: number
         }
@@ -361,6 +368,7 @@ export type Database = {
           line_total?: number
           mpn?: string | null
           qbo_item_id?: string | null
+          qbo_tax_code_ref?: string | null
           quantity?: number
           unit_cost?: number
         }
@@ -374,6 +382,7 @@ export type Database = {
           line_total?: number
           mpn?: string | null
           qbo_item_id?: string | null
+          qbo_tax_code_ref?: string | null
           quantity?: number
           unit_cost?: number
         }
@@ -577,6 +586,7 @@ export type Database = {
           created_at: string
           currency: string
           discount_total: number
+          global_tax_calculation: string | null
           gross_total: number
           guest_email: string | null
           guest_name: string | null
@@ -607,6 +617,7 @@ export type Database = {
           created_at?: string
           currency?: string
           discount_total?: number
+          global_tax_calculation?: string | null
           gross_total: number
           guest_email?: string | null
           guest_name?: string | null
@@ -637,6 +648,7 @@ export type Database = {
           created_at?: string
           currency?: string
           discount_total?: number
+          global_tax_calculation?: string | null
           gross_total?: number
           guest_email?: string | null
           guest_name?: string | null
@@ -676,33 +688,39 @@ export type Database = {
           id: string
           line_discount: number
           line_total: number
+          qbo_tax_code_ref: string | null
           quantity: number
           sales_order_id: string
           sku_id: string
           stock_unit_id: string | null
           unit_price: number
+          vat_rate_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           line_discount?: number
           line_total: number
+          qbo_tax_code_ref?: string | null
           quantity?: number
           sales_order_id: string
           sku_id: string
           stock_unit_id?: string | null
           unit_price: number
+          vat_rate_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           line_discount?: number
           line_total?: number
+          qbo_tax_code_ref?: string | null
           quantity?: number
           sales_order_id?: string
           sku_id?: string
           stock_unit_id?: string | null
           unit_price?: number
+          vat_rate_id?: string | null
         }
         Relationships: [
           {
@@ -724,6 +742,13 @@ export type Database = {
             columns: ["stock_unit_id"]
             isOneToOne: false
             referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_vat_rate_id_fkey"
+            columns: ["vat_rate_id"]
+            isOneToOne: false
+            referencedRelation: "vat_rate"
             referencedColumns: ["id"]
           },
         ]

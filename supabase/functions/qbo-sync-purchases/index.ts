@@ -299,6 +299,8 @@ Deno.serve(async (req) => {
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
+      const globalTaxCalc = purchase.GlobalTaxCalculation ?? null;
+      const taxTotal = purchase.TxnTaxDetail?.TotalTax ?? 0;
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
@@ -310,6 +312,8 @@ Deno.serve(async (req) => {
             total_amount: totalAmount,
             currency,
             raw_payload: purchase,
+            tax_total: taxTotal,
+            global_tax_calculation: globalTaxCalc,
           },
           { onConflict: "qbo_purchase_id" }
         )
@@ -358,6 +362,9 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Capture line-level TaxCodeRef (e.g. "TAX" or "NON")
+        const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
         lineRows.push({
           inbound_receipt_id: receipt.id,
           description: line.Description ?? detail.ItemRef?.name ?? "No description",
@@ -368,6 +375,7 @@ Deno.serve(async (req) => {
           is_stock_line: isStockLine,
           mpn,
           condition_grade: conditionGrade,
+          qbo_tax_code_ref: taxCodeRef,
         });
       }
 
