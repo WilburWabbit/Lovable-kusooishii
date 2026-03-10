@@ -118,6 +118,7 @@ const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
 
 function getSortValue(o: OrderRow, key: string): unknown {
   switch (key) {
+    case "doc_number": return o.doc_number ?? o.order_number;
     case "order_number": return o.order_number;
     case "customer_name": return o.customer?.display_name ?? o.guest_name;
     case "origin_channel": return o.origin_channel;
