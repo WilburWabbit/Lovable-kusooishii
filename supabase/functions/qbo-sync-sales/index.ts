@@ -151,6 +151,7 @@ async function processSalesReceipt(
   if (existing) return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
+  const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
   const txnDate = receipt.TxnDate ?? null;
   const totalAmount = receipt.TotalAmt ?? 0;
   const currency = receipt.CurrencyRef?.value ?? "GBP";
@@ -161,11 +162,9 @@ async function processSalesReceipt(
   let merchandiseSubtotal: number;
   let grossTotal: number;
   if (globalTaxCalc === "TaxInclusive") {
-    // TotalAmt includes tax
     merchandiseSubtotal = totalAmount - taxTotal;
     grossTotal = totalAmount;
   } else {
-    // TaxExcluded or NotApplicable: TotalAmt is ex-tax, gross = subtotal + tax
     merchandiseSubtotal = totalAmount;
     grossTotal = totalAmount + taxTotal;
   }
@@ -177,6 +176,17 @@ async function processSalesReceipt(
 
   if (itemLines.length === 0) {
     return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+  }
+
+  // Resolve customer_id from QBO CustomerRef
+  let customerId: string | null = null;
+  if (customerRefValue) {
+    const { data: cust } = await supabaseAdmin
+      .from("customer")
+      .select("id")
+      .eq("qbo_customer_id", customerRefValue)
+      .maybeSingle();
+    customerId = cust?.id ?? null;
   }
 
   // Resolve vat_rate_id from transaction-level TaxRateRef
@@ -197,6 +207,7 @@ async function processSalesReceipt(
       gross_total: grossTotal,
       global_tax_calculation: globalTaxCalc,
       currency,
+      customer_id: customerId,
       notes: `Imported from QBO SalesReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")
@@ -323,6 +334,7 @@ async function processRefundReceipt(
   if (existing) return { created: false, linesCreated: 0 };
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
+  const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
   const txnDate = receipt.TxnDate ?? null;
   const totalAmount = receipt.TotalAmt ?? 0;
   const currency = receipt.CurrencyRef?.value ?? "GBP";
@@ -348,6 +360,17 @@ async function processRefundReceipt(
     return { created: false, linesCreated: 0 };
   }
 
+  // Resolve customer_id
+  let customerId: string | null = null;
+  if (customerRefValue) {
+    const { data: cust } = await supabaseAdmin
+      .from("customer")
+      .select("id")
+      .eq("qbo_customer_id", customerRefValue)
+      .maybeSingle();
+    customerId = cust?.id ?? null;
+  }
+
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
   const { data: order, error: orderErr } = await supabaseAdmin
@@ -364,6 +387,7 @@ async function processRefundReceipt(
       gross_total: grossTotal,
       global_tax_calculation: globalTaxCalc,
       currency,
+      customer_id: customerId,
       notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")

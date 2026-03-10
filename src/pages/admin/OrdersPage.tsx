@@ -49,6 +49,7 @@ type OrderRow = {
   guest_email: string | null;
   created_at: string;
   notes: string | null;
+  customer: { id: string; display_name: string; email: string | null } | null;
   sales_order_line: OrderLineRow[];
 };
 
@@ -87,6 +88,7 @@ function lineVatAmount(l: OrderLineRow) {
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
   { key: "order_number", label: "Order #" },
+  { key: "customer_name", label: "Customer" },
   { key: "origin_channel", label: "Origin" },
   { key: "origin_reference", label: "Reference" },
   { key: "status", label: "Status" },
@@ -102,6 +104,7 @@ const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
 function getSortValue(o: OrderRow, key: string): unknown {
   switch (key) {
     case "order_number": return o.order_number;
+    case "customer_name": return o.customer?.display_name ?? o.guest_name;
     case "origin_channel": return o.origin_channel;
     case "origin_reference": return o.origin_reference;
     case "status": return o.status;
@@ -120,6 +123,10 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
       return <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />;
     case "order_number":
       return <span className="font-mono text-xs font-medium">{o.order_number}</span>;
+    case "customer_name": {
+      const name = o.customer?.display_name ?? o.guest_name;
+      return <span className="text-xs">{name ?? "—"}</span>;
+    }
     case "origin_channel":
       return <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>{o.origin_channel.replace(/_/g, " ")}</Badge>;
     case "origin_reference":
@@ -171,6 +178,7 @@ export function OrdersPage() {
         (o) =>
           o.order_number.toLowerCase().includes(q) ||
           (o.origin_reference ?? "").toLowerCase().includes(q) ||
+          (o.customer?.display_name ?? "").toLowerCase().includes(q) ||
           (o.guest_name ?? "").toLowerCase().includes(q) ||
           (o.guest_email ?? "").toLowerCase().includes(q),
       );
@@ -308,9 +316,13 @@ export function OrdersPage() {
                           <tr>
                             <td colSpan={visibleCols.length} className="bg-muted/30 p-0">
                               <div className="px-8 py-3">
-                                {o.guest_name || o.guest_email ? (
+                                {o.customer ? (
                                   <p className="text-xs text-muted-foreground mb-2">
-                                    Customer: {o.guest_name}{o.guest_email ? ` (${o.guest_email})` : ""}
+                                    Customer: {o.customer.display_name}{o.customer.email ? ` (${o.customer.email})` : ""}
+                                  </p>
+                                ) : o.guest_name || o.guest_email ? (
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Guest: {o.guest_name}{o.guest_email ? ` (${o.guest_email})` : ""}
                                   </p>
                                 ) : null}
                                 <Table>

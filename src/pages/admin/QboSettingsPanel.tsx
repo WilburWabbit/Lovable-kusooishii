@@ -27,6 +27,7 @@ export function QboSettingsPanel() {
   const [syncing, setSyncing] = useState(false);
   const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [syncingCustomers, setSyncingCustomers] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -110,6 +111,30 @@ export function QboSettingsPanel() {
   };
 
 
+  const syncCustomers = async () => {
+    setSyncingCustomers(true);
+    try {
+      const data = await invokeWithAuth("qbo-sync-customers");
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      if (data.upserted) parts.push(`${data.upserted} customers synced`);
+      if (data.skipped) parts.push(`${data.skipped} skipped`);
+      if (data.orders_linked) parts.push(`${data.orders_linked} orders linked`);
+      toast({
+        title: "Customer sync complete",
+        description: parts.length > 0 ? parts.join(", ") + "." : "No changes.",
+      });
+    } catch (err) {
+      toast({
+        title: "Customer sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingCustomers(false);
+    }
+  };
+
 
   const syncSales = async () => {
     setSyncingSales(true);
@@ -173,6 +198,10 @@ export function QboSettingsPanel() {
               <Button size="sm" onClick={syncSales} disabled={syncingSales || !user}>
                 {syncingSales ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Sales
+              </Button>
+              <Button size="sm" onClick={syncCustomers} disabled={syncingCustomers || !user}>
+                {syncingCustomers ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                Sync Customers
               </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}

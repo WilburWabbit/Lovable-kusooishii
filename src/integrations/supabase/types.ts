@@ -298,6 +298,66 @@ export type Database = {
         }
         Relationships: []
       }
+      customer: {
+        Row: {
+          active: boolean
+          billing_city: string | null
+          billing_country: string | null
+          billing_county: string | null
+          billing_line_1: string | null
+          billing_line_2: string | null
+          billing_postcode: string | null
+          created_at: string
+          display_name: string
+          email: string | null
+          id: string
+          mobile: string | null
+          notes: string | null
+          phone: string | null
+          qbo_customer_id: string
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          billing_city?: string | null
+          billing_country?: string | null
+          billing_county?: string | null
+          billing_line_1?: string | null
+          billing_line_2?: string | null
+          billing_postcode?: string | null
+          created_at?: string
+          display_name: string
+          email?: string | null
+          id?: string
+          mobile?: string | null
+          notes?: string | null
+          phone?: string | null
+          qbo_customer_id: string
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          billing_city?: string | null
+          billing_country?: string | null
+          billing_county?: string | null
+          billing_line_1?: string | null
+          billing_line_2?: string | null
+          billing_postcode?: string | null
+          created_at?: string
+          display_name?: string
+          email?: string | null
+          id?: string
+          mobile?: string | null
+          notes?: string | null
+          phone?: string | null
+          qbo_customer_id?: string
+          synced_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       inbound_receipt: {
         Row: {
           created_at: string
@@ -595,6 +655,7 @@ export type Database = {
           club_id: string | null
           created_at: string
           currency: string
+          customer_id: string | null
           discount_total: number
           global_tax_calculation: string | null
           gross_total: number
@@ -626,6 +687,7 @@ export type Database = {
           club_id?: string | null
           created_at?: string
           currency?: string
+          customer_id?: string | null
           discount_total?: number
           global_tax_calculation?: string | null
           gross_total: number
@@ -657,6 +719,7 @@ export type Database = {
           club_id?: string | null
           created_at?: string
           currency?: string
+          customer_id?: string | null
           discount_total?: number
           global_tax_calculation?: string | null
           gross_total?: number
@@ -688,6 +751,13 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "club"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customer"
             referencedColumns: ["id"]
           },
         ]

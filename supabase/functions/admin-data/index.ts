@@ -92,16 +92,22 @@ Deno.serve(async (req) => {
         vat_rate_percent: u.receipt_line?.tax_code?.purchase_tax_rate?.rate_percent ?? null,
         receipt_line: undefined,
       }));
+    } else if (action === "list-customers") {
+      const { data, error } = await admin
+        .from("customer")
+        .select("id, qbo_customer_id, display_name, email, phone, mobile, billing_city, billing_postcode, billing_country, active, synced_at, created_at")
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      result = data;
     } else if (action === "list-orders") {
       const { data, error } = await admin
         .from("sales_order")
         .select(
-          "id, order_number, origin_channel, origin_reference, status, merchandise_subtotal, tax_total, gross_total, currency, guest_name, guest_email, created_at, notes, sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)))"
+          "id, order_number, origin_channel, origin_reference, status, merchandise_subtotal, tax_total, gross_total, currency, guest_name, guest_email, created_at, notes, customer:customer_id(id, display_name, email), sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
       if (error) throw error;
-      // Flatten vat_rate_percent onto each line
       result = (data ?? []).map((o: any) => ({
         ...o,
         sales_order_line: (o.sales_order_line ?? []).map((l: any) => ({

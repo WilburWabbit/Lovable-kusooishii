@@ -22,6 +22,7 @@ import {
   SettingsPage,
 } from "./pages/admin/AdminPages";
 import { OrdersPage } from "./pages/admin/OrdersPage";
+import { CustomersPage } from "./pages/admin/CustomersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="/admin/inventory" element={<InventoryPage />} />
             <Route path="/admin/listings" element={<ListingsPage />} />
             <Route path="/admin/orders" element={<OrdersPage />} />
+            <Route path="/admin/customers" element={<CustomersPage />} />
             <Route path="/admin/reconciliation" element={<ReconciliationPage />} />
             <Route path="/admin/demand" element={<DemandPage />} />
             <Route path="/admin/analytics" element={<AnalyticsPage />} />
