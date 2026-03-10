@@ -381,6 +381,24 @@ Deno.serve(async (req) => {
 
       if (lineRows.length > 0) {
         await supabaseAdmin.from("inbound_receipt_line").insert(lineRows);
+
+        // Resolve qbo_tax_code_ref → tax_code_id for each line
+        for (const lr of lineRows) {
+          if (lr.qbo_tax_code_ref) {
+            const { data: tc } = await supabaseAdmin
+              .from("tax_code")
+              .select("id")
+              .eq("qbo_tax_code_id", lr.qbo_tax_code_ref)
+              .maybeSingle();
+            if (tc) {
+              await supabaseAdmin
+                .from("inbound_receipt_line")
+                .update({ tax_code_id: tc.id })
+                .eq("inbound_receipt_id", receipt.id)
+                .eq("qbo_tax_code_ref", lr.qbo_tax_code_ref);
+            }
+          }
+        }
       }
 
       // Auto-process the receipt
