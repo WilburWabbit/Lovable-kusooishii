@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { User, Heart, MapPin, Package, LogOut } from "lucide-react";
+import { User, Heart, MapPin, Package, LogOut, Shield } from "lucide-react";
 import WishlistTab from "@/components/WishlistTab";
 
 export default function AccountPage() {
