@@ -149,13 +149,15 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
     case "items":
       return o.sales_order_line.length;
     case "net":
-      return <span className="font-mono text-xs">{fmt(o.merchandise_subtotal)}</span>;
+      return <span className="font-mono text-xs">{fmt(orderNetFromLines(o))}</span>;
     case "vat":
-      return <span className="font-mono text-xs">{fmt(o.tax_total)}</span>;
+      return <span className="font-mono text-xs">{fmt(orderVatFromLines(o))}</span>;
     case "total":
-      return <span className="font-mono text-xs">{fmt(o.gross_total)}</span>;
-    case "created_at":
-      return <span className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</span>;
+      return <span className="font-mono text-xs">{fmt(orderGrossFromLines(o))}</span>;
+    case "created_at": {
+      const dateStr = o.txn_date ?? o.created_at;
+      return <span className="text-xs text-muted-foreground">{format(new Date(dateStr), "dd MMM yyyy")}</span>;
+    }
     default: return null;
   }
 }
