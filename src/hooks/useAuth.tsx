@@ -6,8 +6,10 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: { display_name: string | null; avatar_url: string | null } | null;
+  roles: string[];
   loading: boolean;
   signOut: () => Promise<void>;
+  isStaffOrAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
