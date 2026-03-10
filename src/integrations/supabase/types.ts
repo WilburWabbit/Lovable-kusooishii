@@ -676,13 +676,16 @@ export type Database = {
       }
       product: {
         Row: {
+          age_range: string | null
           call_to_action: string | null
           created_at: string
           description: string | null
+          height_cm: number | null
           highlights: string | null
           id: string
           img_url: string | null
           lego_catalog_id: string | null
+          length_cm: number | null
           mpn: string
           name: string | null
           piece_count: number | null
@@ -696,15 +699,20 @@ export type Database = {
           subtheme_name: string | null
           theme_id: string | null
           updated_at: string
+          weight_kg: number | null
+          width_cm: number | null
         }
         Insert: {
+          age_range?: string | null
           call_to_action?: string | null
           created_at?: string
           description?: string | null
+          height_cm?: number | null
           highlights?: string | null
           id?: string
           img_url?: string | null
           lego_catalog_id?: string | null
+          length_cm?: number | null
           mpn: string
           name?: string | null
           piece_count?: number | null
@@ -718,15 +726,20 @@ export type Database = {
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
+          weight_kg?: number | null
+          width_cm?: number | null
         }
         Update: {
+          age_range?: string | null
           call_to_action?: string | null
           created_at?: string
           description?: string | null
+          height_cm?: number | null
           highlights?: string | null
           id?: string
           img_url?: string | null
           lego_catalog_id?: string | null
+          length_cm?: number | null
           mpn?: string
           name?: string | null
           piece_count?: number | null
@@ -740,6 +753,8 @@ export type Database = {
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
+          weight_kg?: number | null
+          width_cm?: number | null
         }
         Relationships: [
           {
