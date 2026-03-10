@@ -158,6 +158,198 @@ Deno.serve(async (req) => {
         stock_available: stockMap[s.id] ?? 0,
         channel_listings: listingMap[s.id] ?? [],
       }));
+    } else if (action === "list-products") {
+      // 1. Products with theme name
+      const { data: products, error: pErr } = await admin
+        .from("product")
+        .select("*, theme:theme_id(name)")
+        .order("mpn", { ascending: true });
+      if (pErr) throw pErr;
+
+      // 2. SKUs per product
+      const { data: skus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code, condition_grade, price, product_id, active_flag")
+        .order("sku_code");
+      if (skuErr) throw skuErr;
+
+      // 3. Available stock counts per SKU
+      const { data: stockUnits, error: suErr } = await admin
+        .from("stock_unit")
+        .select("sku_id, carrying_value, status");
+      if (suErr) throw suErr;
+
+      const skuStockMap: Record<string, { available: number; value: number }> = {};
+      for (const su of stockUnits ?? []) {
+        if (!skuStockMap[su.sku_id]) skuStockMap[su.sku_id] = { available: 0, value: 0 };
+        if (su.status === "available") {
+          skuStockMap[su.sku_id].available += 1;
+          skuStockMap[su.sku_id].value += su.carrying_value ?? 0;
+        }
+      }
+
+      // 4. Sales per SKU
+      const { data: salesLines, error: slErr } = await admin
+        .from("sales_order_line")
+        .select("sku_id, quantity, line_total");
+      if (slErr) throw slErr;
+
+      const skuSalesMap: Record<string, { qty: number; revenue: number }> = {};
+      for (const sl of salesLines ?? []) {
+        if (!skuSalesMap[sl.sku_id]) skuSalesMap[sl.sku_id] = { qty: 0, revenue: 0 };
+        skuSalesMap[sl.sku_id].qty += sl.quantity;
+        skuSalesMap[sl.sku_id].revenue += sl.line_total;
+      }
+
+      // 5. Channel listings per SKU
+      const { data: listings, error: clErr } = await admin
+        .from("channel_listing")
+        .select("id, sku_id, channel, external_sku, external_listing_id, offer_status, listed_price, listed_quantity, listing_title, listing_description, synced_at");
+      if (clErr) throw clErr;
+
+      const skuListingMap: Record<string, any[]> = {};
+      for (const cl of listings ?? []) {
+        if (!cl.sku_id) continue;
+        if (!skuListingMap[cl.sku_id]) skuListingMap[cl.sku_id] = [];
+        skuListingMap[cl.sku_id].push(cl);
+      }
+
+      // Group SKUs by product_id
+      const productSkuMap: Record<string, any[]> = {};
+      for (const s of skus ?? []) {
+        if (!s.product_id) continue;
+        if (!productSkuMap[s.product_id]) productSkuMap[s.product_id] = [];
+        const stock = skuStockMap[s.id] ?? { available: 0, value: 0 };
+        productSkuMap[s.product_id].push({
+          ...s,
+          stock_available: stock.available,
+          carrying_value: stock.value,
+          channel_listings: skuListingMap[s.id] ?? [],
+        });
+      }
+
+      // Merge into products
+      result = (products ?? []).map((p: any) => {
+        const pSkus = productSkuMap[p.id] ?? [];
+        let stockAvailable = 0, carryingValue = 0, unitsSold = 0, revenue = 0;
+        const allChannelListings: any[] = [];
+        for (const s of pSkus) {
+          stockAvailable += s.stock_available;
+          carryingValue += s.carrying_value;
+          const sales = skuSalesMap[s.id];
+          if (sales) { unitsSold += sales.qty; revenue += sales.revenue; }
+          allChannelListings.push(...s.channel_listings);
+        }
+        return {
+          ...p,
+          theme_name: p.theme?.name ?? null,
+          theme: undefined,
+          stock_available: stockAvailable,
+          carrying_value: carryingValue,
+          units_sold: unitsSold,
+          revenue,
+          skus: pSkus,
+          channel_listings: allChannelListings,
+        };
+      });
+    } else if (action === "get-product") {
+      const { data: product, error: pErr } = await admin
+        .from("product")
+        .select("*, theme:theme_id(name)")
+        .eq("id", params.product_id)
+        .single();
+      if (pErr) throw pErr;
+
+      // SKUs
+      const { data: skus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code, condition_grade, price, active_flag")
+        .eq("product_id", params.product_id)
+        .order("sku_code");
+      if (skuErr) throw skuErr;
+
+      const skuIds = (skus ?? []).map((s: any) => s.id);
+
+      // Stock
+      const { data: stockUnits } = await admin
+        .from("stock_unit")
+        .select("sku_id, carrying_value, status")
+        .in("sku_id", skuIds.length > 0 ? skuIds : ["00000000-0000-0000-0000-000000000000"]);
+
+      const skuStockMap: Record<string, { available: number; value: number }> = {};
+      for (const su of stockUnits ?? []) {
+        if (!skuStockMap[su.sku_id]) skuStockMap[su.sku_id] = { available: 0, value: 0 };
+        if (su.status === "available") {
+          skuStockMap[su.sku_id].available += 1;
+          skuStockMap[su.sku_id].value += su.carrying_value ?? 0;
+        }
+      }
+
+      // Sales
+      const { data: salesLines } = await admin
+        .from("sales_order_line")
+        .select("sku_id, quantity, line_total")
+        .in("sku_id", skuIds.length > 0 ? skuIds : ["00000000-0000-0000-0000-000000000000"]);
+
+      // Channel listings
+      const { data: listings } = await admin
+        .from("channel_listing")
+        .select("id, sku_id, channel, external_sku, external_listing_id, offer_status, listed_price, listed_quantity, listing_title, listing_description, synced_at")
+        .in("sku_id", skuIds.length > 0 ? skuIds : ["00000000-0000-0000-0000-000000000000"]);
+
+      const skuListingMap: Record<string, any[]> = {};
+      for (const cl of listings ?? []) {
+        if (!cl.sku_id) continue;
+        if (!skuListingMap[cl.sku_id]) skuListingMap[cl.sku_id] = [];
+        skuListingMap[cl.sku_id].push(cl);
+      }
+
+      let stockAvailable = 0, carryingValue = 0, unitsSold = 0, revenue = 0;
+      const allChannelListings: any[] = [];
+      const enrichedSkus = (skus ?? []).map((s: any) => {
+        const stock = skuStockMap[s.id] ?? { available: 0, value: 0 };
+        stockAvailable += stock.available;
+        carryingValue += stock.value;
+        const skuSales = (salesLines ?? []).filter((sl: any) => sl.sku_id === s.id);
+        for (const sl of skuSales) { unitsSold += sl.quantity; revenue += sl.line_total; }
+        const cls = skuListingMap[s.id] ?? [];
+        allChannelListings.push(...cls);
+        return { ...s, stock_available: stock.available, carrying_value: stock.value, channel_listings: cls };
+      });
+
+      result = {
+        ...product,
+        theme_name: product.theme?.name ?? null,
+        theme: undefined,
+        stock_available: stockAvailable,
+        carrying_value: carryingValue,
+        units_sold: unitsSold,
+        revenue,
+        skus: enrichedSkus,
+        channel_listings: allChannelListings,
+      };
+    } else if (action === "update-product") {
+      const { product_id, ...fields } = params;
+      const allowed = ["product_hook", "description", "highlights", "call_to_action", "seo_title", "seo_description"];
+      const updates: Record<string, any> = {};
+      for (const k of allowed) {
+        if (k in fields) updates[k] = fields[k];
+      }
+      if (Object.keys(updates).length === 0) throw new Error("No valid fields to update");
+      const { error } = await admin.from("product").update(updates).eq("id", product_id);
+      if (error) throw error;
+      result = { success: true };
+    } else if (action === "update-channel-listing") {
+      const { listing_id, ...fields } = params;
+      const allowed = ["listing_title", "listing_description"];
+      const updates: Record<string, any> = {};
+      for (const k of allowed) {
+        if (k in fields) updates[k] = fields[k];
+      }
+      if (Object.keys(updates).length === 0) throw new Error("No valid fields to update");
+      const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
+      if (error) throw error;
+      result = { success: true };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
