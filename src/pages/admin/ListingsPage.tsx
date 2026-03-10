@@ -43,7 +43,7 @@ interface ListingRow {
   name: string | null;
   condition_grade: string;
   price: number | null;
-  catalog_product: { name: string; mpn: string } | null;
+  product: { name: string; mpn: string } | null;
   stock_available: number;
   channel_listings: ChannelListing[];
 }
