@@ -37,9 +37,46 @@ export default function CartPage() {
   const handleCheckout = async () => {
     setIsCheckingOut(true);
     trackBeginCheckout(cart, subtotal);
-    // Stripe checkout will be wired up once Stripe is enabled
-    toast.info('Stripe checkout coming soon.');
-    setIsCheckingOut(false);
+    try {
+      const { data: { session } } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout`,
+        {
+          method: 'POST',
+          headers: { ...headers, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+          body: JSON.stringify({
+            items: cart.map(i => ({
+              name: i.name,
+              setNumber: i.setNumber,
+              price: i.price,
+              quantity: i.quantity,
+              conditionGrade: i.conditionGrade,
+              image: i.image,
+            })),
+            shippingMethod: selectedShipping,
+            shippingPrice,
+            collectionDiscount,
+          }),
+        }
+      );
+
+      const result = await res.json();
+      if (result.url) {
+        window.location.href = result.url;
+      } else {
+        throw new Error(result.error || 'Failed to create checkout session');
+      }
+    } catch (err: any) {
+      console.error('Checkout error:', err);
+      toast.error(err.message || 'Checkout failed. Please try again.');
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   if (cart.length === 0) {
