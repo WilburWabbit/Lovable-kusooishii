@@ -81,12 +81,17 @@ Deno.serve(async (req) => {
       const { data, error } = await admin
         .from("stock_unit")
         .select(
-          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name))"
+          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)), receipt_line:inbound_receipt_line_id(tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent)))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
       if (error) throw error;
-      result = data;
+      // Flatten vat_rate_percent
+      result = (data ?? []).map((u: any) => ({
+        ...u,
+        vat_rate_percent: u.receipt_line?.tax_code?.purchase_tax_rate?.rate_percent ?? null,
+        receipt_line: undefined,
+      }));
     } else if (action === "list-orders") {
       const { data, error } = await admin
         .from("sales_order")
