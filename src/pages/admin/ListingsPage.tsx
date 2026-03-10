@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +18,7 @@ import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
 
 /* ------------------------------------------------------------------ */
@@ -206,11 +206,10 @@ export function ListingsPage() {
   const { data: rows = [], isLoading, refetch } = useQuery({
     queryKey: ["listings-coverage"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-listings" },
+      const data = await invokeWithAuth<ListingRow[]>("admin-data", {
+        action: "list-listings",
       });
-      if (error) throw error;
-      return (data ?? []) as ListingRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });
@@ -261,10 +260,9 @@ export function ListingsPage() {
   const handleSyncEbay = async () => {
     setSyncing(true);
     try {
-      const { error } = await supabase.functions.invoke("ebay-sync", {
-        body: { action: "sync_inventory" },
+      await invokeWithAuth("ebay-sync", {
+        action: "sync_inventory",
       });
-      if (error) throw error;
       toast.success("eBay sync triggered");
       refetch();
     } catch (err: any) {

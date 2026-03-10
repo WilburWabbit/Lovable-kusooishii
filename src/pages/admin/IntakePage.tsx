@@ -16,6 +16,7 @@ import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 
 interface Receipt {
   id: string;
@@ -124,11 +125,9 @@ export function IntakePage() {
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-receipts" },
+      return await invokeWithAuth<Receipt[]>("admin-data", {
+        action: "list-receipts",
       });
-      if (error) throw error;
-      return data as Receipt[];
     },
     enabled: !!user,
   });
@@ -137,11 +136,10 @@ export function IntakePage() {
     queryKey: ["receipt-lines", selectedReceipt?.id],
     queryFn: async () => {
       if (!selectedReceipt) return [];
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "receipt-lines", receipt_id: selectedReceipt.id },
+      return await invokeWithAuth<ReceiptLine[]>("admin-data", {
+        action: "receipt-lines",
+        receipt_id: selectedReceipt.id,
       });
-      if (error) throw error;
-      return data as ReceiptLine[];
     },
     enabled: !!selectedReceipt,
   });

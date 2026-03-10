@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +17,7 @@ import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 
 type CustomerRow = {
   id: string;
@@ -101,11 +101,10 @@ export function CustomersPage() {
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ["admin-customers"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-customers" },
+      const data = await invokeWithAuth<CustomerRow[]>("admin-data", {
+        action: "list-customers",
       });
-      if (error) throw error;
-      return (data ?? []) as CustomerRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });
