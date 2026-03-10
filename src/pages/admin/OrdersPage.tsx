@@ -48,6 +48,7 @@ type OrderRow = {
   guest_name: string | null;
   guest_email: string | null;
   created_at: string;
+  txn_date: string | null;
   notes: string | null;
   customer: { id: string; display_name: string; email: string | null } | null;
   sales_order_line: OrderLineRow[];

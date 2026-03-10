@@ -678,6 +678,7 @@ export type Database = {
           shipping_total: number
           status: Database["public"]["Enums"]["order_status"]
           tax_total: number
+          txn_date: string | null
           updated_at: string
           user_id: string | null
         }
@@ -710,6 +711,7 @@ export type Database = {
           shipping_total?: number
           status?: Database["public"]["Enums"]["order_status"]
           tax_total?: number
+          txn_date?: string | null
           updated_at?: string
           user_id?: string | null
         }
@@ -742,6 +744,7 @@ export type Database = {
           shipping_total?: number
           status?: Database["public"]["Enums"]["order_status"]
           tax_total?: number
+          txn_date?: string | null
           updated_at?: string
           user_id?: string | null
         }
