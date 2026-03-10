@@ -88,6 +88,7 @@ function lineVatAmount(l: OrderLineRow) {
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
   { key: "order_number", label: "Order #" },
+  { key: "customer_name", label: "Customer" },
   { key: "origin_channel", label: "Origin" },
   { key: "origin_reference", label: "Reference" },
   { key: "status", label: "Status" },
