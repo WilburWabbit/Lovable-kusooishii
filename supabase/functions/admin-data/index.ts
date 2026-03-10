@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin
         .from("sales_order")
         .select(
-          "id, order_number, doc_number, origin_channel, origin_reference, status, merchandise_subtotal, tax_total, gross_total, currency, guest_name, guest_email, created_at, txn_date, notes, customer:customer_id(id, display_name, email), sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)))"
+          "id, order_number, doc_number, origin_channel, origin_reference, status, merchandise_subtotal, tax_total, gross_total, currency, guest_name, guest_email, created_at, txn_date, notes, customer:customer_id(id, display_name, email), sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, product:product_id(name)))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
