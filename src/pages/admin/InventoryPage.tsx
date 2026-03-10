@@ -248,7 +248,7 @@ export function InventoryPage() {
               ))}
             </SelectContent>
           </Select>
-          <div className="sm:ml-auto">
+          <div className="hidden md:block sm:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS}
               visibleColumns={tp.prefs.visibleColumns}
