@@ -13,7 +13,7 @@ import { User, Heart, MapPin, Package, LogOut, Shield } from "lucide-react";
 import WishlistTab from "@/components/WishlistTab";
 
 export default function AccountPage() {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading, signOut, isStaffOrAdmin } = useAuth();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState("");
   const [saving, setSaving] = useState(false);
