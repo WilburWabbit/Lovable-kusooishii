@@ -370,6 +370,36 @@ export type Database = {
         }
         Relationships: []
       }
+      ebay_notification: {
+        Row: {
+          created_at: string
+          id: string
+          notification_id: string | null
+          payload: Json | null
+          read: boolean
+          received_at: string
+          topic: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notification_id?: string | null
+          payload?: Json | null
+          read?: boolean
+          received_at?: string
+          topic: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notification_id?: string | null
+          payload?: Json | null
+          read?: boolean
+          received_at?: string
+          topic?: string
+        }
+        Relationships: []
+      }
       inbound_receipt: {
         Row: {
           created_at: string
