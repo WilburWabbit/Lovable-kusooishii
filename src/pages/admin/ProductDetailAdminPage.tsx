@@ -62,6 +62,11 @@ interface ProductDetail {
   call_to_action: string | null;
   seo_title: string | null;
   seo_description: string | null;
+  age_range: string | null;
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
+  weight_kg: number | null;
   stock_available: number;
   carrying_value: number;
   units_sold: number;
