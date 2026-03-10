@@ -14,13 +14,14 @@ import {
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight } from "lucide-react";
+import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 type OrderLineRow = {
   id: string;
@@ -285,7 +286,7 @@ export function OrdersPage() {
               ))}
             </SelectContent>
           </Select>
-          <div className="sm:ml-auto">
+          <div className="hidden md:block sm:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS.filter((c) => c.key !== "_expand")}
               visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_expand")}
@@ -295,7 +296,63 @@ export function OrdersPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No orders found.</div>
+          ) : (
+            sorted.map((o) => {
+              const isExpanded = expandedId === o.id;
+              const dateStr = o.txn_date ?? o.created_at;
+              return (
+                <Card key={o.id} className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <button
+                      className="w-full p-3 text-left flex items-center gap-3 active:bg-muted/50"
+                      onClick={() => setExpandedId(isExpanded ? null : o.id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <MobileCardTitle>{o.doc_number ?? o.order_number}</MobileCardTitle>
+                        <MobileCardMeta>
+                          <span>{o.customer?.display_name ?? o.guest_name ?? "—"}</span>
+                          <span className="font-mono">{fmt(orderGrossFromLines(o))}</span>
+                          <span>{format(new Date(dateStr), "dd MMM yyyy")}</span>
+                        </MobileCardMeta>
+                        <MobileCardBadges>
+                          <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>{o.origin_channel.replace(/_/g, " ")}</Badge>
+                          <Badge variant="outline" className={STATUS_COLORS[o.status] ?? ""}>{o.status.replace(/_/g, " ")}</Badge>
+                        </MobileCardBadges>
+                      </div>
+                      {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+                    </button>
+                    {isExpanded && o.sales_order_line.length > 0 && (
+                      <div className="border-t border-border px-3 py-2 bg-muted/30 space-y-2">
+                        {o.sales_order_line.map((l) => {
+                          const vat = lineVatAmount(l);
+                          return (
+                            <div key={l.id} className="flex items-center justify-between text-xs">
+                              <div className="min-w-0 flex-1">
+                                <span className="font-mono">{l.sku?.sku_code ?? "—"}</span>
+                                <span className="text-muted-foreground ml-1.5">{l.sku?.product?.name ?? l.sku?.name ?? ""}</span>
+                                <span className="text-muted-foreground ml-1">×{l.quantity}</span>
+                              </div>
+                              <span className="font-mono shrink-0 ml-2">{fmt(l.line_total)}{vat != null ? ` +${fmt(vat)}` : ""}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -391,6 +448,7 @@ export function OrdersPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );

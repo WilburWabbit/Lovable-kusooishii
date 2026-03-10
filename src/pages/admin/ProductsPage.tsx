@@ -24,6 +24,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -323,7 +324,7 @@ export function ProductsPage() {
               <SelectItem value="missing">Missing content</SelectItem>
             </SelectContent>
           </Select>
-          <div className="sm:ml-auto">
+          <div className="hidden md:block sm:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS.filter((c) => c.key !== "_expand")}
               visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_expand")}
@@ -333,7 +334,37 @@ export function ProductsPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No products found.</div>
+          ) : (
+            sorted.map((p) => (
+              <MobileListCard key={p.id} onClick={() => navigate(`/admin/products/${p.id}`)}>
+                <MobileCardTitle>{p.mpn} — {p.name ?? "Unnamed"}</MobileCardTitle>
+                <MobileCardMeta>
+                  {p.theme_name && <span>{p.theme_name}</span>}
+                  <span>Stock: {p.stock_available}</span>
+                  <span>{fmt(p.carrying_value)}</span>
+                  <ContentIndicator product={p} />
+                </MobileCardMeta>
+                <MobileCardBadges>
+                  {p.retired_flag && (
+                    <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 text-[10px]">Retired</Badge>
+                  )}
+                  {p.channel_listings.length > 0 && (
+                    <Badge variant="outline" className="text-[10px]">{p.channel_listings.length} listings</Badge>
+                  )}
+                </MobileCardBadges>
+              </MobileListCard>
+            ))
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -365,10 +396,9 @@ export function ProductsPage() {
                       <>
                         <CollapsibleTrigger asChild>
                           <TableRow className="cursor-pointer" onClick={(e) => {
-                            // If clicking the expand chevron column, toggle expand. Otherwise navigate.
                             const target = e.target as HTMLElement;
                             const cell = target.closest("td");
-                            if (cell && cell.cellIndex === 0) return; // let collapsible handle it
+                            if (cell && cell.cellIndex === 0) return;
                             e.preventDefault();
                             navigate(`/admin/products/${p.id}`);
                           }}>
@@ -447,6 +477,7 @@ export function ProductsPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );

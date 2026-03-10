@@ -17,6 +17,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 interface Receipt {
   id: string;
@@ -278,7 +279,7 @@ export function IntakePage() {
                   <SelectItem value="error">Error</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="sm:ml-auto">
+              <div className="hidden md:block sm:ml-auto">
                 <ColumnSelector
                   allColumns={ALL_COLUMNS.filter((c) => c.key !== "_chevron")}
                   visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_chevron")}
@@ -288,6 +289,30 @@ export function IntakePage() {
               </div>
             </div>
 
+            {/* Mobile card view */}
+            <div className="md:hidden space-y-2">
+              {isLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              ) : !sorted.length ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No receipts yet.</p>
+              ) : (
+                sorted.map((r) => (
+                  <MobileListCard key={r.id} onClick={() => setSelectedReceipt(r)}>
+                    <MobileCardTitle>{r.vendor_name ?? "Unknown"}</MobileCardTitle>
+                    <MobileCardMeta>
+                      <span>{r.txn_date ?? "—"}</span>
+                      <span className="font-mono">{fmt(receiptGross(r))}</span>
+                    </MobileCardMeta>
+                    <MobileCardBadges>
+                      <Badge variant="outline" className={`text-[10px] ${statusColor[r.status] ?? ""}`}>{r.status}</Badge>
+                    </MobileCardBadges>
+                  </MobileListCard>
+                ))
+              )}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block">
             {isLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -328,6 +353,7 @@ export function IntakePage() {
                 </TableBody>
               </Table>
             )}
+            </div>
           </CardContent>
         </Card>
       </div>

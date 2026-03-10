@@ -18,7 +18,7 @@ export function BackOfficeLayout({ children, title }: BackOfficeLayoutProps) {
               <h1 className="font-display text-sm font-semibold text-foreground">{title}</h1>
             )}
           </header>
-          <main className="flex-1 bg-kuso-mist p-6">{children}</main>
+          <main className="flex-1 bg-kuso-mist p-3 md:p-6">{children}</main>
         </div>
       </div>
     </SidebarProvider>

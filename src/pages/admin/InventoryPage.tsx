@@ -19,6 +19,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 type StockRow = {
   id: string;
@@ -247,7 +248,7 @@ export function InventoryPage() {
               ))}
             </SelectContent>
           </Select>
-          <div className="sm:ml-auto">
+          <div className="hidden md:block sm:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS}
               visibleColumns={tp.prefs.visibleColumns}
@@ -257,7 +258,31 @@ export function InventoryPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No stock units found.</div>
+          ) : (
+            sorted.map((u) => (
+              <MobileListCard key={u.id} showChevron={false}>
+                <MobileCardTitle>{u.sku?.sku_code ?? "—"} — {productName(u) || "—"}</MobileCardTitle>
+                <MobileCardMeta>
+                  <span className="font-mono">{u.mpn}</span>
+                  <span>{GRADE_LABELS[u.condition_grade] ?? u.condition_grade}</span>
+                  <span className="font-mono">{fmt(u.carrying_value)}</span>
+                </MobileCardMeta>
+                <MobileCardBadges>
+                  <Badge variant="outline" className={STATUS_COLORS[u.status] ?? ""}>{u.status.replace(/_/g, " ")}</Badge>
+                </MobileCardBadges>
+              </MobileListCard>
+            ))
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -296,6 +321,7 @@ export function InventoryPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );
