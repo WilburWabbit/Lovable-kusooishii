@@ -299,6 +299,8 @@ Deno.serve(async (req) => {
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
       const currency = purchase.CurrencyRef?.value ?? "GBP";
+      const globalTaxCalc = purchase.GlobalTaxCalculation ?? null;
+      const taxTotal = purchase.TxnTaxDetail?.TotalTax ?? 0;
 
       const { data: receipt, error: receiptErr } = await supabaseAdmin
         .from("inbound_receipt")
@@ -310,6 +312,8 @@ Deno.serve(async (req) => {
             total_amount: totalAmount,
             currency,
             raw_payload: purchase,
+            tax_total: taxTotal,
+            global_tax_calculation: globalTaxCalc,
           },
           { onConflict: "qbo_purchase_id" }
         )
