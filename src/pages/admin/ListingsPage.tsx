@@ -151,7 +151,7 @@ function getSortValue(r: ListingRow, key: string): unknown {
   switch (key) {
     case "sku_code": return r.sku_code;
     case "product": return productName(r);
-    case "mpn": return r.catalog_product?.mpn ?? "";
+    case "mpn": return r.product?.mpn ?? "";
     case "grade": return r.condition_grade;
     case "price": return r.price;
     case "stock": return r.stock_available;
