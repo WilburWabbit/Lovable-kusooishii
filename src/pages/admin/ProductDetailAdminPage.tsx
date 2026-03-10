@@ -382,6 +382,9 @@ export default function ProductDetailAdminPage() {
           </Card>
         )}
 
+        {/* Media */}
+        <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} />
+
         {/* Common Content */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">

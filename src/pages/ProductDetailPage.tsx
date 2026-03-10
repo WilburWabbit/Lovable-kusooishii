@@ -123,11 +123,40 @@ export default function ProductDetailPage() {
             </div>
           ) : product ? (
             <div className="grid gap-10 lg:grid-cols-2">
-              {/* Image placeholder */}
-              <div className="aspect-square bg-kuso-mist flex items-center justify-center">
-                <span className="font-display text-6xl font-bold text-muted-foreground/15">
-                  {product.mpn.split("-")[0]}
-                </span>
+              {/* Image gallery */}
+              <div>
+                {mediaItems.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="aspect-square bg-kuso-mist overflow-hidden">
+                      <img
+                        src={mediaItems[selectedImage]?.url}
+                        alt={mediaItems[selectedImage]?.alt || product.name || ""}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                    {mediaItems.length > 1 && (
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {mediaItems.map((img, idx) => (
+                          <button
+                            key={img.id}
+                            onClick={() => setSelectedImage(idx)}
+                            className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors ${
+                              idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
+                            }`}
+                          >
+                            <img src={img.url} alt={img.alt || ""} className="h-full w-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="aspect-square bg-kuso-mist flex items-center justify-center">
+                    <span className="font-display text-6xl font-bold text-muted-foreground/15">
+                      {product.mpn.split("-")[0]}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Product info */}
