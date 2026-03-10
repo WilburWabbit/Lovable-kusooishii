@@ -101,13 +101,102 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
-/** Auto-process a pending receipt: create SKUs + stock_units, mark processed.
- *  QBO is authoritative — SKUs are created standalone when no catalog match exists. */
+// ── Backfill: resolve tax codes and link stock units for already-processed receipts ──
+
+async function backfillProcessedReceipt(
+  supabaseAdmin: any,
+  receiptId: string,
+  rawPayload: any
+): Promise<{ taxCodesUpdated: number; stockUnitsLinked: number }> {
+  let taxCodesUpdated = 0;
+  let stockUnitsLinked = 0;
+
+  const rawLines: any[] = rawPayload?.Line ?? [];
+
+  // 1) Backfill qbo_tax_code_ref and tax_code_id on receipt lines
+  for (const rawLine of rawLines) {
+    if (rawLine.DetailType !== "ItemBasedExpenseLineDetail") continue;
+    const detail = rawLine.ItemBasedExpenseLineDetail;
+    const qboItemId = detail?.ItemRef?.value;
+    const taxCodeRef = detail?.TaxCodeRef?.value;
+    if (!qboItemId || !taxCodeRef) continue;
+
+    // Find the matching receipt line
+    const { data: existingLine } = await supabaseAdmin
+      .from("inbound_receipt_line")
+      .select("id, qbo_tax_code_ref, tax_code_id")
+      .eq("inbound_receipt_id", receiptId)
+      .eq("qbo_item_id", qboItemId)
+      .limit(1)
+      .single();
+
+    if (!existingLine) continue;
+
+    // Update qbo_tax_code_ref if missing
+    if (!existingLine.qbo_tax_code_ref) {
+      await supabaseAdmin
+        .from("inbound_receipt_line")
+        .update({ qbo_tax_code_ref: taxCodeRef })
+        .eq("id", existingLine.id);
+    }
+
+    // Resolve tax_code_id if missing
+    if (!existingLine.tax_code_id) {
+      const { data: tc } = await supabaseAdmin
+        .from("tax_code")
+        .select("id")
+        .eq("qbo_tax_code_id", taxCodeRef)
+        .maybeSingle();
+      if (tc) {
+        await supabaseAdmin
+          .from("inbound_receipt_line")
+          .update({ tax_code_id: tc.id })
+          .eq("id", existingLine.id);
+        taxCodesUpdated++;
+      }
+    }
+  }
+
+  // 2) Backfill stock_unit.inbound_receipt_line_id
+  // Get all stock lines for this receipt
+  const { data: receiptLines } = await supabaseAdmin
+    .from("inbound_receipt_line")
+    .select("id, mpn, condition_grade, quantity")
+    .eq("inbound_receipt_id", receiptId)
+    .eq("is_stock_line", true);
+
+  for (const rl of (receiptLines ?? [])) {
+    if (!rl.mpn || !rl.condition_grade) continue;
+
+    // Find unlinked stock units matching this line's mpn + grade
+    const { data: unlinkedUnits } = await supabaseAdmin
+      .from("stock_unit")
+      .select("id")
+      .eq("mpn", rl.mpn)
+      .eq("condition_grade", rl.condition_grade)
+      .is("inbound_receipt_line_id", null)
+      .limit(rl.quantity);
+
+    for (const unit of (unlinkedUnits ?? [])) {
+      await supabaseAdmin
+        .from("stock_unit")
+        .update({ inbound_receipt_line_id: rl.id })
+        .eq("id", unit.id);
+      stockUnitsLinked++;
+    }
+  }
+
+  return { taxCodesUpdated, stockUnitsLinked };
+}
+
+// ── Auto-process a pending receipt: create SKUs + stock_units, mark processed ──
+
 async function autoProcessReceipt(
   supabaseAdmin: any,
   receiptId: string,
   vendorName: string | null,
   lineRows: Array<{
+    id?: string; // receipt line ID (after insert)
     is_stock_line: boolean;
     mpn: string | null;
     condition_grade: string | null;
@@ -124,7 +213,6 @@ async function autoProcessReceipt(
     return { processed: false, skipped: ["No mapped stock lines"] };
   }
 
-  // Lines marked as stock but missing MPN/grade = exception
   const unmappedStockLines = lineRows.filter(l => l.is_stock_line && (!l.mpn || !l.condition_grade));
   if (unmappedStockLines.length > 0) {
     return { processed: false, skipped: [`${unmappedStockLines.length} stock line(s) missing MPN/grade`] };
@@ -141,7 +229,6 @@ async function autoProcessReceipt(
     const mpn = line.mpn!;
     const skuCode = `${mpn}-G${conditionGrade}`;
 
-    // Optionally link to catalog_product if MPN matches
     const { data: product } = await supabaseAdmin
       .from("catalog_product")
       .select("id, mpn")
@@ -153,7 +240,6 @@ async function autoProcessReceipt(
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
     const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
 
-    // Find-or-create SKU by sku_code (unique constraint)
     let { data: sku } = await supabaseAdmin
       .from("sku")
       .select("id")
@@ -170,7 +256,7 @@ async function autoProcessReceipt(
           name: cleanQboName(line.description ?? mpn),
           price: landedCost,
           active_flag: true,
-          saleable_flag: !!product, // only saleable if catalog-linked
+          saleable_flag: !!product,
         })
         .select("id")
         .single();
@@ -187,6 +273,7 @@ async function autoProcessReceipt(
         status: "available",
         landed_cost: landedCost,
         supplier_id: vendorName ?? null,
+        inbound_receipt_line_id: line.id ?? null, // forward-fix: link to receipt line
       });
     }
 
@@ -195,7 +282,6 @@ async function autoProcessReceipt(
     unitsCreated += stockUnits.length;
   }
 
-  // All lines processed — mark receipt done
   await supabaseAdmin
     .from("inbound_receipt")
     .update({ status: "processed", processed_at: new Date().toISOString() })
@@ -270,7 +356,6 @@ Deno.serve(async (req) => {
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
-      // Pause between batches to avoid QBO 429 rate limits
       if (i + BATCH_SIZE < itemIdArray.length) {
         await new Promise(r => setTimeout(r, 250));
       }
@@ -281,12 +366,13 @@ Deno.serve(async (req) => {
     let leftPending = 0;
     let skippedExisting = 0;
     let skippedNoItems = 0;
+    let backfilledTaxCodes = 0;
+    let backfilledStockLinks = 0;
     const pendingReasons: string[] = [];
 
     for (const purchase of purchases) {
       const qboPurchaseId = purchase.Id;
 
-      // Skip purchases with no item-based lines (pure account expenses)
       const hasItemLines = (purchase.Line ?? []).some(
         (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
       );
@@ -325,8 +411,15 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Already processed — skip line rebuild and auto-processing
+      // Already processed — run backfill for tax codes & stock unit links, then skip
       if (receipt.status === "processed") {
+        try {
+          const bf = await backfillProcessedReceipt(supabaseAdmin, receipt.id, purchase);
+          backfilledTaxCodes += bf.taxCodesUpdated;
+          backfilledStockLinks += bf.stockUnitsLinked;
+        } catch (bfErr) {
+          console.error(`Backfill failed for receipt ${receipt.id}:`, bfErr);
+        }
         skippedExisting++;
         continue;
       }
@@ -362,7 +455,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Capture line-level TaxCodeRef (e.g. "TAX" or "NON")
         const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
         lineRows.push({
@@ -380,42 +472,55 @@ Deno.serve(async (req) => {
       }
 
       if (lineRows.length > 0) {
-        await supabaseAdmin.from("inbound_receipt_line").insert(lineRows);
+        // Insert lines and get back IDs
+        const { data: insertedLines, error: insertErr } = await supabaseAdmin
+          .from("inbound_receipt_line")
+          .insert(lineRows)
+          .select("id, mpn, condition_grade, is_stock_line, qbo_tax_code_ref");
+
+        if (insertErr) {
+          console.error(`Failed to insert lines for receipt ${receipt.id}:`, insertErr);
+        }
 
         // Resolve qbo_tax_code_ref → tax_code_id for each line
-        for (const lr of lineRows) {
-          if (lr.qbo_tax_code_ref) {
+        for (const il of (insertedLines ?? [])) {
+          if (il.qbo_tax_code_ref) {
             const { data: tc } = await supabaseAdmin
               .from("tax_code")
               .select("id")
-              .eq("qbo_tax_code_id", lr.qbo_tax_code_ref)
+              .eq("qbo_tax_code_id", il.qbo_tax_code_ref)
               .maybeSingle();
             if (tc) {
               await supabaseAdmin
                 .from("inbound_receipt_line")
                 .update({ tax_code_id: tc.id })
-                .eq("inbound_receipt_id", receipt.id)
-                .eq("qbo_tax_code_ref", lr.qbo_tax_code_ref);
+                .eq("id", il.id);
             }
           }
         }
-      }
 
-      // Auto-process the receipt
-      try {
-        const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRows);
-        if (result.processed) {
-          autoProcessed++;
-        } else {
-          leftPending++;
-          if (result.skipped.length > 0) {
-            pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
+        // Build line rows with IDs for autoProcessReceipt
+        const lineRowsWithIds = lineRows.map((lr, idx) => ({
+          ...lr,
+          id: insertedLines?.[idx]?.id ?? undefined,
+        }));
+
+        // Auto-process the receipt
+        try {
+          const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRowsWithIds);
+          if (result.processed) {
+            autoProcessed++;
+          } else {
+            leftPending++;
+            if (result.skipped.length > 0) {
+              pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
+            }
           }
+        } catch (procErr) {
+          console.error(`Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
+          leftPending++;
+          pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
         }
-      } catch (procErr) {
-        console.error(`Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
-        leftPending++;
-        pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
       }
     }
 
@@ -448,6 +553,8 @@ Deno.serve(async (req) => {
         skipped_existing: skippedExisting,
         skipped_no_items: skippedNoItems,
         cleaned_up: cleanedUp,
+        backfilled_tax_codes: backfilledTaxCodes,
+        backfilled_stock_links: backfilledStockLinks,
         pending_reasons: pendingReasons,
         items_cached: itemCache.size,
       }),
