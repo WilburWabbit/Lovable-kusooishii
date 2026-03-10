@@ -407,6 +407,17 @@ async function processRefundReceipt(
       continue;
     }
 
+    // Resolve tax_code_id from qbo_tax_code_ref
+    let lineTaxCodeId: string | null = null;
+    if (taxCodeRef) {
+      const { data: tc } = await supabaseAdmin
+        .from("tax_code")
+        .select("id")
+        .eq("qbo_tax_code_id", String(taxCodeRef))
+        .maybeSingle();
+      lineTaxCodeId = tc?.id ?? null;
+    }
+
     const { error: lineErr } = await supabaseAdmin
       .from("sales_order_line")
       .insert({
@@ -417,6 +428,7 @@ async function processRefundReceipt(
         line_total: -(line.Amount ?? 0),
         qbo_tax_code_ref: taxCodeRef,
         vat_rate_id: vatRateId,
+        tax_code_id: lineTaxCodeId,
       });
 
     if (lineErr) {
