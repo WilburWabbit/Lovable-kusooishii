@@ -1,0 +1,1 @@
+ALTER TABLE public.stock_unit ADD COLUMN inbound_receipt_line_id uuid REFERENCES public.inbound_receipt_line(id);

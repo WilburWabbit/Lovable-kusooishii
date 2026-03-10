@@ -830,6 +830,7 @@ export type Database = {
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at: string
           id: string
+          inbound_receipt_line_id: string | null
           landed_cost: number | null
           location_id: string | null
           mpn: string
@@ -847,6 +848,7 @@ export type Database = {
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          inbound_receipt_line_id?: string | null
           landed_cost?: number | null
           location_id?: string | null
           mpn: string
@@ -864,6 +866,7 @@ export type Database = {
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
+          inbound_receipt_line_id?: string | null
           landed_cost?: number | null
           location_id?: string | null
           mpn?: string
@@ -876,6 +879,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "stock_unit_inbound_receipt_line_id_fkey"
+            columns: ["inbound_receipt_line_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_receipt_line"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "stock_unit_sku_id_fkey"
             columns: ["sku_id"]

@@ -24,6 +24,7 @@ type StockRow = {
   carrying_value: number | null;
   accumulated_impairment: number;
   created_at: string;
+  vat_rate_percent: number | null;
   sku: {
     sku_code: string;
     name: string | null;
@@ -55,9 +56,14 @@ const STATUS_OPTIONS = [
   "shipped", "delivered", "returned", "scrap", "part_out", "written_off", "closed",
 ];
 
-function fmt(v: number | null) {
+function fmt(v: number | null | undefined) {
   if (v == null) return "—";
   return `£${v.toFixed(2)}`;
+}
+
+function vatAmount(landed: number | null, rate: number | null) {
+  if (landed == null || rate == null) return null;
+  return Math.round(landed * (rate / 100) * 100) / 100;
 }
 
 export function InventoryPage() {
@@ -180,30 +186,40 @@ export function InventoryPage() {
                     <TableHead>MPN</TableHead>
                     <TableHead>Grade</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Landed</TableHead>
+                    <TableHead className="text-right">Landed (net)</TableHead>
+                    <TableHead className="text-right">VAT %</TableHead>
+                    <TableHead className="text-right">VAT</TableHead>
+                    <TableHead className="text-right">Landed (inc VAT)</TableHead>
                     <TableHead className="text-right">Carrying</TableHead>
                     <TableHead className="text-right">Impairment</TableHead>
                     <TableHead>Created</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((u) => (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-mono text-xs">{u.sku?.sku_code ?? "—"}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{u.sku?.catalog_product?.name ?? u.sku?.name ?? "—"}</TableCell>
-                      <TableCell className="font-mono text-xs">{u.mpn}</TableCell>
-                      <TableCell>{GRADE_LABELS[u.condition_grade] ?? u.condition_grade}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={STATUS_COLORS[u.status] ?? ""}>
-                          {u.status.replace(/_/g, " ")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">{fmt(u.landed_cost)}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{fmt(u.carrying_value)}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{fmt(u.accumulated_impairment)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{format(new Date(u.created_at), "dd MMM yyyy")}</TableCell>
-                    </TableRow>
-                  ))}
+                  {filtered.map((u) => {
+                    const vat = vatAmount(u.landed_cost, u.vat_rate_percent);
+                    const gross = vat != null && u.landed_cost != null ? u.landed_cost + vat : null;
+                    return (
+                      <TableRow key={u.id}>
+                        <TableCell className="font-mono text-xs">{u.sku?.sku_code ?? "—"}</TableCell>
+                        <TableCell className="max-w-[200px] truncate">{u.sku?.catalog_product?.name ?? u.sku?.name ?? "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">{u.mpn}</TableCell>
+                        <TableCell>{GRADE_LABELS[u.condition_grade] ?? u.condition_grade}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={STATUS_COLORS[u.status] ?? ""}>
+                            {u.status.replace(/_/g, " ")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">{fmt(u.landed_cost)}</TableCell>
+                        <TableCell className="text-right text-xs">{u.vat_rate_percent != null ? `${u.vat_rate_percent}%` : "—"}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{vat != null ? fmt(vat) : "—"}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{gross != null ? fmt(gross) : "—"}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{fmt(u.carrying_value)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{fmt(u.accumulated_impairment)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{format(new Date(u.created_at), "dd MMM yyyy")}</TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

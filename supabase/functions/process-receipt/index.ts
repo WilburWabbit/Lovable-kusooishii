@@ -163,6 +163,7 @@ Deno.serve(async (req) => {
           status: "available",
           landed_cost: landedCost,
           supplier_id: receipt.vendor_name ?? null,
+          inbound_receipt_line_id: line.id,
         });
       }
 

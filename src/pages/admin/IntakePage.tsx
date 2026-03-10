@@ -36,6 +36,7 @@ interface ReceiptLine {
   mpn: string | null;
   is_stock_line: boolean;
   condition_grade: string | null;
+  vat_rate_percent: number | null;
 }
 
 const statusColor: Record<string, string> = {
@@ -43,6 +44,31 @@ const statusColor: Record<string, string> = {
   processed: "bg-green-50 text-green-700 border-green-300",
   error: "bg-red-50 text-red-700 border-red-300",
 };
+
+function fmt(v: number | null | undefined) {
+  if (v == null) return "—";
+  return `£${v.toFixed(2)}`;
+}
+
+/** Compute net amount from total_amount depending on tax treatment */
+function receiptNet(r: Receipt) {
+  if (r.global_tax_calculation === "TaxInclusive") {
+    return r.total_amount - r.tax_total;
+  }
+  return r.total_amount;
+}
+
+function receiptGross(r: Receipt) {
+  if (r.global_tax_calculation === "TaxInclusive") {
+    return r.total_amount;
+  }
+  return r.total_amount + r.tax_total;
+}
+
+function lineVat(line: ReceiptLine) {
+  if (line.vat_rate_percent == null) return null;
+  return Math.round(line.line_total * (line.vat_rate_percent / 100) * 100) / 100;
+}
 
 export function IntakePage() {
   const { toast } = useToast();
@@ -202,9 +228,9 @@ export function IntakePage() {
                     <TableHead className="font-display text-xs">QBO ID</TableHead>
                     <TableHead className="font-display text-xs">Vendor</TableHead>
                     <TableHead className="font-display text-xs">Date</TableHead>
-                    <TableHead className="font-display text-xs text-right">Total</TableHead>
-                    <TableHead className="font-display text-xs text-right">Tax</TableHead>
-                    <TableHead className="font-display text-xs">Tax Treatment</TableHead>
+                    <TableHead className="font-display text-xs text-right">Net</TableHead>
+                    <TableHead className="font-display text-xs text-right">VAT</TableHead>
+                    <TableHead className="font-display text-xs text-right">Gross</TableHead>
                     <TableHead className="font-display text-xs">Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -215,20 +241,14 @@ export function IntakePage() {
                       <TableCell className="font-body text-xs font-mono">{r.qbo_purchase_id}</TableCell>
                       <TableCell className="font-body text-xs">{r.vendor_name ?? "—"}</TableCell>
                       <TableCell className="font-body text-xs">{r.txn_date ?? "—"}</TableCell>
-                      <TableCell className="font-body text-xs text-right">
-                        {r.currency} {Number(r.total_amount).toFixed(2)}
+                      <TableCell className="font-body text-xs text-right font-mono">
+                        {fmt(receiptNet(r))}
                       </TableCell>
-                      <TableCell className="font-body text-xs text-right">
-                        {Number(r.tax_total).toFixed(2)}
+                      <TableCell className="font-body text-xs text-right font-mono">
+                        {fmt(r.tax_total)}
                       </TableCell>
-                      <TableCell>
-                        {r.global_tax_calculation ? (
-                          <Badge variant="outline" className="text-[10px]">
-                            {r.global_tax_calculation === "TaxInclusive" ? "Inclusive" : r.global_tax_calculation === "TaxExcluded" ? "Excluded" : r.global_tax_calculation}
-                          </Badge>
-                        ) : (
-                          <span className="font-body text-xs text-muted-foreground">—</span>
-                        )}
+                      <TableCell className="font-body text-xs text-right font-mono">
+                        {fmt(receiptGross(r))}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${statusColor[r.status] ?? ""}`}>
@@ -249,7 +269,7 @@ export function IntakePage() {
 
       {/* Receipt detail dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={(o) => !o && setSelectedReceipt(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-sm">
               Receipt: {selectedReceipt?.qbo_purchase_id} — {selectedReceipt?.vendor_name ?? "Unknown"}
@@ -266,8 +286,10 @@ export function IntakePage() {
                     <TableHead className="font-display text-xs">Type</TableHead>
                     <TableHead className="font-display text-xs">Description</TableHead>
                     <TableHead className="font-display text-xs text-right">Qty</TableHead>
-                    <TableHead className="font-display text-xs text-right">Unit Cost</TableHead>
-                    <TableHead className="font-display text-xs text-right">Total</TableHead>
+                    <TableHead className="font-display text-xs text-right">Unit (net)</TableHead>
+                    <TableHead className="font-display text-xs text-right">Line (net)</TableHead>
+                    <TableHead className="font-display text-xs text-right">VAT %</TableHead>
+                    <TableHead className="font-display text-xs text-right">VAT</TableHead>
                     <TableHead className="font-display text-xs text-right">Landed/unit</TableHead>
                     <TableHead className="font-display text-xs">MPN</TableHead>
                     <TableHead className="font-display text-xs">Grade</TableHead>
@@ -282,6 +304,7 @@ export function IntakePage() {
                     const currentGrade = lineEdits[line.id]?.grade ?? line.condition_grade ?? "1";
                     const hasMpn = !!currentMpn;
                     const landed = getLandedCost(line);
+                    const vat = lineVat(line);
                     return (
                       <TableRow key={line.id}>
                         <TableCell>
@@ -291,10 +314,12 @@ export function IntakePage() {
                         </TableCell>
                         <TableCell className="font-body text-xs max-w-[180px] truncate">{line.description ?? "—"}</TableCell>
                         <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
-                        <TableCell className="font-body text-xs text-right">{Number(line.unit_cost).toFixed(2)}</TableCell>
-                        <TableCell className="font-body text-xs text-right">{Number(line.line_total).toFixed(2)}</TableCell>
+                        <TableCell className="font-body text-xs text-right font-mono">{fmt(line.unit_cost)}</TableCell>
+                        <TableCell className="font-body text-xs text-right font-mono">{fmt(line.line_total)}</TableCell>
+                        <TableCell className="font-body text-xs text-right">{line.vat_rate_percent != null ? `${line.vat_rate_percent}%` : "—"}</TableCell>
+                        <TableCell className="font-body text-xs text-right font-mono">{vat != null ? fmt(vat) : "—"}</TableCell>
                         <TableCell className="font-body text-xs text-right font-medium">
-                          {landed !== null ? `£${landed.toFixed(2)}` : "—"}
+                          {landed !== null ? fmt(landed) : "—"}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -338,29 +363,38 @@ export function IntakePage() {
                   })}
 
                   {/* Account/overhead lines */}
-                  {apportionment.overheadLines.map((line) => (
-                    <TableRow key={line.id} className="bg-muted/30">
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">
-                          Acct
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-body text-xs max-w-[180px] truncate italic text-muted-foreground">
-                        {line.description ?? "—"}
-                      </TableCell>
-                      <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
-                      <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
-                      <TableCell className="font-body text-xs text-right text-muted-foreground">
-                        {Number(line.line_total).toFixed(2)}
-                      </TableCell>
-                      <TableCell className="font-body text-xs text-right text-muted-foreground italic">
-                        apportioned
-                      </TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                    </TableRow>
-                  ))}
+                  {apportionment.overheadLines.map((line) => {
+                    const vat = lineVat(line);
+                    return (
+                      <TableRow key={line.id} className="bg-muted/30">
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">
+                            Acct
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-body text-xs max-w-[180px] truncate italic text-muted-foreground">
+                          {line.description ?? "—"}
+                        </TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">
+                          {fmt(line.line_total)}
+                        </TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground">
+                          {line.vat_rate_percent != null ? `${line.vat_rate_percent}%` : "—"}
+                        </TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">
+                          {vat != null ? fmt(vat) : "—"}
+                        </TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground italic">
+                          apportioned
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                      </TableRow>
+                    );
+                  })}
 
                   {/* Summary row */}
                   {apportionment.totalOverhead > 0 && (
@@ -369,9 +403,9 @@ export function IntakePage() {
                         Overhead to apportion:
                       </TableCell>
                       <TableCell className="font-display text-xs text-right font-semibold">
-                        £{apportionment.totalOverhead.toFixed(2)}
+                        {fmt(apportionment.totalOverhead)}
                       </TableCell>
-                      <TableCell colSpan={4} className="font-body text-[10px] text-muted-foreground italic">
+                      <TableCell colSpan={6} className="font-body text-[10px] text-muted-foreground italic">
                         pro-rata by line total
                       </TableCell>
                     </TableRow>
