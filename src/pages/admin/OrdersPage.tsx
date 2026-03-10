@@ -101,6 +101,7 @@ function orderGrossFromLines(o: OrderRow) {
 
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
+  { key: "doc_number", label: "Sales Receipt" },
   { key: "order_number", label: "Order #" },
   { key: "customer_name", label: "Customer" },
   { key: "origin_channel", label: "Origin" },
