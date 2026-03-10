@@ -67,11 +67,16 @@ Deno.serve(async (req) => {
     } else if (action === "receipt-lines") {
       const { data, error } = await admin
         .from("inbound_receipt_line")
-        .select("*")
+        .select("*, tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent))")
         .eq("inbound_receipt_id", params.receipt_id)
         .order("created_at");
       if (error) throw error;
-      result = data;
+      // Flatten vat_rate_percent onto each line
+      result = (data ?? []).map((l: any) => ({
+        ...l,
+        vat_rate_percent: l.tax_code?.purchase_tax_rate?.rate_percent ?? null,
+        tax_code: undefined,
+      }));
     } else if (action === "list-stock-units") {
       const { data, error } = await admin
         .from("stock_unit")
