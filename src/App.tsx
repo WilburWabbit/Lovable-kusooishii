@@ -70,6 +70,7 @@ const App = () => (
             <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
             <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
             <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
+            <Route path="/admin/ebay-callback" element={<EbayCallbackPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
