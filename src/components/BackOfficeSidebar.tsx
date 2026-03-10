@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Package,
   PackageOpen,
+  Box,
   ShoppingCart,
   BarChart3,
   ListChecks,
