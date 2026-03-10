@@ -585,14 +585,14 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   const skuCode = `${mpn}-G${conditionGrade}`;
 
-  // Look up catalog_product by MPN
-  const { data: catalogProduct } = await admin
-    .from("catalog_product")
+  // Look up product by MPN
+  const { data: productRecord } = await admin
+    .from("product")
     .select("id")
     .eq("mpn", mpn)
     .maybeSingle();
 
-  const catalogProductId = catalogProduct?.id ?? null;
+  const productId = productRecord?.id ?? null;
 
   // Upsert SKU
   const { error } = await admin.from("sku").upsert({
