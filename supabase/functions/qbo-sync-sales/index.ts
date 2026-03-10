@@ -56,24 +56,39 @@ async function fetchQboItem(
   accessToken: string
 ): Promise<any | null> {
   if (cache.has(itemId)) return cache.get(itemId);
-  try {
-    const res = await fetch(`${baseUrl}/item/${itemId}`, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-    });
-    if (!res.ok) {
-      console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
-      cache.set(itemId, null);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${baseUrl}/item/${itemId}`, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      if (res.status === 429) {
+        console.warn(`Rate limited fetching QBO item ${itemId}, attempt ${attempt + 1}`);
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        // Don't cache 429 failures so retries in future calls can succeed
+        return null;
+      }
+      if (!res.ok) {
+        console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
+        cache.set(itemId, null);
+        return null;
+      }
+      const data = await res.json();
+      const item = data?.Item ?? null;
+      cache.set(itemId, item);
+      return item;
+    } catch (err) {
+      console.error(`Error fetching QBO item ${itemId}:`, err);
+      if (attempt === 1) {
+        cache.set(itemId, null);
+      }
       return null;
     }
-    const data = await res.json();
-    const item = data?.Item ?? null;
-    cache.set(itemId, item);
-    return item;
-  } catch (err) {
-    console.error(`Error fetching QBO item ${itemId}:`, err);
-    cache.set(itemId, null);
-    return null;
   }
+  return null;
 }
 
 function parseSku(sku: string): { mpn: string; conditionGrade: string } {
