@@ -1,5 +1,8 @@
 project_id = "gcgrwujfyurgetvqlmbf"
 
+[functions.sync-media-from-hub]
+verify_jwt = false
+
 [functions.qbo-auth]
 verify_jwt = false
 
