@@ -573,6 +573,101 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Backfill VAT codes on existing order lines ──
+    let vatBackfilled = 0;
+    try {
+      // Find orders with lines missing tax_code_id
+      const { data: ordersToFix } = await supabaseAdmin
+        .from("sales_order")
+        .select("id, origin_channel, origin_reference")
+        .in("origin_channel", ["qbo", "qbo_refund"])
+        .not("origin_reference", "is", null);
+
+      if (ordersToFix && ordersToFix.length > 0) {
+        // Filter to only orders that have at least one line with null tax_code_id
+        for (const order of ordersToFix) {
+          const { data: nullLines } = await supabaseAdmin
+            .from("sales_order_line")
+            .select("id")
+            .eq("sales_order_id", order.id)
+            .is("tax_code_id", null)
+            .limit(1);
+
+          if (!nullLines || nullLines.length === 0) continue;
+
+          // Re-fetch the QBO transaction
+          const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
+          try {
+            const res = await fetch(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+            });
+            if (!res.ok) {
+              console.warn(`Backfill: failed to fetch ${entity} ${order.origin_reference}: ${res.status}`);
+              continue;
+            }
+            const data = await res.json();
+            const receipt = data?.[entity] ?? null;
+            if (!receipt) continue;
+
+            const itemLines = (receipt.Line ?? []).filter(
+              (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
+            );
+
+            for (const line of itemLines) {
+              const detail = line.SalesItemLineDetail;
+              const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+              if (!taxCodeRef) continue;
+
+              const itemRefValue = detail.ItemRef.value;
+              const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
+              const skuField = qboItem?.Sku;
+              let skuCode: string | null = null;
+
+              if (skuField && String(skuField).trim()) {
+                const parsed = parseSku(String(skuField));
+                skuCode = `${parsed.mpn}-G${parsed.conditionGrade}`;
+              } else if (detail.ItemRef?.name) {
+                const parsed = parseSku(String(detail.ItemRef.name));
+                skuCode = `${parsed.mpn}-G${parsed.conditionGrade}`;
+              }
+
+              if (!skuCode) continue;
+
+              const { data: sku } = await supabaseAdmin
+                .from("sku")
+                .select("id")
+                .eq("sku_code", skuCode)
+                .maybeSingle();
+              if (!sku) continue;
+
+              // Resolve tax_code_id
+              const { data: tc } = await supabaseAdmin
+                .from("tax_code")
+                .select("id")
+                .eq("qbo_tax_code_id", String(taxCodeRef))
+                .maybeSingle();
+              if (!tc) continue;
+
+              // Update all matching lines for this order+sku that are missing tax_code_id
+              const { data: updated } = await supabaseAdmin
+                .from("sales_order_line")
+                .update({ tax_code_id: tc.id, qbo_tax_code_ref: String(taxCodeRef) })
+                .eq("sales_order_id", order.id)
+                .eq("sku_id", sku.id)
+                .is("tax_code_id", null)
+                .select("id");
+
+              vatBackfilled += (updated?.length ?? 0);
+            }
+          } catch (fetchErr) {
+            console.error(`Backfill: error processing ${entity} ${order.origin_reference}:`, fetchErr);
+          }
+        }
+      }
+    } catch (backfillErr) {
+      console.error("VAT backfill error:", backfillErr);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -588,6 +683,7 @@ Deno.serve(async (req) => {
         refunds_skipped: refundsSkipped,
         refund_lines: totalRefundLines,
         items_cached: itemCache.size,
+        vat_backfilled: vatBackfilled,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
