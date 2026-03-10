@@ -124,6 +124,7 @@ export default function ProductDetailAdminPage() {
   const [contentForm, setContentForm] = useState<Record<string, string>>({});
   const [contentDirty, setContentDirty] = useState(false);
   const [savingContent, setSavingContent] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   // Channel override state: { [listing_id]: { listing_title, listing_description } }
   const [channelForms, setChannelForms] = useState<Record<string, { listing_title: string; listing_description: string }>>({});
