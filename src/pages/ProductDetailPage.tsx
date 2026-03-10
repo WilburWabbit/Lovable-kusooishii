@@ -50,7 +50,7 @@ export default function ProductDetailPage() {
   const { data: mediaItems = [] } = useQuery({
     queryKey: ["product_media_storefront", product?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("product_media")
         .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
         .eq("product_id", product!.id)
