@@ -217,7 +217,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    const body = await req.json().catch(() => ({}));
     const action = body.action || "sync_orders";
 
     const accessToken = await getAccessToken(admin);
