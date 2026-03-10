@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+type SortKey = "name" | "qbo_tax_rate_id" | "rate_percent" | "description" | "active" | "synced_at";
+type SortDir = "asc" | "desc";
 
 interface VatRate {
   id: string;
