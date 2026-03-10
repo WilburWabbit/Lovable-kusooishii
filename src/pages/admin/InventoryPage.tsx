@@ -87,7 +87,7 @@ const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "ri
   { key: "landed_inc", label: "Landed (inc VAT)", align: "right" },
   { key: "carrying", label: "Carrying", align: "right" },
   { key: "impairment", label: "Impairment", align: "right" },
-  { key: "created_at", label: "Created" },
+  { key: "purchase_date", label: "Purchased" },
 ];
 
 const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
