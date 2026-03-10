@@ -599,10 +599,10 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     qbo_item_id: qboItemId,
     sku_code: skuCode,
     name: cleanQboName(item.Name ?? mpn),
-    catalog_product_id: catalogProductId,
+    product_id: productId,
     condition_grade: conditionGrade,
     active_flag: item.Active !== false,
-    saleable_flag: !!catalogProductId,
+    saleable_flag: !!productId,
     price: item.UnitPrice != null ? Number(item.UnitPrice) : null,
   }, { onConflict: "qbo_item_id" });
 
