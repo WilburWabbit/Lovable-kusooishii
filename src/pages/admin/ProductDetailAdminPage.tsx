@@ -511,15 +511,73 @@ export default function ProductDetailAdminPage() {
                       <span>Stock: {s.stock_available}</span>
                       <span>Value: {fmt(s.carrying_value)}</span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-border">
                       {CHANNELS.map((ch) => {
                         const cl = s.channel_listings.find((l) => l.channel === ch);
-                        if (!cl) return null;
-                        return (
-                          <Badge key={ch} variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
-                            {CHANNEL_LABELS[ch]}: {cl.offer_status ?? "—"}
-                          </Badge>
-                        );
+                        const actionKey = `${ch}:${s.id}`;
+                        const isActing = listingAction === actionKey;
+                        if (cl) {
+                          return (
+                            <div key={ch} className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+                                {CHANNEL_LABELS[ch]}: {cl.offer_status ?? "—"}
+                              </Badge>
+                              {ch === "web" && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  disabled={isActing}
+                                  onClick={async () => {
+                                    setListingAction(actionKey);
+                                    try {
+                                      await invokeWithAuth("admin-data", { action: "remove-web-listing", sku_id: s.id });
+                                      toast.success("Web listing removed");
+                                      queryClient.invalidateQueries({ queryKey: ["admin-product", id] });
+                                    } catch (err: any) {
+                                      toast.error(err.message ?? "Failed to remove listing");
+                                    } finally {
+                                      setListingAction(null);
+                                    }
+                                  }}
+                                >
+                                  {isActing ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        }
+                        if (ch === "ebay" || ch === "web") {
+                          return (
+                            <Button
+                              key={ch}
+                              variant="outline"
+                              size="sm"
+                              className="h-6 text-[10px] px-2"
+                              disabled={isActing}
+                              onClick={async () => {
+                                setListingAction(actionKey);
+                                try {
+                                  if (ch === "ebay") {
+                                    await invokeWithAuth("ebay-sync", { action: "create_listing", sku_id: s.id });
+                                    toast.success("eBay listing created");
+                                  } else {
+                                    await invokeWithAuth("admin-data", { action: "create-web-listing", sku_id: s.id });
+                                    toast.success("Web listing created");
+                                  }
+                                  queryClient.invalidateQueries({ queryKey: ["admin-product", id] });
+                                } catch (err: any) {
+                                  toast.error(err.message ?? "Listing failed");
+                                } finally {
+                                  setListingAction(null);
+                                }
+                              }}
+                            >
+                              {isActing ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Plus className="h-3 w-3 mr-0.5" />{CHANNEL_LABELS[ch]}</>}
+                            </Button>
+                          );
+                        }
+                        return null;
                       })}
                     </div>
                   </div>
