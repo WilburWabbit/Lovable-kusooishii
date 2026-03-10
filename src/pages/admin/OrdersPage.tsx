@@ -57,6 +57,7 @@ type OrderRow = {
 
 const ORIGIN_COLORS: Record<string, string> = {
   web: "bg-blue-100 text-blue-800",
+  ebay: "bg-amber-100 text-amber-800",
   qbo: "bg-emerald-100 text-emerald-800",
   qbo_refund: "bg-red-100 text-red-800",
 };
@@ -271,6 +272,7 @@ export function OrdersPage() {
             <SelectContent>
               <SelectItem value="all">All channels</SelectItem>
               <SelectItem value="web">Web</SelectItem>
+              <SelectItem value="ebay">eBay</SelectItem>
               <SelectItem value="qbo">QBO Sale</SelectItem>
               <SelectItem value="qbo_refund">QBO Refund</SelectItem>
             </SelectContent>

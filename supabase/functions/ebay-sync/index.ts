@@ -1,0 +1,471 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const EBAY_API = "https://api.ebay.com";
+
+/* ── OAuth token management (singleton) ── */
+async function getAccessToken(admin: any): Promise<string> {
+  const { data: conn, error } = await admin
+    .from("ebay_connection")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !conn) throw new Error("eBay not connected.");
+
+  if (new Date(conn.token_expires_at).getTime() > Date.now() + 60_000) {
+    return conn.access_token;
+  }
+
+  const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
+  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
+
+  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: conn.refresh_token,
+      scope: [
+        "https://api.ebay.com/oauth/api_scope",
+        "https://api.ebay.com/oauth/api_scope/sell.inventory",
+        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+        "https://api.ebay.com/oauth/api_scope/sell.account",
+      ].join(" "),
+    }),
+  });
+
+  if (!res.ok) throw new Error(`eBay token refresh failed [${res.status}]`);
+  const data = await res.json();
+  const newExpiresAt = new Date(Date.now() + (data.expires_in || 7200) * 1000).toISOString();
+
+  await admin
+    .from("ebay_connection")
+    .update({
+      access_token: data.access_token,
+      ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
+      token_expires_at: newExpiresAt,
+    })
+    .eq("id", conn.id);
+
+  return data.access_token;
+}
+
+/* ── Generic eBay API fetch ── */
+async function ebayFetch(token: string, path: string, options: RequestInit = {}) {
+  const url = path.startsWith("http") ? path : `${EBAY_API}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Accept-Language": "en-GB",
+      "Content-Language": "en-GB",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`eBay API error ${path}: [${res.status}] ${text}`);
+    throw new Error(`eBay API [${res.status}]: ${text}`);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (!text?.trim()) return null;
+  return JSON.parse(text);
+}
+
+/* ── Fetch orders (Fulfillment API) ── */
+async function fetchOrders(token: string, daysBack = 90): Promise<any[]> {
+  const orders: any[] = [];
+  const from = new Date(Date.now() - daysBack * 86400000).toISOString();
+  let offset = 0;
+  const limit = 50;
+  while (true) {
+    const data = await ebayFetch(token, `/sell/fulfillment/v1/order?filter=creationdate:[${from}..]&limit=${limit}&offset=${offset}`);
+    const batch = data?.orders || [];
+    orders.push(...batch);
+    if (batch.length < limit || orders.length >= (data?.total || 0)) break;
+    offset += limit;
+  }
+  return orders;
+}
+
+/* ── Fetch inventory items ── */
+async function fetchInventoryItems(token: string): Promise<any[]> {
+  const items: any[] = [];
+  let offset = 0;
+  const limit = 100;
+  while (true) {
+    const data = await ebayFetch(token, `/sell/inventory/v1/inventory_item?limit=${limit}&offset=${offset}`);
+    const batch = data?.inventoryItems || [];
+    items.push(...batch);
+    if (batch.length < limit || items.length >= (data?.total || 0)) break;
+    offset += limit;
+  }
+  return items;
+}
+
+/* ── Fetch offers ── */
+async function fetchOffers(token: string, skus?: string[]): Promise<any[]> {
+  const offers: any[] = [];
+  try {
+    let offset = 0;
+    const limit = 100;
+    while (true) {
+      const data = await ebayFetch(token, `/sell/inventory/v1/offer?limit=${limit}&offset=${offset}`);
+      const batch = data?.offers || [];
+      offers.push(...batch);
+      if (batch.length < limit || offers.length >= (data?.total || 0)) break;
+      offset += limit;
+    }
+  } catch {
+    console.warn("Bulk offer fetch failed, trying per-SKU fallback");
+    if (skus?.length) {
+      for (const sku of skus) {
+        try {
+          const data = await ebayFetch(token, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&limit=25`);
+          offers.push(...(data?.offers || []));
+        } catch { /* skip */ }
+      }
+    }
+  }
+  return offers;
+}
+
+/* ── Update inventory quantity on eBay ── */
+async function updateInventoryQuantity(token: string, sku: string, quantity: number) {
+  const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+  if (!existing) throw new Error(`Inventory item ${sku} not found on eBay`);
+  const updated = {
+    ...existing,
+    availability: {
+      ...(existing.availability || {}),
+      shipToLocationAvailability: {
+        ...(existing.availability?.shipToLocationAvailability || {}),
+        quantity,
+      },
+    },
+  };
+  await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+    method: "PUT",
+    body: JSON.stringify(updated),
+  });
+}
+
+/* ── SKU code helper: eBay SKU → local sku_code convention ── */
+function normaliseSkuCode(ebaySku: string): string {
+  // eBay SKUs use dot notation e.g. "10311.1", local sku_code uses "10311-G1"
+  const trimmed = ebaySku.trim();
+  const dotIdx = trimmed.indexOf(".");
+  if (dotIdx > 0) {
+    const mpn = trimmed.substring(0, dotIdx);
+    const grade = trimmed.substring(dotIdx + 1) || "1";
+    return `${mpn}-G${["1","2","3","4","5"].includes(grade) ? grade : "1"}`;
+  }
+  return trimmed;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+
+    // Verify caller is admin/staff
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await admin.auth.getUser(token);
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+    const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+    if (!hasAccess) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || "sync_orders";
+
+    const accessToken = await getAccessToken(admin);
+    const results: Record<string, number> = { orders_synced: 0, orders_enriched: 0, inventory_synced: 0, stock_pushed: 0 };
+
+    /* ═══════════════════════════════════════════════
+       SYNC ORDERS — match eBay orders to QBO doc_number
+       ═══════════════════════════════════════════════ */
+    if (action === "sync_orders") {
+      console.log("Fetching eBay orders...");
+      const ebayOrders = await fetchOrders(accessToken, body.days_back || 90);
+      console.log(`Fetched ${ebayOrders.length} orders from eBay`);
+
+      // Pre-fetch existing sales_order for doc_number matching
+      const { data: existingOrders } = await admin
+        .from("sales_order")
+        .select("id, doc_number, origin_channel, origin_reference, guest_name, guest_email, notes")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      const ordersByDocNumber = new Map<string, any>();
+      const ordersByOriginRef = new Map<string, any>();
+      for (const o of existingOrders || []) {
+        if (o.doc_number) ordersByDocNumber.set(o.doc_number, o);
+        if (o.origin_reference) ordersByOriginRef.set(`${o.origin_channel}:${o.origin_reference}`, o);
+      }
+
+      // Pre-fetch SKU lookup
+      const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
+      const skuMap = new Map<string, string>();
+      for (const s of allSkus || []) {
+        skuMap.set(s.sku_code.toLowerCase(), s.id);
+      }
+
+      for (const order of ebayOrders) {
+        const ebayOrderId = order.orderId;
+
+        // Already synced as an eBay order?
+        if (ordersByOriginRef.has(`ebay:${ebayOrderId}`)) {
+          results.orders_synced++;
+          continue;
+        }
+
+        // Extract buyer details from fulfillment data
+        const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
+        const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
+        const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
+        const totalAmount = parseFloat(order.pricingSummary?.total?.value || "0");
+        const taxAmount = parseFloat(order.pricingSummary?.tax?.value || "0");
+        const currency = order.pricingSummary?.total?.currency || "GBP";
+        const creationDate = order.creationDate?.split("T")[0] || null;
+
+        // Check if a QBO-synced order already exists with this doc_number
+        const existingOrder = ordersByDocNumber.get(ebayOrderId);
+
+        if (existingOrder) {
+          // ENRICH existing QBO record — don't overwrite financial data (QBO is master)
+          console.log(`Matched eBay order ${ebayOrderId} to existing order ${existingOrder.id}`);
+          const updatePayload: Record<string, any> = {
+            origin_reference: ebayOrderId,
+            shipping_name: shipTo?.fullName || existingOrder.guest_name || "",
+            shipping_line_1: shipTo?.contactAddress?.addressLine1 || "",
+            shipping_line_2: shipTo?.contactAddress?.addressLine2 || null,
+            shipping_city: shipTo?.contactAddress?.city || "",
+            shipping_postcode: shipTo?.contactAddress?.postalCode || "",
+            shipping_country: shipTo?.contactAddress?.countryCode || "GB",
+            shipping_county: shipTo?.contactAddress?.stateOrProvince || null,
+          };
+
+          // Only backfill guest details if missing
+          if (!existingOrder.guest_name) updatePayload.guest_name = buyerName;
+          if (!existingOrder.guest_email && buyerEmail) updatePayload.guest_email = buyerEmail;
+
+          // Append eBay info to notes
+          const ebayNote = `eBay buyer: ${order.buyer?.username || "unknown"} | Order: ${ebayOrderId}`;
+          const existingNotes = existingOrder.notes || "";
+          if (!existingNotes.includes(ebayOrderId)) {
+            updatePayload.notes = existingNotes ? `${existingNotes}\n${ebayNote}` : ebayNote;
+          }
+
+          await admin.from("sales_order").update(updatePayload).eq("id", existingOrder.id);
+          results.orders_enriched++;
+        } else {
+          // No matching QBO sale — insert new eBay order
+          // Determine net/gross from eBay totals (eBay UK prices are VAT-inclusive)
+          const merchandiseSubtotal = totalAmount - taxAmount;
+          const grossTotal = totalAmount;
+
+          const lineItems = order.lineItems || [];
+
+          const { data: newOrder, error: orderErr } = await admin
+            .from("sales_order")
+            .insert({
+              origin_channel: "ebay",
+              origin_reference: ebayOrderId,
+              doc_number: ebayOrderId,
+              status: "complete",
+              guest_name: buyerName,
+              guest_email: buyerEmail || `ebay-${ebayOrderId}@imported.local`,
+              shipping_name: shipTo?.fullName || buyerName,
+              shipping_line_1: shipTo?.contactAddress?.addressLine1 || "",
+              shipping_line_2: shipTo?.contactAddress?.addressLine2 || null,
+              shipping_city: shipTo?.contactAddress?.city || "",
+              shipping_postcode: shipTo?.contactAddress?.postalCode || "",
+              shipping_country: shipTo?.contactAddress?.countryCode || "GB",
+              shipping_county: shipTo?.contactAddress?.stateOrProvince || null,
+              merchandise_subtotal: merchandiseSubtotal,
+              tax_total: taxAmount,
+              gross_total: grossTotal,
+              global_tax_calculation: "TaxInclusive",
+              currency,
+              txn_date: creationDate,
+              notes: `eBay order ${ebayOrderId} | Buyer: ${order.buyer?.username || "unknown"}`,
+            })
+            .select("id")
+            .single();
+
+          if (orderErr) {
+            console.error(`Failed to insert eBay order ${ebayOrderId}:`, orderErr.message);
+            continue;
+          }
+
+          // Create order lines
+          for (const li of lineItems) {
+            const ebaySku = li.sku;
+            let skuId: string | null = null;
+
+            if (ebaySku) {
+              const localCode = normaliseSkuCode(ebaySku);
+              skuId = skuMap.get(localCode.toLowerCase()) || null;
+              // Fallback: try exact match
+              if (!skuId) skuId = skuMap.get(ebaySku.toLowerCase()) || null;
+            }
+
+            if (!skuId) {
+              console.warn(`No SKU match for eBay line item sku="${ebaySku}" in order ${ebayOrderId}`);
+              continue;
+            }
+
+            const unitPrice = parseFloat(li.lineItemCost?.value || "0");
+            const qty = li.quantity || 1;
+
+            await admin.from("sales_order_line").insert({
+              sales_order_id: newOrder.id,
+              sku_id: skuId,
+              quantity: qty,
+              unit_price: unitPrice,
+              line_total: unitPrice * qty,
+            });
+          }
+        }
+        results.orders_synced++;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════
+       SYNC INVENTORY — pull eBay items + offers → channel_listing
+       ═══════════════════════════════════════════════ */
+    if (action === "sync_inventory") {
+      console.log("Fetching eBay inventory...");
+      const items = await fetchInventoryItems(accessToken);
+      const validSkus = items.map((i: any) => i.sku).filter(Boolean);
+      const offers = await fetchOffers(accessToken, validSkus);
+      console.log(`Fetched ${items.length} items, ${offers.length} offers`);
+
+      const offerMap = new Map<string, any>();
+      for (const o of offers) {
+        if (o.sku) offerMap.set(o.sku, o);
+      }
+
+      // Pre-fetch local SKUs for auto-linking
+      const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
+      const skuMap = new Map<string, string>();
+      for (const s of allSkus || []) {
+        skuMap.set(s.sku_code.toLowerCase(), s.id);
+      }
+
+      for (const item of items) {
+        if (!item.sku) continue;
+        const offer = offerMap.get(item.sku);
+        const listingId = offer?.listing?.listingId ?? null;
+        const price = offer?.pricingSummary?.price?.value ? parseFloat(offer.pricingSummary.price.value) : null;
+        const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
+
+        // Auto-link to local SKU
+        const localCode = normaliseSkuCode(item.sku);
+        const matchedSkuId = skuMap.get(localCode.toLowerCase()) || skuMap.get(item.sku.toLowerCase()) || null;
+
+        const { error: upsertErr } = await admin
+          .from("channel_listing")
+          .upsert(
+            {
+              channel: "ebay",
+              external_sku: item.sku,
+              external_listing_id: listingId,
+              sku_id: matchedSkuId,
+              listed_price: price,
+              listed_quantity: qty,
+              offer_status: offer?.status || null,
+              raw_data: { product: item.product, availability: item.availability },
+              synced_at: new Date().toISOString(),
+            },
+            { onConflict: "channel,external_sku", ignoreDuplicates: false }
+          );
+        if (upsertErr) console.error(`Upsert listing ${item.sku}:`, upsertErr.message);
+        results.inventory_synced++;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════
+       PUSH STOCK — count available stock_units → eBay
+       ═══════════════════════════════════════════════ */
+    if (action === "push_stock") {
+      console.log("Pushing stock levels to eBay...");
+
+      const { data: listings } = await admin
+        .from("channel_listing")
+        .select("id, external_sku, sku_id")
+        .eq("channel", "ebay")
+        .not("sku_id", "is", null);
+
+      if (listings?.length) {
+        // Count available stock per sku_id
+        const skuIds = [...new Set(listings.map((l: any) => l.sku_id))];
+        const stockCounts = new Map<string, number>();
+
+        for (const skuId of skuIds) {
+          const { count } = await admin
+            .from("stock_unit")
+            .select("id", { count: "exact", head: true })
+            .eq("sku_id", skuId)
+            .eq("status", "available");
+          stockCounts.set(skuId, count || 0);
+        }
+
+        for (const listing of listings) {
+          const qty = stockCounts.get(listing.sku_id) || 0;
+          try {
+            await updateInventoryQuantity(accessToken, listing.external_sku, qty);
+            results.stock_pushed++;
+          } catch (e: any) {
+            console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
+          }
+        }
+      }
+    }
+
+    console.log("eBay sync completed:", JSON.stringify(results));
+    return new Response(
+      JSON.stringify({ success: true, ...results }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (e: any) {
+    console.error("ebay-sync error:", e);
+    return new Response(
+      JSON.stringify({ error: e.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
