@@ -14,13 +14,14 @@ import {
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight } from "lucide-react";
+import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 type OrderLineRow = {
   id: string;
