@@ -383,10 +383,16 @@ export default function ProductDetailAdminPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">Product Content</CardTitle>
-            <Button size="sm" disabled={!contentDirty || savingContent} onClick={handleSaveContent}>
-              <Save className="h-3.5 w-3.5 mr-1.5" />
-              {savingContent ? "Saving…" : "Save"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={generating} onClick={handleGenerateCopy}>
+                {generating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                {generating ? "Generating…" : "Generate Copy"}
+              </Button>
+              <Button size="sm" disabled={!contentDirty || savingContent} onClick={handleSaveContent}>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                {savingContent ? "Saving…" : "Save"}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             {CONTENT_FIELDS.map((f) => (
