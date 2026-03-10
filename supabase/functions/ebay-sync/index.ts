@@ -268,6 +268,7 @@ Deno.serve(async (req) => {
           // ENRICH existing QBO record — don't overwrite financial data (QBO is master)
           console.log(`Matched eBay order ${ebayOrderId} to existing order ${existingOrder.id}`);
           const updatePayload: Record<string, any> = {
+            origin_channel: "ebay",
             origin_reference: ebayOrderId,
             shipping_name: shipTo?.fullName || existingOrder.guest_name || "",
             shipping_line_1: shipTo?.contactAddress?.addressLine1 || "",
