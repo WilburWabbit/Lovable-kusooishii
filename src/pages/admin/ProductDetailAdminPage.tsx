@@ -62,6 +62,11 @@ interface ProductDetail {
   call_to_action: string | null;
   seo_title: string | null;
   seo_description: string | null;
+  age_range: string | null;
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
+  weight_kg: number | null;
   stock_available: number;
   carrying_value: number;
   units_sold: number;
@@ -242,6 +247,7 @@ export default function ProductDetailAdminPage() {
               {[product.theme_name, product.subtheme_name].filter(Boolean).join(" › ")}
               {product.release_year ? ` • ${product.release_year}` : ""}
               {product.piece_count ? ` • ${product.piece_count} pcs` : ""}
+              {product.age_range ? ` • ${product.age_range}` : ""}
             </p>
           </div>
           {product.img_url && (
@@ -280,6 +286,49 @@ export default function ProductDetailAdminPage() {
             <CardContent><p className="text-2xl font-bold font-display">{fmt(product.revenue)}</p></CardContent>
           </Card>
         </div>
+
+        {/* Dimensions & Specs */}
+        {(product.length_cm || product.width_cm || product.height_cm || product.weight_kg) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Dimensions & Weight</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {product.length_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Length</p>
+                    <p className="text-sm font-bold font-display">{product.length_cm} cm</p>
+                  </div>
+                )}
+                {product.width_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Width</p>
+                    <p className="text-sm font-bold font-display">{product.width_cm} cm</p>
+                  </div>
+                )}
+                {product.height_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Height</p>
+                    <p className="text-sm font-bold font-display">{product.height_cm} cm</p>
+                  </div>
+                )}
+                {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Girth</p>
+                    <p className="text-sm font-bold font-display">{(2 * ((product.width_cm ?? 0) + (product.height_cm ?? 0))).toFixed(1)} cm</p>
+                  </div>
+                )}
+                {product.weight_kg != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Weight</p>
+                    <p className="text-sm font-bold font-display">{product.weight_kg} kg</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Common Content */}
         <Card>

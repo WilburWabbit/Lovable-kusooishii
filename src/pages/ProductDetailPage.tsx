@@ -24,7 +24,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, length_cm, width_cm, height_cm, weight_kg, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -130,7 +130,7 @@ export default function ProductDetailPage() {
                   </p>
                 )}
 
-                <div className="mt-6 flex gap-6 border-t border-b border-border py-4">
+                <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
                   {product.piece_count && (
                     <div>
                       <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Pieces</p>
@@ -143,11 +143,45 @@ export default function ProductDetailPage() {
                       <p className="mt-1 font-display text-sm font-bold text-foreground">{product.release_year}</p>
                     </div>
                   )}
+                  {(product as any).age_range && (
+                    <div>
+                      <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ages</p>
+                      <p className="mt-1 font-display text-sm font-bold text-foreground">{(product as any).age_range}</p>
+                    </div>
+                  )}
                   <div>
                     <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Variants</p>
                     <p className="mt-1 font-display text-sm font-bold text-foreground">{offers?.length ?? 0}</p>
                   </div>
                 </div>
+
+                {/* Dimensions */}
+                {((product as any).length_cm || (product as any).width_cm || (product as any).height_cm || (product as any).weight_kg) && (
+                  <div className="mt-4 flex gap-6 flex-wrap">
+                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
+                      <div>
+                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Dimensions</p>
+                        <p className="mt-1 font-display text-sm font-bold text-foreground">
+                          {(product as any).length_cm} × {(product as any).width_cm} × {(product as any).height_cm} cm
+                        </p>
+                      </div>
+                    )}
+                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
+                      <div>
+                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Girth</p>
+                        <p className="mt-1 font-display text-sm font-bold text-foreground">
+                          {(2 * (((product as any).width_cm ?? 0) + ((product as any).height_cm ?? 0))).toFixed(1)} cm
+                        </p>
+                      </div>
+                    )}
+                    {(product as any).weight_kg != null && (
+                      <div>
+                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Weight</p>
+                        <p className="mt-1 font-display text-sm font-bold text-foreground">{(product as any).weight_kg} kg</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Offers by grade */}
                 <div className="mt-6 space-y-3">
