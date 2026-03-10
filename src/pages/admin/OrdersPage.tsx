@@ -316,10 +316,10 @@ export function OrdersPage() {
                             <td colSpan={visibleCols.length} className="bg-muted/30 p-0">
                               <div className="px-8 py-3">
                                 {o.customer ? (
-312:                                   <p className="text-xs text-muted-foreground mb-2">
-313:                                     Customer: {o.customer.display_name}{o.customer.email ? ` (${o.customer.email})` : ""}
-314:                                   </p>
-315:                                 ) : o.guest_name || o.guest_email ? (
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Customer: {o.customer.display_name}{o.customer.email ? ` (${o.customer.email})` : ""}
+                                  </p>
+                                ) : o.guest_name || o.guest_email ? (
                                   <p className="text-xs text-muted-foreground mb-2">
                                     Guest: {o.guest_name}{o.guest_email ? ` (${o.guest_email})` : ""}
                                   </p>
