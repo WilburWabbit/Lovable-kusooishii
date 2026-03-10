@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import {
-  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle,
+  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle, Sparkles, Loader2,
 } from "lucide-react";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
@@ -124,6 +124,7 @@ export default function ProductDetailAdminPage() {
   const [contentForm, setContentForm] = useState<Record<string, string>>({});
   const [contentDirty, setContentDirty] = useState(false);
   const [savingContent, setSavingContent] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   // Channel override state: { [listing_id]: { listing_title, listing_description } }
   const [channelForms, setChannelForms] = useState<Record<string, { listing_title: string; listing_description: string }>>({});
@@ -156,6 +157,54 @@ export default function ProductDetailAdminPage() {
     setContentForm((prev) => ({ ...prev, [key]: value }));
     setContentDirty(true);
   }, []);
+
+  const handleGenerateCopy = async () => {
+    if (!product) return;
+    setGenerating(true);
+    try {
+      const result = await invokeWithAuth<{ copy: any }>("generate-product-copy", {
+        product: {
+          name: product.name,
+          mpn: product.mpn,
+          theme_name: product.theme_name,
+          subtheme_name: product.subtheme_name,
+          piece_count: product.piece_count,
+          release_year: product.release_year,
+          retired_flag: product.retired_flag,
+          age_range: product.age_range,
+          weight_kg: product.weight_kg,
+          length_cm: product.length_cm,
+          width_cm: product.width_cm,
+          height_cm: product.height_cm,
+        },
+        product_id: product.id,
+        auto_save: true,
+      });
+
+      const copy = result.copy;
+      const highlightsBullets = Array.isArray(copy.highlights)
+        ? copy.highlights.map((h: string) => `• ${h}`).join("\n")
+        : copy.highlights ?? "";
+
+      const newForm: Record<string, string> = {
+        product_hook: copy.hook ?? "",
+        description: copy.description ?? "",
+        call_to_action: copy.cta ?? "",
+        highlights: highlightsBullets,
+        seo_title: copy.seo_title ?? "",
+        seo_description: copy.seo_body ?? "",
+      };
+      setContentForm(newForm);
+      setContentDirty(false);
+      toast.success("Copy generated and saved");
+      queryClient.invalidateQueries({ queryKey: ["admin-product", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin-products"] });
+    } catch (err: any) {
+      toast.error(err.message ?? "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleSaveContent = async () => {
     if (!product) return;
@@ -334,10 +383,16 @@ export default function ProductDetailAdminPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">Product Content</CardTitle>
-            <Button size="sm" disabled={!contentDirty || savingContent} onClick={handleSaveContent}>
-              <Save className="h-3.5 w-3.5 mr-1.5" />
-              {savingContent ? "Saving…" : "Save"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={generating} onClick={handleGenerateCopy}>
+                {generating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                {generating ? "Generating…" : "Generate Copy"}
+              </Button>
+              <Button size="sm" disabled={!contentDirty || savingContent} onClick={handleSaveContent}>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                {savingContent ? "Saving…" : "Save"}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             {CONTENT_FIELDS.map((f) => (
