@@ -39,6 +39,7 @@ async function getAccessToken(admin: any): Promise<string> {
         "https://api.ebay.com/oauth/api_scope/sell.inventory",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
         "https://api.ebay.com/oauth/api_scope/sell.account",
+        "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
       ].join(" "),
     }),
   });
