@@ -56,24 +56,39 @@ async function fetchQboItem(
   accessToken: string
 ): Promise<any | null> {
   if (cache.has(itemId)) return cache.get(itemId);
-  try {
-    const res = await fetch(`${baseUrl}/item/${itemId}`, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-    });
-    if (!res.ok) {
-      console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
-      cache.set(itemId, null);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${baseUrl}/item/${itemId}`, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      if (res.status === 429) {
+        console.warn(`Rate limited fetching QBO item ${itemId}, attempt ${attempt + 1}`);
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        // Don't cache 429 failures so retries in future calls can succeed
+        return null;
+      }
+      if (!res.ok) {
+        console.error(`Failed to fetch QBO item ${itemId}: ${res.status}`);
+        cache.set(itemId, null);
+        return null;
+      }
+      const data = await res.json();
+      const item = data?.Item ?? null;
+      cache.set(itemId, item);
+      return item;
+    } catch (err) {
+      console.error(`Error fetching QBO item ${itemId}:`, err);
+      if (attempt === 1) {
+        cache.set(itemId, null);
+      }
       return null;
     }
-    const data = await res.json();
-    const item = data?.Item ?? null;
-    cache.set(itemId, item);
-    return item;
-  } catch (err) {
-    console.error(`Error fetching QBO item ${itemId}:`, err);
-    cache.set(itemId, null);
-    return null;
   }
+  return null;
 }
 
 function parseSku(sku: string): { mpn: string; conditionGrade: string } {
@@ -519,12 +534,12 @@ Deno.serve(async (req) => {
 
     const itemCache = new Map<string, any>();
     const itemIdArray = Array.from(uniqueItemIds);
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
       if (i + BATCH_SIZE < itemIdArray.length) {
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);
@@ -575,6 +590,8 @@ Deno.serve(async (req) => {
 
     // ── Backfill VAT codes on existing order lines ──
     let vatBackfilled = 0;
+    const backfillStart = Date.now();
+    const BACKFILL_TIME_BUDGET_MS = 20_000; // 20s max for backfill
     try {
       // Find orders with lines missing tax_code_id
       const { data: ordersToFix } = await supabaseAdmin
@@ -584,8 +601,13 @@ Deno.serve(async (req) => {
         .not("origin_reference", "is", null);
 
       if (ordersToFix && ordersToFix.length > 0) {
-        // Filter to only orders that have at least one line with null tax_code_id
         for (const order of ordersToFix) {
+          // Check time budget
+          if (Date.now() - backfillStart > BACKFILL_TIME_BUDGET_MS) {
+            console.warn("Backfill time budget exceeded, stopping");
+            break;
+          }
+
           const { data: nullLines } = await supabaseAdmin
             .from("sales_order_line")
             .select("id")
@@ -595,12 +617,18 @@ Deno.serve(async (req) => {
 
           if (!nullLines || nullLines.length === 0) continue;
 
-          // Re-fetch the QBO transaction
+          // Throttle between QBO receipt fetches
+          await new Promise(r => setTimeout(r, 500));
+
           const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
           try {
             const res = await fetch(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
               headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
             });
+            if (res.status === 429) {
+              console.warn(`Backfill: rate limited on ${entity} ${order.origin_reference}, stopping backfill`);
+              break;
+            }
             if (!res.ok) {
               console.warn(`Backfill: failed to fetch ${entity} ${order.origin_reference}: ${res.status}`);
               continue;
@@ -640,7 +668,6 @@ Deno.serve(async (req) => {
                 .maybeSingle();
               if (!sku) continue;
 
-              // Resolve tax_code_id
               const { data: tc } = await supabaseAdmin
                 .from("tax_code")
                 .select("id")
@@ -648,7 +675,6 @@ Deno.serve(async (req) => {
                 .maybeSingle();
               if (!tc) continue;
 
-              // Update all matching lines for this order+sku that are missing tax_code_id
               const { data: updated } = await supabaseAdmin
                 .from("sales_order_line")
                 .update({ tax_code_id: tc.id, qbo_tax_code_ref: String(taxCodeRef) })
