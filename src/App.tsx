@@ -25,6 +25,8 @@ import { OrdersPage } from "./pages/admin/OrdersPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
+import { ProductsPage } from "./pages/admin/ProductsPage";
+import ProductDetailAdminPage from "./pages/admin/ProductDetailAdminPage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
