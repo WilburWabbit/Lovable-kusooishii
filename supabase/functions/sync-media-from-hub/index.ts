@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Batch update catalog_product.img_url by MPN
+    // Batch update product.img_url by MPN
     let updated = 0;
     let errors = 0;
     const entries = Array.from(mpnMap.entries());
