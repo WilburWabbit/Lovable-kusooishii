@@ -91,35 +91,68 @@ Deno.serve(async (req) => {
       console.error("Failed to store notification:", insertError);
     }
 
-    // For order-related topics, trigger a reactive order sync
+    // For order-related topics, trigger the full processing pipeline
     const ORDER_TOPICS = [
       "MARKETPLACE_ORDER_CONFIRMATION",
       "ORDER_CONFIRMATION",
       "ORDER_CHANGE",
     ];
     if (ORDER_TOPICS.includes(topic)) {
-      try {
-        const syncRes = await fetch(
-          `${supabaseUrl}/functions/v1/ebay-sync`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${serviceKey}`,
-            },
-            body: JSON.stringify({
-              action: "sync_orders",
-              _triggered_by: "notification",
-            }),
-          }
-        );
-        const syncData = await syncRes.json().catch(() => ({}));
-        console.log(
-          `Triggered order sync from ${topic}:`,
-          JSON.stringify(syncData).substring(0, 200)
-        );
-      } catch (e) {
-        console.error("Failed to trigger order sync from notification:", e);
+      // Extract order ID from notification payload
+      const ebayOrderId =
+        payload?.resource?.orderId ||
+        payload?.data?.orderId ||
+        payload?.orderId ||
+        null;
+
+      if (ebayOrderId) {
+        // Route to dedicated order processing pipeline
+        try {
+          const processRes = await fetch(
+            `${supabaseUrl}/functions/v1/ebay-process-order`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+              },
+              body: JSON.stringify({ order_id: ebayOrderId }),
+            }
+          );
+          const processData = await processRes.json().catch(() => ({}));
+          console.log(
+            `Processed order ${ebayOrderId} from ${topic}:`,
+            JSON.stringify(processData).substring(0, 300)
+          );
+        } catch (e) {
+          console.error(`Failed to process order ${ebayOrderId}:`, e);
+        }
+      } else {
+        // Fallback: trigger bulk sync if we can't extract the order ID
+        console.log("No order ID in payload, falling back to bulk sync");
+        try {
+          const syncRes = await fetch(
+            `${supabaseUrl}/functions/v1/ebay-sync`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+              },
+              body: JSON.stringify({
+                action: "sync_orders",
+                _triggered_by: "notification",
+              }),
+            }
+          );
+          const syncData = await syncRes.json().catch(() => ({}));
+          console.log(
+            `Fallback order sync from ${topic}:`,
+            JSON.stringify(syncData).substring(0, 200)
+          );
+        } catch (e) {
+          console.error("Failed to trigger fallback order sync:", e);
+        }
       }
     }
 

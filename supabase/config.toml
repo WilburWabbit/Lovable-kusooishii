@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.ebay-notifications]
 verify_jwt = false
+
+[functions.ebay-process-order]
+verify_jwt = false
