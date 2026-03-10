@@ -581,6 +581,140 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
+       CREATE LISTING — inventory item → offer → publish
+       ═══════════════════════════════════════════════ */
+    if (action === "create_listing") {
+      const { sku_id, listing_title, listing_description } = body;
+      if (!sku_id) throw new Error("sku_id is required");
+
+      // Fetch SKU + product data
+      const { data: sku, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code, condition_grade, price, name, product:product_id(id, mpn, name, description, img_url, weight_kg, length_cm, width_cm, height_cm)")
+        .eq("id", sku_id)
+        .single();
+      if (skuErr || !sku) throw new Error("SKU not found");
+      const prod = (sku as any).product;
+
+      // Count available stock
+      const { count: stockCount } = await admin
+        .from("stock_unit")
+        .select("id", { count: "exact", head: true })
+        .eq("sku_id", sku_id)
+        .eq("status", "available");
+
+      const conditionMap: Record<string, string> = {
+        "1": "NEW", "2": "LIKE_NEW", "3": "VERY_GOOD", "4": "GOOD", "5": "ACCEPTABLE",
+      };
+      const ebayCondition = conditionMap[sku.condition_grade] || "LIKE_NEW";
+
+      const title = listing_title || prod?.name || sku.name || `LEGO ${prod?.mpn}`;
+      const desc = listing_description || prod?.description || title;
+
+      // Step 1: PUT inventory item
+      const inventoryBody: any = {
+        product: {
+          title: title.substring(0, 80),
+          description: desc,
+          aspects: { Brand: ["LEGO"], MPN: [prod?.mpn || "N/A"] },
+          imageUrls: prod?.img_url ? [prod.img_url] : [],
+        },
+        condition: ebayCondition,
+        availability: {
+          shipToLocationAvailability: { quantity: stockCount || 0 },
+        },
+      };
+      if (prod?.weight_kg) {
+        inventoryBody.packageWeightAndSize = {
+          weight: { value: prod.weight_kg, unit: "KILOGRAM" },
+          dimensions: prod.length_cm ? {
+            length: { value: prod.length_cm, unit: "CENTIMETER" },
+            width: { value: prod.width_cm || 0, unit: "CENTIMETER" },
+            height: { value: prod.height_cm || 0, unit: "CENTIMETER" },
+          } : undefined,
+        };
+      }
+
+      await ebayFetch(accessToken, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku.sku_code)}`, {
+        method: "PUT",
+        body: JSON.stringify(inventoryBody),
+      });
+      console.log(`Inventory item created/updated: ${sku.sku_code}`);
+
+      // Step 2: POST offer
+      const offerBody = {
+        sku: sku.sku_code,
+        marketplaceId: "EBAY_GB",
+        format: "FIXED_PRICE",
+        listingDescription: desc,
+        availableQuantity: stockCount || 0,
+        pricingSummary: {
+          price: { value: String(sku.price ?? 0), currency: "GBP" },
+        },
+        merchantLocationKey: "default",
+        categoryId: "19006", // LEGO sets category
+      };
+
+      let offerId: string | null = null;
+      let listingId: string | null = null;
+
+      // Check if an offer already exists for this SKU
+      try {
+        const existingOffers = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku.sku_code)}&limit=10`);
+        const existing = (existingOffers?.offers || [])[0];
+        if (existing) {
+          offerId = existing.offerId;
+          listingId = existing.listing?.listingId ?? null;
+          console.log(`Existing offer found: ${offerId}`);
+        }
+      } catch { /* no existing offer */ }
+
+      if (!offerId) {
+        const offerRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer`, {
+          method: "POST",
+          body: JSON.stringify(offerBody),
+        });
+        offerId = offerRes?.offerId;
+        console.log(`Offer created: ${offerId}`);
+      }
+
+      // Step 3: Publish offer
+      if (offerId && !listingId) {
+        try {
+          const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
+            method: "POST",
+          });
+          listingId = publishRes?.listingId ?? null;
+          console.log(`Offer published, listing: ${listingId}`);
+        } catch (e: any) {
+          console.warn(`Publish failed (offer may need review): ${e.message}`);
+        }
+      }
+
+      // Upsert channel_listing
+      await admin.from("channel_listing").upsert(
+        {
+          channel: "ebay",
+          external_sku: sku.sku_code,
+          sku_id: sku.id,
+          external_listing_id: listingId,
+          listed_price: sku.price,
+          listed_quantity: stockCount || 0,
+          listing_title: title,
+          listing_description: desc,
+          offer_status: listingId ? "PUBLISHED" : "PENDING",
+          synced_at: new Date().toISOString(),
+        },
+        { onConflict: "channel,external_sku", ignoreDuplicates: false }
+      );
+
+      return new Response(
+        JSON.stringify({ success: true, offerId, listingId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    /* ═══════════════════════════════════════════════
        GET SUBSCRIPTIONS — list current notification subscriptions
        ═══════════════════════════════════════════════ */
     if (action === "get_subscriptions") {

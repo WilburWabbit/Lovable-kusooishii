@@ -1,0 +1,61 @@
+
+-- Add unique constraint on channel_listing(channel, external_sku) if not exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'channel_listing_channel_external_sku_key'
+  ) THEN
+    ALTER TABLE public.channel_listing ADD CONSTRAINT channel_listing_channel_external_sku_key UNIQUE (channel, external_sku);
+  END IF;
+END $$;
+
+-- Update browse_catalog to require web channel listing
+CREATE OR REPLACE FUNCTION public.browse_catalog(
+  search_term text DEFAULT NULL,
+  filter_theme_id uuid DEFAULT NULL,
+  filter_grade text DEFAULT NULL,
+  filter_retired boolean DEFAULT NULL
+)
+RETURNS TABLE(
+  product_id uuid, mpn text, name text, theme_name text, theme_id uuid,
+  retired_flag boolean, release_year integer, piece_count integer,
+  min_price numeric, best_grade text, total_stock bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT
+    p.id AS product_id, p.mpn, p.name, t.name AS theme_name, p.theme_id,
+    p.retired_flag, p.release_year, p.piece_count,
+    MIN(s.price) AS min_price,
+    MIN(s.condition_grade::text) AS best_grade,
+    COUNT(su.id) AS total_stock
+  FROM product p
+  LEFT JOIN theme t ON t.id = p.theme_id
+  JOIN sku s ON s.product_id = p.id AND s.active_flag = true AND s.saleable_flag = true
+  JOIN channel_listing cl ON cl.sku_id = s.id AND cl.channel = 'web' AND cl.offer_status = 'PUBLISHED'
+  JOIN stock_unit su ON su.sku_id = s.id AND su.status = 'available'
+  WHERE p.status = 'active'
+    AND (search_term IS NULL OR p.name ILIKE '%' || search_term || '%' OR p.mpn ILIKE '%' || search_term || '%')
+    AND (filter_theme_id IS NULL OR p.theme_id = filter_theme_id)
+    AND (filter_grade IS NULL OR s.condition_grade::text = filter_grade)
+    AND (filter_retired IS NULL OR p.retired_flag = filter_retired)
+  GROUP BY p.id, p.mpn, p.name, t.name, p.theme_id, p.retired_flag, p.release_year, p.piece_count
+  ORDER BY p.name;
+$function$;
+
+-- Update product_detail_offers to require web channel listing
+CREATE OR REPLACE FUNCTION public.product_detail_offers(p_mpn text)
+RETURNS TABLE(sku_id uuid, sku_code text, condition_grade text, price numeric, stock_count bigint)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT
+    s.id AS sku_id, s.sku_code, s.condition_grade::text, s.price,
+    COUNT(su.id) AS stock_count
+  FROM product p
+  JOIN sku s ON s.product_id = p.id AND s.active_flag = true AND s.saleable_flag = true
+  JOIN channel_listing cl ON cl.sku_id = s.id AND cl.channel = 'web' AND cl.offer_status = 'PUBLISHED'
+  JOIN stock_unit su ON su.sku_id = s.id AND su.status = 'available'
+  WHERE p.mpn = p_mpn AND p.status = 'active'
+  GROUP BY s.id, s.sku_code, s.condition_grade, s.price
+  ORDER BY s.condition_grade::text;
+$function$;
