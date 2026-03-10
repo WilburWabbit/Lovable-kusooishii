@@ -75,7 +75,7 @@ Constraints:
 - Description: 80–140 words.
 - CTA: single imperative sentence, 50 characters max.
 - Highlights: 3–6 bullets.
-- SEO title: 100 characters max.
+- SEO title: 60 characters max.
 - SEO body: 400 characters max, no line breaks.
 
 Structure rigid. Narrative persuasive. Tone adult but platform-safe.`;
