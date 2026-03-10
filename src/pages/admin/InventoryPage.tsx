@@ -127,7 +127,10 @@ function renderCell(u: StockRow, key: string): React.ReactNode {
     case "landed_inc": return <span className="font-mono text-xs">{gross != null ? fmt(gross) : "—"}</span>;
     case "carrying": return <span className="font-mono text-xs">{fmt(u.carrying_value)}</span>;
     case "impairment": return <span className="font-mono text-xs">{fmt(u.accumulated_impairment)}</span>;
-    case "created_at": return <span className="text-xs text-muted-foreground">{format(new Date(u.created_at), "dd MMM yyyy")}</span>;
+    case "purchase_date": {
+      const d = u.purchase_date ?? u.created_at;
+      return <span className="text-xs text-muted-foreground">{format(new Date(d), "dd MMM yyyy")}</span>;
+    }
     default: return null;
   }
 }
