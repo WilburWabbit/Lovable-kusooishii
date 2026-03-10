@@ -245,7 +245,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     const line = stockLines[i];
     const cg = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     const skuCode = `${line.mpn}-G${cg}`;
-    const { data: product } = await admin.from("catalog_product").select("id").eq("mpn", line.mpn).maybeSingle();
+    const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
@@ -254,7 +254,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
       const { data: newSku, error: skuErr } = await admin.from("sku").insert({
-        catalog_product_id: product?.id ?? null,
+        product_id: product?.id ?? null,
         condition_grade: cg,
         sku_code: skuCode,
         name: cleanQboName(line.description ?? line.mpn),
@@ -585,24 +585,24 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   const skuCode = `${mpn}-G${conditionGrade}`;
 
-  // Look up catalog_product by MPN
-  const { data: catalogProduct } = await admin
-    .from("catalog_product")
+  // Look up product by MPN
+  const { data: productRecord } = await admin
+    .from("product")
     .select("id")
     .eq("mpn", mpn)
     .maybeSingle();
 
-  const catalogProductId = catalogProduct?.id ?? null;
+  const productId = productRecord?.id ?? null;
 
   // Upsert SKU
   const { error } = await admin.from("sku").upsert({
     qbo_item_id: qboItemId,
     sku_code: skuCode,
     name: cleanQboName(item.Name ?? mpn),
-    catalog_product_id: catalogProductId,
+    product_id: productId,
     condition_grade: conditionGrade,
     active_flag: item.Active !== false,
-    saleable_flag: !!catalogProductId,
+    saleable_flag: !!productId,
     price: item.UnitPrice != null ? Number(item.UnitPrice) : null,
   }, { onConflict: "qbo_item_id" });
 

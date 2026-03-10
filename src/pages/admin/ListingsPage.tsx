@@ -43,7 +43,7 @@ interface ListingRow {
   name: string | null;
   condition_grade: string;
   price: number | null;
-  catalog_product: { name: string; mpn: string } | null;
+  product: { name: string; mpn: string } | null;
   stock_available: number;
   channel_listings: ChannelListing[];
 }
@@ -76,7 +76,7 @@ function fmt(v: number | null | undefined) {
 }
 
 function productName(r: ListingRow) {
-  return r.catalog_product?.name ?? r.name ?? "";
+  return r.product?.name ?? r.name ?? "";
 }
 
 function getChannelListing(r: ListingRow, ch: Channel): ChannelListing | undefined {
@@ -151,7 +151,7 @@ function getSortValue(r: ListingRow, key: string): unknown {
   switch (key) {
     case "sku_code": return r.sku_code;
     case "product": return productName(r);
-    case "mpn": return r.catalog_product?.mpn ?? "";
+    case "mpn": return r.product?.mpn ?? "";
     case "grade": return r.condition_grade;
     case "price": return r.price;
     case "stock": return r.stock_available;
@@ -168,7 +168,7 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
   switch (key) {
     case "sku_code": return <span className="font-mono text-xs">{r.sku_code}</span>;
     case "product": return <span className="max-w-[200px] truncate block">{productName(r) || "—"}</span>;
-    case "mpn": return <span className="font-mono text-xs">{r.catalog_product?.mpn ?? "—"}</span>;
+    case "mpn": return <span className="font-mono text-xs">{r.product?.mpn ?? "—"}</span>;
     case "grade": return GRADE_LABELS[r.condition_grade] ?? r.condition_grade;
     case "price": return <span className="font-mono text-xs">{fmt(r.price)}</span>;
     case "stock": return <span className="font-mono text-xs">{r.stock_available}</span>;
@@ -235,7 +235,7 @@ export function ListingsPage() {
       list = list.filter(
         (r) =>
           r.sku_code.toLowerCase().includes(q) ||
-          (r.catalog_product?.mpn ?? "").toLowerCase().includes(q) ||
+          (r.product?.mpn ?? "").toLowerCase().includes(q) ||
           productName(r).toLowerCase().includes(q),
       );
     }

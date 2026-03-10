@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Batch update catalog_product.img_url by MPN
+    // Batch update product.img_url by MPN
     let updated = 0;
     let errors = 0;
     const entries = Array.from(mpnMap.entries());
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
       const batch = entries.slice(i, i + 50);
       const promises = batch.map(([mpn, fileUrl]) =>
         admin
-          .from("catalog_product")
+          .from("product")
           .update({ img_url: fileUrl })
           .eq("mpn", mpn)
           .select("id")
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         hub_media_found: mpnMap.size,
-        catalog_products_updated: updated,
+        products_updated: updated,
         errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -182,80 +182,6 @@ export type Database = {
         }
         Relationships: []
       }
-      catalog_product: {
-        Row: {
-          brickeconomy_id: string | null
-          bricklink_item_no: string | null
-          brickowl_boid: string | null
-          created_at: string
-          description: string | null
-          id: string
-          img_url: string | null
-          mpn: string
-          name: string
-          piece_count: number | null
-          product_type: string
-          rebrickable_id: string | null
-          release_year: number | null
-          retired_flag: boolean
-          status: string
-          subtheme_name: string | null
-          theme_id: string | null
-          updated_at: string
-          version_descriptor: string | null
-        }
-        Insert: {
-          brickeconomy_id?: string | null
-          bricklink_item_no?: string | null
-          brickowl_boid?: string | null
-          created_at?: string
-          description?: string | null
-          id?: string
-          img_url?: string | null
-          mpn: string
-          name: string
-          piece_count?: number | null
-          product_type?: string
-          rebrickable_id?: string | null
-          release_year?: number | null
-          retired_flag?: boolean
-          status?: string
-          subtheme_name?: string | null
-          theme_id?: string | null
-          updated_at?: string
-          version_descriptor?: string | null
-        }
-        Update: {
-          brickeconomy_id?: string | null
-          bricklink_item_no?: string | null
-          brickowl_boid?: string | null
-          created_at?: string
-          description?: string | null
-          id?: string
-          img_url?: string | null
-          mpn?: string
-          name?: string
-          piece_count?: number | null
-          product_type?: string
-          rebrickable_id?: string | null
-          release_year?: number | null
-          retired_flag?: boolean
-          status?: string
-          subtheme_name?: string | null
-          theme_id?: string | null
-          updated_at?: string
-          version_descriptor?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "catalog_product_theme_id_fkey"
-            columns: ["theme_id"]
-            isOneToOne: false
-            referencedRelation: "theme"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       channel_listing: {
         Row: {
           channel: string
@@ -265,6 +191,8 @@ export type Database = {
           id: string
           listed_price: number | null
           listed_quantity: number | null
+          listing_description: string | null
+          listing_title: string | null
           offer_status: string | null
           raw_data: Json | null
           sku_id: string | null
@@ -279,6 +207,8 @@ export type Database = {
           id?: string
           listed_price?: number | null
           listed_quantity?: number | null
+          listing_description?: string | null
+          listing_title?: string | null
           offer_status?: string | null
           raw_data?: Json | null
           sku_id?: string | null
@@ -293,6 +223,8 @@ export type Database = {
           id?: string
           listed_price?: number | null
           listed_quantity?: number | null
+          listing_description?: string | null
+          listing_title?: string | null
           offer_status?: string | null
           raw_data?: Json | null
           sku_id?: string | null
@@ -546,6 +478,80 @@ export type Database = {
           },
         ]
       }
+      lego_catalog: {
+        Row: {
+          brickeconomy_id: string | null
+          bricklink_item_no: string | null
+          brickowl_boid: string | null
+          created_at: string
+          description: string | null
+          id: string
+          img_url: string | null
+          mpn: string
+          name: string
+          piece_count: number | null
+          product_type: string
+          rebrickable_id: string | null
+          release_year: number | null
+          retired_flag: boolean
+          status: string
+          subtheme_name: string | null
+          theme_id: string | null
+          updated_at: string
+          version_descriptor: string | null
+        }
+        Insert: {
+          brickeconomy_id?: string | null
+          bricklink_item_no?: string | null
+          brickowl_boid?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          img_url?: string | null
+          mpn: string
+          name: string
+          piece_count?: number | null
+          product_type?: string
+          rebrickable_id?: string | null
+          release_year?: number | null
+          retired_flag?: boolean
+          status?: string
+          subtheme_name?: string | null
+          theme_id?: string | null
+          updated_at?: string
+          version_descriptor?: string | null
+        }
+        Update: {
+          brickeconomy_id?: string | null
+          bricklink_item_no?: string | null
+          brickowl_boid?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          img_url?: string | null
+          mpn?: string
+          name?: string
+          piece_count?: number | null
+          product_type?: string
+          rebrickable_id?: string | null
+          release_year?: number | null
+          retired_flag?: boolean
+          status?: string
+          subtheme_name?: string | null
+          theme_id?: string | null
+          updated_at?: string
+          version_descriptor?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_product_theme_id_fkey"
+            columns: ["theme_id"]
+            isOneToOne: false
+            referencedRelation: "theme"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_asset: {
         Row: {
           alt_text: string | null
@@ -664,6 +670,90 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "club"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product: {
+        Row: {
+          call_to_action: string | null
+          created_at: string
+          description: string | null
+          highlights: string | null
+          id: string
+          img_url: string | null
+          lego_catalog_id: string | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          product_hook: string | null
+          product_type: string
+          release_year: number | null
+          retired_flag: boolean
+          seo_description: string | null
+          seo_title: string | null
+          status: string
+          subtheme_name: string | null
+          theme_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          call_to_action?: string | null
+          created_at?: string
+          description?: string | null
+          highlights?: string | null
+          id?: string
+          img_url?: string | null
+          lego_catalog_id?: string | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          product_hook?: string | null
+          product_type?: string
+          release_year?: number | null
+          retired_flag?: boolean
+          seo_description?: string | null
+          seo_title?: string | null
+          status?: string
+          subtheme_name?: string | null
+          theme_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          call_to_action?: string | null
+          created_at?: string
+          description?: string | null
+          highlights?: string | null
+          id?: string
+          img_url?: string | null
+          lego_catalog_id?: string | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          product_hook?: string | null
+          product_type?: string
+          release_year?: number | null
+          retired_flag?: boolean
+          seo_description?: string | null
+          seo_title?: string | null
+          status?: string
+          subtheme_name?: string | null
+          theme_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_lego_catalog_id_fkey"
+            columns: ["lego_catalog_id"]
+            isOneToOne: false
+            referencedRelation: "lego_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_theme_id_fkey"
+            columns: ["theme_id"]
+            isOneToOne: false
+            referencedRelation: "theme"
             referencedColumns: ["id"]
           },
         ]
@@ -932,12 +1022,12 @@ export type Database = {
       sku: {
         Row: {
           active_flag: boolean
-          catalog_product_id: string | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at: string
           id: string
           name: string | null
           price: number | null
+          product_id: string | null
           qbo_item_id: string | null
           saleable_flag: boolean
           sku_code: string
@@ -945,12 +1035,12 @@ export type Database = {
         }
         Insert: {
           active_flag?: boolean
-          catalog_product_id?: string | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
           name?: string | null
           price?: number | null
+          product_id?: string | null
           qbo_item_id?: string | null
           saleable_flag?: boolean
           sku_code: string
@@ -958,12 +1048,12 @@ export type Database = {
         }
         Update: {
           active_flag?: boolean
-          catalog_product_id?: string | null
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
           id?: string
           name?: string | null
           price?: number | null
+          product_id?: string | null
           qbo_item_id?: string | null
           saleable_flag?: boolean
           sku_code?: string
@@ -971,10 +1061,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "sku_catalog_product_id_fkey"
-            columns: ["catalog_product_id"]
+            foreignKeyName: "sku_product_id_fkey"
+            columns: ["product_id"]
             isOneToOne: false
-            referencedRelation: "catalog_product"
+            referencedRelation: "product"
             referencedColumns: ["id"]
           },
         ]
@@ -1255,7 +1345,7 @@ export type Database = {
             foreignKeyName: "wishlist_item_catalog_product_id_fkey"
             columns: ["catalog_product_id"]
             isOneToOne: false
-            referencedRelation: "catalog_product"
+            referencedRelation: "lego_catalog"
             referencedColumns: ["id"]
           },
           {

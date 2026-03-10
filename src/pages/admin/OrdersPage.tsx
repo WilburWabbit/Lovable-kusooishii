@@ -31,7 +31,7 @@ type OrderLineRow = {
   sku: {
     sku_code: string;
     name: string | null;
-    catalog_product: { name: string } | null;
+    product: { name: string } | null;
   } | null;
 };
 
@@ -367,7 +367,7 @@ export function OrdersPage() {
                                       return (
                                         <TableRow key={l.id}>
                                           <TableCell className="font-mono text-xs">{l.sku?.sku_code ?? "—"}</TableCell>
-                                          <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.catalog_product?.name ?? l.sku?.name ?? "—"}</TableCell>
+                                          <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.product?.name ?? l.sku?.name ?? "—"}</TableCell>
                                           <TableCell className="text-xs text-center">{l.quantity}</TableCell>
                                           <TableCell className="text-xs text-right font-mono">{fmt(l.unit_price)}</TableCell>
                                           <TableCell className="text-xs text-right font-mono">{fmt(l.line_total)}</TableCell>

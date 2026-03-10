@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
       await admin.from("brickeconomy_portfolio_snapshot").insert(snapshots);
     }
 
-    // --- Enrich catalog_product.brickeconomy_id where set_number matches mpn ---
+    // --- Enrich lego_catalog.brickeconomy_id where set_number matches mpn ---
     let catalogMatches = 0;
     for (const item of setItems) {
       if (!item.item_number) continue;
@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
       }
       
       const { data: matched, error: matchErr } = await admin
-        .from("catalog_product")
+        .from("lego_catalog")
         .select("id, brickeconomy_id")
         .in("mpn", mpnVariants)
         .is("brickeconomy_id", null)
@@ -200,7 +200,7 @@ Deno.serve(async (req) => {
 
       if (!matchErr && matched && matched.length > 0) {
         await admin
-          .from("catalog_product")
+          .from("lego_catalog")
           .update({ brickeconomy_id: item.item_number })
           .eq("id", matched[0].id);
         catalogMatches++;

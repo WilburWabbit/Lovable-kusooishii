@@ -229,11 +229,11 @@ async function autoProcessReceipt(
     const mpn = line.mpn!;
     const skuCode = `${mpn}-G${conditionGrade}`;
 
-    const { data: product } = await supabaseAdmin
-      .from("catalog_product")
-      .select("id, mpn")
-      .eq("mpn", mpn)
-      .single();
+      const { data: product } = await supabaseAdmin
+        .from("product")
+        .select("id, mpn")
+        .eq("mpn", mpn)
+        .single();
 
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
@@ -250,7 +250,7 @@ async function autoProcessReceipt(
       const { data: newSku, error: skuErr } = await supabaseAdmin
         .from("sku")
         .insert({
-          catalog_product_id: product?.id ?? null,
+           product_id: product?.id ?? null,
           condition_grade: conditionGrade,
           sku_code: skuCode,
           name: cleanQboName(line.description ?? mpn),
