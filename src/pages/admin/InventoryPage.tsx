@@ -28,6 +28,7 @@ type StockRow = {
   carrying_value: number | null;
   accumulated_impairment: number;
   created_at: string;
+  purchase_date: string | null;
   vat_rate_percent: number | null;
   sku: {
     sku_code: string;

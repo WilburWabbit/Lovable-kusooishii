@@ -81,15 +81,16 @@ Deno.serve(async (req) => {
       const { data, error } = await admin
         .from("stock_unit")
         .select(
-          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)), receipt_line:inbound_receipt_line_id(tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent)))"
+          "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, catalog_product:catalog_product_id(name)), receipt_line:inbound_receipt_line_id(tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent)), receipt:inbound_receipt_id(txn_date))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
       if (error) throw error;
-      // Flatten vat_rate_percent
+      // Flatten vat_rate_percent and purchase_date
       result = (data ?? []).map((u: any) => ({
         ...u,
         vat_rate_percent: u.receipt_line?.tax_code?.purchase_tax_rate?.rate_percent ?? null,
+        purchase_date: u.receipt_line?.receipt?.txn_date ?? null,
         receipt_line: undefined,
       }));
     } else if (action === "list-customers") {
