@@ -19,6 +19,8 @@ interface Receipt {
   vendor_name: string | null;
   txn_date: string | null;
   total_amount: number;
+  tax_total: number;
+  global_tax_calculation: string | null;
   currency: string;
   status: string;
   created_at: string;
