@@ -884,6 +884,8 @@ export type Database = {
           origin_channel: string
           origin_reference: string | null
           payment_reference: string | null
+          shipped_date: string | null
+          shipped_via: string | null
           shipping_city: string
           shipping_country: string
           shipping_county: string | null
@@ -894,6 +896,7 @@ export type Database = {
           shipping_total: number
           status: Database["public"]["Enums"]["order_status"]
           tax_total: number
+          tracking_number: string | null
           txn_date: string | null
           updated_at: string
           user_id: string | null
@@ -918,6 +921,8 @@ export type Database = {
           origin_channel?: string
           origin_reference?: string | null
           payment_reference?: string | null
+          shipped_date?: string | null
+          shipped_via?: string | null
           shipping_city?: string
           shipping_country?: string
           shipping_county?: string | null
@@ -928,6 +933,7 @@ export type Database = {
           shipping_total?: number
           status?: Database["public"]["Enums"]["order_status"]
           tax_total?: number
+          tracking_number?: string | null
           txn_date?: string | null
           updated_at?: string
           user_id?: string | null
@@ -952,6 +958,8 @@ export type Database = {
           origin_channel?: string
           origin_reference?: string | null
           payment_reference?: string | null
+          shipped_date?: string | null
+          shipped_via?: string | null
           shipping_city?: string
           shipping_country?: string
           shipping_county?: string | null
@@ -962,6 +970,7 @@ export type Database = {
           shipping_total?: number
           status?: Database["public"]["Enums"]["order_status"]
           tax_total?: number
+          tracking_number?: string | null
           txn_date?: string | null
           updated_at?: string
           user_id?: string | null
