@@ -271,8 +271,8 @@ export function ListingsPage() {
   const handleSyncEbay = async () => {
     setSyncing(true);
     try {
-      const { error } = await supabase.functions.invoke("ebay-sync", {
-        body: { action: "sync_inventory" },
+      const { error } = await invokeWithAuth("ebay-sync", {
+        action: "sync_inventory",
       });
       if (error) throw error;
       toast.success("eBay sync triggered");
