@@ -38,6 +38,7 @@ type OrderLineRow = {
 type OrderRow = {
   id: string;
   order_number: string;
+  doc_number: string | null;
   origin_channel: string;
   origin_reference: string | null;
   status: string;
