@@ -287,6 +287,49 @@ export default function ProductDetailAdminPage() {
           </Card>
         </div>
 
+        {/* Dimensions & Specs */}
+        {(product.length_cm || product.width_cm || product.height_cm || product.weight_kg) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Dimensions & Weight</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {product.length_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Length</p>
+                    <p className="text-sm font-bold font-display">{product.length_cm} cm</p>
+                  </div>
+                )}
+                {product.width_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Width</p>
+                    <p className="text-sm font-bold font-display">{product.width_cm} cm</p>
+                  </div>
+                )}
+                {product.height_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Height</p>
+                    <p className="text-sm font-bold font-display">{product.height_cm} cm</p>
+                  </div>
+                )}
+                {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Girth</p>
+                    <p className="text-sm font-bold font-display">{(2 * ((product.width_cm ?? 0) + (product.height_cm ?? 0))).toFixed(1)} cm</p>
+                  </div>
+                )}
+                {product.weight_kg != null && (
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Weight</p>
+                    <p className="text-sm font-bold font-display">{product.weight_kg} kg</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Common Content */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
