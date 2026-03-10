@@ -343,12 +343,14 @@ export function ListingsPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">Sync eBay</span>
             </Button>
-            <ColumnSelector
-              allColumns={ALL_COLUMNS}
-              visibleColumns={tp.prefs.visibleColumns}
-              onToggleColumn={tp.toggleColumn}
-              onMoveColumn={tp.moveColumn}
-            />
+            <div className="hidden md:block">
+              <ColumnSelector
+                allColumns={ALL_COLUMNS}
+                visibleColumns={tp.prefs.visibleColumns}
+                onToggleColumn={tp.toggleColumn}
+                onMoveColumn={tp.moveColumn}
+              />
+            </div>
           </div>
         </div>
 
