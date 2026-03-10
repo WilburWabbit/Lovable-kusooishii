@@ -103,50 +103,109 @@ Deno.serve(async (req) => {
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
-    // Query all TaxRate entities
-    const query = encodeURIComponent("SELECT * FROM TaxRate");
-    const res = await fetch(`${baseUrl}/query?query=${query}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
+    // ── 1. Sync TaxRate entities ──
+    const rateQuery = encodeURIComponent("SELECT * FROM TaxRate");
+    const rateRes = await fetch(`${baseUrl}/query?query=${rateQuery}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`QBO TaxRate query failed [${res.status}]: ${errText}`);
+    if (!rateRes.ok) {
+      const errText = await rateRes.text();
+      throw new Error(`QBO TaxRate query failed [${rateRes.status}]: ${errText}`);
     }
 
-    const json = await res.json();
-    const taxRates = json?.QueryResponse?.TaxRate ?? [];
+    const rateJson = await rateRes.json();
+    const taxRates = rateJson?.QueryResponse?.TaxRate ?? [];
 
-    if (taxRates.length === 0) {
-      return new Response(JSON.stringify({ synced: 0, message: "No tax rates found in QBO." }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Upsert each rate
     const now = new Date().toISOString();
-    const rows = taxRates.map((tr: any) => ({
-      qbo_tax_rate_id: String(tr.Id),
-      name: tr.Name ?? `Rate ${tr.Id}`,
-      description: tr.Description ?? null,
-      rate_percent: tr.RateValue ?? 0,
-      agency_ref: tr.AgencyRef?.value ? String(tr.AgencyRef.value) : null,
-      active: tr.Active !== false,
-      synced_at: now,
-    }));
+    let ratesSynced = 0;
 
-    const { error: upsertErr } = await supabaseAdmin
-      .from("vat_rate")
-      .upsert(rows, { onConflict: "qbo_tax_rate_id" });
+    if (taxRates.length > 0) {
+      const rows = taxRates.map((tr: any) => ({
+        qbo_tax_rate_id: String(tr.Id),
+        name: tr.Name ?? `Rate ${tr.Id}`,
+        description: tr.Description ?? null,
+        rate_percent: tr.RateValue ?? 0,
+        agency_ref: tr.AgencyRef?.value ? String(tr.AgencyRef.value) : null,
+        active: tr.Active !== false,
+        synced_at: now,
+      }));
 
-    if (upsertErr) throw new Error(`Upsert failed: ${upsertErr.message}`);
+      const { error: upsertErr } = await supabaseAdmin
+        .from("vat_rate")
+        .upsert(rows, { onConflict: "qbo_tax_rate_id" });
 
-    return new Response(JSON.stringify({ synced: rows.length }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      if (upsertErr) throw new Error(`TaxRate upsert failed: ${upsertErr.message}`);
+      ratesSynced = rows.length;
+    }
+
+    // ── 2. Sync TaxCode entities ──
+    const codeQuery = encodeURIComponent("SELECT * FROM TaxCode");
+    const codeRes = await fetch(`${baseUrl}/query?query=${codeQuery}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
+
+    if (!codeRes.ok) {
+      const errText = await codeRes.text();
+      throw new Error(`QBO TaxCode query failed [${codeRes.status}]: ${errText}`);
+    }
+
+    const codeJson = await codeRes.json();
+    const taxCodes = codeJson?.QueryResponse?.TaxCode ?? [];
+
+    // Build a lookup: qbo_tax_rate_id → vat_rate.id
+    const { data: allVatRates } = await supabaseAdmin
+      .from("vat_rate")
+      .select("id, qbo_tax_rate_id");
+    const vatRateMap = new Map<string, string>();
+    for (const vr of (allVatRates ?? [])) {
+      vatRateMap.set(vr.qbo_tax_rate_id, vr.id);
+    }
+
+    let codesSynced = 0;
+
+    for (const tc of taxCodes) {
+      const qboTaxCodeId = String(tc.Id);
+
+      // Extract the first TaxRateRef from each list
+      const salesRateDetails = tc.SalesTaxRateList?.TaxRateDetail ?? [];
+      const purchaseRateDetails = tc.PurchaseTaxRateList?.TaxRateDetail ?? [];
+
+      const salesQboRateId = salesRateDetails[0]?.TaxRateRef?.value
+        ? String(salesRateDetails[0].TaxRateRef.value)
+        : null;
+      const purchaseQboRateId = purchaseRateDetails[0]?.TaxRateRef?.value
+        ? String(purchaseRateDetails[0].TaxRateRef.value)
+        : null;
+
+      const salesTaxRateId = salesQboRateId ? (vatRateMap.get(salesQboRateId) ?? null) : null;
+      const purchaseTaxRateId = purchaseQboRateId ? (vatRateMap.get(purchaseQboRateId) ?? null) : null;
+
+      const { error: tcErr } = await supabaseAdmin
+        .from("tax_code")
+        .upsert(
+          {
+            qbo_tax_code_id: qboTaxCodeId,
+            name: tc.Name ?? `TaxCode ${qboTaxCodeId}`,
+            active: tc.Active !== false,
+            sales_tax_rate_id: salesTaxRateId,
+            purchase_tax_rate_id: purchaseTaxRateId,
+            synced_at: now,
+          },
+          { onConflict: "qbo_tax_code_id" }
+        );
+
+      if (tcErr) {
+        console.error(`Failed to upsert TaxCode ${qboTaxCodeId}:`, tcErr);
+        continue;
+      }
+      codesSynced++;
+    }
+
+    return new Response(
+      JSON.stringify({ synced: ratesSynced, tax_codes_synced: codesSynced }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (err) {
     console.error("qbo-sync-tax-rates error:", err);
     return new Response(JSON.stringify({ error: err.message ?? "Unknown error" }), {
