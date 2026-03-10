@@ -74,18 +74,18 @@ function productName(u: StockRow) {
   return u.sku?.catalog_product?.name ?? u.sku?.name ?? "";
 }
 
-const ALL_COLUMNS = [
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "sku_code", label: "SKU Code" },
   { key: "product", label: "Product" },
   { key: "mpn", label: "MPN" },
   { key: "grade", label: "Grade" },
   { key: "status", label: "Status" },
-  { key: "landed_net", label: "Landed (net)", align: "right" as const },
-  { key: "vat_pct", label: "VAT %", align: "right" as const },
-  { key: "vat_amt", label: "VAT", align: "right" as const },
-  { key: "landed_inc", label: "Landed (inc VAT)", align: "right" as const },
-  { key: "carrying", label: "Carrying", align: "right" as const },
-  { key: "impairment", label: "Impairment", align: "right" as const },
+  { key: "landed_net", label: "Landed (net)", align: "right" },
+  { key: "vat_pct", label: "VAT %", align: "right" },
+  { key: "vat_amt", label: "VAT", align: "right" },
+  { key: "landed_inc", label: "Landed (inc VAT)", align: "right" },
+  { key: "carrying", label: "Carrying", align: "right" },
+  { key: "impairment", label: "Impairment", align: "right" },
   { key: "created_at", label: "Created" },
 ];
 
