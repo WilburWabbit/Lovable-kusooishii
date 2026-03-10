@@ -362,6 +362,9 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Capture line-level TaxCodeRef (e.g. "TAX" or "NON")
+        const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
         lineRows.push({
           inbound_receipt_id: receipt.id,
           description: line.Description ?? detail.ItemRef?.name ?? "No description",
@@ -372,6 +375,7 @@ Deno.serve(async (req) => {
           is_stock_line: isStockLine,
           mpn,
           condition_grade: conditionGrade,
+          qbo_tax_code_ref: taxCodeRef,
         });
       }
 

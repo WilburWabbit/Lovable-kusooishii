@@ -110,6 +110,26 @@ async function queryQbo(baseUrl: string, accessToken: string, entity: string): P
   return data?.QueryResponse?.[entity] ?? [];
 }
 
+/** Resolve the primary QBO TaxRateRef from TxnTaxDetail and look up our vat_rate row */
+async function resolveVatRateId(
+  supabaseAdmin: any,
+  txnTaxDetail: any
+): Promise<string | null> {
+  const taxLines = txnTaxDetail?.TaxLine ?? [];
+  if (taxLines.length === 0) return null;
+
+  const taxRateRef = taxLines[0]?.TaxLineDetail?.TaxRateRef?.value;
+  if (!taxRateRef) return null;
+
+  const { data: vatRate } = await supabaseAdmin
+    .from("vat_rate")
+    .select("id")
+    .eq("qbo_tax_rate_id", String(taxRateRef))
+    .maybeSingle();
+
+  return vatRate?.id ?? null;
+}
+
 async function processSalesReceipt(
   supabaseAdmin: any,
   receipt: any,
@@ -134,6 +154,21 @@ async function processSalesReceipt(
   const txnDate = receipt.TxnDate ?? null;
   const totalAmount = receipt.TotalAmt ?? 0;
   const currency = receipt.CurrencyRef?.value ?? "GBP";
+  const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
+  const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
+
+  // Compute correct subtotals based on tax treatment
+  let merchandiseSubtotal: number;
+  let grossTotal: number;
+  if (globalTaxCalc === "TaxInclusive") {
+    // TotalAmt includes tax
+    merchandiseSubtotal = totalAmount - taxTotal;
+    grossTotal = totalAmount;
+  } else {
+    // TaxExcluded or NotApplicable: TotalAmt is ex-tax, gross = subtotal + tax
+    merchandiseSubtotal = totalAmount;
+    grossTotal = totalAmount + taxTotal;
+  }
 
   // Extract item lines
   const itemLines = (receipt.Line ?? []).filter(
@@ -143,6 +178,9 @@ async function processSalesReceipt(
   if (itemLines.length === 0) {
     return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
   }
+
+  // Resolve vat_rate_id from transaction-level TaxRateRef
+  const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
   // Create sales_order
   const { data: order, error: orderErr } = await supabaseAdmin
@@ -154,8 +192,10 @@ async function processSalesReceipt(
       guest_name: customerName,
       guest_email: `qbo-sale-${qboId}@imported.local`,
       shipping_name: customerName,
-      merchandise_subtotal: totalAmount,
-      gross_total: totalAmount,
+      merchandise_subtotal: merchandiseSubtotal,
+      tax_total: taxTotal,
+      gross_total: grossTotal,
+      global_tax_calculation: globalTaxCalc,
       currency,
       notes: `Imported from QBO SalesReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
@@ -172,8 +212,8 @@ async function processSalesReceipt(
     const detail = line.SalesItemLineDetail;
     const qty = detail.Qty ?? 1;
     const unitPrice = detail.UnitPrice ?? 0;
-    const lineTotal = line.Amount ?? 0;
     const itemRefValue = detail.ItemRef.value;
+    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
     // Resolve SKU
     const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
@@ -223,6 +263,8 @@ async function processSalesReceipt(
           unit_price: unitPrice,
           line_total: unitPrice,
           stock_unit_id: stockUnit?.id ?? null,
+          qbo_tax_code_ref: taxCodeRef,
+          vat_rate_id: vatRateId,
         });
 
       if (lineErr) {
@@ -270,8 +312,21 @@ async function processRefundReceipt(
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
   const txnDate = receipt.TxnDate ?? null;
-  const totalAmount = -(receipt.TotalAmt ?? 0);
+  const totalAmount = receipt.TotalAmt ?? 0;
   const currency = receipt.CurrencyRef?.value ?? "GBP";
+  const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
+  const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
+
+  // Compute correct subtotals (negated for refunds)
+  let merchandiseSubtotal: number;
+  let grossTotal: number;
+  if (globalTaxCalc === "TaxInclusive") {
+    merchandiseSubtotal = -(totalAmount - taxTotal);
+    grossTotal = -totalAmount;
+  } else {
+    merchandiseSubtotal = -totalAmount;
+    grossTotal = -(totalAmount + taxTotal);
+  }
 
   const itemLines = (receipt.Line ?? []).filter(
     (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
@@ -280,6 +335,8 @@ async function processRefundReceipt(
   if (itemLines.length === 0) {
     return { created: false, linesCreated: 0 };
   }
+
+  const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
@@ -290,8 +347,10 @@ async function processRefundReceipt(
       guest_name: customerName,
       guest_email: `qbo-refund-${qboId}@imported.local`,
       shipping_name: customerName,
-      merchandise_subtotal: totalAmount,
-      gross_total: totalAmount,
+      merchandise_subtotal: merchandiseSubtotal,
+      tax_total: -taxTotal,
+      gross_total: grossTotal,
+      global_tax_calculation: globalTaxCalc,
       currency,
       notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
@@ -307,6 +366,7 @@ async function processRefundReceipt(
     const qty = detail.Qty ?? 1;
     const unitPrice = detail.UnitPrice ?? 0;
     const itemRefValue = detail.ItemRef.value;
+    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
     const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
     const skuField = qboItem?.Sku;
@@ -343,6 +403,8 @@ async function processRefundReceipt(
         quantity: qty,
         unit_price: -unitPrice,
         line_total: -(line.Amount ?? 0),
+        qbo_tax_code_ref: taxCodeRef,
+        vat_rate_id: vatRateId,
       });
 
     if (lineErr) {
