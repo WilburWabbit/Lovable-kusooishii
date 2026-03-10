@@ -76,7 +76,7 @@ function fmt(v: number | null | undefined) {
 }
 
 function productName(r: ListingRow) {
-  return r.catalog_product?.name ?? r.name ?? "";
+  return r.product?.name ?? r.name ?? "";
 }
 
 function getChannelListing(r: ListingRow, ch: Channel): ChannelListing | undefined {
