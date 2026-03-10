@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,18 +18,8 @@ import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
-
-async function invokeWithAuth<T = unknown>(fnName: string, body?: Record<string, unknown>) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error("Not authenticated – please log in again.");
-  const { data, error } = await supabase.functions.invoke(fnName, {
-    body,
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-  if (error) throw error;
-  return data as T;
-}
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
