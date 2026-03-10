@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import {
-  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle, Sparkles, Loader2,
+  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle, Sparkles, Loader2, Plus, X,
 } from "lucide-react";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
