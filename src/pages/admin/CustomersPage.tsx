@@ -192,7 +192,33 @@ export function CustomersPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No customers found.</div>
+          ) : (
+            sorted.map((c) => (
+              <MobileListCard key={c.id} showChevron={false}>
+                <MobileCardTitle>{c.display_name}</MobileCardTitle>
+                <MobileCardMeta>
+                  {c.email && <span>{c.email}</span>}
+                  {c.billing_city && <span>{c.billing_city}</span>}
+                  {c.phone && <span>{c.phone}</span>}
+                </MobileCardMeta>
+                <MobileCardBadges>
+                  <Badge variant="outline" className={c.active ? "bg-green-50 text-green-700 border-green-200" : "bg-muted text-muted-foreground"}>
+                    {c.active ? "Active" : "Inactive"}
+                  </Badge>
+                </MobileCardBadges>
+              </MobileListCard>
+            ))
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -231,6 +257,7 @@ export function CustomersPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );

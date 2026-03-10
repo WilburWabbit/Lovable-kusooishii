@@ -354,7 +354,46 @@ export function ListingsPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No listings found.</div>
+          ) : (
+            sorted.map((r) => (
+              <MobileListCard key={r.id} showChevron={false}>
+                <MobileCardTitle>{r.sku_code} — {productName(r) || "—"}</MobileCardTitle>
+                <MobileCardMeta>
+                  {r.product?.mpn && <span className="font-mono">{r.product.mpn}</span>}
+                  <span>{GRADE_LABELS[r.condition_grade] ?? r.condition_grade}</span>
+                  <span className="font-mono">{fmt(r.price)}</span>
+                  <span>Stock: {r.stock_available}</span>
+                </MobileCardMeta>
+                <MobileCardBadges>
+                  {CHANNELS.map((ch) => {
+                    const cl = getChannelListing(r, ch);
+                    if (!cl) return null;
+                    const status = cl.offer_status?.toLowerCase() ?? "unknown";
+                    let badgeClass = "bg-muted text-muted-foreground";
+                    if (status === "live" || status === "active" || status === "published")
+                      badgeClass = "bg-emerald-100 text-emerald-800";
+                    else if (status === "draft")
+                      badgeClass = "bg-yellow-100 text-yellow-800";
+                    return (
+                      <Badge key={ch} variant="outline" className={`text-[10px] ${badgeClass}`}>
+                        {CHANNEL_LABELS[ch]}: {cl.offer_status ?? "—"}
+                      </Badge>
+                    );
+                  })}
+                </MobileCardBadges>
+              </MobileListCard>
+            ))
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -393,6 +432,7 @@ export function ListingsPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );

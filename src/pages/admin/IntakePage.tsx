@@ -278,7 +278,7 @@ export function IntakePage() {
                   <SelectItem value="error">Error</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="sm:ml-auto">
+              <div className="hidden md:block sm:ml-auto">
                 <ColumnSelector
                   allColumns={ALL_COLUMNS.filter((c) => c.key !== "_chevron")}
                   visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_chevron")}
