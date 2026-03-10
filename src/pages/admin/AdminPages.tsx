@@ -22,9 +22,7 @@ function AdminPlaceholder({ title, description }: AdminPlaceholderProps) {
 
 // InventoryPage moved to src/pages/admin/InventoryPage.tsx
 
-export function ListingsPage() {
-  return <AdminPlaceholder title="Listings" description="Multi-channel listing orchestration, coverage tracking, and publish queue." />;
-}
+// ListingsPage moved to src/pages/admin/ListingsPage.tsx
 
 // OrdersPage moved to src/pages/admin/OrdersPage.tsx
 
