@@ -123,6 +123,10 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
       return <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />;
     case "order_number":
       return <span className="font-mono text-xs font-medium">{o.order_number}</span>;
+    case "customer_name": {
+      const name = o.customer?.display_name ?? o.guest_name;
+      return <span className="text-xs">{name ?? "—"}</span>;
+    }
     case "origin_channel":
       return <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>{o.origin_channel.replace(/_/g, " ")}</Badge>;
     case "origin_reference":
