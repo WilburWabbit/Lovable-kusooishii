@@ -193,20 +193,28 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    // Verify caller is admin/staff
+    // Allow internal service-role invocation (from ebay-notifications webhook)
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await admin.auth.getUser(token);
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
-    if (!hasAccess) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const body = await req.json().catch(() => ({}));
+
+    if (token === serviceRoleKey && body._triggered_by === "notification") {
+      // Trusted internal call — skip user auth
+      console.log("Service-role invocation from notification webhook");
+    } else {
+      // Verify caller is admin/staff
+      const { data: { user }, error: userError } = await admin.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+      const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+      if (!hasAccess) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const body = await req.json().catch(() => ({}));
