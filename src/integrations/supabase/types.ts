@@ -256,6 +256,59 @@ export type Database = {
           },
         ]
       }
+      channel_listing: {
+        Row: {
+          channel: string
+          created_at: string
+          external_listing_id: string | null
+          external_sku: string
+          id: string
+          listed_price: number | null
+          listed_quantity: number | null
+          offer_status: string | null
+          raw_data: Json | null
+          sku_id: string | null
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          external_listing_id?: string | null
+          external_sku: string
+          id?: string
+          listed_price?: number | null
+          listed_quantity?: number | null
+          offer_status?: string | null
+          raw_data?: Json | null
+          sku_id?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          external_listing_id?: string | null
+          external_sku?: string
+          id?: string
+          listed_price?: number | null
+          listed_quantity?: number | null
+          offer_status?: string | null
+          raw_data?: Json | null
+          sku_id?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_listing_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       club: {
         Row: {
           active: boolean
