@@ -207,7 +207,7 @@ export function OrdersPage() {
   );
 
   const totalRevenue = useMemo(
-    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + o.gross_total, 0),
+    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + orderGrossFromLines(o), 0),
     [orders],
   );
   const salesCount = orders.filter((o) => o.origin_channel !== "qbo_refund").length;
