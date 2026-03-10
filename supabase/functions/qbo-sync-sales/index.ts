@@ -406,6 +406,7 @@ async function processRefundReceipt(
       currency,
       customer_id: customerId,
       txn_date: txnDate ?? null,
+      doc_number: receipt.DocNumber ?? null,
       notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")
