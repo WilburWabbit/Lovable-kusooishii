@@ -324,7 +324,7 @@ export function ProductsPage() {
               <SelectItem value="missing">Missing content</SelectItem>
             </SelectContent>
           </Select>
-          <div className="sm:ml-auto">
+          <div className="hidden md:block sm:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS.filter((c) => c.key !== "_expand")}
               visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_expand")}
