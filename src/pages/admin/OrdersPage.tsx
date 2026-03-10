@@ -122,10 +122,10 @@ function getSortValue(o: OrderRow, key: string): unknown {
     case "origin_reference": return o.origin_reference;
     case "status": return o.status;
     case "items": return o.sales_order_line.length;
-    case "net": return o.merchandise_subtotal;
-    case "vat": return o.tax_total;
-    case "total": return o.gross_total;
-    case "created_at": return o.created_at;
+    case "net": return orderNetFromLines(o);
+    case "vat": return orderVatFromLines(o);
+    case "total": return orderGrossFromLines(o);
+    case "created_at": return o.txn_date ?? o.created_at;
     default: return null;
   }
 }
