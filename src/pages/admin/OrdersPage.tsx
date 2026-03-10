@@ -38,6 +38,7 @@ type OrderLineRow = {
 type OrderRow = {
   id: string;
   order_number: string;
+  doc_number: string | null;
   origin_channel: string;
   origin_reference: string | null;
   status: string;
@@ -100,6 +101,7 @@ function orderGrossFromLines(o: OrderRow) {
 
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
+  { key: "doc_number", label: "Sales Receipt" },
   { key: "order_number", label: "Order #" },
   { key: "customer_name", label: "Customer" },
   { key: "origin_channel", label: "Origin" },
@@ -116,6 +118,7 @@ const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
 
 function getSortValue(o: OrderRow, key: string): unknown {
   switch (key) {
+    case "doc_number": return o.doc_number ?? o.order_number;
     case "order_number": return o.order_number;
     case "customer_name": return o.customer?.display_name ?? o.guest_name;
     case "origin_channel": return o.origin_channel;
@@ -134,8 +137,10 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
   switch (key) {
     case "_expand":
       return <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />;
+    case "doc_number":
+      return <span className="font-mono text-xs font-medium">{o.doc_number ?? o.order_number}</span>;
     case "order_number":
-      return <span className="font-mono text-xs font-medium">{o.order_number}</span>;
+      return <span className="font-mono text-xs">{o.order_number}</span>;
     case "customer_name": {
       const name = o.customer?.display_name ?? o.guest_name;
       return <span className="text-xs">{name ?? "—"}</span>;
@@ -192,6 +197,7 @@ export function OrdersPage() {
       list = list.filter(
         (o) =>
           o.order_number.toLowerCase().includes(q) ||
+          (o.doc_number ?? "").toLowerCase().includes(q) ||
           (o.origin_reference ?? "").toLowerCase().includes(q) ||
           (o.customer?.display_name ?? "").toLowerCase().includes(q) ||
           (o.guest_name ?? "").toLowerCase().includes(q) ||

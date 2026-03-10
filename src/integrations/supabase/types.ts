@@ -657,6 +657,7 @@ export type Database = {
           currency: string
           customer_id: string | null
           discount_total: number
+          doc_number: string | null
           global_tax_calculation: string | null
           gross_total: number
           guest_email: string | null
@@ -690,6 +691,7 @@ export type Database = {
           currency?: string
           customer_id?: string | null
           discount_total?: number
+          doc_number?: string | null
           global_tax_calculation?: string | null
           gross_total: number
           guest_email?: string | null
@@ -723,6 +725,7 @@ export type Database = {
           currency?: string
           customer_id?: string | null
           discount_total?: number
+          doc_number?: string | null
           global_tax_calculation?: string | null
           gross_total?: number
           guest_email?: string | null
