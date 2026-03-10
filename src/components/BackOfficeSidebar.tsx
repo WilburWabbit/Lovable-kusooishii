@@ -35,6 +35,7 @@ const operationalItems = [
   { title: "Inventory", url: "/admin/inventory", icon: Package },
   { title: "Listings", url: "/admin/listings", icon: ListChecks },
   { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
+  { title: "Customers", url: "/admin/customers", icon: Contact },
   { title: "Reconciliation", url: "/admin/reconciliation", icon: CreditCard },
   { title: "Demand", url: "/admin/demand", icon: TrendingUp },
   { title: "Analytics", url: "/admin/analytics", icon: BarChart3 },

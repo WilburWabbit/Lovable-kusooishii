@@ -220,7 +220,7 @@ export function CustomersPage() {
                   {sorted.map((c) => (
                     <TableRow key={c.id}>
                       {visibleCols.map((col) => (
-                        <TableCell key={col.key} className={col.align === "center" ? "text-center" : col.align === "right" ? "text-right" : ""}>
+                        <TableCell key={col.key} className={(col as any).align === "center" ? "text-center" : (col as any).align === "right" ? "text-right" : ""}>
                           {renderCell(c, col.key)}
                         </TableCell>
                       ))}

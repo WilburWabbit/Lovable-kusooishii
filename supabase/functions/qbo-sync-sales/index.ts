@@ -334,6 +334,7 @@ async function processRefundReceipt(
   if (existing) return { created: false, linesCreated: 0 };
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
+  const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
   const txnDate = receipt.TxnDate ?? null;
   const totalAmount = receipt.TotalAmt ?? 0;
   const currency = receipt.CurrencyRef?.value ?? "GBP";
@@ -359,6 +360,17 @@ async function processRefundReceipt(
     return { created: false, linesCreated: 0 };
   }
 
+  // Resolve customer_id
+  let customerId: string | null = null;
+  if (customerRefValue) {
+    const { data: cust } = await supabaseAdmin
+      .from("customer")
+      .select("id")
+      .eq("qbo_customer_id", customerRefValue)
+      .maybeSingle();
+    customerId = cust?.id ?? null;
+  }
+
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
   const { data: order, error: orderErr } = await supabaseAdmin
@@ -375,6 +387,7 @@ async function processRefundReceipt(
       gross_total: grossTotal,
       global_tax_calculation: globalTaxCalc,
       currency,
+      customer_id: customerId,
       notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")
