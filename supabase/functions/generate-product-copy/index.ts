@@ -1,0 +1,256 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const SYSTEM_PROMPT = `You are writing for Kuso Oishii, an e-commerce shop voice defined by:
+
+"Banter up top, brutal clarity underneath."
+
+Tone: distinctly adult, sharp, irreverent, collector-intelligent.
+Energy: late-night confidence, dry wit, restrained menace. Not laddish. Not juvenile. Not corporate.
+You are speaking to grown collectors with disposable income and strong opinions.
+
+Voice rules:
+- Default tone: bold, witty, strong language, energetic, slightly dangerous.
+- You may use moderate profanity in the Hook, Description, or call to action (CTA).
+- Absolute limit: no graphic sexual language, no explicit sexual references, no fetish phrasing, no hate speech, no slurs, no politics.
+- No profanity in Specifications, Condition, Disclosures, policies or customer service content.
+- Suggestion and innuendo must remain subtle enough to pass mainstream advertising review.
+- If in doubt, prioritise wit over explicitness.
+
+Structure discipline:
+Hook (1–2 lines) → Description → 1-line CTA → Highlights → Specifications → Condition (always).
+
+Point of view:
+- Use second person ("you").
+- Use imperatives.
+- Use "we" only for trust or process statements.
+
+Collector fluency:
+- Use set numbers, minifig IDs or codes, theme and subtheme terminology.
+- Never invent missing facts.
+
+Description discipline:
+- The Description must be narrative-driven and persuasive.
+- Do not restate specifications such as piece count, release dates, retirement dates, price or inventory status unless essential for storytelling impact.
+- Do not repeat information that appears in Specifications.
+- Focus on atmosphere, display presence, collector psychology and ownership experience.
+- Sell the feeling of owning it, not the list of what it contains.
+- Avoid listing minifigure codes or technical data unless used naturally inside narrative context.
+- No bullet-style phrasing inside Description.
+- No recital of facts.
+- If the Description reads like a summary of Specifications, internally revise before output.
+
+Hyperbole:
+- Allowed in Hook and Description.
+- Never distort factual information.
+
+Language:
+- British English spelling and date formats such as "1 March 2025".
+- Avoid corporate filler language.
+
+Formatting discipline:
+- All content fields must contain Markdown-formatted text.
+- Do not use Markdown code fences.
+- Do not insert blank lines between paragraphs.
+- Use single line breaks only.
+- No double newline characters anywhere in the output.
+- No trailing spaces.
+- The Description must render as one continuous paragraph.
+- The Hook may contain a single line break at most.
+
+Data discipline:
+- Use only provided facts.
+- Do not invent availability, policies, or pricing logic.
+- Clean output. No duplicated sentences. Closed quotes. No stray characters.
+
+If required facts are missing, note them but continue with what you can.
+
+Constraints:
+- Hook: maximum 2 lines.
+- Description: 80–140 words.
+- CTA: single imperative sentence, 50 characters max.
+- Highlights: 3–6 bullets.
+- SEO title: 100 characters max.
+- SEO body: 400 characters max, no line breaks.
+
+Structure rigid. Narrative persuasive. Tone adult but platform-safe.`;
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+
+    // Auth check
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await admin.auth.getUser(token);
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: roles } = await admin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id);
+    const hasAccess = (roles ?? []).some(
+      (r: { role: string }) => r.role === "admin" || r.role === "staff"
+    );
+    if (!hasAccess) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { product, product_id, auto_save } = await req.json();
+    if (!product) throw new Error("product data required");
+
+    // Build user prompt from product facts
+    const facts: string[] = [];
+    facts.push(`Product name: ${product.name}`);
+    facts.push(`Set number / MPN: ${product.mpn}`);
+    if (product.theme_name) facts.push(`Theme: ${product.theme_name}`);
+    if (product.subtheme_name) facts.push(`Subtheme: ${product.subtheme_name}`);
+    if (product.piece_count) facts.push(`Piece count: ${product.piece_count}`);
+    if (product.release_year) facts.push(`Year released: ${product.release_year}`);
+    if (product.retired_flag) facts.push(`Retirement status: retired`);
+    if (product.age_range) facts.push(`Age mark: ${product.age_range}`);
+    if (product.weight_kg) facts.push(`Weight: ${product.weight_kg} kg`);
+    if (product.length_cm && product.width_cm && product.height_cm) {
+      facts.push(`Dimensions: ${product.length_cm} × ${product.width_cm} × ${product.height_cm} cm`);
+    }
+
+    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "generate_copy",
+              description: "Return the generated product copy and SEO content.",
+              parameters: {
+                type: "object",
+                properties: {
+                  seo_title: { type: "string", description: "SEO title, max 100 characters" },
+                  seo_body: { type: "string", description: "SEO meta description, max 400 characters, no line breaks" },
+                  hook: { type: "string", description: "Product hook, 1-2 lines max" },
+                  description: { type: "string", description: "Narrative description, 80-140 words, single paragraph" },
+                  cta: { type: "string", description: "Call to action, single imperative sentence, 50 characters max" },
+                  highlights: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "3-6 highlight bullet points",
+                  },
+                },
+                required: ["seo_title", "seo_body", "hook", "description", "cta", "highlights"],
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
+        tool_choice: { type: "function", function: { name: "generate_copy" } },
+      }),
+    });
+
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (status === 402) {
+        return new Response(
+          JSON.stringify({ error: "AI usage credits exhausted. Please add credits in Settings → Workspace → Usage." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      const text = await response.text();
+      console.error("AI gateway error:", status, text);
+      throw new Error(`AI gateway returned ${status}`);
+    }
+
+    const data = await response.json();
+
+    // Extract tool call arguments
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    let copy: any;
+    if (toolCall?.function?.arguments) {
+      copy =
+        typeof toolCall.function.arguments === "string"
+          ? JSON.parse(toolCall.function.arguments)
+          : toolCall.function.arguments;
+    } else {
+      const content = data.choices?.[0]?.message?.content ?? "";
+      copy = JSON.parse(content);
+    }
+
+    // Auto-save: write copy directly to product table
+    if (auto_save && product_id) {
+      try {
+        const highlightsBullets = Array.isArray(copy.highlights)
+          ? copy.highlights.map((h: string) => `• ${h}`).join("\n")
+          : copy.highlights ?? "";
+
+        await admin.from("product").update({
+          product_hook: copy.hook ?? null,
+          description: copy.description ?? null,
+          call_to_action: copy.cta ?? null,
+          highlights: highlightsBullets || null,
+          seo_title: copy.seo_title ?? null,
+          seo_description: copy.seo_body ?? null,
+        }).eq("id", product_id);
+
+        console.log("Auto-saved copy for product", product_id);
+      } catch (saveErr) {
+        console.error("Auto-save failed:", saveErr);
+      }
+    }
+
+    return new Response(JSON.stringify({ copy }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("generate-product-copy error:", err);
+    return new Response(
+      JSON.stringify({ error: (err as Error).message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
