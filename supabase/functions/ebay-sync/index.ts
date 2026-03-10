@@ -458,6 +458,140 @@ Deno.serve(async (req) => {
       }
     }
 
+    /* ═══════════════════════════════════════════════
+       SETUP NOTIFICATIONS — create destination + subscriptions
+       ═══════════════════════════════════════════════ */
+    if (action === "setup_notifications") {
+      console.log("Setting up eBay notification subscriptions...");
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      const VERIFICATION_TOKEN = Deno.env.get("EBAY_VERIFICATION_TOKEN") || "";
+      const ENDPOINT = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
+
+      const topics = ["FEEDBACK_LEFT", "FEEDBACK_RECEIVED", "ITEM_MARKED_SHIPPED", "ORDER_CONFIRMATION"];
+
+      // Step 1: Create/update config
+      try {
+        await ebayFetch(accessToken, `${NOTIF_API}/config`, {
+          method: "PUT",
+          body: JSON.stringify({ alertEmail: "notifications@kusoonline.co.uk" }),
+        });
+        console.log("Notification config updated");
+      } catch (e: any) {
+        console.warn("Config update failed (may already exist):", e.message);
+      }
+
+      // Step 2: Create or reuse destination
+      let destinationId: string | null = null;
+      try {
+        const existingDests = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+        const existing = (existingDests?.destinations || []).find(
+          (d: any) => d.deliveryConfig?.endpoint === ENDPOINT
+        );
+        if (existing) {
+          destinationId = existing.destinationId;
+          console.log("Reusing existing destination:", destinationId);
+        }
+      } catch {
+        console.log("No existing destinations found");
+      }
+
+      if (!destinationId) {
+        try {
+          const destRes = await ebayFetch(accessToken, `${NOTIF_API}/destination`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: "Kuso Online Webhook",
+              status: "ENABLED",
+              deliveryConfig: {
+                endpoint: ENDPOINT,
+                verificationToken: VERIFICATION_TOKEN,
+              },
+            }),
+          });
+          destinationId = destRes?.destinationId;
+          if (!destinationId) {
+            const dests = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+            const match = (dests?.destinations || []).find(
+              (d: any) => d.deliveryConfig?.endpoint === ENDPOINT
+            );
+            destinationId = match?.destinationId || null;
+          }
+          console.log("Created destination:", destinationId);
+        } catch (e: any) {
+          console.error("Failed to create destination:", e.message);
+          throw new Error(`Failed to create notification destination: ${e.message}`);
+        }
+      }
+
+      if (!destinationId) {
+        throw new Error("Could not determine destination ID");
+      }
+
+      // Step 3: Create subscriptions for each topic
+      const subResults: any[] = [];
+      for (const topicId of topics) {
+        try {
+          const existingSubs = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+          const existingSub = (existingSubs?.subscriptions || []).find(
+            (s: any) => s.topicId === topicId
+          );
+
+          if (existingSub) {
+            if (existingSub.status !== "ENABLED") {
+              await ebayFetch(accessToken, `${NOTIF_API}/subscription/${existingSub.subscriptionId}/enable`, {
+                method: "POST",
+              });
+              subResults.push({ topic: topicId, status: "enabled", subscriptionId: existingSub.subscriptionId });
+            } else {
+              subResults.push({ topic: topicId, status: "already_active", subscriptionId: existingSub.subscriptionId });
+            }
+          } else {
+            await ebayFetch(accessToken, `${NOTIF_API}/subscription`, {
+              method: "POST",
+              body: JSON.stringify({
+                topicId,
+                status: "ENABLED",
+                destinationId,
+                payload: {
+                  format: "JSON",
+                  schemaVersion: "1.0",
+                  deliveryProtocol: "HTTPS",
+                },
+              }),
+            });
+            subResults.push({ topic: topicId, status: "created" });
+          }
+        } catch (e: any) {
+          console.error(`Failed to subscribe to ${topicId}:`, e.message);
+          subResults.push({ topic: topicId, status: "error", error: e.message });
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, subscriptions: subResults, destinationId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    /* ═══════════════════════════════════════════════
+       GET SUBSCRIPTIONS — list current notification subscriptions
+       ═══════════════════════════════════════════════ */
+    if (action === "get_subscriptions") {
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      try {
+        const data = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+        return new Response(
+          JSON.stringify({ success: true, subscriptions: data?.subscriptions || [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (e: any) {
+        return new Response(
+          JSON.stringify({ success: true, subscriptions: [], error: e.message }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     console.log("eBay sync completed:", JSON.stringify(results));
     return new Response(
       JSON.stringify({ success: true, ...results }),
