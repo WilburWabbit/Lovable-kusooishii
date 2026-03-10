@@ -91,6 +91,8 @@ export function QboSettingsPanel() {
       if (data.skipped_existing) parts.push(`${data.skipped_existing} unchanged`);
       if (data.skipped_no_items) parts.push(`${data.skipped_no_items} non-stock skipped`);
       if (data.cleaned_up) parts.push(`${data.cleaned_up} empty receipts cleaned up`);
+      if (data.backfilled_tax_codes) parts.push(`${data.backfilled_tax_codes} tax codes backfilled`);
+      if (data.backfilled_stock_links) parts.push(`${data.backfilled_stock_links} stock units linked`);
       toast({
         title: "Sync complete",
         description: `${data.total} purchases: ${parts.join(", ")}.`,
