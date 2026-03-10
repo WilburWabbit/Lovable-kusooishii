@@ -358,6 +358,33 @@ export type Database = {
         }
         Relationships: []
       }
+      ebay_connection: {
+        Row: {
+          access_token: string
+          created_at: string
+          id: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          id?: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          id?: string
+          refresh_token?: string
+          token_expires_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       inbound_receipt: {
         Row: {
           created_at: string

@@ -26,6 +26,7 @@ import { CustomersPage } from "./pages/admin/CustomersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
+import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import NotFound from "./pages/NotFound";
@@ -69,6 +70,7 @@ const App = () => (
             <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
             <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
             <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
+            <Route path="/admin/ebay-callback" element={<EbayCallbackPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
