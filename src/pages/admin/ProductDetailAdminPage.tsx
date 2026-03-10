@@ -247,6 +247,7 @@ export default function ProductDetailAdminPage() {
               {[product.theme_name, product.subtheme_name].filter(Boolean).join(" › ")}
               {product.release_year ? ` • ${product.release_year}` : ""}
               {product.piece_count ? ` • ${product.piece_count} pcs` : ""}
+              {product.age_range ? ` • ${product.age_range}` : ""}
             </p>
           </div>
           {product.img_url && (
