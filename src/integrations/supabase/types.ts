@@ -356,6 +356,7 @@ export type Database = {
           qbo_item_id: string | null
           qbo_tax_code_ref: string | null
           quantity: number
+          tax_code_id: string | null
           unit_cost: number
         }
         Insert: {
@@ -370,6 +371,7 @@ export type Database = {
           qbo_item_id?: string | null
           qbo_tax_code_ref?: string | null
           quantity?: number
+          tax_code_id?: string | null
           unit_cost?: number
         }
         Update: {
@@ -384,6 +386,7 @@ export type Database = {
           qbo_item_id?: string | null
           qbo_tax_code_ref?: string | null
           quantity?: number
+          tax_code_id?: string | null
           unit_cost?: number
         }
         Relationships: [
@@ -392,6 +395,13 @@ export type Database = {
             columns: ["inbound_receipt_id"]
             isOneToOne: false
             referencedRelation: "inbound_receipt"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_receipt_line_tax_code_id_fkey"
+            columns: ["tax_code_id"]
+            isOneToOne: false
+            referencedRelation: "tax_code"
             referencedColumns: ["id"]
           },
         ]
@@ -693,6 +703,7 @@ export type Database = {
           sales_order_id: string
           sku_id: string
           stock_unit_id: string | null
+          tax_code_id: string | null
           unit_price: number
           vat_rate_id: string | null
         }
@@ -706,6 +717,7 @@ export type Database = {
           sales_order_id: string
           sku_id: string
           stock_unit_id?: string | null
+          tax_code_id?: string | null
           unit_price: number
           vat_rate_id?: string | null
         }
@@ -719,6 +731,7 @@ export type Database = {
           sales_order_id?: string
           sku_id?: string
           stock_unit_id?: string | null
+          tax_code_id?: string | null
           unit_price?: number
           vat_rate_id?: string | null
         }
@@ -742,6 +755,13 @@ export type Database = {
             columns: ["stock_unit_id"]
             isOneToOne: false
             referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_tax_code_id_fkey"
+            columns: ["tax_code_id"]
+            isOneToOne: false
+            referencedRelation: "tax_code"
             referencedColumns: ["id"]
           },
           {
@@ -861,6 +881,54 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tax_code: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          name: string
+          purchase_tax_rate_id: string | null
+          qbo_tax_code_id: string
+          sales_tax_rate_id: string | null
+          synced_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          purchase_tax_rate_id?: string | null
+          qbo_tax_code_id: string
+          sales_tax_rate_id?: string | null
+          synced_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          purchase_tax_rate_id?: string | null
+          qbo_tax_code_id?: string
+          sales_tax_rate_id?: string | null
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tax_code_purchase_tax_rate_id_fkey"
+            columns: ["purchase_tax_rate_id"]
+            isOneToOne: false
+            referencedRelation: "vat_rate"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tax_code_sales_tax_rate_id_fkey"
+            columns: ["sales_tax_rate_id"]
+            isOneToOne: false
+            referencedRelation: "vat_rate"
             referencedColumns: ["id"]
           },
         ]
