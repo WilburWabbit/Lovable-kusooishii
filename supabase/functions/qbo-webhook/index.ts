@@ -547,10 +547,67 @@ async function handleCustomer(admin: any, baseUrl: string, accessToken: string, 
   return error ? `upsert error: ${error.message}` : "upserted";
 }
 
-async function handleItem(_admin: any, _baseUrl: string, _accessToken: string, entityId: string, operation: string): Promise<string> {
-  // Item changes are lightweight — no action needed for webhook.
-  // Full TaxRate/TaxCode sync is done manually from settings.
-  return `item ${entityId} ${operation} — no action (use manual sync)`;
+async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {
+  // QBO Items cannot be deleted, so we only handle Create/Update
+  if (operation === "Delete") {
+    return `item ${entityId} delete — ignored (items cannot be deleted in QBO)`;
+  }
+
+  // Fetch the single Item from QBO
+  const res = await fetch(`${baseUrl}/item/${entityId}?minorversion=65`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`QBO Item fetch failed [${res.status}]: ${errText}`);
+  }
+  const data = await res.json();
+  const item = data?.Item;
+  if (!item) return `item ${entityId} — not found in QBO response`;
+
+  const qboItemId = String(item.Id);
+
+  // Parse SKU field (MPN.Grade convention), fall back to Name
+  let mpn: string | null = null;
+  let conditionGrade = "3";
+  const skuField = item.Sku;
+  if (skuField && String(skuField).trim()) {
+    const parsed = parseSku(String(skuField));
+    mpn = parsed.mpn;
+    conditionGrade = parsed.conditionGrade;
+  } else if (item.Name) {
+    const parsed = parseSku(String(item.Name));
+    mpn = parsed.mpn;
+    conditionGrade = parsed.conditionGrade;
+  }
+
+  if (!mpn) return `item ${entityId} — could not extract MPN`;
+
+  const skuCode = `${mpn}-G${conditionGrade}`;
+
+  // Look up catalog_product by MPN
+  const { data: catalogProduct } = await admin
+    .from("catalog_product")
+    .select("id")
+    .eq("mpn", mpn)
+    .maybeSingle();
+
+  const catalogProductId = catalogProduct?.id ?? null;
+
+  // Upsert SKU
+  const { error } = await admin.from("sku").upsert({
+    qbo_item_id: qboItemId,
+    sku_code: skuCode,
+    name: cleanQboName(item.Name ?? mpn),
+    catalog_product_id: catalogProductId,
+    condition_grade: conditionGrade,
+    active_flag: item.Active !== false,
+    saleable_flag: !!catalogProductId,
+    price: item.UnitPrice != null ? Number(item.UnitPrice) : null,
+  }, { onConflict: "qbo_item_id" });
+
+  if (error) return `item ${entityId} upsert error: ${error.message}`;
+  return `item ${entityId} upserted as SKU ${skuCode}`;
 }
 
 // ────────────────────────────────────────────────────────────
