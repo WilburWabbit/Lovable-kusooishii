@@ -158,6 +158,54 @@ export default function ProductDetailAdminPage() {
     setContentDirty(true);
   }, []);
 
+  const handleGenerateCopy = async () => {
+    if (!product) return;
+    setGenerating(true);
+    try {
+      const result = await invokeWithAuth<{ copy: any }>("generate-product-copy", {
+        product: {
+          name: product.name,
+          mpn: product.mpn,
+          theme_name: product.theme_name,
+          subtheme_name: product.subtheme_name,
+          piece_count: product.piece_count,
+          release_year: product.release_year,
+          retired_flag: product.retired_flag,
+          age_range: product.age_range,
+          weight_kg: product.weight_kg,
+          length_cm: product.length_cm,
+          width_cm: product.width_cm,
+          height_cm: product.height_cm,
+        },
+        product_id: product.id,
+        auto_save: true,
+      });
+
+      const copy = result.copy;
+      const highlightsBullets = Array.isArray(copy.highlights)
+        ? copy.highlights.map((h: string) => `• ${h}`).join("\n")
+        : copy.highlights ?? "";
+
+      const newForm: Record<string, string> = {
+        product_hook: copy.hook ?? "",
+        description: copy.description ?? "",
+        call_to_action: copy.cta ?? "",
+        highlights: highlightsBullets,
+        seo_title: copy.seo_title ?? "",
+        seo_description: copy.seo_body ?? "",
+      };
+      setContentForm(newForm);
+      setContentDirty(false);
+      toast.success("Copy generated and saved");
+      queryClient.invalidateQueries({ queryKey: ["admin-product", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin-products"] });
+    } catch (err: any) {
+      toast.error(err.message ?? "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleSaveContent = async () => {
     if (!product) return;
     setSavingContent(true);
