@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         hub_media_found: mpnMap.size,
-        catalog_products_updated: updated,
+        products_updated: updated,
         errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
