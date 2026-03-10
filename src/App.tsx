@@ -12,6 +12,16 @@ import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AccountPage from "./pages/AccountPage";
+import CartPage from "./pages/CartPage";
+import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
+import AboutPage from "./pages/AboutPage";
+import FAQPage from "./pages/FAQPage";
+import ContactPage from "./pages/ContactPage";
+import ShippingPolicyPage from "./pages/ShippingPolicyPage";
+import ReturnsPage from "./pages/ReturnsPage";
+import OrderTrackingPage from "./pages/OrderTrackingPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
   ReconciliationPage,
@@ -47,6 +57,18 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/browse" element={<BrowsePage />} />
             <Route path="/sets/:mpn" element={<ProductDetailPage />} />
+            <Route path="/cart" element={<CartPage />} />
+            <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
+
+            {/* Content */}
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/faq" element={<FAQPage />} />
+            <Route path="/contact" element={<ContactPage />} />
+            <Route path="/shipping-policy" element={<ShippingPolicyPage />} />
+            <Route path="/returns-exchanges" element={<ReturnsPage />} />
+            <Route path="/order-tracking" element={<OrderTrackingPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />
