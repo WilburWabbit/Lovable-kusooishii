@@ -112,9 +112,9 @@ Deno.serve(async (req) => {
       const mpn = line.mpn;
       const skuCode = `${mpn}-G${conditionGrade}`;
 
-      // Optionally link to catalog_product if MPN matches
+      // Optionally link to product if MPN matches
       const { data: product } = await supabaseAdmin
-        .from("catalog_product")
+        .from("product")
         .select("id, mpn")
         .eq("mpn", mpn)
         .single();
