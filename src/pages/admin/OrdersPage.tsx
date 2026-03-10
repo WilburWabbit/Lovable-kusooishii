@@ -57,6 +57,7 @@ type OrderRow = {
 
 const ORIGIN_COLORS: Record<string, string> = {
   web: "bg-blue-100 text-blue-800",
+  ebay: "bg-amber-100 text-amber-800",
   qbo: "bg-emerald-100 text-emerald-800",
   qbo_refund: "bg-red-100 text-red-800",
 };
