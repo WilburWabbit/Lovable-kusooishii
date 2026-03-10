@@ -322,12 +322,187 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
     const body = await req.json().catch(() => ({}));
     const orderId = body.order_id;
+    const action = body.action || "process_order";
+
     if (!orderId) {
       return new Response(JSON.stringify({ error: "Missing order_id" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // ACTION: process_shipment
+    // ═══════════════════════════════════════════════════════════
+    if (action === "process_shipment") {
+      console.log(`Processing shipment for eBay order: ${orderId}`);
+
+      // ── Find local sales_order ──
+      const { data: localOrder, error: findErr } = await admin
+        .from("sales_order")
+        .select("id, doc_number, status")
+        .eq("origin_channel", "ebay")
+        .eq("origin_reference", orderId)
+        .maybeSingle();
+
+      if (findErr || !localOrder) {
+        console.warn(`No local order found for eBay order ${orderId}, skipping shipment update`);
+        return new Response(
+          JSON.stringify({ success: false, error: "No matching local order found" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // ── Fetch order from eBay to get fulfillment data ──
+      const ebayToken = await getEbayAccessToken(admin);
+      const order = await ebayFetch(ebayToken, `/sell/fulfillment/v1/order/${orderId}`);
+      if (!order) throw new Error(`eBay order ${orderId} not found`);
+
+      // ── Extract fulfillment details ──
+      let shippingCarrier: string | null = null;
+      let trackingNumber: string | null = null;
+      let shippedDate: string | null = null;
+
+      const fulfillmentHrefs = order.fulfillmentHrefs || [];
+      if (fulfillmentHrefs.length > 0) {
+        // Fetch the first (primary) fulfillment
+        try {
+          const fulfillment = await ebayFetch(ebayToken, fulfillmentHrefs[0]);
+          if (fulfillment) {
+            const shipmentTrackings = fulfillment.shipmentTrackingNumber
+              ? [{ shippingCarrierCode: fulfillment.shippingCarrierCode, shipmentTrackingNumber: fulfillment.shipmentTrackingNumber }]
+              : fulfillment.lineItems?.[0]?.lineItemFulfillmentInstructions
+                ? []
+                : [];
+
+            // Try structured tracking from fulfillment
+            shippingCarrier = fulfillment.shippingCarrierCode || null;
+            trackingNumber = fulfillment.shipmentTrackingNumber || null;
+            shippedDate = fulfillment.shippedDate?.split("T")[0] || null;
+          }
+        } catch (e: any) {
+          console.warn(`Failed to fetch fulfillment detail: ${e.message}`);
+        }
+      }
+
+      // Fallback: extract from order-level fulfillmentStartInstructions or lineItems
+      if (!shippingCarrier && !trackingNumber) {
+        for (const li of order.lineItems || []) {
+          const deliveries = li.deliveryAddress ? [li] : [];
+          for (const d of deliveries) {
+            if (d.lineItemFulfillmentStatus === "FULFILLED") {
+              shippedDate = shippedDate || order.lastModifiedDate?.split("T")[0] || new Date().toISOString().split("T")[0];
+            }
+          }
+        }
+      }
+
+      // If still no shipped date, use the order's last modified date
+      if (!shippedDate) {
+        shippedDate = order.lastModifiedDate?.split("T")[0] || new Date().toISOString().split("T")[0];
+      }
+
+      console.log(`Fulfillment data: carrier=${shippingCarrier}, tracking=${trackingNumber}, date=${shippedDate}`);
+
+      // ── Update local sales_order ──
+      const { error: updateErr } = await admin
+        .from("sales_order")
+        .update({
+          shipped_via: shippingCarrier,
+          tracking_number: trackingNumber,
+          shipped_date: shippedDate,
+          status: "shipped",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", localOrder.id);
+
+      if (updateErr) {
+        console.error(`Failed to update local order: ${updateErr.message}`);
+        throw new Error(`Failed to update sales_order: ${updateErr.message}`);
+      }
+      console.log(`Local order ${localOrder.id} updated to shipped`);
+
+      // ── Update QBO SalesReceipt with shipping metadata ──
+      let qboUpdated = false;
+      try {
+        const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
+
+        // Find the existing SalesReceipt by DocNumber
+        const docNumber = localOrder.doc_number || (orderId.length <= 21 ? orderId : orderId.substring(0, 21));
+        const escaped = docNumber.replace(/'/g, "\\'");
+        const queryResult = await qboRequest(
+          qboToken, realmId,
+          `/query?query=${encodeURIComponent(`SELECT * FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`
+        );
+        const existingReceipt = queryResult?.QueryResponse?.SalesReceipt?.[0];
+
+        if (existingReceipt) {
+          // Sparse update with shipping fields
+          const sparseUpdate: any = {
+            Id: existingReceipt.Id,
+            SyncToken: existingReceipt.SyncToken,
+            sparse: true,
+          };
+
+          if (shippedDate) {
+            sparseUpdate.ShipDate = shippedDate;
+          }
+          if (shippingCarrier) {
+            sparseUpdate.ShipMethodRef = { value: shippingCarrier, name: shippingCarrier };
+          }
+          if (trackingNumber) {
+            sparseUpdate.TrackingNum = trackingNumber;
+          }
+
+          await qboRequest(qboToken, realmId, "/salesreceipt", {
+            method: "POST",
+            body: JSON.stringify(sparseUpdate),
+          });
+          qboUpdated = true;
+          console.log(`QBO SalesReceipt ${existingReceipt.Id} updated with shipping data`);
+        } else {
+          console.warn(`No QBO SalesReceipt found with DocNumber "${docNumber}"`);
+        }
+      } catch (e: any) {
+        console.error(`Failed to update QBO SalesReceipt: ${e.message}`);
+      }
+
+      // ── Audit event ──
+      await admin.from("audit_event").insert({
+        entity_type: "sales_order",
+        entity_id: localOrder.id,
+        trigger_type: "ebay_notification",
+        actor_type: "system",
+        source_system: "ebay-process-order",
+        before_json: { status: localOrder.status },
+        after_json: {
+          status: "shipped",
+          shipped_via: shippingCarrier,
+          tracking_number: trackingNumber,
+          shipped_date: shippedDate,
+          qbo_updated: qboUpdated,
+        },
+      });
+
+      console.log(`Shipment pipeline complete for ${orderId}`);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          action: "process_shipment",
+          order_id: orderId,
+          sales_order_id: localOrder.id,
+          shipped_via: shippingCarrier,
+          tracking_number: trackingNumber,
+          shipped_date: shippedDate,
+          qbo_updated: qboUpdated,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ACTION: process_order (default — existing pipeline)
+    // ═══════════════════════════════════════════════════════════
     console.log(`Processing eBay order: ${orderId}`);
 
     // ── Step 1: Idempotency check ──

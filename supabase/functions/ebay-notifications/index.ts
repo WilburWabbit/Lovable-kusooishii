@@ -97,7 +97,15 @@ Deno.serve(async (req) => {
       "ORDER_CONFIRMATION",
       "ORDER_CHANGE",
     ];
-    if (ORDER_TOPICS.includes(topic)) {
+
+    const SHIPMENT_TOPICS = [
+      "ITEM_MARKED_SHIPPED",
+    ];
+
+    const isOrderTopic = ORDER_TOPICS.includes(topic);
+    const isShipmentTopic = SHIPMENT_TOPICS.includes(topic);
+
+    if (isOrderTopic || isShipmentTopic) {
       // Extract order ID from notification payload
       const ebayOrderId =
         payload?.resource?.orderId ||
@@ -108,6 +116,11 @@ Deno.serve(async (req) => {
       if (ebayOrderId) {
         // Route to dedicated order processing pipeline
         try {
+          const processBody: any = { order_id: ebayOrderId };
+          if (isShipmentTopic) {
+            processBody.action = "process_shipment";
+          }
+
           const processRes = await fetch(
             `${supabaseUrl}/functions/v1/ebay-process-order`,
             {
@@ -116,7 +129,7 @@ Deno.serve(async (req) => {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${serviceKey}`,
               },
-              body: JSON.stringify({ order_id: ebayOrderId }),
+              body: JSON.stringify(processBody),
             }
           );
           const processData = await processRes.json().catch(() => ({}));
