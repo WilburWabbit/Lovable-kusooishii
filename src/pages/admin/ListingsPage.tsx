@@ -260,7 +260,7 @@ export function ListingsPage() {
   const handleSyncEbay = async () => {
     setSyncing(true);
     try {
-      const { error } = await invokeWithAuth("ebay-sync", {
+      await invokeWithAuth("ebay-sync", {
         action: "sync_inventory",
       });
       if (error) throw error;

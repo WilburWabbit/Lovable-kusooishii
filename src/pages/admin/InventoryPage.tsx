@@ -147,11 +147,10 @@ export function InventoryPage() {
   const { data: units = [], isLoading } = useQuery({
     queryKey: ["stock-units"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-stock-units" },
+      const data = await invokeWithAuth<StockRow[]>("admin-data", {
+        action: "list-stock-units",
       });
-      if (error) throw error;
-      return (data ?? []) as unknown as StockRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });

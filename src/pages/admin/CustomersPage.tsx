@@ -101,11 +101,10 @@ export function CustomersPage() {
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ["admin-customers"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-customers" },
+      const data = await invokeWithAuth<CustomerRow[]>("admin-data", {
+        action: "list-customers",
       });
-      if (error) throw error;
-      return (data ?? []) as CustomerRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });

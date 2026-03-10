@@ -180,11 +180,10 @@ export function OrdersPage() {
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["admin-orders"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "list-orders" },
+      const data = await invokeWithAuth<OrderRow[]>("admin-data", {
+        action: "list-orders",
       });
-      if (error) throw error;
-      return (data ?? []) as unknown as OrderRow[];
+      return data ?? [];
     },
     enabled: !!user,
   });
