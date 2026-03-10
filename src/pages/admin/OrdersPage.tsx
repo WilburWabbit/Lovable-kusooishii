@@ -178,6 +178,7 @@ export function OrdersPage() {
         (o) =>
           o.order_number.toLowerCase().includes(q) ||
           (o.origin_reference ?? "").toLowerCase().includes(q) ||
+          (o.customer?.display_name ?? "").toLowerCase().includes(q) ||
           (o.guest_name ?? "").toLowerCase().includes(q) ||
           (o.guest_email ?? "").toLowerCase().includes(q),
       );
