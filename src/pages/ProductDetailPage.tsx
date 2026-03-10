@@ -6,6 +6,7 @@ import { useParams, Link } from "react-router-dom";
 import { ShoppingBag, Heart, Shield, Package, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 
 const gradeLabels: Record<string, { label: string; desc: string }> = {
   "1": { label: "Mint", desc: "Box and contents in near-perfect condition. No visible damage, creasing, or shelf wear." },
