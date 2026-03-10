@@ -590,6 +590,8 @@ Deno.serve(async (req) => {
 
     // ── Backfill VAT codes on existing order lines ──
     let vatBackfilled = 0;
+    const backfillStart = Date.now();
+    const BACKFILL_TIME_BUDGET_MS = 20_000; // 20s max for backfill
     try {
       // Find orders with lines missing tax_code_id
       const { data: ordersToFix } = await supabaseAdmin
@@ -599,8 +601,13 @@ Deno.serve(async (req) => {
         .not("origin_reference", "is", null);
 
       if (ordersToFix && ordersToFix.length > 0) {
-        // Filter to only orders that have at least one line with null tax_code_id
         for (const order of ordersToFix) {
+          // Check time budget
+          if (Date.now() - backfillStart > BACKFILL_TIME_BUDGET_MS) {
+            console.warn("Backfill time budget exceeded, stopping");
+            break;
+          }
+
           const { data: nullLines } = await supabaseAdmin
             .from("sales_order_line")
             .select("id")
@@ -610,12 +617,18 @@ Deno.serve(async (req) => {
 
           if (!nullLines || nullLines.length === 0) continue;
 
-          // Re-fetch the QBO transaction
+          // Throttle between QBO receipt fetches
+          await new Promise(r => setTimeout(r, 500));
+
           const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
           try {
             const res = await fetch(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
               headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
             });
+            if (res.status === 429) {
+              console.warn(`Backfill: rate limited on ${entity} ${order.origin_reference}, stopping backfill`);
+              break;
+            }
             if (!res.ok) {
               console.warn(`Backfill: failed to fetch ${entity} ${order.origin_reference}: ${res.status}`);
               continue;
@@ -655,7 +668,6 @@ Deno.serve(async (req) => {
                 .maybeSingle();
               if (!sku) continue;
 
-              // Resolve tax_code_id
               const { data: tc } = await supabaseAdmin
                 .from("tax_code")
                 .select("id")
@@ -663,7 +675,6 @@ Deno.serve(async (req) => {
                 .maybeSingle();
               if (!tc) continue;
 
-              // Update all matching lines for this order+sku that are missing tax_code_id
               const { data: updated } = await supabaseAdmin
                 .from("sales_order_line")
                 .update({ tax_code_id: tc.id, qbo_tax_code_ref: String(taxCodeRef) })
