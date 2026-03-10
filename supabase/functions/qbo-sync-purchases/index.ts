@@ -264,22 +264,35 @@ async function autoProcessReceipt(
       sku = newSku;
     }
 
-    const stockUnits = [];
-    for (let i = 0; i < line.quantity; i++) {
-      stockUnits.push({
-        sku_id: sku!.id,
-        mpn,
-        condition_grade: conditionGrade,
-        status: "available",
-        landed_cost: landedCost,
-        supplier_id: vendorName ?? null,
-        inbound_receipt_line_id: line.id ?? null, // forward-fix: link to receipt line
-      });
+    // Idempotency guard: only create the shortfall
+    let existingCount = 0;
+    if (line.id) {
+      const { count } = await supabaseAdmin
+        .from("stock_unit")
+        .select("id", { count: "exact", head: true })
+        .eq("inbound_receipt_line_id", line.id);
+      existingCount = count ?? 0;
     }
 
-    const { error: suErr } = await supabaseAdmin.from("stock_unit").insert(stockUnits);
-    if (suErr) throw suErr;
-    unitsCreated += stockUnits.length;
+    const shortfall = line.quantity - existingCount;
+    if (shortfall > 0) {
+      const stockUnits = [];
+      for (let i = 0; i < shortfall; i++) {
+        stockUnits.push({
+          sku_id: sku!.id,
+          mpn,
+          condition_grade: conditionGrade,
+          status: "available",
+          landed_cost: landedCost,
+          supplier_id: vendorName ?? null,
+          inbound_receipt_line_id: line.id ?? null,
+        });
+      }
+
+      const { error: suErr } = await supabaseAdmin.from("stock_unit").insert(stockUnits);
+      if (suErr) throw suErr;
+      unitsCreated += stockUnits.length;
+    }
   }
 
   await supabaseAdmin
