@@ -350,6 +350,44 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
       result = { success: true };
+    } else if (action === "create-web-listing") {
+      const { sku_id } = params;
+      if (!sku_id) throw new Error("sku_id is required");
+
+      // Fetch SKU details
+      const { data: sku, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code, price")
+        .eq("id", sku_id)
+        .single();
+      if (skuErr || !sku) throw new Error("SKU not found");
+
+      // Upsert channel_listing for web
+      const { error: uErr } = await admin.from("channel_listing").upsert(
+        {
+          channel: "web",
+          external_sku: sku.sku_code,
+          sku_id: sku.id,
+          listed_price: sku.price,
+          listed_quantity: 0,
+          offer_status: "PUBLISHED",
+          synced_at: new Date().toISOString(),
+        },
+        { onConflict: "channel,external_sku", ignoreDuplicates: false }
+      );
+      if (uErr) throw uErr;
+      result = { success: true };
+    } else if (action === "remove-web-listing") {
+      const { sku_id } = params;
+      if (!sku_id) throw new Error("sku_id is required");
+
+      const { error: dErr } = await admin
+        .from("channel_listing")
+        .delete()
+        .eq("sku_id", sku_id)
+        .eq("channel", "web");
+      if (dErr) throw dErr;
+      result = { success: true };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
