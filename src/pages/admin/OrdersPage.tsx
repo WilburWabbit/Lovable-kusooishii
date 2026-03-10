@@ -86,6 +86,18 @@ function lineVatAmount(l: OrderLineRow) {
   return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
+function orderNetFromLines(o: OrderRow) {
+  return o.sales_order_line.reduce((s, l) => s + l.line_total, 0);
+}
+
+function orderVatFromLines(o: OrderRow) {
+  return o.sales_order_line.reduce((s, l) => s + (lineVatAmount(l) ?? 0), 0);
+}
+
+function orderGrossFromLines(o: OrderRow) {
+  return orderNetFromLines(o) + orderVatFromLines(o);
+}
+
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
   { key: "order_number", label: "Order #" },
