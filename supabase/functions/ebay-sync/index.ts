@@ -39,6 +39,7 @@ async function getAccessToken(admin: any): Promise<string> {
         "https://api.ebay.com/oauth/api_scope/sell.inventory",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
         "https://api.ebay.com/oauth/api_scope/sell.account",
+        "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
       ].join(" "),
     }),
   });
@@ -192,23 +193,30 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    // Verify caller is admin/staff
+    // Allow internal service-role invocation (from ebay-notifications webhook)
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await admin.auth.getUser(token);
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
-    if (!hasAccess) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const body = await req.json().catch(() => ({}));
+
+    if (token === serviceRoleKey && body._triggered_by === "notification") {
+      // Trusted internal call — skip user auth
+      console.log("Service-role invocation from notification webhook");
+    } else {
+      // Verify caller is admin/staff
+      const { data: { user }, error: userError } = await admin.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+      const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+      if (!hasAccess) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
-    const body = await req.json().catch(() => ({}));
     const action = body.action || "sync_orders";
 
     const accessToken = await getAccessToken(admin);
@@ -454,6 +462,140 @@ Deno.serve(async (req) => {
             console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
           }
         }
+      }
+    }
+
+    /* ═══════════════════════════════════════════════
+       SETUP NOTIFICATIONS — create destination + subscriptions
+       ═══════════════════════════════════════════════ */
+    if (action === "setup_notifications") {
+      console.log("Setting up eBay notification subscriptions...");
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      const VERIFICATION_TOKEN = Deno.env.get("EBAY_VERIFICATION_TOKEN") || "";
+      const ENDPOINT = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
+
+      const topics = ["FEEDBACK_LEFT", "FEEDBACK_RECEIVED", "ITEM_MARKED_SHIPPED", "ORDER_CONFIRMATION"];
+
+      // Step 1: Create/update config
+      try {
+        await ebayFetch(accessToken, `${NOTIF_API}/config`, {
+          method: "PUT",
+          body: JSON.stringify({ alertEmail: "notifications@kusoonline.co.uk" }),
+        });
+        console.log("Notification config updated");
+      } catch (e: any) {
+        console.warn("Config update failed (may already exist):", e.message);
+      }
+
+      // Step 2: Create or reuse destination
+      let destinationId: string | null = null;
+      try {
+        const existingDests = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+        const existing = (existingDests?.destinations || []).find(
+          (d: any) => d.deliveryConfig?.endpoint === ENDPOINT
+        );
+        if (existing) {
+          destinationId = existing.destinationId;
+          console.log("Reusing existing destination:", destinationId);
+        }
+      } catch {
+        console.log("No existing destinations found");
+      }
+
+      if (!destinationId) {
+        try {
+          const destRes = await ebayFetch(accessToken, `${NOTIF_API}/destination`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: "Kuso Online Webhook",
+              status: "ENABLED",
+              deliveryConfig: {
+                endpoint: ENDPOINT,
+                verificationToken: VERIFICATION_TOKEN,
+              },
+            }),
+          });
+          destinationId = destRes?.destinationId;
+          if (!destinationId) {
+            const dests = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+            const match = (dests?.destinations || []).find(
+              (d: any) => d.deliveryConfig?.endpoint === ENDPOINT
+            );
+            destinationId = match?.destinationId || null;
+          }
+          console.log("Created destination:", destinationId);
+        } catch (e: any) {
+          console.error("Failed to create destination:", e.message);
+          throw new Error(`Failed to create notification destination: ${e.message}`);
+        }
+      }
+
+      if (!destinationId) {
+        throw new Error("Could not determine destination ID");
+      }
+
+      // Step 3: Create subscriptions for each topic
+      const subResults: any[] = [];
+      for (const topicId of topics) {
+        try {
+          const existingSubs = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+          const existingSub = (existingSubs?.subscriptions || []).find(
+            (s: any) => s.topicId === topicId
+          );
+
+          if (existingSub) {
+            if (existingSub.status !== "ENABLED") {
+              await ebayFetch(accessToken, `${NOTIF_API}/subscription/${existingSub.subscriptionId}/enable`, {
+                method: "POST",
+              });
+              subResults.push({ topic: topicId, status: "enabled", subscriptionId: existingSub.subscriptionId });
+            } else {
+              subResults.push({ topic: topicId, status: "already_active", subscriptionId: existingSub.subscriptionId });
+            }
+          } else {
+            await ebayFetch(accessToken, `${NOTIF_API}/subscription`, {
+              method: "POST",
+              body: JSON.stringify({
+                topicId,
+                status: "ENABLED",
+                destinationId,
+                payload: {
+                  format: "JSON",
+                  schemaVersion: "1.0",
+                  deliveryProtocol: "HTTPS",
+                },
+              }),
+            });
+            subResults.push({ topic: topicId, status: "created" });
+          }
+        } catch (e: any) {
+          console.error(`Failed to subscribe to ${topicId}:`, e.message);
+          subResults.push({ topic: topicId, status: "error", error: e.message });
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, subscriptions: subResults, destinationId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    /* ═══════════════════════════════════════════════
+       GET SUBSCRIPTIONS — list current notification subscriptions
+       ═══════════════════════════════════════════════ */
+    if (action === "get_subscriptions") {
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      try {
+        const data = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+        return new Response(
+          JSON.stringify({ success: true, subscriptions: data?.subscriptions || [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (e: any) {
+        return new Response(
+          JSON.stringify({ success: true, subscriptions: [], error: e.message }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
     }
 
