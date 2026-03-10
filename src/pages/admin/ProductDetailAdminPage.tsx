@@ -497,7 +497,37 @@ export default function ProductDetailAdminPage() {
             <CardHeader>
               <CardTitle className="text-sm font-medium">SKUs</CardTitle>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 md:p-0">
+              {/* Mobile SKU cards */}
+              <div className="md:hidden space-y-2 p-3">
+                {product.skus.map((s) => (
+                  <div key={s.id} className="border border-border rounded-lg p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs font-medium">{s.sku_code}</span>
+                      <span className="font-mono text-xs">{fmt(s.price)}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                      <span>{GRADE_LABELS[s.condition_grade] ?? s.condition_grade}</span>
+                      <span>Stock: {s.stock_available}</span>
+                      <span>Value: {fmt(s.carrying_value)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CHANNELS.map((ch) => {
+                        const cl = s.channel_listings.find((l) => l.channel === ch);
+                        if (!cl) return null;
+                        return (
+                          <Badge key={ch} variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+                            {CHANNEL_LABELS[ch]}: {cl.offer_status ?? "—"}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop SKU table */}
+              <div className="hidden md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -589,6 +619,7 @@ export default function ProductDetailAdminPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         )}
