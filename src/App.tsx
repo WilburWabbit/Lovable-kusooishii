@@ -14,13 +14,13 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AccountPage from "./pages/AccountPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
-  ListingsPage,
   ReconciliationPage,
   DemandPage,
   AnalyticsPage,
   AuditPage,
   SettingsPage,
 } from "./pages/admin/AdminPages";
+import { ListingsPage } from "./pages/admin/ListingsPage";
 import { OrdersPage } from "./pages/admin/OrdersPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";

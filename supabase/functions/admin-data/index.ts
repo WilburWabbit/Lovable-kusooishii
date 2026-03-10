@@ -117,6 +117,47 @@ Deno.serve(async (req) => {
           tax_code: undefined,
         })),
       }));
+    } else if (action === "list-listings") {
+      // 1. Active SKUs with catalog product info
+      const { data: skus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code, name, condition_grade, price, active_flag, catalog_product:catalog_product_id(name, mpn)")
+        .eq("active_flag", true)
+        .order("sku_code", { ascending: true });
+      if (skuErr) throw skuErr;
+
+      // 2. Available stock counts per SKU
+      const { data: stockCounts, error: scErr } = await admin
+        .from("stock_unit")
+        .select("sku_id")
+        .eq("status", "available");
+      if (scErr) throw scErr;
+      const stockMap: Record<string, number> = {};
+      for (const su of stockCounts ?? []) {
+        stockMap[su.sku_id] = (stockMap[su.sku_id] ?? 0) + 1;
+      }
+
+      // 3. All channel listings
+      const { data: listings, error: clErr } = await admin
+        .from("channel_listing")
+        .select("id, sku_id, channel, external_sku, external_listing_id, offer_status, listed_price, listed_quantity, synced_at")
+        .order("channel");
+      if (clErr) throw clErr;
+
+      // Group listings by sku_id
+      const listingMap: Record<string, any[]> = {};
+      for (const cl of listings ?? []) {
+        if (!cl.sku_id) continue;
+        if (!listingMap[cl.sku_id]) listingMap[cl.sku_id] = [];
+        listingMap[cl.sku_id].push(cl);
+      }
+
+      // Merge
+      result = (skus ?? []).map((s: any) => ({
+        ...s,
+        stock_available: stockMap[s.id] ?? 0,
+        channel_listings: listingMap[s.id] ?? [],
+      }));
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
