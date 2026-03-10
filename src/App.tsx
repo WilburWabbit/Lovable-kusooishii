@@ -26,6 +26,7 @@ import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
+import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
