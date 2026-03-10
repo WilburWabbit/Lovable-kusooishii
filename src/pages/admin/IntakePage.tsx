@@ -203,7 +203,7 @@ export function IntakePage() {
 
     if (mpn) {
       const { data: product } = await supabase
-        .from("catalog_product")
+        .from("product")
         .select("id")
         .eq("mpn", mpn)
         .single();

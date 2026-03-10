@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
       const batch = entries.slice(i, i + 50);
       const promises = batch.map(([mpn, fileUrl]) =>
         admin
-          .from("catalog_product")
+          .from("product")
           .update({ img_url: fileUrl })
           .eq("mpn", mpn)
           .select("id")

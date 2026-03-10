@@ -235,7 +235,7 @@ export function ListingsPage() {
       list = list.filter(
         (r) =>
           r.sku_code.toLowerCase().includes(q) ||
-          (r.catalog_product?.mpn ?? "").toLowerCase().includes(q) ||
+          (r.product?.mpn ?? "").toLowerCase().includes(q) ||
           productName(r).toLowerCase().includes(q),
       );
     }

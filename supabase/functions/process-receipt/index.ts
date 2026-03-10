@@ -138,7 +138,7 @@ Deno.serve(async (req) => {
         const { data: newSku, error: skuErr } = await supabaseAdmin
           .from("sku")
           .insert({
-            catalog_product_id: product?.id ?? null,
+            product_id: product?.id ?? null,
             condition_grade: conditionGrade,
             sku_code: skuCode,
             name: cleanQboName(line.description ?? mpn),

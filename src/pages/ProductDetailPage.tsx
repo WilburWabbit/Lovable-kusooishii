@@ -23,7 +23,7 @@ export default function ProductDetailPage() {
     queryKey: ["product", mpn],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("catalog_product")
+        .from("product")
         .select("id, mpn, name, description, piece_count, release_year, retired_flag, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")

@@ -73,7 +73,7 @@ function vatAmount(landed: number | null, rate: number | null) {
 }
 
 function productName(u: StockRow) {
-  return u.sku?.catalog_product?.name ?? u.sku?.name ?? "";
+  return u.sku?.product?.name ?? u.sku?.name ?? "";
 }
 
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [

@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
     let errors = 0;
     for (let i = 0; i < products.length; i += BATCH) {
       const batch = products.slice(i, i + BATCH);
-      const { error } = await supabase.from("catalog_product").upsert(batch, {
+      const { error } = await supabase.from("lego_catalog").upsert(batch, {
         onConflict: "mpn",
         ignoreDuplicates: false,
       });
