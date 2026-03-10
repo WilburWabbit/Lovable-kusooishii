@@ -48,6 +48,7 @@ type OrderRow = {
   guest_name: string | null;
   guest_email: string | null;
   created_at: string;
+  txn_date: string | null;
   notes: string | null;
   customer: { id: string; display_name: string; email: string | null } | null;
   sales_order_line: OrderLineRow[];
@@ -85,6 +86,18 @@ function lineVatAmount(l: OrderLineRow) {
   return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
+function orderNetFromLines(o: OrderRow) {
+  return o.sales_order_line.reduce((s, l) => s + l.line_total, 0);
+}
+
+function orderVatFromLines(o: OrderRow) {
+  return o.sales_order_line.reduce((s, l) => s + (lineVatAmount(l) ?? 0), 0);
+}
+
+function orderGrossFromLines(o: OrderRow) {
+  return orderNetFromLines(o) + orderVatFromLines(o);
+}
+
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
   { key: "_expand", label: "", align: "left" as const },
   { key: "order_number", label: "Order #" },
@@ -109,10 +122,10 @@ function getSortValue(o: OrderRow, key: string): unknown {
     case "origin_reference": return o.origin_reference;
     case "status": return o.status;
     case "items": return o.sales_order_line.length;
-    case "net": return o.merchandise_subtotal;
-    case "vat": return o.tax_total;
-    case "total": return o.gross_total;
-    case "created_at": return o.created_at;
+    case "net": return orderNetFromLines(o);
+    case "vat": return orderVatFromLines(o);
+    case "total": return orderGrossFromLines(o);
+    case "created_at": return o.txn_date ?? o.created_at;
     default: return null;
   }
 }
@@ -136,13 +149,15 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
     case "items":
       return o.sales_order_line.length;
     case "net":
-      return <span className="font-mono text-xs">{fmt(o.merchandise_subtotal)}</span>;
+      return <span className="font-mono text-xs">{fmt(orderNetFromLines(o))}</span>;
     case "vat":
-      return <span className="font-mono text-xs">{fmt(o.tax_total)}</span>;
+      return <span className="font-mono text-xs">{fmt(orderVatFromLines(o))}</span>;
     case "total":
-      return <span className="font-mono text-xs">{fmt(o.gross_total)}</span>;
-    case "created_at":
-      return <span className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</span>;
+      return <span className="font-mono text-xs">{fmt(orderGrossFromLines(o))}</span>;
+    case "created_at": {
+      const dateStr = o.txn_date ?? o.created_at;
+      return <span className="text-xs text-muted-foreground">{format(new Date(dateStr), "dd MMM yyyy")}</span>;
+    }
     default: return null;
   }
 }
@@ -192,7 +207,7 @@ export function OrdersPage() {
   );
 
   const totalRevenue = useMemo(
-    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + o.gross_total, 0),
+    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + orderGrossFromLines(o), 0),
     [orders],
   );
   const salesCount = orders.filter((o) => o.origin_channel !== "qbo_refund").length;
