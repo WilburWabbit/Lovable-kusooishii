@@ -6,12 +6,16 @@ import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Package, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useTablePreferences } from "@/hooks/useTablePreferences";
+import { SortableTableHead } from "@/components/admin/SortableTableHead";
+import { ColumnSelector } from "@/components/admin/ColumnSelector";
+import { sortRows } from "@/lib/table-utils";
 
 interface Receipt {
   id: string;
@@ -50,24 +54,59 @@ function fmt(v: number | null | undefined) {
   return `£${v.toFixed(2)}`;
 }
 
-/** Compute net amount from total_amount depending on tax treatment */
 function receiptNet(r: Receipt) {
-  if (r.global_tax_calculation === "TaxInclusive") {
-    return r.total_amount - r.tax_total;
-  }
+  if (r.global_tax_calculation === "TaxInclusive") return r.total_amount - r.tax_total;
   return r.total_amount;
 }
 
 function receiptGross(r: Receipt) {
-  if (r.global_tax_calculation === "TaxInclusive") {
-    return r.total_amount;
-  }
+  if (r.global_tax_calculation === "TaxInclusive") return r.total_amount;
   return r.total_amount + r.tax_total;
 }
 
 function lineVat(line: ReceiptLine) {
   if (line.vat_rate_percent == null) return null;
   return Math.round(line.line_total * (line.vat_rate_percent / 100) * 100) / 100;
+}
+
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
+  { key: "qbo_purchase_id", label: "QBO ID" },
+  { key: "vendor_name", label: "Vendor" },
+  { key: "txn_date", label: "Date" },
+  { key: "net", label: "Net", align: "right" as const },
+  { key: "vat", label: "VAT", align: "right" as const },
+  { key: "gross", label: "Gross", align: "right" as const },
+  { key: "status", label: "Status" },
+  { key: "_chevron", label: "" },
+];
+
+const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
+
+function getSortValue(r: Receipt, key: string): unknown {
+  switch (key) {
+    case "qbo_purchase_id": return r.qbo_purchase_id;
+    case "vendor_name": return r.vendor_name;
+    case "txn_date": return r.txn_date;
+    case "net": return receiptNet(r);
+    case "vat": return r.tax_total;
+    case "gross": return receiptGross(r);
+    case "status": return r.status;
+    default: return null;
+  }
+}
+
+function renderCell(r: Receipt, key: string): React.ReactNode {
+  switch (key) {
+    case "qbo_purchase_id": return <span className="font-body text-xs font-mono">{r.qbo_purchase_id}</span>;
+    case "vendor_name": return <span className="font-body text-xs">{r.vendor_name ?? "—"}</span>;
+    case "txn_date": return <span className="font-body text-xs">{r.txn_date ?? "—"}</span>;
+    case "net": return <span className="font-body text-xs font-mono">{fmt(receiptNet(r))}</span>;
+    case "vat": return <span className="font-body text-xs font-mono">{fmt(r.tax_total)}</span>;
+    case "gross": return <span className="font-body text-xs font-mono">{fmt(receiptGross(r))}</span>;
+    case "status": return <Badge variant="outline" className={`text-[10px] ${statusColor[r.status] ?? ""}`}>{r.status}</Badge>;
+    case "_chevron": return <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />;
+    default: return null;
+  }
 }
 
 export function IntakePage() {
@@ -78,6 +117,9 @@ export function IntakePage() {
   const [lineEdits, setLineEdits] = useState<Record<string, { mpn?: string; grade?: string }>>({});
   const [mpnValid, setMpnValid] = useState<Record<string, boolean | null>>({});
   const [processing, setProcessing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const tp = useTablePreferences("admin-intake", DEFAULT_VISIBLE, { key: "txn_date", dir: "desc" });
 
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["inbound-receipts"],
@@ -104,7 +146,17 @@ export function IntakePage() {
     enabled: !!selectedReceipt,
   });
 
-  // Compute apportionment preview
+  const filtered = useMemo(() => {
+    let list = receipts ?? [];
+    if (statusFilter !== "all") list = list.filter((r) => r.status === statusFilter);
+    return list;
+  }, [receipts, statusFilter]);
+
+  const sorted = useMemo(
+    () => sortRows(filtered, tp.prefs.sort.key, tp.prefs.sort.dir, getSortValue),
+    [filtered, tp.prefs.sort],
+  );
+
   const apportionment = useMemo(() => {
     if (!lines) return { stockLines: [], overheadLines: [], totalOverhead: 0, totalStockCost: 0 };
     const stockLines = lines.filter((l) => l.is_stock_line);
@@ -202,6 +254,10 @@ export function IntakePage() {
   const mappedCount = apportionment.stockLines.filter((l) => l.mpn && l.condition_grade).length;
   const canProcess = selectedReceipt?.status === "pending" && mappedCount > 0 && !processing;
 
+  const visibleCols = tp.prefs.visibleColumns
+    .map((k) => ALL_COLUMNS.find((c) => c.key === k))
+    .filter(Boolean) as typeof ALL_COLUMNS;
+
   return (
     <BackOfficeLayout title="Intake">
       <div className="space-y-6 animate-fade-in">
@@ -213,11 +269,32 @@ export function IntakePage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="sm:w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="processed">Processed</SelectItem>
+                  <SelectItem value="error">Error</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="sm:ml-auto">
+                <ColumnSelector
+                  allColumns={ALL_COLUMNS.filter((c) => c.key !== "_chevron")}
+                  visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_chevron")}
+                  onToggleColumn={tp.toggleColumn}
+                  onMoveColumn={tp.moveColumn}
+                />
+              </div>
+            </div>
+
             {isLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ) : !receipts?.length ? (
+            ) : !sorted.length ? (
               <p className="font-body text-sm text-muted-foreground text-center py-8">
                 No receipts yet. Sync purchases from QuickBooks in Settings.
               </p>
@@ -225,39 +302,29 @@ export function IntakePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="font-display text-xs">QBO ID</TableHead>
-                    <TableHead className="font-display text-xs">Vendor</TableHead>
-                    <TableHead className="font-display text-xs">Date</TableHead>
-                    <TableHead className="font-display text-xs text-right">Net</TableHead>
-                    <TableHead className="font-display text-xs text-right">VAT</TableHead>
-                    <TableHead className="font-display text-xs text-right">Gross</TableHead>
-                    <TableHead className="font-display text-xs">Status</TableHead>
-                    <TableHead />
+                    {visibleCols.map((col) => (
+                      <SortableTableHead
+                        key={col.key}
+                        columnKey={col.key}
+                        label={col.label}
+                        sortKey={tp.prefs.sort.key}
+                        sortDir={tp.prefs.sort.dir}
+                        onToggleSort={tp.toggleSort}
+                        align={col.align}
+                        sortable={col.key !== "_chevron"}
+                        className="font-display text-xs"
+                      />
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {receipts.map((r) => (
+                  {sorted.map((r) => (
                     <TableRow key={r.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedReceipt(r)}>
-                      <TableCell className="font-body text-xs font-mono">{r.qbo_purchase_id}</TableCell>
-                      <TableCell className="font-body text-xs">{r.vendor_name ?? "—"}</TableCell>
-                      <TableCell className="font-body text-xs">{r.txn_date ?? "—"}</TableCell>
-                      <TableCell className="font-body text-xs text-right font-mono">
-                        {fmt(receiptNet(r))}
-                      </TableCell>
-                      <TableCell className="font-body text-xs text-right font-mono">
-                        {fmt(r.tax_total)}
-                      </TableCell>
-                      <TableCell className="font-body text-xs text-right font-mono">
-                        {fmt(receiptGross(r))}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${statusColor[r.status] ?? ""}`}>
-                          {r.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      </TableCell>
+                      {visibleCols.map((col) => (
+                        <TableCell key={col.key} className={col.align === "right" ? "text-right" : ""}>
+                          {renderCell(r, col.key)}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -283,21 +350,20 @@ export function IntakePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="font-display text-xs">Type</TableHead>
-                    <TableHead className="font-display text-xs">Description</TableHead>
-                    <TableHead className="font-display text-xs text-right">Qty</TableHead>
-                    <TableHead className="font-display text-xs text-right">Unit (net)</TableHead>
-                    <TableHead className="font-display text-xs text-right">Line (net)</TableHead>
-                    <TableHead className="font-display text-xs text-right">VAT %</TableHead>
-                    <TableHead className="font-display text-xs text-right">VAT</TableHead>
-                    <TableHead className="font-display text-xs text-right">Landed/unit</TableHead>
-                    <TableHead className="font-display text-xs">MPN</TableHead>
-                    <TableHead className="font-display text-xs">Grade</TableHead>
-                    <TableHead />
+                    <SortableTableHead columnKey="" label="Type" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" />
+                    <SortableTableHead columnKey="" label="Description" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" />
+                    <SortableTableHead columnKey="" label="Qty" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="Unit (net)" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="Line (net)" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="VAT %" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="VAT" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="Landed/unit" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" align="right" />
+                    <SortableTableHead columnKey="" label="MPN" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" />
+                    <SortableTableHead columnKey="" label="Grade" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="font-display text-xs" />
+                    <SortableTableHead columnKey="" label="" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {/* Stock lines first */}
                   {apportionment.stockLines.map((line) => {
                     const isValid = mpnValid[line.id];
                     const currentMpn = lineEdits[line.id]?.mpn ?? line.mpn;
@@ -308,9 +374,7 @@ export function IntakePage() {
                     return (
                       <TableRow key={line.id}>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-                            Item
-                          </Badge>
+                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">Item</Badge>
                         </TableCell>
                         <TableCell className="font-body text-xs max-w-[180px] truncate">{line.description ?? "—"}</TableCell>
                         <TableCell className="font-body text-xs text-right">{line.quantity}</TableCell>
@@ -318,9 +382,7 @@ export function IntakePage() {
                         <TableCell className="font-body text-xs text-right font-mono">{fmt(line.line_total)}</TableCell>
                         <TableCell className="font-body text-xs text-right">{line.vat_rate_percent != null ? `${line.vat_rate_percent}%` : "—"}</TableCell>
                         <TableCell className="font-body text-xs text-right font-mono">{vat != null ? fmt(vat) : "—"}</TableCell>
-                        <TableCell className="font-body text-xs text-right font-medium">
-                          {landed !== null ? fmt(landed) : "—"}
-                        </TableCell>
+                        <TableCell className="font-body text-xs text-right font-medium">{landed !== null ? fmt(landed) : "—"}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
                             <Input
@@ -341,9 +403,7 @@ export function IntakePage() {
                             onValueChange={(v) => handleGradeChange(line.id, v)}
                             disabled={selectedReceipt?.status !== "pending"}
                           >
-                            <SelectTrigger className="h-7 w-14 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
+                            <SelectTrigger className="h-7 w-14 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               {["1", "2", "3", "4", "5"].map((g) => (
                                 <SelectItem key={g} value={g} className="text-xs">{g}</SelectItem>
@@ -353,42 +413,27 @@ export function IntakePage() {
                         </TableCell>
                         <TableCell>
                           {selectedReceipt?.status === "pending" && (
-                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>
-                              Save
-                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => saveMpnMapping(line.id)}>Save</Button>
                           )}
                         </TableCell>
                       </TableRow>
                     );
                   })}
 
-                  {/* Account/overhead lines */}
                   {apportionment.overheadLines.map((line) => {
                     const vat = lineVat(line);
                     return (
                       <TableRow key={line.id} className="bg-muted/30">
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">
-                            Acct
-                          </Badge>
+                          <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">Acct</Badge>
                         </TableCell>
-                        <TableCell className="font-body text-xs max-w-[180px] truncate italic text-muted-foreground">
-                          {line.description ?? "—"}
-                        </TableCell>
+                        <TableCell className="font-body text-xs max-w-[180px] truncate italic text-muted-foreground">{line.description ?? "—"}</TableCell>
                         <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
                         <TableCell className="font-body text-xs text-right text-muted-foreground">—</TableCell>
-                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">
-                          {fmt(line.line_total)}
-                        </TableCell>
-                        <TableCell className="font-body text-xs text-right text-muted-foreground">
-                          {line.vat_rate_percent != null ? `${line.vat_rate_percent}%` : "—"}
-                        </TableCell>
-                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">
-                          {vat != null ? fmt(vat) : "—"}
-                        </TableCell>
-                        <TableCell className="font-body text-xs text-right text-muted-foreground italic">
-                          apportioned
-                        </TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">{fmt(line.line_total)}</TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground">{line.vat_rate_percent != null ? `${line.vat_rate_percent}%` : "—"}</TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground font-mono">{vat != null ? fmt(vat) : "—"}</TableCell>
+                        <TableCell className="font-body text-xs text-right text-muted-foreground italic">apportioned</TableCell>
                         <TableCell />
                         <TableCell />
                         <TableCell />
@@ -396,18 +441,11 @@ export function IntakePage() {
                     );
                   })}
 
-                  {/* Summary row */}
                   {apportionment.totalOverhead > 0 && (
                     <TableRow className="border-t-2 border-border">
-                      <TableCell colSpan={4} className="font-display text-xs text-right">
-                        Overhead to apportion:
-                      </TableCell>
-                      <TableCell className="font-display text-xs text-right font-semibold">
-                        {fmt(apportionment.totalOverhead)}
-                      </TableCell>
-                      <TableCell colSpan={6} className="font-body text-[10px] text-muted-foreground italic">
-                        pro-rata by line total
-                      </TableCell>
+                      <TableCell colSpan={4} className="font-display text-xs text-right">Overhead to apportion:</TableCell>
+                      <TableCell className="font-display text-xs text-right font-semibold">{fmt(apportionment.totalOverhead)}</TableCell>
+                      <TableCell colSpan={6} className="font-body text-[10px] text-muted-foreground italic">pro-rata by line total</TableCell>
                     </TableRow>
                   )}
                 </TableBody>
@@ -429,9 +467,7 @@ export function IntakePage() {
 
           {selectedReceipt?.status === "processed" && (
             <div className="text-center py-2">
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 text-xs">
-                ✓ Processed
-              </Badge>
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 text-xs">✓ Processed</Badge>
             </div>
           )}
         </DialogContent>

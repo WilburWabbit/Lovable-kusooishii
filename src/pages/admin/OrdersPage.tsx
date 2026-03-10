@@ -10,13 +10,17 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ShoppingCart, PoundSterling, ArrowUpRight, ArrowDownLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
+import { useTablePreferences } from "@/hooks/useTablePreferences";
+import { SortableTableHead } from "@/components/admin/SortableTableHead";
+import { ColumnSelector } from "@/components/admin/ColumnSelector";
+import { sortRows } from "@/lib/table-utils";
 
 type OrderLineRow = {
   id: string;
@@ -80,12 +84,70 @@ function lineVatAmount(l: OrderLineRow) {
   return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
+const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
+  { key: "_expand", label: "", align: "left" as const },
+  { key: "order_number", label: "Order #" },
+  { key: "origin_channel", label: "Origin" },
+  { key: "origin_reference", label: "Reference" },
+  { key: "status", label: "Status" },
+  { key: "items", label: "Items", align: "center" as const },
+  { key: "net", label: "Net", align: "right" as const },
+  { key: "vat", label: "VAT", align: "right" as const },
+  { key: "total", label: "Total", align: "right" as const },
+  { key: "created_at", label: "Date" },
+];
+
+const DEFAULT_VISIBLE = ALL_COLUMNS.map((c) => c.key);
+
+function getSortValue(o: OrderRow, key: string): unknown {
+  switch (key) {
+    case "order_number": return o.order_number;
+    case "origin_channel": return o.origin_channel;
+    case "origin_reference": return o.origin_reference;
+    case "status": return o.status;
+    case "items": return o.sales_order_line.length;
+    case "net": return o.merchandise_subtotal;
+    case "vat": return o.tax_total;
+    case "total": return o.gross_total;
+    case "created_at": return o.created_at;
+    default: return null;
+  }
+}
+
+function renderCell(o: OrderRow, key: string, expandedId: string | null): React.ReactNode {
+  switch (key) {
+    case "_expand":
+      return <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />;
+    case "order_number":
+      return <span className="font-mono text-xs font-medium">{o.order_number}</span>;
+    case "origin_channel":
+      return <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>{o.origin_channel.replace(/_/g, " ")}</Badge>;
+    case "origin_reference":
+      return <span className="font-mono text-xs">{o.origin_reference ?? "—"}</span>;
+    case "status":
+      return <Badge variant="outline" className={STATUS_COLORS[o.status] ?? ""}>{o.status.replace(/_/g, " ")}</Badge>;
+    case "items":
+      return o.sales_order_line.length;
+    case "net":
+      return <span className="font-mono text-xs">{fmt(o.merchandise_subtotal)}</span>;
+    case "vat":
+      return <span className="font-mono text-xs">{fmt(o.tax_total)}</span>;
+    case "total":
+      return <span className="font-mono text-xs">{fmt(o.gross_total)}</span>;
+    case "created_at":
+      return <span className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</span>;
+    default: return null;
+  }
+}
+
 export function OrdersPage() {
   const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const tp = useTablePreferences("admin-orders", DEFAULT_VISIBLE, { key: "created_at", dir: "desc" });
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["admin-orders"],
@@ -116,12 +178,21 @@ export function OrdersPage() {
     return list;
   }, [orders, channelFilter, statusFilter, search]);
 
+  const sorted = useMemo(
+    () => sortRows(filtered, tp.prefs.sort.key, tp.prefs.sort.dir, getSortValue),
+    [filtered, tp.prefs.sort],
+  );
+
   const totalRevenue = useMemo(
     () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + o.gross_total, 0),
     [orders],
   );
   const salesCount = orders.filter((o) => o.origin_channel !== "qbo_refund").length;
   const refundCount = orders.filter((o) => o.origin_channel === "qbo_refund").length;
+
+  const visibleCols = tp.prefs.visibleColumns
+    .map((k) => ALL_COLUMNS.find((c) => c.key === k))
+    .filter(Boolean) as typeof ALL_COLUMNS;
 
   return (
     <BackOfficeLayout title="Orders">
@@ -184,6 +255,14 @@ export function OrdersPage() {
               ))}
             </SelectContent>
           </Select>
+          <div className="sm:ml-auto">
+            <ColumnSelector
+              allColumns={ALL_COLUMNS.filter((c) => c.key !== "_expand")}
+              visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_expand")}
+              onToggleColumn={tp.toggleColumn}
+              onMoveColumn={tp.moveColumn}
+            />
+          </div>
         </div>
 
         {/* Table */}
@@ -191,55 +270,43 @@ export function OrdersPage() {
           <CardContent className="p-0">
             {isLoading ? (
               <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No orders found.</div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead>Order #</TableHead>
-                    <TableHead>Origin</TableHead>
-                    <TableHead>Reference</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-center">Items</TableHead>
-                    <TableHead className="text-right">Net</TableHead>
-                    <TableHead className="text-right">VAT</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Date</TableHead>
+                    {visibleCols.map((col) => (
+                      <SortableTableHead
+                        key={col.key}
+                        columnKey={col.key}
+                        label={col.label}
+                        sortKey={tp.prefs.sort.key}
+                        sortDir={tp.prefs.sort.dir}
+                        onToggleSort={tp.toggleSort}
+                        align={col.align}
+                        sortable={col.key !== "_expand"}
+                        className={col.key === "_expand" ? "w-8" : ""}
+                      />
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((o) => (
+                  {sorted.map((o) => (
                     <Collapsible key={o.id} open={expandedId === o.id} onOpenChange={(open) => setExpandedId(open ? o.id : null)} asChild>
                       <>
                         <CollapsibleTrigger asChild>
                           <TableRow className="cursor-pointer">
-                            <TableCell className="w-8 px-2">
-                              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === o.id ? "rotate-90" : ""}`} />
-                            </TableCell>
-                            <TableCell className="font-mono text-xs font-medium">{o.order_number}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={ORIGIN_COLORS[o.origin_channel] ?? ""}>
-                                {o.origin_channel.replace(/_/g, " ")}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">{o.origin_reference ?? "—"}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={STATUS_COLORS[o.status] ?? ""}>
-                                {o.status.replace(/_/g, " ")}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-center">{o.sales_order_line.length}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{fmt(o.merchandise_subtotal)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{fmt(o.tax_total)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{fmt(o.gross_total)}</TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd MMM yyyy")}</TableCell>
+                            {visibleCols.map((col) => (
+                              <TableCell key={col.key} className={`${col.key === "_expand" ? "w-8 px-2" : ""} ${col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : ""}`}>
+                                {renderCell(o, col.key, expandedId)}
+                              </TableCell>
+                            ))}
                           </TableRow>
                         </CollapsibleTrigger>
                         <CollapsibleContent asChild>
                           <tr>
-                            <td colSpan={10} className="bg-muted/30 p-0">
+                            <td colSpan={visibleCols.length} className="bg-muted/30 p-0">
                               <div className="px-8 py-3">
                                 {o.guest_name || o.guest_email ? (
                                   <p className="text-xs text-muted-foreground mb-2">
@@ -249,14 +316,14 @@ export function OrdersPage() {
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
-                                      <TableHead className="text-xs">SKU</TableHead>
-                                      <TableHead className="text-xs">Product</TableHead>
-                                      <TableHead className="text-xs text-center">Qty</TableHead>
-                                      <TableHead className="text-xs text-right">Unit (net)</TableHead>
-                                      <TableHead className="text-xs text-right">Line (net)</TableHead>
-                                      <TableHead className="text-xs text-right">VAT %</TableHead>
-                                      <TableHead className="text-xs text-right">VAT</TableHead>
-                                      <TableHead className="text-xs text-right">Line (inc VAT)</TableHead>
+                                      <SortableTableHead columnKey="" label="SKU" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" />
+                                      <SortableTableHead columnKey="" label="Product" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" />
+                                      <SortableTableHead columnKey="" label="Qty" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="center" />
+                                      <SortableTableHead columnKey="" label="Unit (net)" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="right" />
+                                      <SortableTableHead columnKey="" label="Line (net)" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="right" />
+                                      <SortableTableHead columnKey="" label="VAT %" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="right" />
+                                      <SortableTableHead columnKey="" label="VAT" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="right" />
+                                      <SortableTableHead columnKey="" label="Line (inc VAT)" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="right" />
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
