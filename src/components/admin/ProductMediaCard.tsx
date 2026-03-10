@@ -101,7 +101,7 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         if (assetErr) throw assetErr;
 
         // Create product_media link
-        const { error: linkErr } = await supabase
+        const { error: linkErr } = await (supabase as any)
           .from("product_media")
           .insert({
             product_id: productId,
