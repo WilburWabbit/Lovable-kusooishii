@@ -166,7 +166,7 @@ Deno.serve(async (req) => {
               parameters: {
                 type: "object",
                 properties: {
-                  seo_title: { type: "string", description: "SEO title, max 100 characters" },
+                  seo_title: { type: "string", description: "SEO title, max 60 characters" },
                   seo_body: { type: "string", description: "SEO meta description, max 400 characters, no line breaks" },
                   hook: { type: "string", description: "Product hook, 1-2 lines max" },
                   description: { type: "string", description: "Narrative description, 80-140 words, single paragraph" },
