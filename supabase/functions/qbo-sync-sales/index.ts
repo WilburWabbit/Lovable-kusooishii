@@ -593,7 +593,7 @@ Deno.serve(async (req) => {
     // ── Backfill VAT codes on existing order lines ──
     let vatBackfilled = 0;
     const backfillStart = Date.now();
-    const BACKFILL_TIME_BUDGET_MS = 20_000; // 20s max for backfill
+    const BACKFILL_TIME_BUDGET_MS = 45_000; // 45s max for backfill
     try {
       // Find orders with lines missing tax_code_id
       const { data: ordersToFix } = await supabaseAdmin
