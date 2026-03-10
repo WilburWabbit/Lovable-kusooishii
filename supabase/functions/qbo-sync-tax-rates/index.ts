@@ -70,6 +70,8 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
     if (!isWebhook) {
       // Verify caller identity
       const userClient = createClient(supabaseUrl, anonKey, {
@@ -84,8 +86,6 @@ Deno.serve(async (req) => {
       }
       const userId = claimsData.claims.sub;
 
-      const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
       // Check admin/staff role
       const { data: hasAdmin } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "admin" });
       const { data: hasStaff } = await supabaseAdmin.rpc("has_role", { _user_id: userId, _role: "staff" });
@@ -98,8 +98,6 @@ Deno.serve(async (req) => {
     } else {
       console.log("Webhook-triggered sync (service role auth)");
     }
-
-    const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // QBO credentials
     const clientId = Deno.env.get("QBO_CLIENT_ID")!;
