@@ -38,6 +38,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(data);
   }, []);
 
+  const fetchRoles = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    setRoles(data?.map((r) => r.role) ?? []);
+  }, []);
+
   useEffect(() => {
     // Set up listener BEFORE getSession
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
