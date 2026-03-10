@@ -26,6 +26,7 @@ import { InventoryPage } from "./pages/admin/InventoryPage";
 import { IntakePage } from "./pages/admin/IntakePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
+import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -64,6 +65,7 @@ const App = () => (
             <Route path="/admin/audit" element={<AuditPage />} />
             <Route path="/admin/settings" element={<SettingsPage />} />
             <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
+            <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
             <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
 
             <Route path="*" element={<NotFound />} />

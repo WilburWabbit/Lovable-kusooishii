@@ -896,6 +896,42 @@ export type Database = {
         }
         Relationships: []
       }
+      vat_rate: {
+        Row: {
+          active: boolean
+          agency_ref: string | null
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          qbo_tax_rate_id: string
+          rate_percent: number
+          synced_at: string
+        }
+        Insert: {
+          active?: boolean
+          agency_ref?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          qbo_tax_rate_id: string
+          rate_percent: number
+          synced_at?: string
+        }
+        Update: {
+          active?: boolean
+          agency_ref?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          qbo_tax_rate_id?: string
+          rate_percent?: number
+          synced_at?: string
+        }
+        Relationships: []
+      }
       wishlist: {
         Row: {
           created_at: string

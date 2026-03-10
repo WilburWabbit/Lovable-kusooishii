@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.brickeconomy-sync]
 verify_jwt = false
+
+[functions.qbo-sync-tax-rates]
+verify_jwt = false
