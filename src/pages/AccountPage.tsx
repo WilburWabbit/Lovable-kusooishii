@@ -9,11 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { User, Heart, MapPin, Package, LogOut } from "lucide-react";
+import { User, Heart, MapPin, Package, LogOut, Shield } from "lucide-react";
 import WishlistTab from "@/components/WishlistTab";
 
 export default function AccountPage() {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading, signOut, isStaffOrAdmin } = useAuth();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -114,6 +114,11 @@ export default function AccountPage() {
               <TabsTrigger value="orders" className="font-display text-xs">
                 <Package className="mr-1.5 h-3.5 w-3.5" /> Orders
               </TabsTrigger>
+              {isStaffOrAdmin && (
+                <TabsTrigger value="admin" className="font-display text-xs" onClick={() => navigate("/admin")}>
+                  <Shield className="mr-1.5 h-3.5 w-3.5" /> Admin
+                </TabsTrigger>
+              )}
             </TabsList>
 
             {/* Profile Tab */}

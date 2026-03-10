@@ -6,22 +6,27 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: { display_name: string | null; avatar_url: string | null } | null;
+  roles: string[];
   loading: boolean;
   signOut: () => Promise<void>;
+  isStaffOrAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   profile: null,
+  roles: [],
   loading: true,
   signOut: async () => {},
+  isStaffOrAdmin: false,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<{ display_name: string | null; avatar_url: string | null } | null>(null);
+  const [roles, setRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = useCallback(async (userId: string) => {
@@ -33,6 +38,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(data);
   }, []);
 
+  const fetchRoles = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    setRoles(data?.map((r) => r.role) ?? []);
+  }, []);
+
   useEffect(() => {
     // Set up listener BEFORE getSession
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -40,10 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          // Use setTimeout to avoid potential deadlock with Supabase client
-          setTimeout(() => fetchProfile(session.user.id), 0);
+          setTimeout(() => {
+            fetchProfile(session.user.id);
+            fetchRoles(session.user.id);
+          }, 0);
         } else {
           setProfile(null);
+          setRoles([]);
         }
         setLoading(false);
       }
@@ -54,22 +70,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
+        fetchRoles(session.user.id);
       }
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchProfile]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchProfile, fetchRoles]);
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
     setProfile(null);
+    setRoles([]);
   };
 
+  const isStaffOrAdmin = roles.includes("admin") || roles.includes("staff");
+
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, signOut, isStaffOrAdmin }}>
       {children}
     </AuthContext.Provider>
   );
