@@ -149,12 +149,12 @@ export default function VatRatesSettingsPage() {
   );
 
   const visibleRateCols = ratesTp.prefs.visibleColumns
-    .map((k) => RATE_COLUMNS.find((c) => c.key === k))
-    .filter(Boolean) as typeof RATE_COLUMNS;
+    .map((k) => RATE_COLUMNS.find((c) => c.key === k)!)
+    .filter(Boolean);
 
   const visibleCodeCols = codesTp.prefs.visibleColumns
-    .map((k) => CODE_COLUMNS.find((c) => c.key === k))
-    .filter(Boolean) as typeof CODE_COLUMNS;
+    .map((k) => CODE_COLUMNS.find((c) => c.key === k)!)
+    .filter(Boolean);
 
   const fetchData = async () => {
     setLoading(true);

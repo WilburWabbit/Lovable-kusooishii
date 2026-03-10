@@ -179,8 +179,8 @@ export function InventoryPage() {
   const countByStatus = (st: string) => units.filter((u) => u.status === st).length;
 
   const visibleCols = tp.prefs.visibleColumns
-    .map((k) => ALL_COLUMNS.find((c) => c.key === k))
-    .filter(Boolean) as typeof ALL_COLUMNS;
+    .map((k) => ALL_COLUMNS.find((c) => c.key === k)!)
+    .filter(Boolean);
 
   return (
     <BackOfficeLayout title="Inventory">
