@@ -6,6 +6,7 @@ import { useParams, Link } from "react-router-dom";
 import { ShoppingBag, Heart, Shield, Package, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 
 const gradeLabels: Record<string, { label: string; desc: string }> = {
   "1": { label: "Mint", desc: "Box and contents in near-perfect condition. No visible damage, creasing, or shelf wear." },
@@ -44,6 +45,28 @@ export default function ProductDetailPage() {
     },
     enabled: !!mpn,
   });
+
+  // Fetch product media
+  const { data: mediaItems = [] } = useQuery({
+    queryKey: ["product_media_storefront", product?.id],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("product_media")
+        .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
+        .eq("product_id", product!.id)
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((pm: any) => ({
+        id: pm.id,
+        url: pm.media_asset?.original_url,
+        alt: pm.media_asset?.alt_text ?? "",
+        is_primary: pm.is_primary,
+      }));
+    },
+    enabled: !!product?.id,
+  });
+
+  const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
   const themeName = product?.theme && typeof product.theme === "object" && !Array.isArray(product.theme)
@@ -100,11 +123,40 @@ export default function ProductDetailPage() {
             </div>
           ) : product ? (
             <div className="grid gap-10 lg:grid-cols-2">
-              {/* Image placeholder */}
-              <div className="aspect-square bg-kuso-mist flex items-center justify-center">
-                <span className="font-display text-6xl font-bold text-muted-foreground/15">
-                  {product.mpn.split("-")[0]}
-                </span>
+              {/* Image gallery */}
+              <div>
+                {mediaItems.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="aspect-square bg-kuso-mist overflow-hidden">
+                      <img
+                        src={mediaItems[selectedImage]?.url}
+                        alt={mediaItems[selectedImage]?.alt || product.name || ""}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                    {mediaItems.length > 1 && (
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {mediaItems.map((img, idx) => (
+                          <button
+                            key={img.id}
+                            onClick={() => setSelectedImage(idx)}
+                            className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors ${
+                              idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
+                            }`}
+                          >
+                            <img src={img.url} alt={img.alt || ""} className="h-full w-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="aspect-square bg-kuso-mist flex items-center justify-center">
+                    <span className="font-display text-6xl font-bold text-muted-foreground/15">
+                      {product.mpn.split("-")[0]}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Product info */}
