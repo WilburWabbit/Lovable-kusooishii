@@ -173,6 +173,7 @@ export function EbaySettingsPanel() {
     try {
       const data = await invokeWithAuth<any>("ebay-sync", { action: "get_subscriptions" });
       setSubscriptions(data?.subscriptions || []);
+      if (data?.destinationUrl) setDestinationUrl(data.destinationUrl);
     } catch (err) {
       toast({
         title: "Failed to load subscriptions",
@@ -181,6 +182,31 @@ export function EbaySettingsPanel() {
       });
     } finally {
       setLoadingSubs(false);
+    }
+  };
+
+  const diagnoseNotifications = async () => {
+    setDiagnosing(true);
+    try {
+      const data = await invokeWithAuth<any>("ebay-sync", { action: "diagnose_notifications" });
+      setDiagReport(data);
+      if (data?.issues?.length > 0) {
+        toast({
+          title: `${data.issues.length} issue(s) detected`,
+          description: data.issues[0],
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "No issues detected", description: "Notification setup looks healthy." });
+      }
+    } catch (err) {
+      toast({
+        title: "Diagnosis failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setDiagnosing(false);
     }
   };
 
