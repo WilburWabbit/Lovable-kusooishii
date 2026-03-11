@@ -773,7 +773,7 @@ Deno.serve(async (req) => {
     if (orderErr) throw new Error(`Failed to insert sales_order: ${orderErr.message}`);
     console.log(`Local sales_order created: ${newOrder.id}`);
 
-    // ── Step 10: Insert sales_order_lines ──
+    // ── Step 11: Insert sales_order_lines ──
     const affectedSkuIds = new Set<string>();
 
     for (const pl of processedLines) {
