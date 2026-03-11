@@ -594,7 +594,27 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   const productId = productRecord?.id ?? null;
 
-  // Upsert SKU
+  // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,
+  // update it to link to this QBO item before upserting (avoids sku_code unique violation)
+  const { data: existingByCode } = await admin
+    .from("sku")
+    .select("id, qbo_item_id")
+    .eq("sku_code", skuCode)
+    .maybeSingle();
+
+  if (existingByCode && existingByCode.qbo_item_id !== qboItemId) {
+    // Link the existing SKU to this QBO item ID
+    await admin.from("sku").update({
+      qbo_item_id: qboItemId,
+      name: cleanQboName(item.Name ?? mpn),
+      product_id: productId ?? existingByCode.product_id,
+      active_flag: item.Active !== false,
+      price: item.UnitPrice != null ? Number(item.UnitPrice) : existingByCode.price,
+    }).eq("id", existingByCode.id);
+    return `item ${entityId} linked to existing SKU ${skuCode}`;
+  }
+
+  // Upsert SKU (now safe — unique index on qbo_item_id exists)
   const { error } = await admin.from("sku").upsert({
     qbo_item_id: qboItemId,
     sku_code: skuCode,
