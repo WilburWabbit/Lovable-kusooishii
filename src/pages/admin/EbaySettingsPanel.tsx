@@ -5,7 +5,7 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck } from "lucide-react";
+import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck, Stethoscope } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SubResult {
