@@ -821,7 +821,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 12: Push updated stock counts to channels ──
+    // ── Step 13: Push updated stock counts to channels ──
     let stockPushed = 0;
 
     if (affectedSkuIds.size > 0) {
