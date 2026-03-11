@@ -773,7 +773,18 @@ Deno.serve(async (req) => {
     if (orderErr) throw new Error(`Failed to insert sales_order: ${orderErr.message}`);
     console.log(`Local sales_order created: ${newOrder.id}`);
 
-    // ── Step 11: Insert sales_order_lines ──
+    // ── Step 11: Look up default sales tax code ──
+    const { data: defaultTaxCode } = await admin
+      .from("tax_code")
+      .select("id, qbo_tax_code_id")
+      .eq("name", "20.0% S")
+      .eq("active", true)
+      .single();
+
+    const taxCodeId = defaultTaxCode?.id ?? null;
+    const qboTaxCodeRef = defaultTaxCode?.qbo_tax_code_id ?? null;
+
+    // ── Step 12: Insert sales_order_lines ──
     const affectedSkuIds = new Set<string>();
 
     for (const pl of processedLines) {
@@ -785,6 +796,8 @@ Deno.serve(async (req) => {
         quantity: pl.qty,
         unit_price: pl.unitPrice,
         line_total: pl.lineTotal,
+        tax_code_id: taxCodeId,
+        qbo_tax_code_ref: qboTaxCodeRef,
       });
     }
 
