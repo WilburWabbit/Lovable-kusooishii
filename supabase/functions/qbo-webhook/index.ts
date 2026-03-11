@@ -267,8 +267,17 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     }
 
     const receiptLineId = insertedLines?.[lineRows.indexOf(line)]?.id ?? null;
+
+    // Shortfall guard: only insert units not already created for this receipt line
+    let shortfall = line.quantity;
+    if (receiptLineId) {
+      const { count } = await admin.from("stock_unit").select("id", { count: "exact", head: true }).eq("inbound_receipt_line_id", receiptLineId);
+      shortfall = line.quantity - (count ?? 0);
+    }
+    if (shortfall <= 0) { continue; }
+
     const stockUnits = [];
-    for (let j = 0; j < line.quantity; j++) {
+    for (let j = 0; j < shortfall; j++) {
       stockUnits.push({
         sku_id: sku!.id,
         mpn: line.mpn,
