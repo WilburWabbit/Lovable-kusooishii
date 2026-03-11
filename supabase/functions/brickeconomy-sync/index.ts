@@ -84,6 +84,45 @@ Deno.serve(async (req) => {
     const setsRaw = await setsRes.json();
     const minifigsRaw = await minifigsRes.json();
 
+    // --- Step 1: Land raw payloads ---
+    const correlationId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    const { data: setsLanding } = await admin
+      .from("landing_raw_brickeconomy")
+      .upsert(
+        {
+          external_id: "collection_sets",
+          entity_type: "collection_sets",
+          raw_payload: setsRaw,
+          status: "pending",
+          correlation_id: correlationId,
+          received_at: now,
+        },
+        { onConflict: "external_id" }
+      )
+      .select("id")
+      .single();
+
+    const { data: minifigsLanding } = await admin
+      .from("landing_raw_brickeconomy")
+      .upsert(
+        {
+          external_id: "collection_minifigs",
+          entity_type: "collection_minifigs",
+          raw_payload: minifigsRaw,
+          status: "pending",
+          correlation_id: correlationId,
+          received_at: now,
+        },
+        { onConflict: "external_id" }
+      )
+      .select("id")
+      .single();
+
+    console.log(`Landed BrickEconomy payloads: sets=${setsLanding?.id}, minifigs=${minifigsLanding?.id}`);
+
+    // --- Step 2: Process to canonical tables ---
     // Unwrap the data envelope
     const setsData = setsRaw.data ?? setsRaw;
     const minifigsData = minifigsRaw.data ?? minifigsRaw;
@@ -108,7 +147,7 @@ Deno.serve(async (req) => {
       released_date: item.released_date ?? null,
       retired_date: item.retired_date ?? null,
       currency: "GBP",
-      synced_at: new Date().toISOString(),
+      synced_at: now,
     }));
 
     // --- Process minifigs ---
@@ -131,7 +170,7 @@ Deno.serve(async (req) => {
       released_date: item.released_date ?? null,
       retired_date: item.retired_date ?? null,
       currency: "GBP",
-      synced_at: new Date().toISOString(),
+      synced_at: now,
     }));
 
     // --- Full replace: delete then insert ---
@@ -150,8 +189,6 @@ Deno.serve(async (req) => {
     }
 
     // --- Portfolio snapshots (upsert by snapshot_type) ---
-    const now = new Date().toISOString();
-    // Delete old snapshots and insert fresh
     await admin.from("brickeconomy_portfolio_snapshot").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
     const snapshots = [];
@@ -185,7 +222,6 @@ Deno.serve(async (req) => {
     let catalogMatches = 0;
     for (const item of setItems) {
       if (!item.item_number) continue;
-      // Try to match by MPN (e.g. "10297" or "10297-1")
       const mpnVariants = [item.item_number];
       if (!item.item_number.includes("-")) {
         mpnVariants.push(`${item.item_number}-1`);
@@ -207,6 +243,15 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- Step 3: Mark landing rows as committed ---
+    const landingIds = [setsLanding?.id, minifigsLanding?.id].filter(Boolean);
+    if (landingIds.length > 0) {
+      await admin.from("landing_raw_brickeconomy").update({
+        status: "committed",
+        processed_at: new Date().toISOString(),
+      }).in("id", landingIds);
+    }
+
     return new Response(
       JSON.stringify({
         sets_synced: setItems.length,
@@ -217,6 +262,17 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
+    // Try to mark landing rows as error
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const errAdmin = createClient(supabaseUrl, serviceRoleKey);
+      await errAdmin.from("landing_raw_brickeconomy").update({
+        status: "error",
+        error_message: (err.message || "Unknown error").substring(0, 500),
+        processed_at: new Date().toISOString(),
+      }).eq("status", "pending");
+    } catch { /* best effort */ }
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
