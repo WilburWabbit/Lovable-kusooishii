@@ -505,7 +505,30 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════════════
     console.log(`Processing eBay order: ${orderId}`);
 
-    // ── Step 1: Idempotency check ──
+    // ── Step 1: Land raw order payload ──
+    const ebayToken = await getEbayAccessToken(admin);
+    const order = await ebayFetch(ebayToken, `/sell/fulfillment/v1/order/${orderId}`);
+    if (!order) throw new Error(`eBay order ${orderId} not found`);
+
+    const correlationId = crypto.randomUUID();
+    const { data: landingRow } = await admin
+      .from("landing_raw_ebay_order")
+      .upsert(
+        {
+          external_id: orderId,
+          raw_payload: order,
+          status: "pending",
+          correlation_id: correlationId,
+          received_at: new Date().toISOString(),
+        },
+        { onConflict: "external_id" }
+      )
+      .select("id")
+      .single();
+    const landingId = landingRow?.id;
+    console.log(`Landed eBay order ${orderId} → landing_raw_ebay_order ${landingId}`);
+
+    // ── Step 2: Idempotency check ──
     const { data: existing } = await admin
       .from("sales_order")
       .select("id")
@@ -515,17 +538,20 @@ Deno.serve(async (req) => {
 
     if (existing) {
       console.log(`Order ${orderId} already processed (sales_order ${existing.id}), skipping`);
+      if (landingId) {
+        await admin.from("landing_raw_ebay_order").update({
+          status: "skipped",
+          processed_at: new Date().toISOString(),
+          error_message: `Already committed as sales_order ${existing.id}`,
+        }).eq("id", landingId);
+      }
       return new Response(
         JSON.stringify({ success: true, skipped: true, sales_order_id: existing.id }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // ── Step 2: Fetch order from eBay ──
-    const ebayToken = await getEbayAccessToken(admin);
-    const order = await ebayFetch(ebayToken, `/sell/fulfillment/v1/order/${orderId}`);
-    if (!order) throw new Error(`eBay order ${orderId} not found`);
-
+    // ── Step 3: Extract order data from landed payload ──
     const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
     const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
     const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
@@ -537,10 +563,10 @@ Deno.serve(async (req) => {
 
     console.log(`eBay order ${orderId}: buyer=${buyerName}, total=${totalAmount}, lines=${lineItems.length}`);
 
-    // ── Step 3: Get QBO connection ──
+    // ── Step 4: Get QBO connection ──
     const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
 
-    // ── Step 4: Upsert QBO Customer ──
+    // ── Step 5: Upsert QBO Customer ──
     const shippingAddr = shipTo?.contactAddress;
     const qboCustomer = await findOrCreateCustomer(qboToken, realmId, buyerName, {
       email: buyerEmail,
@@ -555,7 +581,7 @@ Deno.serve(async (req) => {
     });
     console.log(`QBO Customer: ${qboCustomer.name} (ID: ${qboCustomer.id})`);
 
-    // ── Step 5: Upsert local customer record ──
+    // ── Step 6: Upsert local customer record ──
     const { data: localCustomer } = await admin
       .from("customer")
       .upsert({
@@ -571,12 +597,12 @@ Deno.serve(async (req) => {
       .select("id")
       .single();
 
-    // ── Step 6: Resolve tax info ──
+    // ── Step 7: Resolve tax info ──
     const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
     const multiplier = 1 + taxInfo.ratePercent / 100;
     console.log(`Tax: code=${taxInfo.taxCodeId}, rate=${taxInfo.ratePercent}%`);
 
-    // ── Step 7: Resolve SKUs + build QBO lines ──
+    // ── Step 8: Resolve SKUs + build QBO lines ──
     const { data: allSkus } = await admin.from("sku").select("id, sku_code, qbo_item_id").eq("active_flag", true);
     const skuMap = new Map<string, { id: string; sku_code: string; qbo_item_id: string | null }>();
     for (const s of allSkus || []) {
@@ -666,7 +692,7 @@ Deno.serve(async (req) => {
       totalTax = Math.round((totalAmount - totalNet) * 100) / 100;
     }
 
-    // ── Step 8: Create QBO SalesReceipt (TaxExcluded) ──
+    // ── Step 9: Create QBO SalesReceipt (TaxExcluded) ──
     console.log(`Creating QBO SalesReceipt: net=${totalNet}, tax=${totalTax}, gross=${totalAmount}`);
 
     const receiptBody: any = {
@@ -714,7 +740,7 @@ Deno.serve(async (req) => {
       console.log(`QBO SalesReceipt created: ID=${receipt.Id}, Total=${receipt.TotalAmt}`);
     }
 
-    // ── Step 9: Insert local sales_order ──
+    // ── Step 10: Insert local sales_order ──
     const merchandiseSubtotal = totalAmount - taxAmount;
     const { data: newOrder, error: orderErr } = await admin
       .from("sales_order")
@@ -747,7 +773,7 @@ Deno.serve(async (req) => {
     if (orderErr) throw new Error(`Failed to insert sales_order: ${orderErr.message}`);
     console.log(`Local sales_order created: ${newOrder.id}`);
 
-    // ── Step 10: Insert sales_order_lines ──
+    // ── Step 11: Insert sales_order_lines ──
     const affectedSkuIds = new Set<string>();
 
     for (const pl of processedLines) {
@@ -762,7 +788,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Step 11: FIFO stock depletion ──
+    // ── Step 12: FIFO stock depletion ──
     let unitsDepletedTotal = 0;
     for (const pl of processedLines) {
       const { data: availableUnits } = await admin
@@ -795,7 +821,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 12: Push updated stock counts to channels ──
+    // ── Step 13: Push updated stock counts to channels ──
     let stockPushed = 0;
 
     if (affectedSkuIds.size > 0) {
@@ -839,19 +865,29 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 13: Audit event ──
+    // ── Step 14: Mark landing row committed + audit event ──
+    if (landingId) {
+      await admin.from("landing_raw_ebay_order").update({
+        status: "committed",
+        processed_at: new Date().toISOString(),
+        correlation_id: correlationId,
+      }).eq("id", landingId);
+    }
+
     await admin.from("audit_event").insert({
       entity_type: "sales_order",
       entity_id: newOrder.id,
       trigger_type: "ebay_notification",
       actor_type: "system",
       source_system: "ebay-process-order",
+      correlation_id: correlationId,
       after_json: {
         order_id: orderId,
         qbo_customer_id: qboCustomer.id,
         lines: processedLines.length,
         units_depleted: unitsDepletedTotal,
         stock_pushed: stockPushed,
+        landing_id: landingId,
       },
     });
 
@@ -871,6 +907,20 @@ Deno.serve(async (req) => {
     );
   } catch (e: any) {
     console.error("ebay-process-order error:", e);
+    // Try to mark landing row as error
+    try {
+      const body2 = await req.clone().json().catch(() => ({}));
+      if (body2?.order_id) {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const errAdmin = createClient(supabaseUrl, serviceKey);
+        await errAdmin.from("landing_raw_ebay_order").update({
+          status: "error",
+          error_message: (e.message || "Unknown error").substring(0, 500),
+          processed_at: new Date().toISOString(),
+        }).eq("external_id", body2.order_id).eq("status", "pending");
+      }
+    } catch { /* best effort */ }
     return new Response(
       JSON.stringify({ error: e.message || "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
