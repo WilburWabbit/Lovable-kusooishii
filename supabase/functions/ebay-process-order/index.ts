@@ -692,7 +692,7 @@ Deno.serve(async (req) => {
       totalTax = Math.round((totalAmount - totalNet) * 100) / 100;
     }
 
-    // ── Step 8: Create QBO SalesReceipt (TaxExcluded) ──
+    // ── Step 9: Create QBO SalesReceipt (TaxExcluded) ──
     console.log(`Creating QBO SalesReceipt: net=${totalNet}, tax=${totalTax}, gross=${totalAmount}`);
 
     const receiptBody: any = {
