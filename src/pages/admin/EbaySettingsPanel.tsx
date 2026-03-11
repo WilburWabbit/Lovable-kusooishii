@@ -5,8 +5,18 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing } from "lucide-react";
+import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface SubResult {
+  subscriptionId?: string;
+  topicId?: string;
+  topic?: string;
+  status?: string;
+  error?: string;
+  reason?: string;
+  testStatus?: "passed" | "failed" | "skipped";
+}
 
 export function EbaySettingsPanel() {
   const { toast } = useToast();
@@ -19,7 +29,8 @@ export function EbaySettingsPanel() {
   const [pushingStock, setPushingStock] = useState(false);
   const [settingUpNotifs, setSettingUpNotifs] = useState(false);
   const [loadingSubs, setLoadingSubs] = useState(false);
-  const [subscriptions, setSubscriptions] = useState<any[] | null>(null);
+  const [testingSubs, setTestingSubs] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -170,6 +181,68 @@ export function EbaySettingsPanel() {
     }
   };
 
+  const testSubscriptions = async () => {
+    setTestingSubs(true);
+    try {
+      const data = await invokeWithAuth<any>("ebay-sync", { action: "test_subscriptions" });
+      if (data?.error) throw new Error(data.error);
+      const results: any[] = data?.results || [];
+
+      const passed = results.filter((r: any) => r.status === "passed").length;
+      const failed = results.filter((r: any) => r.status === "failed").length;
+      const skipped = results.filter((r: any) => r.status === "skipped").length;
+
+      // Merge test results into subscriptions display
+      setSubscriptions((prev) => {
+        if (!prev) return results.map((r: any) => ({ ...r, testStatus: r.status }));
+        return prev.map((sub) => {
+          const match = results.find(
+            (r: any) => r.subscriptionId === sub.subscriptionId || r.topicId === (sub.topicId || sub.topic)
+          );
+          return match ? { ...sub, testStatus: match.status, error: match.error, reason: match.reason } : sub;
+        });
+      });
+
+      if (failed > 0) {
+        toast({
+          title: "Subscription tests completed with failures",
+          description: `${passed} passed, ${failed} failed, ${skipped} skipped`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "All subscription tests passed",
+          description: `${passed} passed, ${skipped} skipped`,
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Subscription test failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setTestingSubs(false);
+    }
+  };
+
+  const getSubBadgeClass = (sub: SubResult) => {
+    if (sub.testStatus === "passed") return "text-green-600 border-green-300 bg-green-50 text-xs";
+    if (sub.testStatus === "failed") return "text-destructive border-destructive/30 bg-destructive/5 text-xs";
+    if (sub.testStatus === "skipped") return "text-amber-600 border-amber-300 bg-amber-50 text-xs";
+    if (sub.status === "ENABLED") return "text-green-600 border-green-300 bg-green-50 text-xs";
+    if (sub.status === "error") return "text-destructive border-destructive/30 bg-destructive/5 text-xs";
+    return "text-muted-foreground text-xs";
+  };
+
+  const getSubLabel = (sub: SubResult) => {
+    const topic = sub.topicId || sub.topic || "Unknown";
+    if (sub.testStatus === "passed") return `${topic}: ✓ passed`;
+    if (sub.testStatus === "failed") return `${topic}: ✗ failed`;
+    if (sub.testStatus === "skipped") return `${topic}: ⊘ ${sub.reason || "skipped"}`;
+    return `${topic}: ${sub.status || "unknown"}`;
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -214,6 +287,10 @@ export function EbaySettingsPanel() {
                 {loadingSubs ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <BellRing className="mr-2 h-3.5 w-3.5" />}
                 View Subscriptions
               </Button>
+              <Button size="sm" variant="outline" onClick={testSubscriptions} disabled={testingSubs || !user}>
+                {testingSubs ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-2 h-3.5 w-3.5" />}
+                Test Subscriptions
+              </Button>
               <Button size="sm" variant="outline" onClick={disconnectEbay} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
@@ -227,22 +304,30 @@ export function EbaySettingsPanel() {
                 {subscriptions.length === 0 ? (
                   <p className="font-body text-xs text-muted-foreground">No active subscriptions.</p>
                 ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {subscriptions.map((sub: any, i: number) => (
-                      <Badge
-                        key={sub.subscriptionId || i}
-                        variant="outline"
-                        className={
-                          sub.status === "ENABLED"
-                            ? "text-green-600 border-green-300 bg-green-50 text-xs"
-                            : sub.status === "error"
-                              ? "text-destructive border-destructive/30 bg-destructive/5 text-xs"
-                              : "text-muted-foreground text-xs"
-                        }
-                      >
-                        {sub.topicId || sub.topic || "Unknown"}: {sub.status || "unknown"}
-                      </Badge>
-                    ))}
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap gap-1.5">
+                      {subscriptions.map((sub, i) => (
+                        <Badge
+                          key={sub.subscriptionId || i}
+                          variant="outline"
+                          className={getSubBadgeClass(sub)}
+                          title={sub.error || sub.reason || undefined}
+                        >
+                          {getSubLabel(sub)}
+                        </Badge>
+                      ))}
+                    </div>
+                    {subscriptions.some((s) => s.testStatus === "failed") && (
+                      <div className="mt-2 space-y-0.5">
+                        {subscriptions
+                          .filter((s) => s.testStatus === "failed")
+                          .map((s, i) => (
+                            <p key={i} className="font-body text-xs text-destructive">
+                              {s.topicId || s.topic}: {s.error || "Verification failed"}
+                            </p>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
