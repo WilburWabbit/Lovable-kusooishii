@@ -131,6 +131,7 @@ Deno.serve(async (req) => {
         );
       } catch (err) { console.error(`Failed to land TaxRate ${tr.Id}:`, err); }
     }
+    const now = new Date().toISOString();
     let ratesSynced = 0;
 
     if (taxRates.length > 0) {
@@ -150,6 +151,11 @@ Deno.serve(async (req) => {
 
       if (upsertErr) throw new Error(`TaxRate upsert failed: ${upsertErr.message}`);
       ratesSynced = rows.length;
+
+      // Mark landed tax rates as committed
+      for (const tr of taxRates) {
+        await supabaseAdmin.from("landing_raw_qbo_tax_entity").update({ status: "committed", processed_at: now }).eq("entity_type", "TaxRate").eq("external_id", String(tr.Id));
+      }
     }
 
     // ── 2. Sync TaxCode entities ──
