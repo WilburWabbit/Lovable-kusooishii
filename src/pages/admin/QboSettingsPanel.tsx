@@ -28,6 +28,7 @@ export function QboSettingsPanel() {
   const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
+  const [syncingItems, setSyncingItems] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
