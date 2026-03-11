@@ -34,6 +34,8 @@ export function EbaySettingsPanel() {
   const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
   const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
   const [diagReport, setDiagReport] = useState<any>(null);
+  const [configIssues, setConfigIssues] = useState<string[]>([]);
+  const [destinationInfo, setDestinationInfo] = useState<{ url: string | null; expectedUrl: string | null; destinationId: string | null } | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -216,6 +218,9 @@ export function EbaySettingsPanel() {
       const data = await invokeWithAuth<any>("ebay-sync", { action: "test_subscriptions" });
       if (data?.error) throw new Error(data.error);
       const results: any[] = data?.results || [];
+      const issues: string[] = data?.configIssues || [];
+      setConfigIssues(issues);
+      if (data?.destination) setDestinationInfo(data.destination);
 
       const passed = results.filter((r: any) => r.status === "passed").length;
       const failed = results.filter((r: any) => r.status === "failed").length;
@@ -330,6 +335,30 @@ export function EbaySettingsPanel() {
               </Button>
             </div>
 
+            {/* Configuration issues from test */}
+            {configIssues.length > 0 && (
+              <div className="mt-3 space-y-1">
+                <p className="font-body text-xs font-medium text-destructive">Configuration Issues</p>
+                <div className="space-y-0.5">
+                  {configIssues.map((issue, i) => (
+                    <p key={i} className="font-body text-xs text-destructive">⚠ {issue}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Destination info from test */}
+            {destinationInfo && (
+              <div className="mt-2 space-y-0.5">
+                <p className="font-body text-xs text-muted-foreground">
+                  Registered endpoint: <code className="text-xs bg-muted px-1 py-0.5 rounded">{destinationInfo.url || "none"}</code>
+                </p>
+                <p className="font-body text-xs text-muted-foreground">
+                  Expected endpoint: <code className="text-xs bg-muted px-1 py-0.5 rounded">{destinationInfo.expectedUrl || "unknown"}</code>
+                </p>
+              </div>
+            )}
+
             {/* Subscription status display */}
             {subscriptions && (
               <div className="mt-3 space-y-1">
@@ -366,8 +395,8 @@ export function EbaySettingsPanel() {
               </div>
             )}
 
-            {/* Destination URL */}
-            {destinationUrl && (
+            {/* Destination URL from view subscriptions */}
+            {destinationUrl && !destinationInfo && (
               <div className="mt-2">
                 <p className="font-body text-xs text-muted-foreground">
                   Destination: <code className="text-xs bg-muted px-1 py-0.5 rounded">{destinationUrl}</code>
