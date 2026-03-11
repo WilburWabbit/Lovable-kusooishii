@@ -865,19 +865,29 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 13: Audit event ──
+    // ── Step 14: Mark landing row committed + audit event ──
+    if (landingId) {
+      await admin.from("landing_raw_ebay_order").update({
+        status: "committed",
+        processed_at: new Date().toISOString(),
+        correlation_id: correlationId,
+      }).eq("id", landingId);
+    }
+
     await admin.from("audit_event").insert({
       entity_type: "sales_order",
       entity_id: newOrder.id,
       trigger_type: "ebay_notification",
       actor_type: "system",
       source_system: "ebay-process-order",
+      correlation_id: correlationId,
       after_json: {
         order_id: orderId,
         qbo_customer_id: qboCustomer.id,
         lines: processedLines.length,
         units_depleted: unitsDepletedTotal,
         stock_pushed: stockPushed,
+        landing_id: landingId,
       },
     });
 
