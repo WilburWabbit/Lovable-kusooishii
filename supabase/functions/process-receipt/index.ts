@@ -153,9 +153,17 @@ Deno.serve(async (req) => {
         sku = newSku;
       }
 
-      // Create stock_unit records (one per quantity)
+      // Shortfall guard: only insert units not already created for this receipt line
+      const { count: existingCount } = await supabaseAdmin
+        .from("stock_unit")
+        .select("id", { count: "exact", head: true })
+        .eq("inbound_receipt_line_id", line.id);
+
+      const shortfall = line.quantity - (existingCount ?? 0);
+      if (shortfall <= 0) { continue; }
+
       const stockUnits = [];
-      for (let i = 0; i < line.quantity; i++) {
+      for (let i = 0; i < shortfall; i++) {
         stockUnits.push({
           sku_id: sku!.id,
           mpn,
