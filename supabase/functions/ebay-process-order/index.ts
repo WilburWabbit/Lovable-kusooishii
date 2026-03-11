@@ -740,7 +740,7 @@ Deno.serve(async (req) => {
       console.log(`QBO SalesReceipt created: ID=${receipt.Id}, Total=${receipt.TotalAmt}`);
     }
 
-    // ── Step 9: Insert local sales_order ──
+    // ── Step 10: Insert local sales_order ──
     const merchandiseSubtotal = totalAmount - taxAmount;
     const { data: newOrder, error: orderErr } = await admin
       .from("sales_order")
