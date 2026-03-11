@@ -505,7 +505,30 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════════════
     console.log(`Processing eBay order: ${orderId}`);
 
-    // ── Step 1: Idempotency check ──
+    // ── Step 1: Land raw order payload ──
+    const ebayToken = await getEbayAccessToken(admin);
+    const order = await ebayFetch(ebayToken, `/sell/fulfillment/v1/order/${orderId}`);
+    if (!order) throw new Error(`eBay order ${orderId} not found`);
+
+    const correlationId = crypto.randomUUID();
+    const { data: landingRow } = await admin
+      .from("landing_raw_ebay_order")
+      .upsert(
+        {
+          external_id: orderId,
+          raw_payload: order,
+          status: "pending",
+          correlation_id: correlationId,
+          received_at: new Date().toISOString(),
+        },
+        { onConflict: "external_id" }
+      )
+      .select("id")
+      .single();
+    const landingId = landingRow?.id;
+    console.log(`Landed eBay order ${orderId} → landing_raw_ebay_order ${landingId}`);
+
+    // ── Step 2: Idempotency check ──
     const { data: existing } = await admin
       .from("sales_order")
       .select("id")
@@ -515,16 +538,18 @@ Deno.serve(async (req) => {
 
     if (existing) {
       console.log(`Order ${orderId} already processed (sales_order ${existing.id}), skipping`);
+      if (landingId) {
+        await admin.from("landing_raw_ebay_order").update({
+          status: "skipped",
+          processed_at: new Date().toISOString(),
+          error_message: `Already committed as sales_order ${existing.id}`,
+        }).eq("id", landingId);
+      }
       return new Response(
         JSON.stringify({ success: true, skipped: true, sales_order_id: existing.id }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // ── Step 2: Fetch order from eBay ──
-    const ebayToken = await getEbayAccessToken(admin);
-    const order = await ebayFetch(ebayToken, `/sell/fulfillment/v1/order/${orderId}`);
-    if (!order) throw new Error(`eBay order ${orderId} not found`);
 
     const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
     const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
