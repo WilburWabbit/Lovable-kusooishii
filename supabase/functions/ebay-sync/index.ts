@@ -474,7 +474,7 @@ Deno.serve(async (req) => {
       const VERIFICATION_TOKEN = Deno.env.get("EBAY_VERIFICATION_TOKEN") || "";
       const ENDPOINT = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
 
-      const topics = ["FEEDBACK_LEFT", "FEEDBACK_RECEIVED", "ITEM_MARKED_SHIPPED", "ORDER_CONFIRMATION"];
+      const topics = ["FEEDBACK_LEFT", "FEEDBACK_RECEIVED", "ITEM_MARKED_SHIPPED", "ORDER_CONFIRMATION", "MARKETPLACE_ACCOUNT_DELETION"];
 
       // Step 1: Create/update config
       try {
