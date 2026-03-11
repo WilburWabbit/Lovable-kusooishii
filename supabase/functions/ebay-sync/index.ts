@@ -832,11 +832,56 @@ Deno.serve(async (req) => {
        ═══════════════════════════════════════════════ */
     if (action === "test_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
-      try {
-        const data = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
-        const subs = data?.subscriptions || [];
-        const testResults: any[] = [];
+      const REQUIRED_TOPICS = ["ORDER_CONFIRMATION", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
+      const expectedEndpoint = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
+      const configIssues: string[] = [];
+      let registeredEndpoint: string | null = null;
+      let activeDestinationId: string | null = null;
 
+      try {
+        // Step 1: GET destination — verify registered webhook URL
+        try {
+          const destData = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+          const destinations = destData?.destinations || [];
+          if (destinations.length === 0) {
+            configIssues.push("No destinations registered with eBay");
+          } else {
+            const match = destinations.find((d: any) => d.deliveryConfig?.endpoint === expectedEndpoint);
+            if (match) {
+              registeredEndpoint = match.deliveryConfig.endpoint;
+              activeDestinationId = match.destinationId;
+              if (match.status !== "ENABLED") {
+                configIssues.push(`Destination exists but status is ${match.status} (expected ENABLED)`);
+              }
+            } else {
+              // No exact match — report what IS registered
+              registeredEndpoint = destinations[0]?.deliveryConfig?.endpoint || "unknown";
+              activeDestinationId = destinations[0]?.destinationId || null;
+              configIssues.push(`Endpoint mismatch — registered: ${registeredEndpoint}, expected: ${expectedEndpoint}`);
+            }
+          }
+        } catch (e: any) {
+          configIssues.push(`Failed to fetch destinations: ${e.message}`);
+        }
+
+        // Step 2: GET subscription — verify all required topics exist and are ENABLED
+        const subData = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+        const subs = subData?.subscriptions || [];
+
+        const topicMap = new Map(subs.map((s: any) => [s.topicId, s]));
+        for (const topic of REQUIRED_TOPICS) {
+          const sub = topicMap.get(topic);
+          if (!sub) {
+            configIssues.push(`Missing subscription for required topic: ${topic}`);
+          } else if (sub.status !== "ENABLED") {
+            configIssues.push(`Subscription for ${topic} is ${sub.status} (expected ENABLED)`);
+          } else if (activeDestinationId && sub.destinationId !== activeDestinationId) {
+            configIssues.push(`Subscription ${topic} points to destination ${sub.destinationId}, expected ${activeDestinationId}`);
+          }
+        }
+
+        // Step 3: POST test — fire test notification for each enabled subscription
+        const testResults: any[] = [];
         for (const sub of subs) {
           if (sub.status !== "ENABLED") {
             testResults.push({
@@ -867,7 +912,12 @@ Deno.serve(async (req) => {
         }
 
         return new Response(
-          JSON.stringify({ success: true, results: testResults }),
+          JSON.stringify({
+            success: true,
+            results: testResults,
+            configIssues,
+            destination: { url: registeredEndpoint, expectedUrl: expectedEndpoint, destinationId: activeDestinationId },
+          }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       } catch (e: any) {

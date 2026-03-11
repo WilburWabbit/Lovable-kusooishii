@@ -34,6 +34,8 @@ export function EbaySettingsPanel() {
   const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
   const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
   const [diagReport, setDiagReport] = useState<any>(null);
+  const [configIssues, setConfigIssues] = useState<string[]>([]);
+  const [destinationInfo, setDestinationInfo] = useState<{ url: string | null; expectedUrl: string | null; destinationId: string | null } | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
