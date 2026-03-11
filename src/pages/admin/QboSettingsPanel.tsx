@@ -28,6 +28,7 @@ export function QboSettingsPanel() {
   const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
+  const [syncingItems, setSyncingItems] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -135,6 +136,31 @@ export function QboSettingsPanel() {
     }
   };
 
+  const syncItems = async () => {
+    setSyncingItems(true);
+    try {
+      const data = await invokeWithAuth("qbo-sync-items");
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      if (data.upserted) parts.push(`${data.upserted} items upserted`);
+      if (data.linked) parts.push(`${data.linked} linked to existing SKUs`);
+      if (data.skipped_no_mpn) parts.push(`${data.skipped_no_mpn} skipped (no MPN)`);
+      if (data.errors) parts.push(`${data.errors} errors`);
+      toast({
+        title: "Item sync complete",
+        description: parts.length > 0 ? `${data.total} items: ${parts.join(", ")}.` : "No items found.",
+      });
+      fetchStatus();
+    } catch (err) {
+      toast({
+        title: "Item sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingItems(false);
+    }
+  };
 
   const syncSales = async () => {
     setSyncingSales(true);
@@ -203,6 +229,10 @@ export function QboSettingsPanel() {
               <Button size="sm" onClick={syncCustomers} disabled={syncingCustomers || !user}>
                 {syncingCustomers ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Customers
+              </Button>
+              <Button size="sm" onClick={syncItems} disabled={syncingItems || !user}>
+                {syncingItems ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                Sync Items
               </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
