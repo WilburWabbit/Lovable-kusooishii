@@ -230,6 +230,10 @@ export function QboSettingsPanel() {
                 {syncingCustomers ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Customers
               </Button>
+              <Button size="sm" onClick={syncItems} disabled={syncingItems || !user}>
+                {syncingItems ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                Sync Items
+              </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
