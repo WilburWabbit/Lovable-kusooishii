@@ -597,7 +597,7 @@ Deno.serve(async (req) => {
       .select("id")
       .single();
 
-    // ── Step 6: Resolve tax info ──
+    // ── Step 7: Resolve tax info ──
     const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
     const multiplier = 1 + taxInfo.ratePercent / 100;
     console.log(`Tax: code=${taxInfo.taxCodeId}, rate=${taxInfo.ratePercent}%`);
