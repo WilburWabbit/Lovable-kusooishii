@@ -320,6 +320,10 @@ export function EbaySettingsPanel() {
                 {testingSubs ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-2 h-3.5 w-3.5" />}
                 Test Subscriptions
               </Button>
+              <Button size="sm" variant="outline" onClick={diagnoseNotifications} disabled={diagnosing || !user}>
+                {diagnosing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="mr-2 h-3.5 w-3.5" />}
+                Diagnose
+              </Button>
               <Button size="sm" variant="outline" onClick={disconnectEbay} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
