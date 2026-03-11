@@ -752,6 +752,57 @@ Deno.serve(async (req) => {
       }
     }
 
+    /* ═══════════════════════════════════════════════
+       TEST SUBSCRIPTIONS — send test notification for each enabled subscription
+       ═══════════════════════════════════════════════ */
+    if (action === "test_subscriptions") {
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      try {
+        const data = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+        const subs = data?.subscriptions || [];
+        const testResults: any[] = [];
+
+        for (const sub of subs) {
+          if (sub.status !== "ENABLED") {
+            testResults.push({
+              subscriptionId: sub.subscriptionId,
+              topicId: sub.topicId,
+              status: "skipped",
+              reason: `Subscription status is ${sub.status}`,
+            });
+            continue;
+          }
+          try {
+            await ebayFetch(accessToken, `${NOTIF_API}/subscription/${sub.subscriptionId}/test`, {
+              method: "POST",
+            });
+            testResults.push({
+              subscriptionId: sub.subscriptionId,
+              topicId: sub.topicId,
+              status: "passed",
+            });
+          } catch (e: any) {
+            testResults.push({
+              subscriptionId: sub.subscriptionId,
+              topicId: sub.topicId,
+              status: "failed",
+              error: e.message,
+            });
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, results: testResults }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (e: any) {
+        return new Response(
+          JSON.stringify({ error: e.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     console.log("eBay sync completed:", JSON.stringify(results));
     return new Response(
       JSON.stringify({ success: true, ...results }),
