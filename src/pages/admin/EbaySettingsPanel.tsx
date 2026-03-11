@@ -5,7 +5,7 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck } from "lucide-react";
+import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck, Stethoscope } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SubResult {
@@ -30,7 +30,10 @@ export function EbaySettingsPanel() {
   const [settingUpNotifs, setSettingUpNotifs] = useState(false);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [testingSubs, setTestingSubs] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
   const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
+  const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
+  const [diagReport, setDiagReport] = useState<any>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -170,6 +173,7 @@ export function EbaySettingsPanel() {
     try {
       const data = await invokeWithAuth<any>("ebay-sync", { action: "get_subscriptions" });
       setSubscriptions(data?.subscriptions || []);
+      if (data?.destinationUrl) setDestinationUrl(data.destinationUrl);
     } catch (err) {
       toast({
         title: "Failed to load subscriptions",
@@ -178,6 +182,31 @@ export function EbaySettingsPanel() {
       });
     } finally {
       setLoadingSubs(false);
+    }
+  };
+
+  const diagnoseNotifications = async () => {
+    setDiagnosing(true);
+    try {
+      const data = await invokeWithAuth<any>("ebay-sync", { action: "diagnose_notifications" });
+      setDiagReport(data);
+      if (data?.issues?.length > 0) {
+        toast({
+          title: `${data.issues.length} issue(s) detected`,
+          description: data.issues[0],
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "No issues detected", description: "Notification setup looks healthy." });
+      }
+    } catch (err) {
+      toast({
+        title: "Diagnosis failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setDiagnosing(false);
     }
   };
 
@@ -291,6 +320,10 @@ export function EbaySettingsPanel() {
                 {testingSubs ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-2 h-3.5 w-3.5" />}
                 Test Subscriptions
               </Button>
+              <Button size="sm" variant="outline" onClick={diagnoseNotifications} disabled={diagnosing || !user}>
+                {diagnosing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="mr-2 h-3.5 w-3.5" />}
+                Diagnose
+              </Button>
               <Button size="sm" variant="outline" onClick={disconnectEbay} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
@@ -330,6 +363,34 @@ export function EbaySettingsPanel() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Destination URL */}
+            {destinationUrl && (
+              <div className="mt-2">
+                <p className="font-body text-xs text-muted-foreground">
+                  Destination: <code className="text-xs bg-muted px-1 py-0.5 rounded">{destinationUrl}</code>
+                </p>
+              </div>
+            )}
+
+            {/* Diagnostic report */}
+            {diagReport && (
+              <div className="mt-3 space-y-1.5">
+                <p className="font-body text-xs font-medium text-foreground">Diagnostic Report</p>
+                {diagReport.issues?.length === 0 ? (
+                  <p className="font-body text-xs text-muted-foreground">✓ No issues detected</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {diagReport.issues?.map((issue: string, i: number) => (
+                      <p key={i} className="font-body text-xs text-destructive">⚠ {issue}</p>
+                    ))}
+                  </div>
+                )}
+                <p className="font-body text-xs text-muted-foreground">
+                  Notifications received: {diagReport.notificationCount ?? "unknown"}
+                </p>
               </div>
             )}
           </div>
