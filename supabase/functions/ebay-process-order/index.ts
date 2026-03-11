@@ -907,6 +907,20 @@ Deno.serve(async (req) => {
     );
   } catch (e: any) {
     console.error("ebay-process-order error:", e);
+    // Try to mark landing row as error
+    try {
+      const body2 = await req.clone().json().catch(() => ({}));
+      if (body2?.order_id) {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const errAdmin = createClient(supabaseUrl, serviceKey);
+        await errAdmin.from("landing_raw_ebay_order").update({
+          status: "error",
+          error_message: (e.message || "Unknown error").substring(0, 500),
+          processed_at: new Date().toISOString(),
+        }).eq("external_id", body2.order_id).eq("status", "pending");
+      }
+    } catch { /* best effort */ }
     return new Response(
       JSON.stringify({ error: e.message || "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
