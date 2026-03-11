@@ -566,7 +566,7 @@ Deno.serve(async (req) => {
     // ── Step 4: Get QBO connection ──
     const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
 
-    // ── Step 4: Upsert QBO Customer ──
+    // ── Step 5: Upsert QBO Customer ──
     const shippingAddr = shipTo?.contactAddress;
     const qboCustomer = await findOrCreateCustomer(qboToken, realmId, buyerName, {
       email: buyerEmail,
