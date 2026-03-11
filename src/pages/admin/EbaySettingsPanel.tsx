@@ -30,7 +30,10 @@ export function EbaySettingsPanel() {
   const [settingUpNotifs, setSettingUpNotifs] = useState(false);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [testingSubs, setTestingSubs] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
   const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
+  const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
+  const [diagReport, setDiagReport] = useState<any>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
