@@ -254,6 +254,7 @@ async function processSalesReceipt(
   const qboId = String(receipt.Id);
   const originChannel = "qbo";
 
+  // ── Same-channel dedup: already imported as QBO? ──
   const { data: existing } = await supabaseAdmin
     .from("sales_order")
     .select("id")
@@ -301,6 +302,44 @@ async function processSalesReceipt(
 
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
+  // ── Cross-channel dedup: already imported via eBay with same DocNumber? ──
+  const docNumber = receipt.DocNumber ?? null;
+  if (docNumber) {
+    const { data: ebayOrder } = await supabaseAdmin
+      .from("sales_order")
+      .select("id")
+      .eq("origin_channel", "ebay")
+      .eq("origin_reference", docNumber)
+      .maybeSingle();
+
+    if (ebayOrder) {
+      // Enrich the existing eBay order with QBO metadata instead of creating a duplicate
+      const enrichFields: Record<string, any> = {
+        doc_number: docNumber,
+        global_tax_calculation: globalTaxCalc,
+      };
+      if (customerId) enrichFields.customer_id = customerId;
+      if (taxTotal) enrichFields.tax_total = taxTotal;
+
+      await supabaseAdmin
+        .from("sales_order")
+        .update(enrichFields)
+        .eq("id", ebayOrder.id);
+
+      // Also backfill VAT on the eBay order's lines if we have it
+      if (vatRateId) {
+        await supabaseAdmin
+          .from("sales_order_line")
+          .update({ vat_rate_id: vatRateId })
+          .eq("sales_order_id", ebayOrder.id)
+          .is("vat_rate_id", null);
+      }
+
+      console.log(`Cross-channel dedup: enriched eBay order ${ebayOrder.id} with QBO data (DocNumber ${docNumber})`);
+      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+    }
+  }
+
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
     .insert({
@@ -317,8 +356,8 @@ async function processSalesReceipt(
       currency,
       customer_id: customerId,
       txn_date: txnDate ?? null,
-      doc_number: receipt.DocNumber ?? null,
-      notes: `Imported from QBO SalesReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
+      doc_number: docNumber,
+      notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
     })
     .select("id")
     .single();
