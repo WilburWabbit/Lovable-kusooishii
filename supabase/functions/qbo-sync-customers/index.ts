@@ -86,11 +86,33 @@ Deno.serve(async (req) => {
 
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+    const correlationId = crypto.randomUUID();
 
-    // --- Step 1: Sync all QBO Customers ---
+    // --- Step 1: Fetch and land all QBO Customers ---
     const qboCustomers = await queryQboAll(baseUrl, accessToken, "Customer");
-    console.log(`Fetched ${qboCustomers.length} QBO customers`);
+    console.log(`Landing ${qboCustomers.length} QBO customers (correlation: ${correlationId})`);
 
+    // Land raw payloads
+    for (const c of qboCustomers) {
+      try {
+        await admin
+          .from("landing_raw_qbo_customer")
+          .upsert(
+            {
+              external_id: String(c.Id),
+              raw_payload: c,
+              status: "pending",
+              correlation_id: correlationId,
+              received_at: new Date().toISOString(),
+            },
+            { onConflict: "external_id" }
+          );
+      } catch (err) {
+        console.error(`Failed to land customer ${c.Id}:`, err);
+      }
+    }
+
+    // --- Step 2: Process into canonical tables ---
     let upserted = 0;
     let skipped = 0;
 
