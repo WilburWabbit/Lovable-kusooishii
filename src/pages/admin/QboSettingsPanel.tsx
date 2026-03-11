@@ -136,6 +136,31 @@ export function QboSettingsPanel() {
     }
   };
 
+  const syncItems = async () => {
+    setSyncingItems(true);
+    try {
+      const data = await invokeWithAuth("qbo-sync-items");
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      if (data.upserted) parts.push(`${data.upserted} items upserted`);
+      if (data.linked) parts.push(`${data.linked} linked to existing SKUs`);
+      if (data.skipped_no_mpn) parts.push(`${data.skipped_no_mpn} skipped (no MPN)`);
+      if (data.errors) parts.push(`${data.errors} errors`);
+      toast({
+        title: "Item sync complete",
+        description: parts.length > 0 ? `${data.total} items: ${parts.join(", ")}.` : "No items found.",
+      });
+      fetchStatus();
+    } catch (err) {
+      toast({
+        title: "Item sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingItems(false);
+    }
+  };
 
   const syncSales = async () => {
     setSyncingSales(true);
