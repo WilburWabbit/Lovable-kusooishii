@@ -143,8 +143,10 @@ Deno.serve(async (req) => {
 
       if (error) {
         console.error(`Failed to upsert customer ${qboId}:`, error.message);
+        await admin.from("landing_raw_qbo_customer").update({ status: "error", error_message: error.message, processed_at: new Date().toISOString() }).eq("external_id", qboId);
         skipped++;
       } else {
+        await admin.from("landing_raw_qbo_customer").update({ status: "committed", processed_at: new Date().toISOString() }).eq("external_id", qboId);
         upserted++;
       }
     }
