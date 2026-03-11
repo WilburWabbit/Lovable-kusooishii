@@ -365,6 +365,34 @@ export function EbaySettingsPanel() {
                 )}
               </div>
             )}
+
+            {/* Destination URL */}
+            {destinationUrl && (
+              <div className="mt-2">
+                <p className="font-body text-xs text-muted-foreground">
+                  Destination: <code className="text-xs bg-muted px-1 py-0.5 rounded">{destinationUrl}</code>
+                </p>
+              </div>
+            )}
+
+            {/* Diagnostic report */}
+            {diagReport && (
+              <div className="mt-3 space-y-1.5">
+                <p className="font-body text-xs font-medium text-foreground">Diagnostic Report</p>
+                {diagReport.issues?.length === 0 ? (
+                  <p className="font-body text-xs text-muted-foreground">✓ No issues detected</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {diagReport.issues?.map((issue: string, i: number) => (
+                      <p key={i} className="font-body text-xs text-destructive">⚠ {issue}</p>
+                    ))}
+                  </div>
+                )}
+                <p className="font-body text-xs text-muted-foreground">
+                  Notifications received: {diagReport.notificationCount ?? "unknown"}
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <Button size="sm" onClick={connectEbay} disabled={!user}>
