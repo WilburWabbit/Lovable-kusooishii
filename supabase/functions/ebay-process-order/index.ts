@@ -581,7 +581,7 @@ Deno.serve(async (req) => {
     });
     console.log(`QBO Customer: ${qboCustomer.name} (ID: ${qboCustomer.id})`);
 
-    // ── Step 5: Upsert local customer record ──
+    // ── Step 6: Upsert local customer record ──
     const { data: localCustomer } = await admin
       .from("customer")
       .upsert({
