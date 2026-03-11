@@ -118,15 +118,24 @@ async function backfillProcessedReceipt(
     const detail = rawLine.ItemBasedExpenseLineDetail;
     const qboItemId = detail?.ItemRef?.value;
     const taxCodeRef = detail?.TaxCodeRef?.value;
+    const unitPrice = detail?.UnitPrice ?? null;
     if (!qboItemId || !taxCodeRef) continue;
 
-    const { data: existingLine } = await supabaseAdmin
+    // Match by qbo_item_id + unit_cost to disambiguate duplicate items on the same receipt
+    let query = supabaseAdmin
       .from("inbound_receipt_line")
       .select("id, qbo_tax_code_ref, tax_code_id")
       .eq("inbound_receipt_id", receiptId)
-      .eq("qbo_item_id", qboItemId)
-      .limit(1)
-      .single();
+      .eq("qbo_item_id", qboItemId);
+
+    if (unitPrice !== null) {
+      query = query.eq("unit_cost", unitPrice);
+    }
+
+    const { data: matchedLines } = await query;
+    const existingLine = (matchedLines ?? []).find(
+      (l: any) => !l.qbo_tax_code_ref || !l.tax_code_id
+    ) ?? matchedLines?.[0] ?? null;
 
     if (!existingLine) continue;
 
