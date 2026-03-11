@@ -218,6 +218,9 @@ export function EbaySettingsPanel() {
       const data = await invokeWithAuth<any>("ebay-sync", { action: "test_subscriptions" });
       if (data?.error) throw new Error(data.error);
       const results: any[] = data?.results || [];
+      const issues: string[] = data?.configIssues || [];
+      setConfigIssues(issues);
+      if (data?.destination) setDestinationInfo(data.destination);
 
       const passed = results.filter((r: any) => r.status === "passed").length;
       const failed = results.filter((r: any) => r.status === "failed").length;
