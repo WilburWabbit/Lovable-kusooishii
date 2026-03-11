@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS sku_qbo_item_id_unique ON public.sku (qbo_item_id) WHERE qbo_item_id IS NOT NULL;
