@@ -602,7 +602,7 @@ Deno.serve(async (req) => {
     const multiplier = 1 + taxInfo.ratePercent / 100;
     console.log(`Tax: code=${taxInfo.taxCodeId}, rate=${taxInfo.ratePercent}%`);
 
-    // ── Step 7: Resolve SKUs + build QBO lines ──
+    // ── Step 8: Resolve SKUs + build QBO lines ──
     const { data: allSkus } = await admin.from("sku").select("id, sku_code, qbo_item_id").eq("active_flag", true);
     const skuMap = new Map<string, { id: string; sku_code: string; qbo_item_id: string | null }>();
     for (const s of allSkus || []) {
