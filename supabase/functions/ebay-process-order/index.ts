@@ -788,7 +788,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Step 11: FIFO stock depletion ──
+    // ── Step 12: FIFO stock depletion ──
     let unitsDepletedTotal = 0;
     for (const pl of processedLines) {
       const { data: availableUnits } = await admin
