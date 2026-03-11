@@ -740,8 +740,17 @@ Deno.serve(async (req) => {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
       try {
         const data = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+
+        // Also fetch destination URL for diagnostics
+        let destinationUrl: string | null = null;
+        try {
+          const destData = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+          const dest = (destData?.destinations || [])[0];
+          destinationUrl = dest?.deliveryConfig?.endpoint || null;
+        } catch { /* ignore */ }
+
         return new Response(
-          JSON.stringify({ success: true, subscriptions: data?.subscriptions || [] }),
+          JSON.stringify({ success: true, subscriptions: data?.subscriptions || [], destinationUrl }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       } catch (e: any) {
@@ -750,6 +759,72 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+    }
+
+    /* ═══════════════════════════════════════════════
+       DIAGNOSE NOTIFICATIONS — structured report
+       ═══════════════════════════════════════════════ */
+    if (action === "diagnose_notifications") {
+      const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
+      const expectedEndpoint = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
+      const report: any = { expectedEndpoint, destinations: [], subscriptions: [], issues: [] };
+
+      try {
+        const destData = await ebayFetch(accessToken, `${NOTIF_API}/destination`);
+        report.destinations = (destData?.destinations || []).map((d: any) => ({
+          destinationId: d.destinationId,
+          name: d.name,
+          status: d.status,
+          endpoint: d.deliveryConfig?.endpoint,
+        }));
+      } catch (e: any) {
+        report.issues.push(`Failed to fetch destinations: ${e.message}`);
+      }
+
+      try {
+        const subData = await ebayFetch(accessToken, `${NOTIF_API}/subscription`);
+        report.subscriptions = (subData?.subscriptions || []).map((s: any) => ({
+          subscriptionId: s.subscriptionId,
+          topicId: s.topicId,
+          status: s.status,
+          destinationId: s.destinationId,
+        }));
+      } catch (e: any) {
+        report.issues.push(`Failed to fetch subscriptions: ${e.message}`);
+      }
+
+      // Check for common issues
+      const registeredEndpoint = report.destinations[0]?.endpoint;
+      if (registeredEndpoint && registeredEndpoint !== expectedEndpoint) {
+        report.issues.push(`Endpoint mismatch: registered="${registeredEndpoint}" vs expected="${expectedEndpoint}"`);
+      }
+      if (!report.destinations.length) {
+        report.issues.push("No notification destinations registered with eBay");
+      }
+      const disabledSubs = report.subscriptions.filter((s: any) => s.status !== "ENABLED");
+      if (disabledSubs.length) {
+        report.issues.push(`${disabledSubs.length} subscription(s) not ENABLED: ${disabledSubs.map((s: any) => s.topicId).join(", ")}`);
+      }
+      const requiredTopics = ["ORDER_CONFIRMATION", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
+      const subscribedTopics = report.subscriptions.map((s: any) => s.topicId);
+      const missingTopics = requiredTopics.filter(t => !subscribedTopics.includes(t));
+      if (missingTopics.length) {
+        report.issues.push(`Missing required topics: ${missingTopics.join(", ")}`);
+      }
+
+      // Check recent notifications in DB
+      const { count: notifCount } = await admin
+        .from("ebay_notification")
+        .select("id", { count: "exact", head: true });
+      report.notificationCount = notifCount || 0;
+      if (notifCount === 0) {
+        report.issues.push("Zero notifications ever received — eBay may not be delivering to the endpoint");
+      }
+
+      return new Response(
+        JSON.stringify(report),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     /* ═══════════════════════════════════════════════
