@@ -544,7 +544,22 @@ Deno.serve(async (req) => {
           );
 
           if (existingSub) {
-            if (existingSub.status !== "ENABLED") {
+            if (existingSub.destinationId !== destinationId) {
+              // Subscription bound to stale destination — delete and recreate
+              await ebayFetch(accessToken, `${NOTIF_API}/subscription/${existingSub.subscriptionId}`, {
+                method: "DELETE",
+              });
+              await ebayFetch(accessToken, `${NOTIF_API}/subscription`, {
+                method: "POST",
+                body: JSON.stringify({
+                  topicId,
+                  status: "ENABLED",
+                  destinationId,
+                  payload: { format: "JSON", schemaVersion: "1.0", deliveryProtocol: "HTTPS" },
+                }),
+              });
+              subResults.push({ topic: topicId, status: "rebound" });
+            } else if (existingSub.status !== "ENABLED") {
               await ebayFetch(accessToken, `${NOTIF_API}/subscription/${existingSub.subscriptionId}/enable`, {
                 method: "POST",
               });
