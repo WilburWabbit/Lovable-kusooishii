@@ -1,0 +1,1 @@
+ALTER TABLE public.landing_raw_brickeconomy ADD CONSTRAINT landing_raw_brickeconomy_external_id_key UNIQUE (external_id);
