@@ -113,7 +113,6 @@ async function backfillProcessedReceipt(
 
   const rawLines: any[] = rawPayload?.Line ?? [];
 
-  // 1) Backfill qbo_tax_code_ref and tax_code_id on receipt lines
   for (const rawLine of rawLines) {
     if (rawLine.DetailType !== "ItemBasedExpenseLineDetail") continue;
     const detail = rawLine.ItemBasedExpenseLineDetail;
@@ -121,7 +120,6 @@ async function backfillProcessedReceipt(
     const taxCodeRef = detail?.TaxCodeRef?.value;
     if (!qboItemId || !taxCodeRef) continue;
 
-    // Find the matching receipt line
     const { data: existingLine } = await supabaseAdmin
       .from("inbound_receipt_line")
       .select("id, qbo_tax_code_ref, tax_code_id")
@@ -132,7 +130,6 @@ async function backfillProcessedReceipt(
 
     if (!existingLine) continue;
 
-    // Update qbo_tax_code_ref if missing
     if (!existingLine.qbo_tax_code_ref) {
       await supabaseAdmin
         .from("inbound_receipt_line")
@@ -140,7 +137,6 @@ async function backfillProcessedReceipt(
         .eq("id", existingLine.id);
     }
 
-    // Resolve tax_code_id if missing
     if (!existingLine.tax_code_id) {
       const { data: tc } = await supabaseAdmin
         .from("tax_code")
@@ -157,8 +153,6 @@ async function backfillProcessedReceipt(
     }
   }
 
-  // 2) Backfill stock_unit.inbound_receipt_line_id
-  // Get all stock lines for this receipt
   const { data: receiptLines } = await supabaseAdmin
     .from("inbound_receipt_line")
     .select("id, mpn, condition_grade, quantity")
@@ -168,7 +162,6 @@ async function backfillProcessedReceipt(
   for (const rl of (receiptLines ?? [])) {
     if (!rl.mpn || !rl.condition_grade) continue;
 
-    // Find unlinked stock units matching this line's mpn + grade
     const { data: unlinkedUnits } = await supabaseAdmin
       .from("stock_unit")
       .select("id")
@@ -196,7 +189,7 @@ async function autoProcessReceipt(
   receiptId: string,
   vendorName: string | null,
   lineRows: Array<{
-    id?: string; // receipt line ID (after insert)
+    id?: string;
     is_stock_line: boolean;
     mpn: string | null;
     condition_grade: string | null;
@@ -229,11 +222,11 @@ async function autoProcessReceipt(
     const mpn = line.mpn!;
     const skuCode = `${mpn}-G${conditionGrade}`;
 
-      const { data: product } = await supabaseAdmin
-        .from("product")
-        .select("id, mpn")
-        .eq("mpn", mpn)
-        .single();
+    const { data: product } = await supabaseAdmin
+      .from("product")
+      .select("id, mpn")
+      .eq("mpn", mpn)
+      .single();
 
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
@@ -250,7 +243,7 @@ async function autoProcessReceipt(
       const { data: newSku, error: skuErr } = await supabaseAdmin
         .from("sku")
         .insert({
-           product_id: product?.id ?? null,
+          product_id: product?.id ?? null,
           condition_grade: conditionGrade,
           sku_code: skuCode,
           name: cleanQboName(line.description ?? mpn),
@@ -264,7 +257,6 @@ async function autoProcessReceipt(
       sku = newSku;
     }
 
-    // Idempotency guard: only create the shortfall
     let existingCount = 0;
     if (line.id) {
       const { count } = await supabaseAdmin
@@ -302,6 +294,85 @@ async function autoProcessReceipt(
 
   return { processed: true, skipped: [] };
 }
+
+// ── Landing layer: capture raw QBO payloads before canonical processing ──
+
+async function landPurchase(
+  supabaseAdmin: any,
+  purchase: any,
+  correlationId: string
+): Promise<{ landingId: string; alreadyLanded: boolean }> {
+  const externalId = String(purchase.Id);
+
+  // Check if already landed
+  const { data: existing } = await supabaseAdmin
+    .from("landing_raw_qbo_purchase")
+    .select("id, status")
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  if (existing) {
+    // Update the raw payload (QBO data may have changed) but keep existing status
+    await supabaseAdmin
+      .from("landing_raw_qbo_purchase")
+      .update({ raw_payload: purchase, received_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    return { landingId: existing.id, alreadyLanded: existing.status === "committed" };
+  }
+
+  const { data: landing, error } = await supabaseAdmin
+    .from("landing_raw_qbo_purchase")
+    .insert({
+      external_id: externalId,
+      raw_payload: purchase,
+      status: "pending",
+      correlation_id: correlationId,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return { landingId: landing.id, alreadyLanded: false };
+}
+
+async function landQboItem(
+  supabaseAdmin: any,
+  item: any,
+  correlationId: string
+): Promise<void> {
+  if (!item?.Id) return;
+  const externalId = String(item.Id);
+
+  await supabaseAdmin
+    .from("landing_raw_qbo_item")
+    .upsert(
+      {
+        external_id: externalId,
+        raw_payload: item,
+        status: "committed", // Items are reference data, committed immediately
+        correlation_id: correlationId,
+        received_at: new Date().toISOString(),
+        processed_at: new Date().toISOString(),
+      },
+      { onConflict: "external_id" }
+    );
+}
+
+async function markLandingCommitted(supabaseAdmin: any, landingId: string): Promise<void> {
+  await supabaseAdmin
+    .from("landing_raw_qbo_purchase")
+    .update({ status: "committed", processed_at: new Date().toISOString() })
+    .eq("id", landingId);
+}
+
+async function markLandingError(supabaseAdmin: any, landingId: string, errorMessage: string): Promise<void> {
+  await supabaseAdmin
+    .from("landing_raw_qbo_purchase")
+    .update({ status: "error", error_message: errorMessage, processed_at: new Date().toISOString() })
+    .eq("id", landingId);
+}
+
+// ── Main handler ──
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -345,7 +416,10 @@ Deno.serve(async (req) => {
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
-    // Query purchases
+    // Generate a correlation ID for this sync run
+    const correlationId = crypto.randomUUID();
+
+    // Query purchases from QBO
     const query = encodeURIComponent("SELECT * FROM Purchase MAXRESULTS 1000");
     const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
@@ -359,7 +433,21 @@ Deno.serve(async (req) => {
     const purchaseData = await purchaseRes.json();
     const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
 
-    // --- Pre-fetch all unique QBO item IDs in parallel ---
+    // ── Phase 1: Land all raw purchases ──
+    console.log(`Landing ${purchases.length} raw QBO purchases (correlation: ${correlationId})`);
+    const landingResults: Array<{ purchase: any; landingId: string; alreadyLanded: boolean }> = [];
+
+    for (const purchase of purchases) {
+      try {
+        const result = await landPurchase(supabaseAdmin, purchase, correlationId);
+        landingResults.push({ purchase, ...result });
+      } catch (err) {
+        console.error(`Failed to land purchase ${purchase.Id}:`, err);
+      }
+    }
+    console.log(`Landed ${landingResults.length} purchases`);
+
+    // ── Phase 2: Pre-fetch QBO items and land them ──
     const uniqueItemIds = new Set<string>();
     for (const purchase of purchases) {
       for (const line of (purchase.Line ?? [])) {
@@ -381,6 +469,18 @@ Deno.serve(async (req) => {
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items`);
 
+    // Land all fetched QBO items
+    for (const [, item] of itemCache) {
+      if (item) {
+        try {
+          await landQboItem(supabaseAdmin, item, correlationId);
+        } catch (err) {
+          console.error(`Failed to land QBO item ${item?.Id}:`, err);
+        }
+      }
+    }
+
+    // ── Phase 3: Process from landing into canonical tables ──
     let autoProcessed = 0;
     let leftPending = 0;
     let skippedExisting = 0;
@@ -389,7 +489,7 @@ Deno.serve(async (req) => {
     let backfilledStockLinks = 0;
     const pendingReasons: string[] = [];
 
-    for (const purchase of purchases) {
+    for (const { purchase, landingId, alreadyLanded } of landingResults) {
       const qboPurchaseId = purchase.Id;
 
       const hasItemLines = (purchase.Line ?? []).some(
@@ -397,6 +497,12 @@ Deno.serve(async (req) => {
       );
       if (!hasItemLines) {
         skippedNoItems++;
+        if (!alreadyLanded) {
+          await supabaseAdmin
+            .from("landing_raw_qbo_purchase")
+            .update({ status: "skipped", processed_at: new Date().toISOString() })
+            .eq("id", landingId);
+        }
         continue;
       }
 
@@ -427,10 +533,11 @@ Deno.serve(async (req) => {
 
       if (receiptErr) {
         console.error(`Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
+        await markLandingError(supabaseAdmin, landingId, `Upsert failed: ${receiptErr.message}`);
         continue;
       }
 
-      // Already processed — run backfill for tax codes & stock unit links, then skip
+      // Already processed — run backfill, then mark landing as committed
       if (receipt.status === "processed") {
         try {
           const bf = await backfillProcessedReceipt(supabaseAdmin, receipt.id, purchase);
@@ -440,6 +547,7 @@ Deno.serve(async (req) => {
           console.error(`Backfill failed for receipt ${receipt.id}:`, bfErr);
         }
         skippedExisting++;
+        await markLandingCommitted(supabaseAdmin, landingId);
         continue;
       }
 
@@ -491,7 +599,6 @@ Deno.serve(async (req) => {
       }
 
       if (lineRows.length > 0) {
-        // Insert lines and get back IDs
         const { data: insertedLines, error: insertErr } = await supabaseAdmin
           .from("inbound_receipt_line")
           .insert(lineRows)
@@ -499,9 +606,11 @@ Deno.serve(async (req) => {
 
         if (insertErr) {
           console.error(`Failed to insert lines for receipt ${receipt.id}:`, insertErr);
+          await markLandingError(supabaseAdmin, landingId, `Line insert failed: ${insertErr.message}`);
+          continue;
         }
 
-        // Resolve qbo_tax_code_ref → tax_code_id for each line
+        // Resolve qbo_tax_code_ref → tax_code_id
         for (const il of (insertedLines ?? [])) {
           if (il.qbo_tax_code_ref) {
             const { data: tc } = await supabaseAdmin
@@ -518,7 +627,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Build line rows with IDs for autoProcessReceipt
         const lineRowsWithIds = lineRows.map((lr, idx) => ({
           ...lr,
           id: insertedLines?.[idx]?.id ?? undefined,
@@ -529,8 +637,10 @@ Deno.serve(async (req) => {
           const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRowsWithIds);
           if (result.processed) {
             autoProcessed++;
+            await markLandingCommitted(supabaseAdmin, landingId);
           } else {
             leftPending++;
+            // Landing stays pending — will be retried on next sync
             if (result.skipped.length > 0) {
               pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
             }
@@ -538,6 +648,7 @@ Deno.serve(async (req) => {
         } catch (procErr) {
           console.error(`Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
           leftPending++;
+          await markLandingError(supabaseAdmin, landingId, `Auto-process error: ${procErr instanceof Error ? procErr.message : "Unknown"}`);
           pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
         }
       }
@@ -566,7 +677,9 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        correlation_id: correlationId,
         total: purchases.length,
+        landed: landingResults.length,
         auto_processed: autoProcessed,
         left_pending: leftPending,
         skipped_existing: skippedExisting,
