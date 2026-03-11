@@ -106,8 +106,9 @@ Deno.serve(async (req) => {
 
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+    const correlationId = crypto.randomUUID();
 
-    // ── 1. Sync TaxRate entities ──
+    // ── 1. Fetch and land TaxRate entities ──
     const rateQuery = encodeURIComponent("SELECT * FROM TaxRate");
     const rateRes = await fetch(`${baseUrl}/query?query=${rateQuery}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
@@ -121,6 +122,15 @@ Deno.serve(async (req) => {
     const rateJson = await rateRes.json();
     const taxRates = rateJson?.QueryResponse?.TaxRate ?? [];
 
+    // Land raw tax rates
+    for (const tr of taxRates) {
+      try {
+        await supabaseAdmin.from("landing_raw_qbo_tax_entity").upsert(
+          { entity_type: "TaxRate", external_id: String(tr.Id), raw_payload: tr, status: "pending", correlation_id: correlationId, received_at: new Date().toISOString() },
+          { onConflict: "entity_type,external_id" }
+        );
+      } catch (err) { console.error(`Failed to land TaxRate ${tr.Id}:`, err); }
+    }
     const now = new Date().toISOString();
     let ratesSynced = 0;
 
@@ -141,6 +151,11 @@ Deno.serve(async (req) => {
 
       if (upsertErr) throw new Error(`TaxRate upsert failed: ${upsertErr.message}`);
       ratesSynced = rows.length;
+
+      // Mark landed tax rates as committed
+      for (const tr of taxRates) {
+        await supabaseAdmin.from("landing_raw_qbo_tax_entity").update({ status: "committed", processed_at: now }).eq("entity_type", "TaxRate").eq("external_id", String(tr.Id));
+      }
     }
 
     // ── 2. Sync TaxCode entities ──

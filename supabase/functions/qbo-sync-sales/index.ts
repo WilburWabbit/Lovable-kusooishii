@@ -68,7 +68,6 @@ async function fetchQboItem(
           await new Promise(r => setTimeout(r, 2000));
           continue;
         }
-        // Don't cache 429 failures so retries in future calls can succeed
         return null;
       }
       if (!res.ok) {
@@ -125,7 +124,6 @@ async function queryQbo(baseUrl: string, accessToken: string, entity: string): P
   return data?.QueryResponse?.[entity] ?? [];
 }
 
-/** Resolve the primary QBO TaxRateRef from TxnTaxDetail and look up our vat_rate row */
 async function resolveVatRateId(
   supabaseAdmin: any,
   txnTaxDetail: any
@@ -145,6 +143,107 @@ async function resolveVatRateId(
   return vatRate?.id ?? null;
 }
 
+async function landSalesReceipt(
+  supabaseAdmin: any,
+  receipt: any,
+  correlationId: string
+): Promise<{ landingId: string; alreadyCommitted: boolean }> {
+  const externalId = String(receipt.Id);
+
+  const { data: existing } = await supabaseAdmin
+    .from("landing_raw_qbo_sales_receipt")
+    .select("id, status")
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  if (existing) {
+    await supabaseAdmin
+      .from("landing_raw_qbo_sales_receipt")
+      .update({ raw_payload: receipt, received_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    return { landingId: existing.id, alreadyCommitted: existing.status === "committed" };
+  }
+
+  const { data: landing, error } = await supabaseAdmin
+    .from("landing_raw_qbo_sales_receipt")
+    .insert({
+      external_id: externalId,
+      raw_payload: receipt,
+      status: "pending",
+      correlation_id: correlationId,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return { landingId: landing.id, alreadyCommitted: false };
+}
+
+async function landRefundReceipt(
+  supabaseAdmin: any,
+  receipt: any,
+  correlationId: string
+): Promise<{ landingId: string; alreadyCommitted: boolean }> {
+  const externalId = String(receipt.Id);
+
+  const { data: existing } = await supabaseAdmin
+    .from("landing_raw_qbo_refund_receipt")
+    .select("id, status")
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  if (existing) {
+    await supabaseAdmin
+      .from("landing_raw_qbo_refund_receipt")
+      .update({ raw_payload: receipt, received_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    return { landingId: existing.id, alreadyCommitted: existing.status === "committed" };
+  }
+
+  const { data: landing, error } = await supabaseAdmin
+    .from("landing_raw_qbo_refund_receipt")
+    .insert({
+      external_id: externalId,
+      raw_payload: receipt,
+      status: "pending",
+      correlation_id: correlationId,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return { landingId: landing.id, alreadyCommitted: false };
+}
+
+async function landQboItem(supabaseAdmin: any, item: any, correlationId: string): Promise<void> {
+  if (!item?.Id) return;
+  await supabaseAdmin
+    .from("landing_raw_qbo_item")
+    .upsert(
+      {
+        external_id: String(item.Id),
+        raw_payload: item,
+        status: "committed",
+        correlation_id: correlationId,
+        received_at: new Date().toISOString(),
+        processed_at: new Date().toISOString(),
+      },
+      { onConflict: "external_id" }
+    );
+}
+
+async function markLandingStatus(
+  supabaseAdmin: any,
+  table: string,
+  landingId: string,
+  status: string,
+  errorMessage?: string
+): Promise<void> {
+  const update: any = { status, processed_at: new Date().toISOString() };
+  if (errorMessage) update.error_message = errorMessage;
+  await supabaseAdmin.from(table).update(update).eq("id", landingId);
+}
+
 async function processSalesReceipt(
   supabaseAdmin: any,
   receipt: any,
@@ -155,7 +254,6 @@ async function processSalesReceipt(
   const qboId = String(receipt.Id);
   const originChannel = "qbo";
 
-  // Check if already synced
   const { data: existing } = await supabaseAdmin
     .from("sales_order")
     .select("id")
@@ -173,7 +271,6 @@ async function processSalesReceipt(
   const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
   const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
 
-  // Compute correct subtotals based on tax treatment
   let merchandiseSubtotal: number;
   let grossTotal: number;
   if (globalTaxCalc === "TaxInclusive") {
@@ -184,7 +281,6 @@ async function processSalesReceipt(
     grossTotal = totalAmount + taxTotal;
   }
 
-  // Extract item lines
   const itemLines = (receipt.Line ?? []).filter(
     (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
   );
@@ -193,7 +289,6 @@ async function processSalesReceipt(
     return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
   }
 
-  // Resolve customer_id from QBO CustomerRef
   let customerId: string | null = null;
   if (customerRefValue) {
     const { data: cust } = await supabaseAdmin
@@ -204,10 +299,8 @@ async function processSalesReceipt(
     customerId = cust?.id ?? null;
   }
 
-  // Resolve vat_rate_id from transaction-level TaxRateRef
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
-  // Create sales_order
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
     .insert({
@@ -243,7 +336,6 @@ async function processSalesReceipt(
     const itemRefValue = detail.ItemRef.value;
     const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
-    // Resolve SKU
     const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
@@ -271,7 +363,6 @@ async function processSalesReceipt(
       continue;
     }
 
-    // FIFO: match oldest available stock units for this line's quantity
     for (let i = 0; i < qty; i++) {
       const { data: stockUnit } = await supabaseAdmin
         .from("stock_unit")
@@ -282,7 +373,6 @@ async function processSalesReceipt(
         .limit(1)
         .single();
 
-      // Resolve tax_code_id from qbo_tax_code_ref
       let lineTaxCodeId: string | null = null;
       if (taxCodeRef) {
         const { data: tc } = await supabaseAdmin
@@ -340,7 +430,6 @@ async function processRefundReceipt(
   const qboId = String(receipt.Id);
   const originChannel = "qbo_refund";
 
-  // Check if already synced
   const { data: existing } = await supabaseAdmin
     .from("sales_order")
     .select("id")
@@ -358,7 +447,6 @@ async function processRefundReceipt(
   const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
   const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
 
-  // Compute correct subtotals (negated for refunds)
   let merchandiseSubtotal: number;
   let grossTotal: number;
   if (globalTaxCalc === "TaxInclusive") {
@@ -377,7 +465,6 @@ async function processRefundReceipt(
     return { created: false, linesCreated: 0 };
   }
 
-  // Resolve customer_id
   let customerId: string | null = null;
   if (customerRefValue) {
     const { data: cust } = await supabaseAdmin
@@ -450,7 +537,6 @@ async function processRefundReceipt(
       continue;
     }
 
-    // Resolve tax_code_id from qbo_tax_code_ref
     let lineTaxCodeId: string | null = null;
     if (taxCodeRef) {
       const { data: tc } = await supabaseAdmin
@@ -525,14 +611,40 @@ Deno.serve(async (req) => {
 
     const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+    const correlationId = crypto.randomUUID();
 
-    // Fetch both entity types
+    // Fetch both entity types from QBO
     const [salesReceipts, refundReceipts] = await Promise.all([
       queryQbo(baseUrl, accessToken, "SalesReceipt"),
       queryQbo(baseUrl, accessToken, "RefundReceipt"),
     ]);
 
-    // Pre-fetch all unique QBO item IDs
+    // ── Phase 1: Land all raw payloads ──
+    console.log(`Landing ${salesReceipts.length} sales receipts + ${refundReceipts.length} refund receipts (correlation: ${correlationId})`);
+
+    type LandingEntry = { receipt: any; landingId: string; alreadyCommitted: boolean; table: string };
+    const salesLanded: LandingEntry[] = [];
+    const refundsLanded: LandingEntry[] = [];
+
+    for (const sr of salesReceipts) {
+      try {
+        const result = await landSalesReceipt(supabaseAdmin, sr, correlationId);
+        salesLanded.push({ receipt: sr, ...result, table: "landing_raw_qbo_sales_receipt" });
+      } catch (err) {
+        console.error(`Failed to land SalesReceipt ${sr.Id}:`, err);
+      }
+    }
+
+    for (const rr of refundReceipts) {
+      try {
+        const result = await landRefundReceipt(supabaseAdmin, rr, correlationId);
+        refundsLanded.push({ receipt: rr, ...result, table: "landing_raw_qbo_refund_receipt" });
+      } catch (err) {
+        console.error(`Failed to land RefundReceipt ${rr.Id}:`, err);
+      }
+    }
+
+    // ── Phase 2: Pre-fetch QBO items and land them ──
     const uniqueItemIds = new Set<string>();
     for (const receipt of [...salesReceipts, ...refundReceipts]) {
       for (const line of (receipt.Line ?? [])) {
@@ -554,6 +666,16 @@ Deno.serve(async (req) => {
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);
 
+    // Land all fetched QBO items
+    for (const [, item] of itemCache) {
+      if (item) {
+        try { await landQboItem(supabaseAdmin, item, correlationId); } catch (err) {
+          console.error(`Failed to land QBO item ${item?.Id}:`, err);
+        }
+      }
+    }
+
+    // ── Phase 3: Process from landing into canonical tables ──
     let salesCreated = 0;
     let salesSkipped = 0;
     let salesNoItems = 0;
@@ -561,7 +683,11 @@ Deno.serve(async (req) => {
     let totalStockMissing = 0;
     let totalSalesLines = 0;
 
-    for (const sr of salesReceipts) {
+    for (const { receipt: sr, landingId, alreadyCommitted, table } of salesLanded) {
+      if (alreadyCommitted) {
+        salesSkipped++;
+        continue;
+      }
       try {
         const result = await processSalesReceipt(supabaseAdmin, sr, itemCache, baseUrl, accessToken);
         if (result.created) {
@@ -569,14 +695,20 @@ Deno.serve(async (req) => {
           totalSalesLines += result.linesCreated;
           totalStockMatched += result.stockMatched;
           totalStockMissing += result.stockMissing;
+          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
         } else if (result.linesCreated === 0 && !result.created) {
-          // Could be skipped (existing) or no item lines
           const hasItems = (sr.Line ?? []).some((l: any) => l.DetailType === "SalesItemLineDetail");
-          if (hasItems) salesSkipped++;
-          else salesNoItems++;
+          if (hasItems) {
+            salesSkipped++;
+            await markLandingStatus(supabaseAdmin, table, landingId, "committed"); // Already exists in canonical
+          } else {
+            salesNoItems++;
+            await markLandingStatus(supabaseAdmin, table, landingId, "skipped");
+          }
         }
       } catch (err) {
         console.error(`Failed to process SalesReceipt ${sr.Id}:`, err);
+        await markLandingStatus(supabaseAdmin, table, landingId, "error", err instanceof Error ? err.message : "Unknown");
       }
     }
 
@@ -584,26 +716,32 @@ Deno.serve(async (req) => {
     let refundsSkipped = 0;
     let totalRefundLines = 0;
 
-    for (const rr of refundReceipts) {
+    for (const { receipt: rr, landingId, alreadyCommitted, table } of refundsLanded) {
+      if (alreadyCommitted) {
+        refundsSkipped++;
+        continue;
+      }
       try {
         const result = await processRefundReceipt(supabaseAdmin, rr, itemCache, baseUrl, accessToken);
         if (result.created) {
           refundsCreated++;
           totalRefundLines += result.linesCreated;
+          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
         } else {
           refundsSkipped++;
+          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
         }
       } catch (err) {
         console.error(`Failed to process RefundReceipt ${rr.Id}:`, err);
+        await markLandingStatus(supabaseAdmin, table, landingId, "error", err instanceof Error ? err.message : "Unknown");
       }
     }
 
-    // ── Backfill VAT codes on existing order lines ──
+    // ── Phase 4: Backfill VAT codes on existing order lines ──
     let vatBackfilled = 0;
     const backfillStart = Date.now();
-    const BACKFILL_TIME_BUDGET_MS = 45_000; // 45s max for backfill
+    const BACKFILL_TIME_BUDGET_MS = 45_000;
     try {
-      // Find orders with lines missing tax_code_id
       const { data: ordersToFix } = await supabaseAdmin
         .from("sales_order")
         .select("id, origin_channel, origin_reference")
@@ -612,7 +750,6 @@ Deno.serve(async (req) => {
 
       if (ordersToFix && ordersToFix.length > 0) {
         for (const order of ordersToFix) {
-          // Check time budget
           if (Date.now() - backfillStart > BACKFILL_TIME_BUDGET_MS) {
             console.warn("Backfill time budget exceeded, stopping");
             break;
@@ -627,7 +764,6 @@ Deno.serve(async (req) => {
 
           if (!nullLines || nullLines.length === 0) continue;
 
-          // Throttle between QBO receipt fetches
           await new Promise(r => setTimeout(r, 500));
 
           const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
@@ -707,7 +843,9 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        correlation_id: correlationId,
         sales_receipts: salesReceipts.length,
+        sales_landed: salesLanded.length,
         sales_created: salesCreated,
         sales_skipped: salesSkipped,
         sales_no_items: salesNoItems,
@@ -715,6 +853,7 @@ Deno.serve(async (req) => {
         stock_matched: totalStockMatched,
         stock_missing: totalStockMissing,
         refund_receipts: refundReceipts.length,
+        refunds_landed: refundsLanded.length,
         refunds_created: refundsCreated,
         refunds_skipped: refundsSkipped,
         refund_lines: totalRefundLines,

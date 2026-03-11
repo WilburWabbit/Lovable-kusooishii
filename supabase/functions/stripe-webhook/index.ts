@@ -29,9 +29,40 @@ serve(async (req) => {
     return new Response(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
+  // ── Land raw Stripe event ──
+  const landingCorrelation = crypto.randomUUID();
+  try {
+    await supabase
+      .from("landing_raw_stripe_event")
+      .upsert(
+        {
+          external_id: event.id,
+          event_type: event.type,
+          raw_payload: event as unknown as Record<string, unknown>,
+          status: "pending",
+          correlation_id: landingCorrelation,
+          received_at: new Date().toISOString(),
+        },
+        { onConflict: "external_id" }
+      );
+  } catch (landErr) {
+    console.error("Failed to land Stripe event:", landErr);
+  }
+
+  // ── Process event ──
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     await handleCheckoutCompleted(session);
+  }
+
+  // Mark landing as committed
+  try {
+    await supabase
+      .from("landing_raw_stripe_event")
+      .update({ status: "committed", processed_at: new Date().toISOString() })
+      .eq("external_id", event.id);
+  } catch (updateErr) {
+    console.error("Failed to update landing status:", updateErr);
   }
 
   return new Response(JSON.stringify({ received: true }), {
