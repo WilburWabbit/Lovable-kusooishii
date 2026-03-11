@@ -551,6 +551,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ── Step 3: Extract order data from landed payload ──
     const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
     const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
     const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
