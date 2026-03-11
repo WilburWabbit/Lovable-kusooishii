@@ -563,7 +563,7 @@ Deno.serve(async (req) => {
 
     console.log(`eBay order ${orderId}: buyer=${buyerName}, total=${totalAmount}, lines=${lineItems.length}`);
 
-    // ── Step 3: Get QBO connection ──
+    // ── Step 4: Get QBO connection ──
     const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
 
     // ── Step 4: Upsert QBO Customer ──
