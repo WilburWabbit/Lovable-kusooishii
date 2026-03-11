@@ -508,6 +508,345 @@ export type Database = {
           },
         ]
       }
+      landing_raw_brickeconomy: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_ebay_listing: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_ebay_order: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_customer: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_item: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_purchase: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_refund_receipt: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_sales_receipt: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_tax_entity: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_stripe_event: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          event_type: string
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          event_type: string
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          event_type?: string
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
       lego_catalog: {
         Row: {
           brickeconomy_id: string | null
@@ -1548,6 +1887,7 @@ export type Database = {
     Enums: {
       app_role: "admin" | "staff" | "member"
       condition_grade: "1" | "2" | "3" | "4" | "5"
+      landing_status: "pending" | "staged" | "committed" | "error" | "skipped"
       listing_status:
         | "draft"
         | "price_pending"
@@ -1721,6 +2061,7 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "staff", "member"],
       condition_grade: ["1", "2", "3", "4", "5"],
+      landing_status: ["pending", "staged", "committed", "error", "skipped"],
       listing_status: [
         "draft",
         "price_pending",
