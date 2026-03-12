@@ -144,7 +144,7 @@ export default function ProductDetailPage() {
               <div>
                 {mediaItems.length > 0 ? (
                   <div className="space-y-3">
-                    <div className="aspect-square bg-kuso-mist overflow-hidden">
+                    <div className="aspect-square bg-background overflow-hidden border border-border">
                       <img
                         src={mediaItems[selectedImage]?.url}
                         alt={mediaItems[selectedImage]?.alt || product.name || ""}
