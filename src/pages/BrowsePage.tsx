@@ -58,7 +58,7 @@ export default function BrowsePage() {
         product_id: string; mpn: string; name: string; theme_name: string | null;
         theme_id: string | null; retired_flag: boolean; release_year: number | null;
         piece_count: number | null; min_price: number | null; best_grade: string | null;
-        total_stock: number;
+        total_stock: number; img_url: string | null;
       }[];
     },
   });
