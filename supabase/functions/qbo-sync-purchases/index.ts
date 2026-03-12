@@ -447,42 +447,13 @@ Deno.serve(async (req) => {
     // Generate a correlation ID for this sync run
     const correlationId = crypto.randomUUID();
 
-    // ── Build month ranges from current month back to April 2023 ──
-    function generateMonthRanges(singleMonth?: string | null): Array<{ start: string; end: string; label: string }> {
-      if (singleMonth) {
-        const [y, m] = singleMonth.split("-").map(Number);
-        const start = `${y}-${String(m).padStart(2, "0")}-01`;
-        const lastDay = new Date(y, m, 0).getDate();
-        const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-        return [{ start, end, label: singleMonth }];
-      }
-
-      const ranges: Array<{ start: string; end: string; label: string }> = [];
-      const now = new Date();
-      let year = now.getFullYear();
-      let month = now.getMonth() + 1; // 1-indexed
-
-      const endYear = 2023;
-      const endMonth = 4;
-
-      while (year > endYear || (year === endYear && month >= endMonth)) {
-        const start = `${year}-${String(month).padStart(2, "0")}-01`;
-        const lastDay = new Date(year, month, 0).getDate();
-        const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-        const label = `${year}-${String(month).padStart(2, "0")}`;
-        ranges.push({ start, end, label });
-
-        month--;
-        if (month < 1) {
-          month = 12;
-          year--;
-        }
-      }
-      return ranges;
-    }
-
-    const monthRanges = generateMonthRanges(targetMonth);
-    console.log(`Will process ${monthRanges.length} month(s): ${monthRanges[0]?.label} → ${monthRanges[monthRanges.length - 1]?.label}`);
+    // ── Build single month range ──
+    const [y, m] = targetMonth.split("-").map(Number);
+    const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    const monthLabel = targetMonth;
+    console.log(`Processing single month: ${monthLabel} (${monthStart} → ${monthEnd})`);
 
     // Accumulated totals across all months
     let totalPurchases = 0;
