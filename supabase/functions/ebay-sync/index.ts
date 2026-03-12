@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
 
             if (ebaySku) {
               // Direct lookup — eBay SKU should match sku_code exactly
-              skuId = skuMap.get(ebaySku.trim().toLowerCase()) || null;
+              skuId = skuMap.get(ebaySku) || null;
             }
 
             if (!skuId) {
@@ -388,7 +388,7 @@ Deno.serve(async (req) => {
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
         // Direct lookup — eBay SKU should match sku_code exactly
-        const matchedSkuId = skuMap.get(item.sku.trim().toLowerCase()) || null;
+        const matchedSkuId = skuMap.get(item.sku) || null;
 
         const { error: upsertErr } = await admin
           .from("channel_listing")
