@@ -219,7 +219,7 @@ export default function BrowsePage() {
                       to={`/sets/${set.mpn}`}
                       className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
                     >
-                      <div className="aspect-square bg-kuso-mist">
+                      <div className="aspect-square bg-white">
                         {set.img_url ? (
                           <img
                             src={set.img_url}
