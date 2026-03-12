@@ -262,6 +262,7 @@ Deno.serve(async (req) => {
         total: qboItems.length,
         upserted,
         linked,
+        products_created: productsCreated,
         skipped_no_mpn: skippedNoMpn,
         errors,
       }),
