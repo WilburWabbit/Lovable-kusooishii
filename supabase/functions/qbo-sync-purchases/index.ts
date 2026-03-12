@@ -230,8 +230,8 @@ async function autoProcessReceipt(
   for (const line of stockLines) {
     const conditionGrade = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     const mpn = line.mpn!;
-    // Reconstruct QBO-format SKU from mpn + grade
-    const skuCode = conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn;
+    // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
+    const skuCode = line.sku_code || (conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn);
 
     const { data: product } = await supabaseAdmin
       .from("product")
