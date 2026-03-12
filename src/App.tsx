@@ -41,6 +41,9 @@ import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
+import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
+import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
+import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
