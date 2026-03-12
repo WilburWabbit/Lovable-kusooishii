@@ -206,6 +206,7 @@ async function autoProcessReceipt(
     quantity: number;
     unit_cost: number;
     description?: string | null;
+    sku_code?: string | null;
   }>
 ): Promise<{ processed: boolean; skipped: string[] }> {
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
