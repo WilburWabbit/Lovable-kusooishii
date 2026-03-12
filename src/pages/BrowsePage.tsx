@@ -38,14 +38,6 @@ export default function BrowsePage() {
     setSelectedThemeId(themeFromUrl);
   }, [themeFromUrl]);
 
-  if (viewMode === "themes") {
-    return (
-      <StorefrontLayout>
-        <ThemesGrid />
-      </StorefrontLayout>
-    );
-  }
-
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useMemo(() => {
@@ -83,6 +75,7 @@ export default function BrowsePage() {
         yearMax: maxYear === -Infinity ? null : maxYear,
       };
     },
+    enabled: viewMode !== "themes",
   });
 
   const themes = filterMeta?.themes;
@@ -107,6 +100,7 @@ export default function BrowsePage() {
         total_stock: number; img_url: string | null;
       }[];
     },
+    enabled: viewMode !== "themes",
   });
 
   const filteredProducts = useMemo(() => {
@@ -116,6 +110,14 @@ export default function BrowsePage() {
       (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
     );
   }, [products, yearRange]);
+
+  if (viewMode === "themes") {
+    return (
+      <StorefrontLayout>
+        <ThemesGrid />
+      </StorefrontLayout>
+    );
+  }
 
   return (
     <StorefrontLayout>
