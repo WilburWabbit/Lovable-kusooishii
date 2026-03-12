@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import kusoLogo from '@/assets/kuso-logo.png';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Search, Menu, X, Heart, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
