@@ -211,7 +211,7 @@ export default function ProductDetailPage() {
                     if (beData?.retail_price != null) specs.push({ label: "RRP", value: `£${Number(beData.retail_price).toFixed(2)}` });
                     if (beData?.current_value != null) specs.push({ label: "Market Value", value: `£${Number(beData.current_value).toFixed(2)}` });
                     if (beData?.growth != null) specs.push({ label: "Growth", value: `${beData.growth > 0 ? "+" : ""}${Number(beData.growth).toFixed(1)}%` });
-                    specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
+                    if ((offers?.length ?? 0) > 1) specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
                     return specs.map((s) => (
                       <div key={s.label}>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
