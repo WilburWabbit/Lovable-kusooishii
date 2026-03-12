@@ -47,7 +47,7 @@ export function StorefrontHeader() {
       <div className="container flex items-center justify-between h-16 text-secondary-foreground">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <span className="font-display text-xl font-bold tracking-tight text-foreground">
+          <span className="font-display tracking-tight text-primary text-2xl font-extrabold">
             KUSO<span className="text-2xl text-primary font-extrabold"></span>OISHII
           </span>
         </Link>
