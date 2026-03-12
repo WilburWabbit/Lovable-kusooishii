@@ -183,7 +183,7 @@ export default function ProductDetailPage() {
                   <span className="font-body text-xs text-muted-foreground">·</span>
                   <span className="font-body text-xs text-muted-foreground">{product.mpn}</span>
                   {product.retired_flag && (
-                    <Badge variant="destructive" className="font-display text-[10px] uppercase tracking-wider">
+                    <Badge variant="destructive" className="ml-auto font-display text-[10px] uppercase tracking-wider">
                       Retired
                     </Badge>
                   )}
