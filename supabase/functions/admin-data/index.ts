@@ -763,12 +763,47 @@ Deno.serve(async (req) => {
       }
 
       // 7. Compute prices
-      // floor = (cost_base + min_profit) / (1 - min_margin - fee_rate_estimate)
-      // We estimate fee rate from channel fees (sum of rate_percent / 100)
-      const totalFeeRate = (fees ?? []).reduce((sum: number, f: any) => sum + (f.rate_percent / 100), 0);
+      // Decompose fees into rate-based and fixed components, respecting applies_to
+      let effectiveFeeRate = 0;
+      let fixedFeeCosts = 0;
+      for (const fee of fees ?? []) {
+        const rate = (fee.rate_percent ?? 0) / 100;
+        const fixed = fee.fixed_amount ?? 0;
+        if (fee.applies_to === "sale_plus_shipping") {
+          effectiveFeeRate += rate;
+          fixedFeeCosts += fixed + (shippingCost * rate);
+        } else if (fee.applies_to === "sale_price_inc_vat") {
+          effectiveFeeRate += rate * 1.2;
+          fixedFeeCosts += fixed;
+        } else {
+          effectiveFeeRate += rate;
+          fixedFeeCosts += fixed;
+        }
+      }
+
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
-      const floorPrice = Math.round(((costBase + minProfit) / (1 - effectiveMargin - totalFeeRate - riskRate)) * 100) / 100;
+      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+      let floorPrice = Math.round(((costBase + minProfit + fixedFeeCosts) / denominator) * 100) / 100;
+
+      // Post-check: verify floor covers all fees with min/max clamps applied
+      for (let i = 0; i < 5; i++) {
+        let totalFees = 0;
+        for (const fee of fees ?? []) {
+          let base = floorPrice;
+          if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
+          else if (fee.applies_to === "sale_price_inc_vat") base = floorPrice * 1.2;
+          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
+          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
+          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
+          totalFees += amount;
+        }
+        const riskReserve = floorPrice * riskRate;
+        const requiredRevenue = costBase + minProfit + totalFees + riskReserve;
+        const neededPrice = requiredRevenue / (1 - effectiveMargin);
+        if (neededPrice <= floorPrice + 0.01) break;
+        floorPrice = Math.round(neededPrice * 100) / 100;
+      }
 
       let targetPrice: number | null = null;
       if (marketConsensus != null) {
@@ -802,7 +837,8 @@ Deno.serve(async (req) => {
           carrying_value: Math.round(avgCarrying * 100) / 100,
           packaging_cost: packagingCost,
           shipping_cost: shippingCost,
-          total_fee_rate: Math.round(totalFeeRate * 10000) / 100,
+          total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
+          fixed_fee_costs: Math.round(fixedFeeCosts * 100) / 100,
           risk_reserve_rate: riskReserveRate,
           min_profit: minProfit,
           min_margin: minMargin * 100,
