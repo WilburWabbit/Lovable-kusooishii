@@ -35,9 +35,9 @@ export default function BrowsePage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch only themes that have in-stock, published products
-  const { data: themes } = useQuery({
-    queryKey: ["themes_with_stock"],
+  // Fetch themes and year range from in-stock products
+  const { data: filterMeta } = useQuery({
+    queryKey: ["browse_filter_meta"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("browse_catalog", {
         search_term: null,
@@ -46,15 +46,30 @@ export default function BrowsePage() {
         filter_retired: null,
       });
       if (error) throw error;
+      const rows = data as any[];
       const themeMap = new Map<string, { id: string; name: string }>();
-      for (const row of (data as any[])) {
+      let minYear = Infinity;
+      let maxYear = -Infinity;
+      for (const row of rows) {
         if (row.theme_id && row.theme_name && !themeMap.has(row.theme_id)) {
           themeMap.set(row.theme_id, { id: row.theme_id, name: row.theme_name });
         }
+        if (row.release_year != null) {
+          if (row.release_year < minYear) minYear = row.release_year;
+          if (row.release_year > maxYear) maxYear = row.release_year;
+        }
       }
-      return Array.from(themeMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      return {
+        themes: Array.from(themeMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+        yearMin: minYear === Infinity ? null : minYear,
+        yearMax: maxYear === -Infinity ? null : maxYear,
+      };
     },
   });
+
+  const themes = filterMeta?.themes;
+  const yearMin = filterMeta?.yearMin ?? 2000;
+  const yearMax = filterMeta?.yearMax ?? new Date().getFullYear();
 
   // Fetch browse data
   const { data: products, isLoading } = useQuery({
