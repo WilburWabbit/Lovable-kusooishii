@@ -44,6 +44,7 @@ import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
 import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
+import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -89,6 +90,7 @@ const App = () => (
             <Route path="/admin/products" element={<ProductsPage />} />
             <Route path="/admin/products/:id" element={<ProductDetailAdminPage />} />
             <Route path="/admin/listings" element={<ListingsPage />} />
+            <Route path="/admin/pricing" element={<PricingDashboardPage />} />
             <Route path="/admin/orders" element={<OrdersPage />} />
             <Route path="/admin/customers" element={<CustomersPage />} />
             <Route path="/admin/reconciliation" element={<ReconciliationPage />} />
