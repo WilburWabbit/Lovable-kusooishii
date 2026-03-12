@@ -108,19 +108,20 @@ Deno.serve(async (req) => {
     );
     console.log(`Fetched ${qboItems.length} QBO items (correlation: ${correlationId})`);
 
-    // Pre-fetch all products and catalog entries for MPN lookup
-    const [{ data: allProducts }, { data: allCatalog }] = await Promise.all([
-      admin.from("product").select("id, mpn"),
-      admin.from("lego_catalog").select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type").eq("status", "active"),
-    ]);
+    // Pre-fetch all products with pagination (avoids 1000-row default limit)
     const productByMpn = new Map<string, string>();
-    for (const p of allProducts ?? []) {
-      productByMpn.set(p.mpn, p.id);
+    {
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data } = await admin.from("product").select("id, mpn").range(from, from + pageSize - 1);
+        if (!data || data.length === 0) break;
+        for (const p of data) productByMpn.set(p.mpn, p.id);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
     }
-    const catalogByMpn = new Map<string, any>();
-    for (const c of allCatalog ?? []) {
-      catalogByMpn.set(c.mpn, c);
-    }
+    console.log(`Loaded ${productByMpn.size} products into lookup map`);
 
     let upserted = 0;
     let linked = 0;
@@ -171,9 +172,14 @@ Deno.serve(async (req) => {
       const skuCode = rawSku;
       let productId = productByMpn.get(mpn) ?? null;
 
-      // Auto-create product from catalog if no product exists
+      // Auto-create product from catalog if no product exists (on-demand lookup)
       if (!productId && mpn) {
-        const catalog = catalogByMpn.get(mpn);
+        const { data: catalog } = await admin
+          .from("lego_catalog")
+          .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+          .eq("mpn", mpn)
+          .eq("status", "active")
+          .maybeSingle();
         if (catalog) {
           const { data: newProduct, error: prodErr } = await admin.from("product").insert({
             mpn,
