@@ -109,6 +109,12 @@ export default function PricingDashboardPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    invokeWithAuth<ChannelConfig[]>("admin-data", { action: "list-channel-pricing-config" })
+      .then((data) => setAutoPriceConfigs(data))
+      .catch(() => {});
+  }, []);
+
   // Filter
   const q = search.toLowerCase();
   let filtered = rows.filter((r) => {
