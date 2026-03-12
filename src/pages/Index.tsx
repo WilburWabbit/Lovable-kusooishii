@@ -168,7 +168,7 @@ export default function HomePage() {
                           {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
                         </span>
                         <span className="font-body text-muted-foreground text-sm">
-                          {set.best_grade ? gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
+                          {set.total_stock > 0 ? `${set.total_stock} in stock` : "Out of stock"}
                         </span>
                       </div>
                     </div>
