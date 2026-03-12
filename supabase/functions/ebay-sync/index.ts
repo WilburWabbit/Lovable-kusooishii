@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
       const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
       const skuMap = new Map<string, string>();
       for (const s of allSkus || []) {
-        skuMap.set(s.sku_code.toLowerCase(), s.id);
+        skuMap.set(s.sku_code, s.id);
       }
 
       for (const order of ebayOrders) {
@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
 
             if (ebaySku) {
               // Direct lookup — eBay SKU should match sku_code exactly
-              skuId = skuMap.get(ebaySku.trim().toLowerCase()) || null;
+              skuId = skuMap.get(ebaySku) || null;
             }
 
             if (!skuId) {
@@ -377,7 +377,7 @@ Deno.serve(async (req) => {
       const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
       const skuMap = new Map<string, string>();
       for (const s of allSkus || []) {
-        skuMap.set(s.sku_code.toLowerCase(), s.id);
+        skuMap.set(s.sku_code, s.id);
       }
 
       for (const item of items) {
@@ -388,7 +388,7 @@ Deno.serve(async (req) => {
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
         // Direct lookup — eBay SKU should match sku_code exactly
-        const matchedSkuId = skuMap.get(item.sku.trim().toLowerCase()) || null;
+        const matchedSkuId = skuMap.get(item.sku) || null;
 
         const { error: upsertErr } = await admin
           .from("channel_listing")
@@ -610,14 +610,9 @@ Deno.serve(async (req) => {
       const title = listing_title || prod?.name || sku.name || `LEGO ${prod?.mpn}`;
       const desc = listing_description || prod?.description || title;
 
-      // Resolve image URLs with fallbacks
+      // Resolve image URLs from product_media only
       let imageUrls: string[] = [];
-
-      // Primary: product.img_url
-      if (prod?.img_url) imageUrls.push(prod.img_url);
-
-      // Fallback: product_media → media_asset
-      if (imageUrls.length === 0 && prod?.id) {
+      if (prod?.id) {
         const { data: mediaRows } = await admin
           .from("product_media")
           .select("media_asset:media_asset_id(original_url)")
@@ -629,18 +624,8 @@ Deno.serve(async (req) => {
           .filter(Boolean);
       }
 
-      // Fallback: lego_catalog img_url
-      if (imageUrls.length === 0 && prod?.mpn) {
-        const { data: cat } = await admin
-          .from("lego_catalog")
-          .select("img_url")
-          .eq("mpn", prod.mpn)
-          .maybeSingle();
-        if (cat?.img_url) imageUrls.push(cat.img_url);
-      }
-
       if (imageUrls.length === 0) {
-        throw new Error(`Cannot publish ${sku.sku_code}: no images found. Add at least one image first.`);
+        throw new Error(`Cannot publish ${sku.sku_code}: no images found in product_media. Add at least one image first.`);
       }
 
       // Step 1: PUT inventory item

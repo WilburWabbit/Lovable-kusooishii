@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     }
 
     // eBay requires: SHA-256( challengeCode + verificationToken + endpoint )
-    const endpoint = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
+    const endpoint = `${Deno.env.get("SUPABASE_URL")!.replace(/\/+$/, "")}/functions/v1/ebay-notifications`;
 
     const encoder = new TextEncoder();
     const data = encoder.encode(challengeCode + VERIFICATION_TOKEN + endpoint);
@@ -59,8 +59,9 @@ Deno.serve(async (req) => {
     try {
       payload = await req.json();
     } catch {
-      return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-        status: 400,
+      console.error("eBay notification: invalid JSON body");
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -77,6 +78,22 @@ Deno.serve(async (req) => {
       payload?.metadata?.notificationId ||
       null;
 
+    // Idempotency check: skip if this notification was already processed
+    if (notificationId) {
+      const { data: existing } = await supabaseAdmin
+        .from("ebay_notification")
+        .select("id")
+        .eq("notification_id", notificationId)
+        .maybeSingle();
+      if (existing) {
+        console.log(`Duplicate notification ${notificationId}, skipping`);
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Store the notification
     const { error: insertError } = await supabaseAdmin
       .from("ebay_notification")
@@ -89,6 +106,10 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       console.error("Failed to store notification:", insertError);
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // For order-related topics, trigger the full processing pipeline
@@ -107,11 +128,12 @@ Deno.serve(async (req) => {
 
     if (isOrderTopic || isShipmentTopic) {
       // Extract order ID from notification payload
-      const ebayOrderId =
+      const rawOrderId =
         payload?.resource?.orderId ||
         payload?.data?.orderId ||
         payload?.orderId ||
         null;
+      const ebayOrderId = typeof rawOrderId === "string" && rawOrderId.trim() ? rawOrderId.trim() : null;
 
       if (ebayOrderId) {
         // Route to dedicated order processing pipeline
@@ -130,6 +152,7 @@ Deno.serve(async (req) => {
                 Authorization: `Bearer ${serviceKey}`,
               },
               body: JSON.stringify(processBody),
+              signal: AbortSignal.timeout(25000),
             }
           );
           const processData = await processRes.json().catch(() => ({}));
@@ -142,29 +165,48 @@ Deno.serve(async (req) => {
         }
       } else {
         // Fallback: trigger bulk sync if we can't extract the order ID
-        console.log("No order ID in payload, falling back to bulk sync");
-        try {
-          const syncRes = await fetch(
-            `${supabaseUrl}/functions/v1/ebay-sync`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${serviceKey}`,
-              },
-              body: JSON.stringify({
-                action: "sync_orders",
-                _triggered_by: "notification",
-              }),
-            }
-          );
-          const syncData = await syncRes.json().catch(() => ({}));
-          console.log(
-            `Fallback order sync from ${topic}:`,
-            JSON.stringify(syncData).substring(0, 200)
-          );
-        } catch (e) {
-          console.error("Failed to trigger fallback order sync:", e);
+        // Debounce: skip if a bulk sync was triggered in the last 30 seconds
+        const { data: recentSync } = await supabaseAdmin
+          .from("ebay_notification")
+          .select("id")
+          .eq("topic", "__BULK_SYNC__")
+          .gte("received_at", new Date(Date.now() - 30000).toISOString())
+          .maybeSingle();
+
+        if (recentSync) {
+          console.log("Bulk sync already triggered recently, skipping");
+        } else {
+          console.log("No order ID in payload, falling back to bulk sync");
+          await supabaseAdmin.from("ebay_notification").insert({
+            topic: "__BULK_SYNC__",
+            notification_id: null,
+            payload: {},
+            received_at: new Date().toISOString(),
+          });
+          try {
+            const syncRes = await fetch(
+              `${supabaseUrl}/functions/v1/ebay-sync`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${serviceKey}`,
+                },
+                body: JSON.stringify({
+                  action: "sync_orders",
+                  _triggered_by: "notification",
+                }),
+                signal: AbortSignal.timeout(25000),
+              }
+            );
+            const syncData = await syncRes.json().catch(() => ({}));
+            console.log(
+              `Fallback order sync from ${topic}:`,
+              JSON.stringify(syncData).substring(0, 200)
+            );
+          } catch (e) {
+            console.error("Failed to trigger fallback order sync:", e);
+          }
         }
       }
     }

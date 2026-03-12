@@ -60,9 +60,11 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
+      const now = new Date().toISOString();
       return new Response(
         JSON.stringify({
           connected: !!conn,
+          expired: conn ? conn.token_expires_at < now : null,
           token_expires_at: conn?.token_expires_at ?? null,
           last_updated: conn?.updated_at ?? null,
         }),
@@ -133,11 +135,14 @@ Deno.serve(async (req) => {
         console.error("eBay token exchange failed:", JSON.stringify(tokenData));
         throw new Error(`Token exchange failed [${tokenRes.status}]`);
       }
+      if (!tokenData.access_token || !tokenData.refresh_token) {
+        throw new Error("eBay token response missing access_token or refresh_token");
+      }
 
-      const expiresAt = new Date(Date.now() + (tokenData.expires_in || 7200) * 1000).toISOString();
+      const expiresAt = new Date(Date.now() + (tokenData.expires_in ?? 7200) * 1000).toISOString();
 
       // Delete any existing connections (singleton) then insert
-      await supabaseAdmin.from("ebay_connection").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabaseAdmin.from("ebay_connection").delete().gte("id", "00000000-0000-0000-0000-000000000000");
 
       const { error: dbError } = await supabaseAdmin
         .from("ebay_connection")
@@ -157,7 +162,7 @@ Deno.serve(async (req) => {
 
     // --- Disconnect ---
     if (action === "disconnect") {
-      await supabaseAdmin.from("ebay_connection").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabaseAdmin.from("ebay_connection").delete().gte("id", "00000000-0000-0000-0000-000000000000");
 
       return new Response(
         JSON.stringify({ success: true }),
@@ -195,16 +200,22 @@ Deno.serve(async (req) => {
       }
 
       const tokens = await tokenRes.json();
-      const expiresAt = new Date(Date.now() + (tokens.expires_in || 7200) * 1000).toISOString();
+      const expiresAt = new Date(Date.now() + (tokens.expires_in ?? 7200) * 1000).toISOString();
 
-      await supabaseAdmin
+      const { data: updated } = await supabaseAdmin
         .from("ebay_connection")
         .update({
           access_token: tokens.access_token,
-          ...(tokens.refresh_token ? { refresh_token: tokens.refresh_token } : {}),
+          refresh_token: tokens.refresh_token || conn.refresh_token,
           token_expires_at: expiresAt,
         })
-        .eq("id", conn.id);
+        .eq("id", conn.id)
+        .eq("updated_at", conn.updated_at)
+        .select("id");
+
+      if (!updated?.length) {
+        throw new Error("Token refresh conflict — another refresh may have occurred simultaneously");
+      }
 
       return new Response(
         JSON.stringify({ success: true }),

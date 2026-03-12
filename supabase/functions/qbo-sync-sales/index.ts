@@ -91,16 +91,15 @@ async function fetchQboItem(
 }
 
 function parseSku(sku: string): { mpn: string; conditionGrade: string } {
-  const trimmed = sku.trim();
-  const dotIndex = trimmed.indexOf(".");
+  const dotIndex = sku.indexOf(".");
   let mpn: string;
   let conditionGrade: string;
 
   if (dotIndex > 0) {
-    mpn = trimmed.substring(0, dotIndex);
-    conditionGrade = trimmed.substring(dotIndex + 1) || "1";
+    mpn = sku.substring(0, dotIndex);
+    conditionGrade = sku.substring(dotIndex + 1) || "1";
   } else {
-    mpn = trimmed;
+    mpn = sku;
     conditionGrade = "1";
   }
 
@@ -380,10 +379,10 @@ async function processSalesReceipt(
     let skuCode: string | null = null;
 
     // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField).trim()) {
-      skuCode = String(skuField).trim();
+    if (skuField && String(skuField)) {
+      skuCode = String(skuField);
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name).trim();
+      skuCode = String(detail.ItemRef.name);
     }
 
     let skuId: string | null = null;
@@ -553,10 +552,10 @@ async function processRefundReceipt(
     let skuCode: string | null = null;
 
     // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField).trim()) {
-      skuCode = String(skuField).trim();
+    if (skuField && String(skuField)) {
+      skuCode = String(skuField);
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name).trim();
+      skuCode = String(detail.ItemRef.name);
     }
 
     let skuId: string | null = null;
@@ -835,10 +834,10 @@ Deno.serve(async (req) => {
               let skuCode: string | null = null;
 
               // Use raw QBO SKU verbatim as sku_code
-              if (skuField && String(skuField).trim()) {
-                skuCode = String(skuField).trim();
+              if (skuField && String(skuField)) {
+                skuCode = String(skuField);
               } else if (detail.ItemRef?.name) {
-                skuCode = String(detail.ItemRef.name).trim();
+                skuCode = String(detail.ItemRef.name);
               }
 
               if (!skuCode) continue;

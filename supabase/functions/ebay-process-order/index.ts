@@ -593,7 +593,7 @@ Deno.serve(async (req) => {
     const { data: allSkus } = await admin.from("sku").select("id, sku_code, qbo_item_id").eq("active_flag", true);
     const skuMap = new Map<string, { id: string; sku_code: string; qbo_item_id: string | null }>();
     for (const s of allSkus || []) {
-      skuMap.set(s.sku_code.toLowerCase(), s);
+      skuMap.set(s.sku_code, s);
     }
 
     const qboLines: any[] = [];
@@ -613,7 +613,7 @@ Deno.serve(async (req) => {
     for (const li of lineItems) {
       const ebaySku = li.sku || "";
       // Direct lookup — eBay SKU should match sku_code exactly
-      const matchedSku = skuMap.get(ebaySku.trim().toLowerCase());
+      const matchedSku = skuMap.get(ebaySku);
 
       if (!matchedSku) {
         console.warn(`No SKU match for eBay SKU "${ebaySku}" in order ${orderId}`);
@@ -663,6 +663,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Adjust last line item to absorb rounding so QBO total matches eBay total exactly
+    const computedGross = totalNet + totalTax;
+    const diff = Math.round((totalAmount - computedGross) * 100) / 100;
+    if (diff !== 0 && qboLines.length > 0) {
+      const lastLine = qboLines[qboLines.length - 1];
+      const adjustedNet = lastLine.Amount + diff;
+      lastLine.Amount = Math.round(adjustedNet * 100) / 100;
+      lastLine.SalesItemLineDetail.UnitPrice = Math.round((lastLine.Amount / lastLine.SalesItemLineDetail.Qty) * 100) / 100;
+      totalNet += diff;
+    }
     totalNet = Math.round(totalNet * 100) / 100;
     totalTax = Math.round(totalTax * 100) / 100;
 
