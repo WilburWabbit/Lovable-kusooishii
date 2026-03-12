@@ -379,12 +379,11 @@ async function processSalesReceipt(
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
 
+    // Use raw QBO SKU verbatim as sku_code
     if (skuField && String(skuField).trim()) {
-      const parsed = parseSku(String(skuField));
-      skuCode = `${parsed.mpn}-G${parsed.conditionGrade}`;
+      skuCode = String(skuField).trim();
     } else if (detail.ItemRef?.name) {
-      const parsed = parseSku(String(detail.ItemRef.name));
-      skuCode = `${parsed.mpn}-G${parsed.conditionGrade}`;
+      skuCode = String(detail.ItemRef.name).trim();
     }
 
     let skuId: string | null = null;
