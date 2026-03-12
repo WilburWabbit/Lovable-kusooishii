@@ -27,8 +27,8 @@ export default function AboutPage() {
         <div className="container max-w-3xl">
           <h2 className="font-display text-3xl font-bold text-foreground mb-8">The Story</h2>
           <div className="space-y-5 font-body text-muted-foreground leading-relaxed">
-            <p>Here's what happens when you return a LEGO set to a big retailer: they open the box to check it, slap a "returned" sticker on it, and it goes into a warehouse where nobody quite knows what to do with it. The box might have a dent. A bag might be open. Nothing's actually wrong with the bricks — but the retailer can't sell it as new, so it sits there.</p>
-            <p>That's where we come in. Kuso Oishii buys that stock directly from authorised UK retailers. We inspect every set — weigh sealed bags, hand-count open ones, photograph the box condition, and write up honest notes so you know exactly what you're getting.</p>
+            <p>Here's what happens when you return a LEGO set to a big retailer: they open the box to check it, slap a "returned" sticker on it, and it goes into a warehouse where nobody quite knows what to do with it. The box might have a dent. A bag might be open. Most times, the set is still in mint condition. Either way, there is nothing's actually wrong with the bricks — but the retailer can't sell it as new, so it sits there until the inevitable happens and it gets thrown into a skip.    </p>
+            <p>That's where we come in. Kuso Oishii buys that stock from UK retailers, wholesalers, and trusted collectors. We inspect every set — weigh sealed bags, hand-count open ones, photograph the box condition, and write up honest notes so you know exactly what you're getting.</p>
             <p>It's circular commerce without the greenwash. We're not saving the planet — we're just making sure perfectly good LEGO doesn't go to waste. And you get sets at fair prices without the "is this legit?" anxiety.</p>
           </div>
         </div>
@@ -40,19 +40,19 @@ export default function AboutPage() {
           <h2 className="font-display text-3xl font-bold text-foreground text-center mb-12">The Kuso Oishii Difference</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
             {[
-              { icon: ShieldCheck, title: 'Radical Honesty', desc: "Every set has detailed condition notes. Dented box? We'll say so. Missing a minifig arm? You'll know before you buy." },
-              { icon: Search, title: 'Collector Detail', desc: 'Set numbers, minifig IDs, bag-by-bag inspection notes. We speak AFOL because we are AFOLs.' },
-              { icon: Package, title: 'Fair Prices', desc: "No markup games. No 'rare find' surcharges. Rescued stock at rescued prices. Simple." },
-              { icon: Smile, title: 'No Corporate Waffle', desc: "We don't 'curate experiences.' We sell LEGO. You build it. Everyone's happy." },
-            ].map(({ icon: Icon, title, desc }) => (
-              <Card key={title} className="border-none shadow-md">
+            { icon: ShieldCheck, title: 'Radical Honesty', desc: "Every set has detailed condition notes. Dented box? We'll say so. Missing a minifig arm? You'll know before you buy." },
+            { icon: Search, title: 'Collector Detail', desc: 'Set numbers, minifig IDs, bag-by-bag inspection notes. We speak AFOL because we are AFOLs.' },
+            { icon: Package, title: 'Fair Prices', desc: "No markup games. No 'rare find' surcharges. Rescued stock at rescued prices. Simple." },
+            { icon: Smile, title: 'No Corporate Waffle', desc: "We don't 'curate experiences.' We sell LEGO. You build it. Everyone's happy." }].
+            map(({ icon: Icon, title, desc }) =>
+            <Card key={title} className="border-none shadow-md">
                 <CardContent className="p-6 text-center space-y-3">
                   <Icon className="h-10 w-10 mx-auto text-primary" />
                   <h3 className="font-display font-bold text-foreground text-lg">{title}</h3>
                   <p className="font-body text-sm text-muted-foreground">{desc}</p>
                 </CardContent>
               </Card>
-            ))}
+            )}
           </div>
         </div>
       </section>
@@ -63,17 +63,17 @@ export default function AboutPage() {
           <h2 className="font-display text-3xl font-bold text-foreground text-center mb-12">How It Works</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
             {[
-              { n: '1', title: 'We Source', desc: 'Returned, open-box, and damaged-box LEGO® sets from authorised UK retailers. Every set is genuine.' },
-              { n: '2', title: 'We Inspect', desc: 'Sealed bags get weighed. Open bags get hand-counted. Box condition photographed. Honest notes written.' },
-              { n: '3', title: 'You Build', desc: "Pick your set, read the condition notes, and get building. No surprises, no anxiety, just bricks." },
-            ].map(({ n, title, desc }) => (
-              <div key={n} className="space-y-4 relative">
+            { n: '1', title: 'We Source', desc: 'Returned, open-box, and damaged-box LEGO® sets from authorised UK retailers. Every set is genuine.' },
+            { n: '2', title: 'We Inspect', desc: 'Sealed bags get weighed. Open bags get hand-counted. Box condition photographed. Honest notes written.' },
+            { n: '3', title: 'You Build', desc: "Pick your set, read the condition notes, and get building. No surprises, no anxiety, just bricks." }].
+            map(({ n, title, desc }) =>
+            <div key={n} className="space-y-4 relative">
                 {n !== '1' && <ArrowRight className="hidden md:block absolute -left-4 top-8 h-6 w-6 text-muted-foreground/40" />}
                 <div className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-display text-2xl font-bold mx-auto">{n}</div>
                 <h3 className="font-display text-xl font-bold text-foreground">{title}</h3>
                 <p className="font-body text-muted-foreground text-sm">{desc}</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
@@ -91,6 +91,6 @@ export default function AboutPage() {
           </Button>
         </div>
       </section>
-    </StorefrontLayout>
-  );
+    </StorefrontLayout>);
+
 }
