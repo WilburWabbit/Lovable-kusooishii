@@ -243,7 +243,7 @@ export default function BrowsePage() {
                         )}
                         {set.best_grade && (
                           <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
-                            G{set.best_grade}
+                            {gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}`}
                           </span>
                         )}
                       </div>
