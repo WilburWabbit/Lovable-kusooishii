@@ -737,7 +737,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         correlation_id: correlationId,
-        months_processed: monthRanges.length,
+        month: monthLabel,
         total: totalPurchases,
         landed: totalLanded,
         auto_processed: autoProcessed,
