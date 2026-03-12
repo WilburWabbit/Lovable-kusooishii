@@ -267,9 +267,9 @@ export default function BrowsePage() {
                     </div>
                   ))}
                 </div>
-              ) : products && products.length > 0 ? (
+              ) : filteredProducts && filteredProducts.length > 0 ? (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {products.map((set) => (
+                  {filteredProducts.map((set) => (
                     <Link
                       key={set.product_id}
                       to={`/sets/${set.mpn}`}
