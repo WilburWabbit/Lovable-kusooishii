@@ -163,19 +163,6 @@ async function updateInventoryQuantity(token: string, sku: string, quantity: num
   });
 }
 
-/* ── SKU code helper: eBay SKU → local sku_code convention ── */
-function normaliseSkuCode(ebaySku: string): string {
-  // eBay SKUs use dot notation e.g. "10311.1", local sku_code uses "10311-G1"
-  const trimmed = ebaySku.trim();
-  const dotIdx = trimmed.indexOf(".");
-  if (dotIdx > 0) {
-    const mpn = trimmed.substring(0, dotIdx);
-    const grade = trimmed.substring(dotIdx + 1) || "1";
-    return `${mpn}-G${["1","2","3","4","5"].includes(grade) ? grade : "1"}`;
-  }
-  return trimmed;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
