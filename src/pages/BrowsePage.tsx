@@ -26,6 +26,7 @@ export default function BrowsePage() {
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
+  const [yearRange, setYearRange] = useState<[number, number] | null>(null);
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
