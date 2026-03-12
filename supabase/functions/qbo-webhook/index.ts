@@ -91,13 +91,12 @@ async function resolveSkuFromQboItem(admin: any, baseUrl: string, accessToken: s
   const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${itemRefValue}`);
   const qboItem = itemData?.Item ?? null;
   const skuField = qboItem?.Sku;
+  // Use the raw QBO SKU verbatim as sku_code
   let skuCode: string | null = null;
   if (skuField && String(skuField).trim()) {
-    const p = parseSku(String(skuField));
-    skuCode = `${p.mpn}-G${p.conditionGrade}`;
+    skuCode = String(skuField).trim();
   } else if (itemRefName) {
-    const p = parseSku(String(itemRefName));
-    skuCode = `${p.mpn}-G${p.conditionGrade}`;
+    skuCode = String(itemRefName).trim();
   }
   if (!skuCode) return { skuId: null, skuCode: null };
   const { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
