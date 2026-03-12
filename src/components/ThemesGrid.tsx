@@ -90,7 +90,7 @@ export function ThemesGrid() {
                 to={`/browse?theme=${theme.theme_id}`}
                 className="group relative flex flex-col overflow-hidden rounded-lg border border-border bg-background transition-all hover:shadow-lg hover:border-primary/30"
               >
-                <div className="aspect-[4/3] bg-muted/30 relative overflow-hidden">
+                <div className="aspect-[4/3] bg-background relative overflow-hidden">
                   {theme.sample_img ? (
                     <img
                       src={theme.sample_img}
