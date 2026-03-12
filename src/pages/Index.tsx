@@ -78,7 +78,7 @@ export default function HomePage() {
             { icon: Truck, title: "Club Collection", desc: "Free pickup at local LEGO clubs" },
           ].map(({ icon: Icon, title, desc }) => (
             <div key={title} className="flex items-center gap-4 px-6 py-6">
-              <Icon className="h-5 w-5 shrink-0 text-primary" />
+              <Icon className="h-5 w-5 shrink-0 text-blue-500" />
               <div>
                 <p className="font-display text-sm font-semibold text-foreground">{title}</p>
                 <p className="font-body text-xs text-muted-foreground">{desc}</p>
