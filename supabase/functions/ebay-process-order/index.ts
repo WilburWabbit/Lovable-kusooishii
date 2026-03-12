@@ -612,8 +612,8 @@ Deno.serve(async (req) => {
 
     for (const li of lineItems) {
       const ebaySku = li.sku || "";
-      const localCode = normaliseSkuCode(ebaySku);
-      const matchedSku = skuMap.get(localCode.toLowerCase()) || skuMap.get(ebaySku.toLowerCase());
+      // Direct lookup — eBay SKU should match sku_code exactly
+      const matchedSku = skuMap.get(ebaySku.trim().toLowerCase());
 
       if (!matchedSku) {
         console.warn(`No SKU match for eBay SKU "${ebaySku}" in order ${orderId}`);
