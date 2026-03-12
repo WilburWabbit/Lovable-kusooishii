@@ -39,7 +39,7 @@ export function StorefrontHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container flex items-center justify-between h-16">
+      <div className="container flex items-center justify-between h-16 text-secondary-foreground">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <span className="font-display text-xl font-bold tracking-tight text-foreground">
