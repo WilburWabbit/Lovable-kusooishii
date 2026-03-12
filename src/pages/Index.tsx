@@ -125,7 +125,7 @@ export default function HomePage() {
                     className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
                   >
                     {/* Image */}
-                    <div className="aspect-square bg-kuso-mist">
+                    <div className="aspect-square bg-background">
                       {set.img_url ? (
                         <img
                           src={set.img_url}
