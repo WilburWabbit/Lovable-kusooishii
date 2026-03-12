@@ -562,13 +562,18 @@ Deno.serve(async (req) => {
       const { sku_id, channel, sale_price, shipping_charged } = params;
       if (!sku_id || !channel || sale_price === undefined) throw new Error("sku_id, channel, and sale_price are required");
 
-      // 1. Get SKU → product weight
+      // 1. Get SKU → product dimensions
       const { data: skuData } = await admin
         .from("sku")
-        .select("id, price, product:product_id(weight_kg)")
+        .select("id, price, product:product_id(weight_kg, length_cm, width_cm, height_cm)")
         .eq("id", sku_id)
         .single();
-      const weightKg = (skuData?.product as any)?.weight_kg ?? 0;
+      const product = (skuData?.product as any) ?? {};
+      const weightKg = product.weight_kg ?? 0;
+      const lengthCm = product.length_cm;
+      const widthCm = product.width_cm;
+      const heightCm = product.height_cm;
+      const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
 
       // 2. Get carrying value (avg of available stock)
       const { data: stockUnits } = await admin
@@ -595,7 +600,7 @@ Deno.serve(async (req) => {
       for (const fee of fees ?? []) {
         let base = salePrice;
         if (fee.applies_to === "sale_plus_shipping") base = salePrice + shippingCharged;
-        else if (fee.applies_to === "sale_price_inc_vat") base = salePrice * 1.2; // UK VAT
+        else if (fee.applies_to === "sale_price_inc_vat") base = salePrice * 1.2;
         let amount = (base * (fee.rate_percent / 100)) + (fee.fixed_amount ?? 0);
         if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
         if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
@@ -604,16 +609,37 @@ Deno.serve(async (req) => {
         feeBreakdown.push({ fee_name: fee.fee_name, amount });
       }
 
-      // 5. Get shipping cost from rate table
-      const { data: rates } = await admin
+      // 5. Get shipping cost — dimension-aware matching
+      let shippingCost = 0;
+      let matchedRate: any = null;
+
+      // Fetch all active rates for channel
+      const { data: allRates } = await admin
         .from("shipping_rate_table")
         .select("*")
         .or(`channel.eq.${channel},channel.eq.default`)
         .eq("active", true)
         .gte("max_weight_kg", weightKg)
-        .order("max_weight_kg", { ascending: true })
-        .limit(1);
-      const shippingCost = rates && rates.length > 0 ? Number(rates[0].cost) : 0;
+        .order("cost", { ascending: true });
+
+      if (hasDimensions && allRates && allRates.length > 0) {
+        // Filter by dimensions: length, width, depth (height)
+        matchedRate = allRates.find((r: any) =>
+          (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
+          (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
+          (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
+        );
+      }
+
+      if (!matchedRate) {
+        // Default to Evri Small Parcel (cheapest that fits weight)
+        const evriSmall = (allRates ?? []).filter((r: any) =>
+          r.carrier === "Evri" && r.size_band === "Small Parcel"
+        );
+        matchedRate = evriSmall.length > 0 ? evriSmall[0] : (allRates && allRates.length > 0 ? allRates[0] : null);
+      }
+
+      shippingCost = matchedRate ? Number(matchedRate.cost) : 0;
 
       // 6. Get defaults
       const { data: defaults } = await admin
