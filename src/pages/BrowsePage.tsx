@@ -107,7 +107,7 @@ export default function BrowsePage() {
           <div className="container">
             <h1 className="font-display text-2xl font-bold text-foreground">Browse Sets</h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">
-              {isLoading ? "Loading…" : `${products?.length ?? 0} sets available`} · condition graded · version tracked
+              {isLoading ? "Loading…" : `${filteredProducts?.length ?? 0} sets available`} · condition graded · version tracked
             </p>
           </div>
         </div>
