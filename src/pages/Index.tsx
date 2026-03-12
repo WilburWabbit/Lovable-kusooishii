@@ -1,27 +1,34 @@
 import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight, Star, Shield, Truck } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
-// Mock featured products
-const featuredSets = [
-  { mpn: "75367-1", name: "Venator-Class Republic Attack Cruiser", theme: "Star Wars", grade: 1, price: 649.99, retired: true },
-  { mpn: "10497-1", name: "Galaxy Explorer", theme: "Icons", grade: 2, price: 119.99, retired: false },
-  { mpn: "21330-1", name: "Home Alone", theme: "Ideas", grade: 1, price: 349.99, retired: true },
-  { mpn: "42151-1", name: "Bugatti Bolide", theme: "Technic", grade: 1, price: 54.99, retired: false },
-  { mpn: "10305-1", name: "Lion Knights' Castle", theme: "Icons", grade: 2, price: 449.99, retired: true },
-  { mpn: "75341-1", name: "Luke Skywalker's Landspeeder", theme: "Star Wars", grade: 1, price: 249.99, retired: true },
-];
-
-const gradeLabels: Record<number, string> = {
-  1: "Mint",
-  2: "Excellent",
-  3: "Good",
-  4: "Acceptable",
+const gradeLabels: Record<string, string> = {
+  "1": "Mint",
+  "2": "Excellent",
+  "3": "Good",
+  "4": "Acceptable",
 };
 
 export default function HomePage() {
+  const { data: featuredSets, isLoading } = useQuery({
+    queryKey: ["featured_sets"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("browse_catalog", {
+        search_term: null,
+        filter_theme_id: null,
+        filter_grade: null,
+        filter_retired: null,
+      });
+      if (error) throw error;
+      return (data as any[]).slice(0, 6);
+    },
+  });
+
   return (
     <StorefrontLayout>
       {/* Hero */}
@@ -100,50 +107,73 @@ export default function HomePage() {
           </div>
 
           <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {featuredSets.map((set) => (
-              <Link
-                key={set.mpn}
-                to={`/sets/${set.mpn}`}
-                className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
-              >
-                {/* Image placeholder */}
-                <div className="aspect-square bg-kuso-mist p-8">
-                  <div className="flex h-full items-center justify-center">
-                    <span className="font-display text-4xl font-bold text-muted-foreground/20">
-                      {set.mpn.split("-")[0]}
-                    </span>
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="border border-border">
+                    <Skeleton className="aspect-square w-full rounded-none" />
+                    <div className="space-y-2 p-4">
+                      <Skeleton className="h-3 w-24" />
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-5 w-16" />
+                    </div>
                   </div>
-                </div>
+                ))
+              : featuredSets?.map((set) => (
+                  <Link
+                    key={set.product_id}
+                    to={`/sets/${set.mpn}`}
+                    className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
+                  >
+                    {/* Image */}
+                    <div className="aspect-square bg-kuso-mist">
+                      {set.img_url ? (
+                        <img
+                          src={set.img_url}
+                          alt={set.name}
+                          className="h-full w-full object-contain p-4"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-8">
+                          <span className="font-display text-4xl font-bold text-muted-foreground/20">
+                            {set.mpn.split("-")[0]}
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-                {/* Badges */}
-                <div className="absolute left-3 top-3 flex gap-1.5">
-                  {set.retired && (
-                    <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
-                      Retired
-                    </span>
-                  )}
-                  <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                    Grade {set.grade}
-                  </span>
-                </div>
+                    {/* Badges */}
+                    <div className="absolute left-3 top-3 flex gap-1.5">
+                      {set.retired_flag && (
+                        <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
+                          Retired
+                        </span>
+                      )}
+                      {set.best_grade && (
+                        <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
+                          Grade {set.best_grade}
+                        </span>
+                      )}
+                    </div>
 
-                {/* Info */}
-                <div className="flex flex-1 flex-col p-4">
-                  <p className="font-body text-xs text-muted-foreground">{set.theme} · {set.mpn}</p>
-                  <h3 className="mt-1 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
-                    {set.name}
-                  </h3>
-                  <div className="mt-auto pt-3 flex items-baseline justify-between">
-                    <span className="font-display text-lg font-bold text-foreground">
-                      £{set.price.toFixed(2)}
-                    </span>
-                    <span className="font-body text-xs text-muted-foreground">
-                      {gradeLabels[set.grade]}
-                    </span>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                    {/* Info */}
+                    <div className="flex flex-1 flex-col p-4">
+                      <p className="font-body text-xs text-muted-foreground">
+                        {set.theme_name ?? "Uncategorised"} · {set.mpn}
+                      </p>
+                      <h3 className="mt-1 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                        {set.name}
+                      </h3>
+                      <div className="mt-auto pt-3 flex items-baseline justify-between">
+                        <span className="font-display text-lg font-bold text-foreground">
+                          {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
+                        </span>
+                        <span className="font-body text-xs text-muted-foreground">
+                          {set.best_grade ? gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
           </div>
 
           <div className="mt-8 text-center sm:hidden">

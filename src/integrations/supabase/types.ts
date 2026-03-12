@@ -2013,6 +2013,7 @@ export type Database = {
         }
         Returns: {
           best_grade: string
+          img_url: string
           min_price: number
           mpn: string
           name: string

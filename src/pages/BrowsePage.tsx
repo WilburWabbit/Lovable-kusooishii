@@ -58,7 +58,7 @@ export default function BrowsePage() {
         product_id: string; mpn: string; name: string; theme_name: string | null;
         theme_id: string | null; retired_flag: boolean; release_year: number | null;
         piece_count: number | null; min_price: number | null; best_grade: string | null;
-        total_stock: number;
+        total_stock: number; img_url: string | null;
       }[];
     },
   });
@@ -208,12 +208,20 @@ export default function BrowsePage() {
                       to={`/sets/${set.mpn}`}
                       className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
                     >
-                      <div className="aspect-square bg-kuso-mist p-6">
-                        <div className="flex h-full items-center justify-center">
-                          <span className="font-display text-3xl font-bold text-muted-foreground/20">
-                            {set.mpn.split("-")[0]}
-                          </span>
-                        </div>
+                      <div className="aspect-square bg-kuso-mist">
+                        {set.img_url ? (
+                          <img
+                            src={set.img_url}
+                            alt={set.name}
+                            className="h-full w-full object-contain p-4"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center p-6">
+                            <span className="font-display text-3xl font-bold text-muted-foreground/20">
+                              {set.mpn.split("-")[0]}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="absolute left-2 top-2 flex gap-1">
