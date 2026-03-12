@@ -76,7 +76,7 @@ export default function PricingDashboardPage() {
     // Fetch SKUs with product details
     const { data: skuData, error: skuError } = await supabase
       .from("sku")
-      .select("id, sku_code, condition_grade, price, name, product:product_id(name, mpn)")
+      .select("id, sku_code, condition_grade, price, product:product_id(name, mpn)")
       .eq("active_flag", true)
       .order("sku_code");
 
@@ -131,7 +131,7 @@ export default function PricingDashboardPage() {
         id: r.id,
         sku_code: r.sku_code,
         condition_grade: r.condition_grade ?? "—",
-        product_name: r.product?.name ?? r.name ?? "—",
+        product_name: r.product?.name ?? "—",
         mpn: r.product?.mpn ?? "—",
         stock_qty: stockMap.get(r.id) ?? 0,
         price: r.price,
