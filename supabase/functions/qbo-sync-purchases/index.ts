@@ -408,6 +408,15 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
+    // Parse request body for full_sync flag
+    let fullSync = false;
+    try {
+      const body = await req.json();
+      fullSync = body?.full_sync === true;
+    } catch {
+      // No body or invalid JSON — default to incremental
+    }
+
     if (!isWebhook) {
       const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
       if (userError || !user) throw new Error("Unauthorized");
@@ -430,8 +439,29 @@ Deno.serve(async (req) => {
     // Generate a correlation ID for this sync run
     const correlationId = crypto.randomUUID();
 
-    // Query purchases from QBO
-    const query = encodeURIComponent("SELECT * FROM Purchase MAXRESULTS 1000");
+    // ── Incremental sync: determine date filter ──
+    let dateFilter = "";
+    if (!fullSync) {
+      const { data: lastLanding } = await supabaseAdmin
+        .from("landing_raw_qbo_purchase")
+        .select("received_at")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastLanding?.received_at) {
+        // Use the last sync time minus 1 hour buffer for safety
+        const lastSync = new Date(new Date(lastLanding.received_at).getTime() - 3600_000);
+        const isoDate = lastSync.toISOString().slice(0, 19);
+        dateFilter = ` WHERE MetaData.LastUpdatedTime > '${isoDate}'`;
+        console.log(`Incremental sync: fetching purchases updated after ${isoDate}`);
+      }
+    } else {
+      console.log("Full sync requested");
+    }
+
+    // Query purchases from QBO (incremental or full)
+    const query = encodeURIComponent(`SELECT * FROM Purchase${dateFilter} MAXRESULTS 1000`);
     const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
