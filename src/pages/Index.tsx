@@ -157,12 +157,12 @@ export default function HomePage() {
 
                     {/* Info */}
                     <div className="flex flex-1 flex-col p-4">
-                      <p className="font-body text-xs text-muted-foreground">
-                        {set.theme_name ?? "Uncategorised"} · {set.mpn}
-                      </p>
-                      <h3 className="mt-1 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                      <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
                         {set.name}
                       </h3>
+                      <p className="mt-1 font-body text-xs text-muted-foreground">
+                        {set.theme_name ?? "Uncategorised"} · {set.mpn}
+                      </p>
                       <div className="mt-auto pt-3 flex items-baseline justify-between">
                         <span className="font-display text-lg font-bold text-foreground">
                           {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
