@@ -169,7 +169,35 @@ Deno.serve(async (req) => {
       // Use the raw QBO SKU verbatim as sku_code (canonical identifier)
       const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
-      const productId = productByMpn.get(mpn) ?? null;
+      let productId = productByMpn.get(mpn) ?? null;
+
+      // Auto-create product from catalog if no product exists
+      if (!productId && mpn) {
+        const catalog = catalogByMpn.get(mpn);
+        if (catalog) {
+          const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+            mpn,
+            name: catalog.name,
+            theme_id: catalog.theme_id,
+            piece_count: catalog.piece_count,
+            release_year: catalog.release_year,
+            retired_flag: catalog.retired_flag ?? false,
+            img_url: catalog.img_url,
+            subtheme_name: catalog.subtheme_name,
+            product_type: catalog.product_type ?? "set",
+            lego_catalog_id: catalog.id,
+            status: "active",
+          }).select("id").single();
+          if (prodErr) {
+            console.error(`Auto-create product for ${mpn}:`, prodErr.message);
+          } else if (newProduct) {
+            productId = newProduct.id;
+            productByMpn.set(mpn, newProduct.id);
+            productsCreated++;
+            console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
+          }
+        }
+      }
 
       // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,
       // link it to this QBO item before upserting (avoids sku_code unique violation)
