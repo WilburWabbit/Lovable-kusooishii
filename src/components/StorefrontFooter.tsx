@@ -11,7 +11,9 @@ export function StorefrontFooter() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4">
           {/* Brand */}
           <div className="space-y-4">
-            <img src={kusoLogo} alt="Kuso Oishii" className="h-8 brightness-0 invert" />
+            <span className="font-display tracking-tight text-primary-foreground text-2xl font-extrabold">
+              KUSO OISHII
+            </span>
             <p className="font-body text-sm text-primary-foreground/60">
               Affordable LEGO®, responsibly re-sold. Rescued stock from UK retailers at fair prices.
             </p>
