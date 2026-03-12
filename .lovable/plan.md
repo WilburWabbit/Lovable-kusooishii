@@ -1,48 +1,46 @@
 
 
-## Fix: Stale Edge Functions Producing `-G` SKU Codes
+## Plan: Auto-Create Products During QBO Item Sync
 
-### Root Cause
-
-The code in the repository correctly uses raw QBO SKU verbatim (dot notation like `42129-1.2`), but the **deployed edge functions** are running an older version that converts dot notation to `-G` format (e.g., `42129-1-G2`). Evidence:
-
-- QBO sends: `42129-1.2` (confirmed via `landing_raw_qbo_item` payloads)
-- Database stores: `42129-1-G2` (all 362 SKUs in `-G` format, zero in dot format)
-- Last sync ran today at 15:53 UTC and produced `-G` results
-- No database triggers transform the SKU — the conversion happens in the deployed function code
-
-The repo code has been fixed but the edge functions were never redeployed.
+### Problem
+The `qbo-sync-items` function only **links** SKUs to existing `product` records by MPN lookup. It never creates new product records. So 94 SKUs have `product_id = NULL` — 20 of those have matching `lego_catalog` entries that could seed a product automatically.
 
 ### Fix
+Update `qbo-sync-items/index.ts` to auto-create a `product` record when:
+1. No product exists for the parsed MPN
+2. A `lego_catalog` entry exists for that MPN
 
-**1. Redeploy all QBO-related edge functions** to ensure the deployed code matches the repo:
-- `qbo-sync-items` — the primary offender, syncs all QBO items to SKUs
-- `qbo-sync-purchases` — creates SKUs during purchase processing
-- `qbo-sync-sales` — resolves SKUs during sales sync
-- `qbo-webhook` — handles real-time QBO item/purchase/sale webhooks
-- `process-receipt` — manual receipt processing, creates SKUs
+The new product is created from catalog data (name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name) and then linked to the SKU.
 
-**2. Database migration** — fix all 362 existing SKU records from `-G` back to dot notation:
+### Changes
 
-```sql
--- Convert -G1 → .1, -G2 → .2, etc. for all SKUs
-UPDATE sku
-SET sku_code = regexp_replace(sku_code, '-G(\d)$', '.\1')
-WHERE sku_code ~ '-G\d$';
+**`supabase/functions/qbo-sync-items/index.ts`**
+
+After the `productByMpn` map is built (line ~116), also pre-fetch `lego_catalog` into a `catalogByMpn` map.
+
+Inside the per-item loop, after MPN is parsed, if `productByMpn` has no match but `catalogByMpn` does:
+1. Insert a new `product` row using catalog data
+2. Add it to `productByMpn` so subsequent SKUs with the same MPN reuse it
+3. Set `productId` on the SKU upsert
+
+```text
+Flow per QBO item:
+  parse MPN from SKU
+  productId = productByMpn[mpn]
+  if (!productId && catalogByMpn[mpn]) {
+    insert product from catalog
+    productByMpn[mpn] = new product id
+    productId = new id
+  }
+  upsert SKU with productId
 ```
 
-Also update any `channel_listing.external_sku` and `inbound_receipt_line.sku_code` values that use `-G` format.
+For the 74 orphaned SKUs with no catalog match, the SKU is still created with `product_id = NULL` as before — those are minifigs/parts/non-standard items without catalog entries.
 
-**3. Code audit result** — the current repo code is correct across all five functions:
-- `parseSku()` is only used to extract MPN and condition_grade for internal logic
-- `sku_code` is always set from the raw QBO `Sku` field verbatim
-- Fallback reconstruction (`mpn.grade`) uses dot notation correctly
-- No `-G` transformation exists anywhere in the current codebase
-
-### Files Changed
-
+### Scope
 | File | Change |
 |------|--------|
-| All 5 QBO edge functions | Redeploy (no code changes needed — repo is correct) |
-| New SQL migration | Convert all `-G` sku_codes to dot notation across `sku`, `channel_listing`, `inbound_receipt_line` |
+| `supabase/functions/qbo-sync-items/index.ts` | Add catalog lookup + auto-create product logic |
+
+No database migration needed. No frontend changes.
 
