@@ -55,12 +55,18 @@ function fmt(v: number | null) {
   return v != null ? `£${v.toFixed(2)}` : "—";
 }
 
+interface ChannelConfig {
+  channel: string;
+  auto_price_enabled: boolean;
+}
+
 export default function PricingDashboardPage() {
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
   const [belowFloorOnly, setBelowFloorOnly] = useState(false);
+  const [autoPriceConfigs, setAutoPriceConfigs] = useState<ChannelConfig[]>([]);
 
   const { prefs, toggleSort, toggleColumn, moveColumn } = useTablePreferences(
     "admin-pricing",
