@@ -2,6 +2,9 @@ import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { QboSettingsPanel } from "./QboSettingsPanel";
 import { BrickEconomySettingsPanel } from "./BrickEconomySettingsPanel";
 import { EbaySettingsPanel } from "./EbaySettingsPanel";
+import { ChannelFeesSettingsPanel } from "./ChannelFeesSettingsPanel";
+import { ShippingRatesSettingsPanel } from "./ShippingRatesSettingsPanel";
+import { SellingCostDefaultsPanel } from "./SellingCostDefaultsPanel";
 
 export function SettingsPage() {
   return (
@@ -10,6 +13,9 @@ export function SettingsPage() {
         <QboSettingsPanel />
         <EbaySettingsPanel />
         <BrickEconomySettingsPanel />
+        <SellingCostDefaultsPanel />
+        <ChannelFeesSettingsPanel />
+        <ShippingRatesSettingsPanel />
       </div>
     </BackOfficeLayout>
   );
