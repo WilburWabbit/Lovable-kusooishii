@@ -225,8 +225,23 @@ export default function PricingDashboardPage() {
           </Card>
         </div>
 
+        {/* Batch Run */}
+        {batchRunning && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Pricing {batchProgress.done} of {batchProgress.total}…</span>
+              <span>{batchProgress.total > 0 ? Math.round((batchProgress.done / batchProgress.total) * 100) : 0}%</span>
+            </div>
+            <Progress value={batchProgress.total > 0 ? (batchProgress.done / batchProgress.total) * 100 : 0} className="h-2" />
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-wrap items-end gap-3">
+          <Button size="sm" onClick={handleRunAllPricing} disabled={batchRunning || loading}>
+            {batchRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
+            Run All Pricing{channelFilter !== "all" ? ` (${channelFilter})` : ""}
+          </Button>
           <div className="flex-1 min-w-[200px]">
             <Input placeholder="Search product, MPN or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9" />
           </div>
