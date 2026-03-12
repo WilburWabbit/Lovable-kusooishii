@@ -49,6 +49,9 @@ const operationalItems = [
 
 const settingsItems = [
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Integrations", url: "/admin/settings/integrations", icon: Plug },
+  { title: "Selling Fees", url: "/admin/settings/selling-fees", icon: Receipt },
+  { title: "Shipping Rates", url: "/admin/settings/shipping-rates", icon: Truck },
   { title: "Users", url: "/admin/settings/users", icon: Users },
   { title: "VAT Rates", url: "/admin/settings/vat-rates", icon: Percent },
 ];
