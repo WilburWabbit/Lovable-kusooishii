@@ -43,7 +43,7 @@ export function StorefrontHeader() {
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <span className="font-display text-xl font-bold tracking-tight text-foreground">
-            KUSO<span className="text-2xl text-primary font-extrabold">KUSO OISHII</span>OISHII
+            KUSO<span className="text-2xl text-primary font-extrabold"></span>OISHII
           </span>
         </Link>
 
