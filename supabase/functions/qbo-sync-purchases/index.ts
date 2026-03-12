@@ -408,7 +408,7 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    // Parse request body for optional month filter
+    // Parse request body for required month parameter
     let targetMonth: string | null = null;
     try {
       const body = await req.json();
@@ -416,7 +416,13 @@ Deno.serve(async (req) => {
         targetMonth = body.month; // e.g. "2025-06"
       }
     } catch {
-      // No body or invalid JSON — sync all months
+      // No body or invalid JSON — default to current month
+    }
+
+    // Default to current month if none provided
+    if (!targetMonth) {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     }
 
     if (!isWebhook) {
