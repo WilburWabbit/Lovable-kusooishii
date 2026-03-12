@@ -260,7 +260,43 @@ export default function ProductDetailAdminPage() {
     }
   };
 
-  if (isLoading) {
+  const handleCalculatePricing = async (skuId: string, channel: string) => {
+    const key = `${skuId}:${channel}`;
+    setPricingLoading(key);
+    try {
+      const result = await invokeWithAuth<any>("admin-data", { action: "calculate-pricing", sku_id: skuId, channel });
+      setPricingResults((prev) => ({ ...prev, [key]: result }));
+      
+      // Find the listing to persist prices
+      const listing = product?.channel_listings.find((cl) => cl.sku_id === skuId && cl.channel === channel);
+      if (listing) {
+        await invokeWithAuth("admin-data", {
+          action: "update-listing-prices",
+          listing_id: listing.id,
+          price_floor: result.floor_price,
+          price_target: result.target_price,
+          price_ceiling: result.ceiling_price,
+          confidence_score: result.confidence_score,
+        });
+      }
+      toast.success("Pricing calculated");
+    } catch (err: any) {
+      toast.error(err.message ?? "Pricing failed");
+    } finally {
+      setPricingLoading(null);
+    }
+  };
+
+  const handleCalculateAllPricing = async () => {
+    if (!product) return;
+    for (const sku of product.skus) {
+      for (const cl of sku.channel_listings) {
+        await handleCalculatePricing(sku.id, cl.channel);
+      }
+    }
+  };
+
+
     return (
       <BackOfficeLayout title="Product">
         <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
