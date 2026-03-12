@@ -108,15 +108,23 @@ Deno.serve(async (req) => {
     );
     console.log(`Fetched ${qboItems.length} QBO items (correlation: ${correlationId})`);
 
-    // Pre-fetch all products for MPN lookup
-    const { data: allProducts } = await admin.from("product").select("id, mpn");
+    // Pre-fetch all products and catalog entries for MPN lookup
+    const [{ data: allProducts }, { data: allCatalog }] = await Promise.all([
+      admin.from("product").select("id, mpn"),
+      admin.from("lego_catalog").select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type").eq("status", "active"),
+    ]);
     const productByMpn = new Map<string, string>();
     for (const p of allProducts ?? []) {
       productByMpn.set(p.mpn, p.id);
     }
+    const catalogByMpn = new Map<string, any>();
+    for (const c of allCatalog ?? []) {
+      catalogByMpn.set(c.mpn, c);
+    }
 
     let upserted = 0;
     let linked = 0;
+    let productsCreated = 0;
     let skippedNoMpn = 0;
     let errors = 0;
 
