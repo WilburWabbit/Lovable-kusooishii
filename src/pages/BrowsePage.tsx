@@ -33,22 +33,21 @@ export default function BrowsePage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch only themes that have in-stock products
+  // Fetch only themes that have in-stock, published products
   const { data: themes } = useQuery({
     queryKey: ["themes_with_stock"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product")
-        .select("theme_id, theme:theme_id(id, name)")
-        .eq("status", "active")
-        .not("theme_id", "is", null);
+      const { data, error } = await supabase.rpc("browse_catalog", {
+        search_term: null,
+        filter_theme_id: null,
+        filter_grade: null,
+        filter_retired: null,
+      });
       if (error) throw error;
-      // Deduplicate and extract theme info
       const themeMap = new Map<string, { id: string; name: string }>();
-      for (const row of data) {
-        const t = row.theme as unknown as { id: string; name: string } | null;
-        if (t && !themeMap.has(t.id)) {
-          themeMap.set(t.id, t);
+      for (const row of (data as any[])) {
+        if (row.theme_id && row.theme_name && !themeMap.has(row.theme_id)) {
+          themeMap.set(row.theme_id, { id: row.theme_id, name: row.theme_name });
         }
       }
       return Array.from(themeMap.values()).sort((a, b) => a.name.localeCompare(b.name));
