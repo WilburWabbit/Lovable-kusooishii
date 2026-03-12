@@ -114,6 +114,286 @@ async function resolveParentCategory(
   return { parentItemId, brand, itemType };
 }
 
+// ────────────────────────────────────────────────────────────
+// Post-creation enrichment: BrickEconomy + AI Copy
+// ────────────────────────────────────────────────────────────
+
+const BE_BASE = "https://www.brickeconomy.com/api/v1";
+
+/**
+ * Fetch a single set or minifig from BrickEconomy API, store in
+ * brickeconomy_collection, and enrich the product record.
+ */
+async function enrichFromBrickEconomy(
+  admin: any, mpn: string, itemType: string, productId: string
+): Promise<boolean> {
+  const apiKey = Deno.env.get("BRICKECONOMY_API_KEY");
+  if (!apiKey) { console.warn("BRICKECONOMY_API_KEY not configured — skipping enrichment"); return false; }
+
+  const isMinifig = itemType.toLowerCase().includes("minifig");
+  const endpoint = isMinifig ? `${BE_BASE}/minifig/${encodeURIComponent(mpn)}` : `${BE_BASE}/set/${encodeURIComponent(mpn)}`;
+
+  const res = await fetch(`${endpoint}?currency=GBP`, {
+    headers: { "x-apikey": apiKey, "User-Agent": "BrickKeeperSync/1.0", Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    // Try without the "-1" suffix for sets (e.g. "75367-1" → "75367")
+    if (!isMinifig && mpn.endsWith("-1")) {
+      const baseMpn = mpn.replace(/-1$/, "");
+      const retryRes = await fetch(`${BE_BASE}/set/${encodeURIComponent(baseMpn)}?currency=GBP`, {
+        headers: { "x-apikey": apiKey, "User-Agent": "BrickKeeperSync/1.0", Accept: "application/json" },
+      });
+      if (!retryRes.ok) {
+        console.warn(`BrickEconomy lookup failed for ${mpn} and ${baseMpn}: ${retryRes.status}`);
+        return false;
+      }
+      const retryData = await retryRes.json();
+      return await processBrickEconomyResponse(admin, retryData, isMinifig, mpn, productId);
+    }
+    console.warn(`BrickEconomy lookup failed for ${mpn}: ${res.status}`);
+    return false;
+  }
+
+  const data = await res.json();
+  return await processBrickEconomyResponse(admin, data, isMinifig, mpn, productId);
+}
+
+async function processBrickEconomyResponse(
+  admin: any, data: any, isMinifig: boolean, mpn: string, productId: string
+): Promise<boolean> {
+  // Unwrap response envelope
+  const itemData = data.data ?? data;
+  const item = isMinifig ? itemData : itemData;
+
+  const now = new Date().toISOString();
+
+  // Store in brickeconomy_collection
+  const itemNumber = isMinifig
+    ? String(item.minifig_number ?? item.set_number ?? mpn)
+    : String(item.set_number ?? mpn);
+
+  await admin.from("brickeconomy_collection").upsert({
+    item_type: isMinifig ? "minifig" : "set",
+    item_number: itemNumber,
+    name: item.name ?? null,
+    theme: item.theme ?? null,
+    subtheme: item.subtheme ?? null,
+    year: item.year ?? null,
+    pieces_count: item.pieces_count ?? null,
+    minifigs_count: item.minifigs_count ?? null,
+    current_value: item.current_value ?? null,
+    growth: item.growth ?? null,
+    retail_price: item.retail_price ?? null,
+    released_date: item.released_date ?? null,
+    retired_date: item.retired_date ?? null,
+    currency: "GBP",
+    synced_at: now,
+  }, { onConflict: "item_type,item_number,paid_price,acquired_date" }).then(({ error }: any) => {
+    if (error) console.error(`brickeconomy_collection upsert error:`, error.message);
+  });
+
+  // Enrich the product record with BrickEconomy data
+  const updates: Record<string, any> = {};
+  if (item.name && !isMinifig) updates.name = item.name;
+  if (item.pieces_count) updates.piece_count = item.pieces_count;
+  if (item.year) updates.release_year = item.year;
+  if (item.retired_date) updates.retired_flag = true;
+
+  // Link to lego_catalog if match exists
+  const mpnVariants = [mpn];
+  if (!mpn.includes("-")) mpnVariants.push(`${mpn}-1`);
+  const { data: catalogMatch } = await admin
+    .from("lego_catalog").select("id, brickeconomy_id")
+    .in("mpn", mpnVariants).is("brickeconomy_id", null).limit(1);
+  if (catalogMatch && catalogMatch.length > 0) {
+    await admin.from("lego_catalog").update({ brickeconomy_id: itemNumber }).eq("id", catalogMatch[0].id);
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await admin.from("product").update(updates).eq("id", productId);
+  }
+
+  console.log(`BrickEconomy enriched product ${productId} (${mpn}): value=${item.current_value}`);
+  return true;
+}
+
+const COPY_SYSTEM_PROMPT = `You are writing for Kuso Oishii, an e-commerce shop voice defined by:
+
+"Banter up top, brutal clarity underneath."
+
+Tone: distinctly adult, sharp, irreverent, collector-intelligent.
+Energy: late-night confidence, dry wit, restrained menace. Not laddish. Not juvenile. Not corporate.
+You are speaking to grown collectors with disposable income and strong opinions.
+
+Voice rules:
+- Default tone: bold, witty, strong language, energetic, slightly dangerous.
+- You may use moderate profanity in the Hook, Description, or call to action (CTA).
+- Absolute limit: no graphic sexual language, no explicit sexual references, no fetish phrasing, no hate speech, no slurs, no politics.
+- No profanity in Specifications, Condition, Disclosures, policies or customer service content.
+- Suggestion and innuendo must remain subtle enough to pass mainstream advertising review.
+- If in doubt, prioritise wit over explicitness.
+
+Structure discipline:
+Hook (1–2 lines) → Description → 1-line CTA → Highlights → Specifications → Condition (always).
+
+Point of view:
+- Use second person ("you").
+- Use imperatives.
+- Use "we" only for trust or process statements.
+
+Collector fluency:
+- Use set numbers, minifig IDs or codes, theme and subtheme terminology.
+- Never invent missing facts.
+
+Description discipline:
+- The Description must be narrative-driven and persuasive.
+- Do not restate specifications such as piece count, release dates, retirement dates, price or inventory status unless essential for storytelling impact.
+- Do not repeat information that appears in Specifications.
+- Focus on atmosphere, display presence, collector psychology and ownership experience.
+- Sell the feeling of owning it, not the list of what it contains.
+- Avoid listing minifigure codes or technical data unless used naturally inside narrative context.
+- No bullet-style phrasing inside Description.
+- No recital of facts.
+- If the Description reads like a summary of Specifications, internally revise before output.
+
+Hyperbole:
+- Allowed in Hook and Description.
+- Never distort factual information.
+
+Language:
+- British English spelling and date formats such as "1 March 2025".
+- Avoid corporate filler language.
+
+Formatting discipline:
+- All content fields must contain Markdown-formatted text.
+- Do not use Markdown code fences.
+- Do not insert blank lines between paragraphs.
+- Use single line breaks only.
+- No double newline characters anywhere in the output.
+- No trailing spaces.
+- The Description must render as one continuous paragraph.
+- The Hook may contain a single line break at most.
+
+Data discipline:
+- Use only provided facts.
+- Do not invent availability, policies, or pricing logic.
+- Clean output. No duplicated sentences. Closed quotes. No stray characters.
+
+If required facts are missing, note them but continue with what you can.
+
+Constraints:
+- Hook: maximum 2 lines.
+- Description: 80–140 words.
+- CTA: single imperative sentence, 50 characters max.
+- Highlights: 3–6 bullets.
+- SEO title: 60 characters max.
+- SEO body: 400 characters max, no line breaks.
+
+Structure rigid. Narrative persuasive. Tone adult but platform-safe.`;
+
+/**
+ * Generate AI marketing copy for a product and auto-save to the product table.
+ */
+async function generateAndSaveCopy(admin: any, productId: string): Promise<boolean> {
+  const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!openaiKey) { console.warn("OPENAI_API_KEY not configured — skipping copy generation"); return false; }
+
+  // Fetch the product with theme join to build facts
+  const { data: product, error: pErr } = await admin
+    .from("product")
+    .select("mpn, name, piece_count, release_year, retired_flag, subtheme_name, product_type, brand, age_range, weight_kg, length_cm, width_cm, height_cm, theme:theme_id(name)")
+    .eq("id", productId)
+    .single();
+
+  if (pErr || !product) { console.error("Failed to fetch product for copy generation:", pErr?.message); return false; }
+
+  const themeName = product.theme?.name ?? null;
+  const facts: string[] = [];
+  facts.push(`Product name: ${product.name ?? product.mpn}`);
+  facts.push(`Set number / MPN: ${product.mpn}`);
+  if (themeName) facts.push(`Theme: ${themeName}`);
+  if (product.subtheme_name) facts.push(`Subtheme: ${product.subtheme_name}`);
+  if (product.piece_count) facts.push(`Piece count: ${product.piece_count}`);
+  if (product.release_year) facts.push(`Year released: ${product.release_year}`);
+  if (product.retired_flag) facts.push(`Retirement status: retired`);
+  if (product.age_range) facts.push(`Age mark: ${product.age_range}`);
+  if (product.weight_kg) facts.push(`Weight: ${product.weight_kg} kg`);
+  if (product.length_cm && product.width_cm && product.height_cm) {
+    facts.push(`Dimensions: ${product.length_cm} × ${product.width_cm} × ${product.height_cm} cm`);
+  }
+
+  const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: COPY_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "generate_copy",
+          description: "Return the generated product copy and SEO content.",
+          parameters: {
+            type: "object",
+            properties: {
+              seo_title: { type: "string", description: "SEO title, max 60 characters" },
+              seo_body: { type: "string", description: "SEO meta description, max 400 characters, no line breaks" },
+              hook: { type: "string", description: "Product hook, 1-2 lines max" },
+              description: { type: "string", description: "Narrative description, 80-140 words, single paragraph" },
+              cta: { type: "string", description: "Call to action, single imperative sentence, 50 characters max" },
+              highlights: { type: "array", items: { type: "string" }, description: "3-6 highlight bullet points" },
+            },
+            required: ["seo_title", "seo_body", "hook", "description", "cta", "highlights"],
+            additionalProperties: false,
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "generate_copy" } },
+    }),
+  });
+
+  if (!response.ok) {
+    console.error(`OpenAI copy generation failed [${response.status}]:`, await response.text());
+    return false;
+  }
+
+  const data = await response.json();
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+  let copy: any;
+  if (toolCall?.function?.arguments) {
+    copy = typeof toolCall.function.arguments === "string"
+      ? JSON.parse(toolCall.function.arguments)
+      : toolCall.function.arguments;
+  } else {
+    const content = data.choices?.[0]?.message?.content ?? "";
+    copy = JSON.parse(content);
+  }
+
+  // Save to product table
+  const highlightsBullets = Array.isArray(copy.highlights)
+    ? copy.highlights.map((h: string) => `• ${h}`).join("\n")
+    : copy.highlights ?? "";
+
+  const { error: saveErr } = await admin.from("product").update({
+    product_hook: copy.hook ?? null,
+    description: copy.description ?? null,
+    call_to_action: copy.cta ?? null,
+    highlights: highlightsBullets || null,
+    seo_title: copy.seo_title ?? null,
+    seo_description: copy.seo_body ?? null,
+  }).eq("id", productId);
+
+  if (saveErr) { console.error("Failed to save AI copy:", saveErr.message); return false; }
+  console.log(`AI copy generated and saved for product ${productId}`);
+  return true;
+}
+
 async function resolveVatRateId(admin: any, txnTaxDetail: any): Promise<string | null> {
   const taxLines = txnTaxDetail?.TaxLine ?? [];
   if (taxLines.length === 0) return null;
@@ -793,6 +1073,27 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   }, { onConflict: "qbo_item_id" });
 
   if (error) return `item ${entityId} upsert error: ${error.message}`;
+
+  // Post-creation enrichment: BrickEconomy lookup + AI copy generation
+  // Only for new LEGO items (Set or Minifig) with a product record
+  if (operation === "Create" && brand === "LEGO" && itemType && productId) {
+    const isEligible = itemType.toLowerCase() === "set" || itemType.toLowerCase().includes("minifig");
+    if (isEligible) {
+      try {
+        const enriched = await enrichFromBrickEconomy(admin, mpn, itemType, productId);
+        console.log(`BrickEconomy enrichment for ${mpn}: ${enriched ? "success" : "skipped/failed"}`);
+      } catch (err: any) {
+        console.error(`BrickEconomy enrichment error for ${mpn}:`, err.message);
+      }
+      try {
+        const copied = await generateAndSaveCopy(admin, productId);
+        console.log(`AI copy generation for ${mpn}: ${copied ? "success" : "skipped/failed"}`);
+      } catch (err: any) {
+        console.error(`AI copy generation error for ${mpn}:`, err.message);
+      }
+    }
+  }
+
   return `item ${entityId} upserted as SKU ${skuCode}`;
 }
 
