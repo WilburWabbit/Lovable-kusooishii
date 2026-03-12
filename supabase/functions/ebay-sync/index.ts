@@ -610,13 +610,46 @@ Deno.serve(async (req) => {
       const title = listing_title || prod?.name || sku.name || `LEGO ${prod?.mpn}`;
       const desc = listing_description || prod?.description || title;
 
+      // Resolve image URLs with fallbacks
+      let imageUrls: string[] = [];
+
+      // Primary: product.img_url
+      if (prod?.img_url) imageUrls.push(prod.img_url);
+
+      // Fallback: product_media → media_asset
+      if (imageUrls.length === 0 && prod?.id) {
+        const { data: mediaRows } = await admin
+          .from("product_media")
+          .select("media_asset:media_asset_id(original_url)")
+          .eq("product_id", prod.id)
+          .order("sort_order")
+          .limit(12);
+        imageUrls = (mediaRows || [])
+          .map((r: any) => r.media_asset?.original_url)
+          .filter(Boolean);
+      }
+
+      // Fallback: lego_catalog img_url
+      if (imageUrls.length === 0 && prod?.mpn) {
+        const { data: cat } = await admin
+          .from("lego_catalog")
+          .select("img_url")
+          .eq("mpn", prod.mpn)
+          .maybeSingle();
+        if (cat?.img_url) imageUrls.push(cat.img_url);
+      }
+
+      if (imageUrls.length === 0) {
+        throw new Error(`Cannot publish ${sku.sku_code}: no images found. Add at least one image first.`);
+      }
+
       // Step 1: PUT inventory item
       const inventoryBody: any = {
         product: {
           title: title.substring(0, 80),
           description: desc,
           aspects: { Brand: ["LEGO"], MPN: [prod?.mpn || "N/A"] },
-          imageUrls: prod?.img_url ? [prod.img_url] : [],
+          imageUrls,
         },
         condition: ebayCondition,
         availability: {
