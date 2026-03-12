@@ -32,7 +32,7 @@ export function StorefrontFooter() {
 
           {/* Quick Links */}
           <div className="space-y-4">
-            <h4 className="font-display text-xs font-semibold uppercase tracking-widest text-primary">Quick Links</h4>
+            <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Quick Links</h4>
             <nav className="flex flex-col gap-2">
               <Link to="/browse" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shop All Sets</Link>
               <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
@@ -44,7 +44,7 @@ export function StorefrontFooter() {
 
           {/* Customer Service */}
           <div className="space-y-4">
-            <h4 className="font-display text-xs font-semibold uppercase tracking-widest text-primary">Customer Service</h4>
+            <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Customer Service</h4>
             <nav className="flex flex-col gap-2">
               <Link to="/faq" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">FAQ</Link>
               <Link to="/contact" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Contact Us</Link>
@@ -56,7 +56,7 @@ export function StorefrontFooter() {
 
           {/* Newsletter */}
           <div className="space-y-4">
-            <h4 className="font-display text-xs font-semibold uppercase tracking-widest text-primary">First Dibs</h4>
+            <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">First Dibs</h4>
             <p className="font-body text-sm text-primary-foreground/60">
               Get first dibs on rescued sets. No spam. Just bricks.
             </p>
@@ -86,6 +86,6 @@ export function StorefrontFooter() {
           </div>
         </div>
       </div>
-    </footer>
-  );
+    </footer>);
+
 }
