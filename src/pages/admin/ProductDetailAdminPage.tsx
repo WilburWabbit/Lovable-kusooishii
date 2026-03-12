@@ -122,6 +122,25 @@ export default function ProductDetailAdminPage() {
     enabled: !!user && !!id,
   });
 
+  // BrickEconomy valuation query
+  const { data: beValuation } = useQuery({
+    queryKey: ["be-valuation", product?.mpn],
+    queryFn: async () => {
+      const mpn = product!.mpn;
+      const baseMpn = mpn.replace(/-\d+$/, "");
+      const candidates = [mpn];
+      if (baseMpn !== mpn) candidates.push(baseMpn);
+      const { data } = await supabase
+        .from("brickeconomy_collection")
+        .select("item_number, name, current_value, growth, synced_at, condition")
+        .in("item_number", candidates)
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!product?.mpn,
+  });
+
   // Content form state
   const [contentForm, setContentForm] = useState<Record<string, string>>({});
   const [contentDirty, setContentDirty] = useState(false);
