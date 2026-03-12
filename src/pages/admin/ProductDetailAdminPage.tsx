@@ -286,20 +286,24 @@ export default function ProductDetailAdminPage() {
     try {
       const result = await invokeWithAuth<any>("admin-data", { action: "calculate-pricing", sku_id: skuId, channel });
       setPricingResults((prev) => ({ ...prev, [key]: result }));
-      
-      // Find the listing to persist prices
-      const listing = product?.channel_listings.find((cl) => cl.sku_id === skuId && cl.channel === channel);
-      if (listing) {
-        await invokeWithAuth("admin-data", {
-          action: "update-listing-prices",
-          listing_id: listing.id,
-          price_floor: result.floor_price,
-          price_target: result.target_price,
-          price_ceiling: result.ceiling_price,
-          confidence_score: result.confidence_score,
-          auto_price: true,
-        });
-      }
+
+      // Ensure a channel_listing exists (creates one if missing)
+      const { listing_id } = await invokeWithAuth<{ listing_id: string; created: boolean }>(
+        "admin-data", { action: "ensure-channel-listing", sku_id: skuId, channel }
+      );
+
+      // Persist pricing to the listing
+      await invokeWithAuth("admin-data", {
+        action: "update-listing-prices",
+        listing_id,
+        price_floor: result.floor_price,
+        price_target: result.target_price,
+        price_ceiling: result.ceiling_price,
+        confidence_score: result.confidence_score,
+        auto_price: true,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["admin-product", id] });
       toast.success("Pricing calculated");
     } catch (err: any) {
       toast.error(err.message ?? "Pricing failed");

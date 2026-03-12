@@ -55,6 +55,42 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
+async function fetchQboEntity(baseUrl: string, accessToken: string, entityPath: string): Promise<any | null> {
+  const res = await fetch(`${baseUrl}/${entityPath}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    console.error(`QBO fetch ${entityPath} failed [${res.status}]: ${await res.text()}`);
+    return null;
+  }
+  return await res.json();
+}
+
+function parseParentCategory(parentName: string): { brand: string | null; itemType: string | null } {
+  const trimmed = parentName.trim();
+  const colonIdx = trimmed.indexOf(":");
+  if (colonIdx <= 0) return { brand: null, itemType: null };
+  const prefix = trimmed.substring(0, colonIdx).trim();
+  const suffix = trimmed.substring(colonIdx + 1).trim();
+  if (!suffix) return { brand: null, itemType: null };
+  if (prefix.toUpperCase() === "LEGO") {
+    return { brand: "LEGO", itemType: suffix };
+  }
+  return { brand: suffix, itemType: null };
+}
+
+async function resolveParentCategory(
+  baseUrl: string, accessToken: string, item: any
+): Promise<{ parentItemId: string | null; brand: string | null; itemType: string | null }> {
+  if (!item.ParentRef?.value) return { parentItemId: null, brand: null, itemType: null };
+  const parentItemId = String(item.ParentRef.value);
+  const parentData = await fetchQboEntity(baseUrl, accessToken, `item/${parentItemId}`);
+  const parentName = parentData?.Item?.Name;
+  if (!parentName) return { parentItemId, brand: null, itemType: null };
+  const { brand, itemType } = parseParentCategory(parentName);
+  return { parentItemId, brand, itemType };
+}
+
 async function queryQboAll(baseUrl: string, accessToken: string, query: string, entityKey: string): Promise<any[]> {
   const all: any[] = [];
   let startPos = 1;
@@ -170,7 +206,21 @@ Deno.serve(async (req) => {
       // Use the raw QBO SKU verbatim as sku_code (canonical identifier)
       const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
+
+      // Resolve parent item category (brand / item type)
+      const { parentItemId, brand, itemType } = await resolveParentCategory(baseUrl, accessToken, item);
+
       let productId = productByMpn.get(mpn) ?? null;
+
+      // Update existing product with brand/type from parent if available
+      if (productId && (brand || itemType)) {
+        const updates: Record<string, any> = {};
+        if (brand) updates.brand = brand;
+        if (itemType) updates.product_type = itemType;
+        if (Object.keys(updates).length > 0) {
+          await admin.from("product").update(updates).eq("id", productId);
+        }
+      }
 
       // Auto-create product from catalog if no product exists (on-demand lookup)
       if (!productId && mpn) {
@@ -190,9 +240,10 @@ Deno.serve(async (req) => {
             retired_flag: catalog.retired_flag ?? false,
             img_url: catalog.img_url,
             subtheme_name: catalog.subtheme_name,
-            product_type: catalog.product_type ?? "set",
+            product_type: itemType ?? catalog.product_type ?? "set",
             lego_catalog_id: catalog.id,
             status: "active",
+            brand: brand,
           }).select("id").single();
           if (prodErr) {
             console.error(`Auto-create product for ${mpn}:`, prodErr.message);
@@ -201,6 +252,19 @@ Deno.serve(async (req) => {
             productByMpn.set(mpn, newProduct.id);
             productsCreated++;
             console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
+          }
+        } else if (brand || itemType) {
+          // No catalog match — create minimal product with parent category info
+          const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+            mpn, name: cleanQboName(item.Name ?? mpn),
+            product_type: itemType ?? "set", brand: brand, status: "active",
+          }).select("id").single();
+          if (prodErr) {
+            console.error(`Create product for ${mpn}:`, prodErr.message);
+          } else if (newProduct) {
+            productId = newProduct.id;
+            productByMpn.set(mpn, newProduct.id);
+            productsCreated++;
           }
         }
       }
@@ -216,6 +280,7 @@ Deno.serve(async (req) => {
       if (existingByCode && existingByCode.qbo_item_id !== qboItemId) {
         const { error } = await admin.from("sku").update({
           qbo_item_id: qboItemId,
+          qbo_parent_item_id: parentItemId,
           name: cleanQboName(item.Name ?? mpn),
           product_id: productId ?? existingByCode.product_id,
           active_flag: item.Active !== false,
@@ -239,6 +304,7 @@ Deno.serve(async (req) => {
       // Upsert SKU
       const { error } = await admin.from("sku").upsert({
         qbo_item_id: qboItemId,
+        qbo_parent_item_id: parentItemId,
         sku_code: skuCode,
         name: cleanQboName(item.Name ?? mpn),
         product_id: productId,

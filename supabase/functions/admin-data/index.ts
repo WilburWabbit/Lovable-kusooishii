@@ -763,12 +763,47 @@ Deno.serve(async (req) => {
       }
 
       // 7. Compute prices
-      // floor = (cost_base + min_profit) / (1 - min_margin - fee_rate_estimate)
-      // We estimate fee rate from channel fees (sum of rate_percent / 100)
-      const totalFeeRate = (fees ?? []).reduce((sum: number, f: any) => sum + (f.rate_percent / 100), 0);
+      // Decompose fees into rate-based and fixed components, respecting applies_to
+      let effectiveFeeRate = 0;
+      let fixedFeeCosts = 0;
+      for (const fee of fees ?? []) {
+        const rate = (fee.rate_percent ?? 0) / 100;
+        const fixed = fee.fixed_amount ?? 0;
+        if (fee.applies_to === "sale_plus_shipping") {
+          effectiveFeeRate += rate;
+          fixedFeeCosts += fixed + (shippingCost * rate);
+        } else if (fee.applies_to === "sale_price_inc_vat") {
+          effectiveFeeRate += rate * 1.2;
+          fixedFeeCosts += fixed;
+        } else {
+          effectiveFeeRate += rate;
+          fixedFeeCosts += fixed;
+        }
+      }
+
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
-      const floorPrice = Math.round(((costBase + minProfit) / (1 - effectiveMargin - totalFeeRate - riskRate)) * 100) / 100;
+      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+      let floorPrice = Math.round(((costBase + minProfit + fixedFeeCosts) / denominator) * 100) / 100;
+
+      // Post-check: verify floor covers all fees with min/max clamps applied
+      for (let i = 0; i < 5; i++) {
+        let totalFees = 0;
+        for (const fee of fees ?? []) {
+          let base = floorPrice;
+          if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
+          else if (fee.applies_to === "sale_price_inc_vat") base = floorPrice * 1.2;
+          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
+          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
+          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
+          totalFees += amount;
+        }
+        const riskReserve = floorPrice * riskRate;
+        const requiredRevenue = costBase + minProfit + totalFees + riskReserve;
+        const neededPrice = requiredRevenue / (1 - effectiveMargin);
+        if (neededPrice <= floorPrice + 0.01) break;
+        floorPrice = Math.round(neededPrice * 100) / 100;
+      }
 
       let targetPrice: number | null = null;
       if (marketConsensus != null) {
@@ -802,7 +837,8 @@ Deno.serve(async (req) => {
           carrying_value: Math.round(avgCarrying * 100) / 100,
           packaging_cost: packagingCost,
           shipping_cost: shippingCost,
-          total_fee_rate: Math.round(totalFeeRate * 10000) / 100,
+          total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
+          fixed_fee_costs: Math.round(fixedFeeCosts * 100) / 100,
           risk_reserve_rate: riskReserveRate,
           min_profit: minProfit,
           min_margin: minMargin * 100,
@@ -811,34 +847,52 @@ Deno.serve(async (req) => {
 
     } else if (action === "batch-calculate-pricing") {
       const { channel: batchChannel } = params;
-      // Get all active listings, optionally filtered by channel
-      let query = admin
+      // Default to "web" channel when not specified or "all"
+      const targetChannel = (batchChannel && batchChannel !== "all") ? batchChannel : "web";
+
+      // 1. Get all active SKUs with a product (orphan SKUs without product_id are excluded)
+      const { data: activeSkus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code")
+        .eq("active_flag", true)
+        .not("product_id", "is", null);
+      if (skuErr) throw skuErr;
+
+      // 2. Get existing channel_listing rows for target channel
+      const { data: existingListings, error: elErr } = await admin
         .from("channel_listing")
         .select("id, sku_id, channel")
+        .eq("channel", targetChannel)
         .not("sku_id", "is", null);
-      if (batchChannel && batchChannel !== "all") {
-        query = query.eq("channel", batchChannel);
-      }
-      const { data: listings, error: lErr } = await query;
-      if (lErr) throw lErr;
+      if (elErr) throw elErr;
 
-      const results: any[] = [];
-      for (const listing of listings ?? []) {
-        try {
-          // Re-invoke the pricing logic inline (reuse by calling the same endpoint pattern)
-          // For efficiency, we'll compute inline here
-          const innerReq = new Request(req.url, {
-            method: "POST",
-            headers: req.headers,
-            body: JSON.stringify({ action: "calculate-pricing", sku_id: listing.sku_id, channel: listing.channel }),
-          });
-          // Instead of recursion, just store the listing info and compute separately
-          results.push({ listing_id: listing.id, sku_id: listing.sku_id, channel: listing.channel });
-        } catch {
-          // skip failures
-        }
+      const listedSkuIds = new Set((existingListings ?? []).map((l: any) => l.sku_id));
+
+      // 3. Auto-create missing channel_listing rows for SKUs that don't have one
+      const missing = (activeSkus ?? []).filter((s: any) => !listedSkuIds.has(s.id));
+      if (missing.length > 0) {
+        const newRows = missing.map((s: any) => ({
+          channel: targetChannel,
+          external_sku: s.sku_code,
+          sku_id: s.id,
+          listed_quantity: 0,
+          offer_status: "DRAFT",
+          synced_at: new Date().toISOString(),
+        }));
+        await admin.from("channel_listing").upsert(newRows, { onConflict: "channel,external_sku", ignoreDuplicates: true });
       }
-      // For batch, return the list of listings to price (frontend will call individual pricing)
+
+      // 4. Re-fetch all listings for the target channel
+      const { data: allListings, error: alErr } = await admin
+        .from("channel_listing")
+        .select("id, sku_id, channel")
+        .eq("channel", targetChannel)
+        .not("sku_id", "is", null);
+      if (alErr) throw alErr;
+
+      const results = (allListings ?? []).map((l: any) => ({
+        listing_id: l.id, sku_id: l.sku_id, channel: l.channel,
+      }));
       result = { listings: results, total: results.length };
 
     } else if (action === "update-listing-prices") {
@@ -926,6 +980,46 @@ Deno.serve(async (req) => {
       }, { onConflict: "channel" });
       if (error) throw error;
       result = { success: true };
+
+    } else if (action === "ensure-channel-listing") {
+      const { sku_id, channel } = params;
+      if (!sku_id || !channel) throw new Error("sku_id and channel are required");
+
+      // Check for existing listing
+      const { data: existing } = await admin
+        .from("channel_listing")
+        .select("id")
+        .eq("sku_id", sku_id)
+        .eq("channel", channel)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        result = { listing_id: existing.id, created: false };
+      } else {
+        // Get SKU code for external_sku
+        const { data: sku } = await admin
+          .from("sku")
+          .select("sku_code")
+          .eq("id", sku_id)
+          .single();
+        if (!sku) throw new Error("SKU not found");
+
+        const { data: newListing, error: insertErr } = await admin
+          .from("channel_listing")
+          .upsert({
+            channel,
+            external_sku: sku.sku_code,
+            sku_id,
+            listed_quantity: 0,
+            offer_status: "DRAFT",
+            synced_at: new Date().toISOString(),
+          }, { onConflict: "channel,external_sku", ignoreDuplicates: false })
+          .select("id")
+          .single();
+        if (insertErr) throw insertErr;
+        result = { listing_id: newListing!.id, created: true };
+      }
 
     } else {
       return new Response(

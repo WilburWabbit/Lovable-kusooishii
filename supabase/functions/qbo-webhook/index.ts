@@ -78,6 +78,322 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
+/**
+ * Parse QBO parent item name to extract brand and item type.
+ * Convention: "LEGO:<ItemType>" → { brand: "LEGO", itemType: "<ItemType>" }
+ *             "Other:<Brand>"   → { brand: "<Brand>", itemType: null }
+ */
+function parseParentCategory(parentName: string): { brand: string | null; itemType: string | null } {
+  const trimmed = parentName.trim();
+  const colonIdx = trimmed.indexOf(":");
+  if (colonIdx <= 0) return { brand: null, itemType: null };
+  const prefix = trimmed.substring(0, colonIdx).trim();
+  const suffix = trimmed.substring(colonIdx + 1).trim();
+  if (!suffix) return { brand: null, itemType: null };
+  if (prefix.toUpperCase() === "LEGO") {
+    return { brand: "LEGO", itemType: suffix };
+  }
+  // "Other:<Brand>" pattern
+  return { brand: suffix, itemType: null };
+}
+
+/**
+ * Fetch QBO parent item and extract brand/itemType from its name.
+ * Returns { parentItemId, brand, itemType }.
+ */
+async function resolveParentCategory(
+  baseUrl: string, accessToken: string, item: any
+): Promise<{ parentItemId: string | null; brand: string | null; itemType: string | null }> {
+  if (!item.ParentRef?.value) return { parentItemId: null, brand: null, itemType: null };
+  const parentItemId = String(item.ParentRef.value);
+  // Fetch the parent item to get its Name
+  const parentData = await fetchQboEntity(baseUrl, accessToken, `item/${parentItemId}`);
+  const parentName = parentData?.Item?.Name;
+  if (!parentName) return { parentItemId, brand: null, itemType: null };
+  const { brand, itemType } = parseParentCategory(parentName);
+  return { parentItemId, brand, itemType };
+}
+
+// ────────────────────────────────────────────────────────────
+// Post-creation enrichment: BrickEconomy + AI Copy
+// ────────────────────────────────────────────────────────────
+
+const BE_BASE = "https://www.brickeconomy.com/api/v1";
+
+/**
+ * Fetch a single set or minifig from BrickEconomy API, store in
+ * brickeconomy_collection, and enrich the product record.
+ */
+async function enrichFromBrickEconomy(
+  admin: any, mpn: string, itemType: string, productId: string
+): Promise<boolean> {
+  const apiKey = Deno.env.get("BRICKECONOMY_API_KEY");
+  if (!apiKey) { console.warn("BRICKECONOMY_API_KEY not configured — skipping enrichment"); return false; }
+
+  const isMinifig = itemType.toLowerCase().includes("minifig");
+  const endpoint = isMinifig ? `${BE_BASE}/minifig/${encodeURIComponent(mpn)}` : `${BE_BASE}/set/${encodeURIComponent(mpn)}`;
+
+  const res = await fetch(`${endpoint}?currency=GBP`, {
+    headers: { "x-apikey": apiKey, "User-Agent": "BrickKeeperSync/1.0", Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    // Try without the "-1" suffix for sets (e.g. "75367-1" → "75367")
+    if (!isMinifig && mpn.endsWith("-1")) {
+      const baseMpn = mpn.replace(/-1$/, "");
+      const retryRes = await fetch(`${BE_BASE}/set/${encodeURIComponent(baseMpn)}?currency=GBP`, {
+        headers: { "x-apikey": apiKey, "User-Agent": "BrickKeeperSync/1.0", Accept: "application/json" },
+      });
+      if (!retryRes.ok) {
+        console.warn(`BrickEconomy lookup failed for ${mpn} and ${baseMpn}: ${retryRes.status}`);
+        return false;
+      }
+      const retryData = await retryRes.json();
+      return await processBrickEconomyResponse(admin, retryData, isMinifig, mpn, productId);
+    }
+    console.warn(`BrickEconomy lookup failed for ${mpn}: ${res.status}`);
+    return false;
+  }
+
+  const data = await res.json();
+  return await processBrickEconomyResponse(admin, data, isMinifig, mpn, productId);
+}
+
+async function processBrickEconomyResponse(
+  admin: any, data: any, isMinifig: boolean, mpn: string, productId: string
+): Promise<boolean> {
+  // Unwrap response envelope
+  const itemData = data.data ?? data;
+  const item = isMinifig ? itemData : itemData;
+
+  const now = new Date().toISOString();
+
+  // Store in brickeconomy_collection
+  const itemNumber = isMinifig
+    ? String(item.minifig_number ?? item.set_number ?? mpn)
+    : String(item.set_number ?? mpn);
+
+  await admin.from("brickeconomy_collection").upsert({
+    item_type: isMinifig ? "minifig" : "set",
+    item_number: itemNumber,
+    name: item.name ?? null,
+    theme: item.theme ?? null,
+    subtheme: item.subtheme ?? null,
+    year: item.year ?? null,
+    pieces_count: item.pieces_count ?? null,
+    minifigs_count: item.minifigs_count ?? null,
+    current_value: item.current_value ?? null,
+    growth: item.growth ?? null,
+    retail_price: item.retail_price ?? null,
+    released_date: item.released_date ?? null,
+    retired_date: item.retired_date ?? null,
+    currency: "GBP",
+    synced_at: now,
+  }, { onConflict: "item_type,item_number,paid_price,acquired_date" }).then(({ error }: any) => {
+    if (error) console.error(`brickeconomy_collection upsert error:`, error.message);
+  });
+
+  // Enrich the product record with BrickEconomy data
+  const updates: Record<string, any> = {};
+  if (item.name && !isMinifig) updates.name = item.name;
+  if (item.pieces_count) updates.piece_count = item.pieces_count;
+  if (item.year) updates.release_year = item.year;
+  if (item.retired_date) updates.retired_flag = true;
+
+  // Link to lego_catalog if match exists
+  const mpnVariants = [mpn];
+  if (!mpn.includes("-")) mpnVariants.push(`${mpn}-1`);
+  const { data: catalogMatch } = await admin
+    .from("lego_catalog").select("id, brickeconomy_id")
+    .in("mpn", mpnVariants).is("brickeconomy_id", null).limit(1);
+  if (catalogMatch && catalogMatch.length > 0) {
+    await admin.from("lego_catalog").update({ brickeconomy_id: itemNumber }).eq("id", catalogMatch[0].id);
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await admin.from("product").update(updates).eq("id", productId);
+  }
+
+  console.log(`BrickEconomy enriched product ${productId} (${mpn}): value=${item.current_value}`);
+  return true;
+}
+
+const COPY_SYSTEM_PROMPT = `You are writing for Kuso Oishii, an e-commerce shop voice defined by:
+
+"Banter up top, brutal clarity underneath."
+
+Tone: distinctly adult, sharp, irreverent, collector-intelligent.
+Energy: late-night confidence, dry wit, restrained menace. Not laddish. Not juvenile. Not corporate.
+You are speaking to grown collectors with disposable income and strong opinions.
+
+Voice rules:
+- Default tone: bold, witty, strong language, energetic, slightly dangerous.
+- You may use moderate profanity in the Hook, Description, or call to action (CTA).
+- Absolute limit: no graphic sexual language, no explicit sexual references, no fetish phrasing, no hate speech, no slurs, no politics.
+- No profanity in Specifications, Condition, Disclosures, policies or customer service content.
+- Suggestion and innuendo must remain subtle enough to pass mainstream advertising review.
+- If in doubt, prioritise wit over explicitness.
+
+Structure discipline:
+Hook (1–2 lines) → Description → 1-line CTA → Highlights → Specifications → Condition (always).
+
+Point of view:
+- Use second person ("you").
+- Use imperatives.
+- Use "we" only for trust or process statements.
+
+Collector fluency:
+- Use set numbers, minifig IDs or codes, theme and subtheme terminology.
+- Never invent missing facts.
+
+Description discipline:
+- The Description must be narrative-driven and persuasive.
+- Do not restate specifications such as piece count, release dates, retirement dates, price or inventory status unless essential for storytelling impact.
+- Do not repeat information that appears in Specifications.
+- Focus on atmosphere, display presence, collector psychology and ownership experience.
+- Sell the feeling of owning it, not the list of what it contains.
+- Avoid listing minifigure codes or technical data unless used naturally inside narrative context.
+- No bullet-style phrasing inside Description.
+- No recital of facts.
+- If the Description reads like a summary of Specifications, internally revise before output.
+
+Hyperbole:
+- Allowed in Hook and Description.
+- Never distort factual information.
+
+Language:
+- British English spelling and date formats such as "1 March 2025".
+- Avoid corporate filler language.
+
+Formatting discipline:
+- All content fields must contain Markdown-formatted text.
+- Do not use Markdown code fences.
+- Do not insert blank lines between paragraphs.
+- Use single line breaks only.
+- No double newline characters anywhere in the output.
+- No trailing spaces.
+- The Description must render as one continuous paragraph.
+- The Hook may contain a single line break at most.
+
+Data discipline:
+- Use only provided facts.
+- Do not invent availability, policies, or pricing logic.
+- Clean output. No duplicated sentences. Closed quotes. No stray characters.
+
+If required facts are missing, note them but continue with what you can.
+
+Constraints:
+- Hook: maximum 2 lines.
+- Description: 80–140 words.
+- CTA: single imperative sentence, 50 characters max.
+- Highlights: 3–6 bullets.
+- SEO title: 60 characters max.
+- SEO body: 400 characters max, no line breaks.
+
+Structure rigid. Narrative persuasive. Tone adult but platform-safe.`;
+
+/**
+ * Generate AI marketing copy for a product and auto-save to the product table.
+ */
+async function generateAndSaveCopy(admin: any, productId: string): Promise<boolean> {
+  const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!openaiKey) { console.warn("OPENAI_API_KEY not configured — skipping copy generation"); return false; }
+
+  // Fetch the product with theme join to build facts
+  const { data: product, error: pErr } = await admin
+    .from("product")
+    .select("mpn, name, piece_count, release_year, retired_flag, subtheme_name, product_type, brand, age_range, weight_kg, length_cm, width_cm, height_cm, theme:theme_id(name)")
+    .eq("id", productId)
+    .single();
+
+  if (pErr || !product) { console.error("Failed to fetch product for copy generation:", pErr?.message); return false; }
+
+  const themeName = product.theme?.name ?? null;
+  const facts: string[] = [];
+  facts.push(`Product name: ${product.name ?? product.mpn}`);
+  facts.push(`Set number / MPN: ${product.mpn}`);
+  if (themeName) facts.push(`Theme: ${themeName}`);
+  if (product.subtheme_name) facts.push(`Subtheme: ${product.subtheme_name}`);
+  if (product.piece_count) facts.push(`Piece count: ${product.piece_count}`);
+  if (product.release_year) facts.push(`Year released: ${product.release_year}`);
+  if (product.retired_flag) facts.push(`Retirement status: retired`);
+  if (product.age_range) facts.push(`Age mark: ${product.age_range}`);
+  if (product.weight_kg) facts.push(`Weight: ${product.weight_kg} kg`);
+  if (product.length_cm && product.width_cm && product.height_cm) {
+    facts.push(`Dimensions: ${product.length_cm} × ${product.width_cm} × ${product.height_cm} cm`);
+  }
+
+  const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: COPY_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "generate_copy",
+          description: "Return the generated product copy and SEO content.",
+          parameters: {
+            type: "object",
+            properties: {
+              seo_title: { type: "string", description: "SEO title, max 60 characters" },
+              seo_body: { type: "string", description: "SEO meta description, max 400 characters, no line breaks" },
+              hook: { type: "string", description: "Product hook, 1-2 lines max" },
+              description: { type: "string", description: "Narrative description, 80-140 words, single paragraph" },
+              cta: { type: "string", description: "Call to action, single imperative sentence, 50 characters max" },
+              highlights: { type: "array", items: { type: "string" }, description: "3-6 highlight bullet points" },
+            },
+            required: ["seo_title", "seo_body", "hook", "description", "cta", "highlights"],
+            additionalProperties: false,
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "generate_copy" } },
+    }),
+  });
+
+  if (!response.ok) {
+    console.error(`OpenAI copy generation failed [${response.status}]:`, await response.text());
+    return false;
+  }
+
+  const data = await response.json();
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+  let copy: any;
+  if (toolCall?.function?.arguments) {
+    copy = typeof toolCall.function.arguments === "string"
+      ? JSON.parse(toolCall.function.arguments)
+      : toolCall.function.arguments;
+  } else {
+    const content = data.choices?.[0]?.message?.content ?? "";
+    copy = JSON.parse(content);
+  }
+
+  // Save to product table
+  const highlightsBullets = Array.isArray(copy.highlights)
+    ? copy.highlights.map((h: string) => `• ${h}`).join("\n")
+    : copy.highlights ?? "";
+
+  const { error: saveErr } = await admin.from("product").update({
+    product_hook: copy.hook ?? null,
+    description: copy.description ?? null,
+    call_to_action: copy.cta ?? null,
+    highlights: highlightsBullets || null,
+    seo_title: copy.seo_title ?? null,
+    seo_description: copy.seo_body ?? null,
+  }).eq("id", productId);
+
+  if (saveErr) { console.error("Failed to save AI copy:", saveErr.message); return false; }
+  console.log(`AI copy generated and saved for product ${productId}`);
+  return true;
+}
+
 async function resolveVatRateId(admin: any, txnTaxDetail: any): Promise<string | null> {
   const taxLines = txnTaxDetail?.TaxLine ?? [];
   if (taxLines.length === 0) return null;
@@ -184,6 +500,9 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let conditionGrade: string | null = null;
 
     let rawSkuCode: string | null = null;
+    let parentItemId: string | null = null;
+    let brand: string | null = null;
+    let itemType: string | null = null;
     if (isStockLine && detail.ItemRef?.value) {
       const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${detail.ItemRef.value}`);
       const qboItem = itemData?.Item ?? null;
@@ -198,6 +517,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         const parsed = parseSku(String(detail.ItemRef.name));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
+      }
+      // Resolve parent category from QBO item
+      if (qboItem) {
+        const parentInfo = await resolveParentCategory(baseUrl, accessToken, qboItem);
+        parentItemId = parentInfo.parentItemId;
+        brand = parentInfo.brand;
+        itemType = parentInfo.itemType;
       }
     }
 
@@ -214,6 +540,9 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       condition_grade: conditionGrade,
       qbo_tax_code_ref: taxCodeRef,
       sku_code: rawSkuCode,
+      _parentItemId: parentItemId,
+      _brand: brand,
+      _itemType: itemType,
     });
   }
 
@@ -249,7 +578,48 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     const cg = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
     const skuCode = line.sku_code || (cg !== "1" ? `${line.mpn}.${cg}` : line.mpn!);
+    // Look up product, auto-create from lego_catalog if missing
+    const lineBrand = line._brand as string | null;
+    const lineItemType = line._itemType as string | null;
+    const lineParentItemId = line._parentItemId as string | null;
+    let productId: string | null = null;
     const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
+    if (product) {
+      productId = product.id;
+      // Update brand/product_type from parent category if available
+      const updates: Record<string, any> = {};
+      if (lineBrand) updates.brand = lineBrand;
+      if (lineItemType) updates.product_type = lineItemType;
+      if (Object.keys(updates).length > 0) {
+        await admin.from("product").update(updates).eq("id", product.id);
+      }
+    } else if (line.mpn) {
+      const { data: catalog } = await admin
+        .from("lego_catalog")
+        .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+        .eq("mpn", line.mpn).eq("status", "active").maybeSingle();
+      if (catalog) {
+        const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+          mpn: line.mpn, name: catalog.name, theme_id: catalog.theme_id,
+          piece_count: catalog.piece_count, release_year: catalog.release_year,
+          retired_flag: catalog.retired_flag ?? false, img_url: catalog.img_url,
+          subtheme_name: catalog.subtheme_name,
+          product_type: lineItemType ?? catalog.product_type ?? "set",
+          lego_catalog_id: catalog.id, status: "active",
+          brand: lineBrand,
+        }).select("id").single();
+        if (!prodErr && newProduct) { productId = newProduct.id; }
+        else if (prodErr) { console.error(`Auto-create product for ${line.mpn}:`, prodErr.message); }
+      } else if (lineBrand || lineItemType) {
+        const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+          mpn: line.mpn, name: cleanQboName(line.description ?? line.mpn),
+          product_type: lineItemType ?? "set", brand: lineBrand, status: "active",
+        }).select("id").single();
+        if (!prodErr && newProduct) { productId = newProduct.id; }
+        else if (prodErr) { console.error(`Create product for ${line.mpn}:`, prodErr.message); }
+      }
+    }
+
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
@@ -258,13 +628,14 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
       const { data: newSku, error: skuErr } = await admin.from("sku").insert({
-        product_id: product?.id ?? null,
+        product_id: productId,
         condition_grade: cg,
         sku_code: skuCode,
         name: cleanQboName(line.description ?? line.mpn),
         price: landedCost,
         active_flag: true,
-        saleable_flag: !!product,
+        saleable_flag: !!productId,
+        qbo_parent_item_id: lineParentItemId,
       }).select("id").single();
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
@@ -600,14 +971,72 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
   const skuCode = rawSku;
 
-  // Look up product by MPN
+  // Resolve parent item category (brand / item type)
+  const { parentItemId, brand, itemType } = await resolveParentCategory(baseUrl, accessToken, item);
+
+  // Look up product by MPN, auto-create from lego_catalog if missing
+  let productId: string | null = null;
   const { data: productRecord } = await admin
     .from("product")
     .select("id")
     .eq("mpn", mpn)
     .maybeSingle();
 
-  const productId = productRecord?.id ?? null;
+  if (productRecord) {
+    productId = productRecord.id;
+    // Update brand and product_type from parent category if available
+    const updates: Record<string, any> = {};
+    if (brand) updates.brand = brand;
+    if (itemType) updates.product_type = itemType;
+    if (Object.keys(updates).length > 0) {
+      await admin.from("product").update(updates).eq("id", productRecord.id);
+    }
+  } else {
+    // Auto-create product from lego_catalog (same logic as qbo-sync-items)
+    const { data: catalog } = await admin
+      .from("lego_catalog")
+      .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+      .eq("mpn", mpn)
+      .eq("status", "active")
+      .maybeSingle();
+    if (catalog) {
+      const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+        mpn,
+        name: catalog.name,
+        theme_id: catalog.theme_id,
+        piece_count: catalog.piece_count,
+        release_year: catalog.release_year,
+        retired_flag: catalog.retired_flag ?? false,
+        img_url: catalog.img_url,
+        subtheme_name: catalog.subtheme_name,
+        product_type: itemType ?? catalog.product_type ?? "set",
+        lego_catalog_id: catalog.id,
+        status: "active",
+        brand: brand,
+      }).select("id").single();
+      if (!prodErr && newProduct) {
+        productId = newProduct.id;
+        console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
+      } else if (prodErr) {
+        console.error(`Auto-create product for ${mpn}:`, prodErr.message);
+      }
+    } else if (brand || itemType) {
+      // No catalog match — create a minimal product with parent category info
+      const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+        mpn,
+        name: cleanQboName(item.Name ?? mpn),
+        product_type: itemType ?? "set",
+        brand: brand,
+        status: "active",
+      }).select("id").single();
+      if (!prodErr && newProduct) {
+        productId = newProduct.id;
+        console.log(`Created product for MPN ${mpn} with brand=${brand} type=${itemType}`);
+      } else if (prodErr) {
+        console.error(`Create product for ${mpn}:`, prodErr.message);
+      }
+    }
+  }
 
   // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,
   // update it to link to this QBO item before upserting (avoids sku_code unique violation)
@@ -621,6 +1050,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     // Link the existing SKU to this QBO item ID
     await admin.from("sku").update({
       qbo_item_id: qboItemId,
+      qbo_parent_item_id: parentItemId,
       name: cleanQboName(item.Name ?? mpn),
       product_id: productId ?? existingByCode.product_id,
       active_flag: item.Active !== false,
@@ -632,6 +1062,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   // Upsert SKU (now safe — unique index on qbo_item_id exists)
   const { error } = await admin.from("sku").upsert({
     qbo_item_id: qboItemId,
+    qbo_parent_item_id: parentItemId,
     sku_code: skuCode,
     name: cleanQboName(item.Name ?? mpn),
     product_id: productId,
@@ -642,6 +1073,27 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   }, { onConflict: "qbo_item_id" });
 
   if (error) return `item ${entityId} upsert error: ${error.message}`;
+
+  // Post-creation enrichment: BrickEconomy lookup + AI copy generation
+  // Only for new LEGO items (Set or Minifig) with a product record
+  if (operation === "Create" && brand === "LEGO" && itemType && productId) {
+    const isEligible = itemType.toLowerCase() === "set" || itemType.toLowerCase().includes("minifig");
+    if (isEligible) {
+      try {
+        const enriched = await enrichFromBrickEconomy(admin, mpn, itemType, productId);
+        console.log(`BrickEconomy enrichment for ${mpn}: ${enriched ? "success" : "skipped/failed"}`);
+      } catch (err: any) {
+        console.error(`BrickEconomy enrichment error for ${mpn}:`, err.message);
+      }
+      try {
+        const copied = await generateAndSaveCopy(admin, productId);
+        console.log(`AI copy generation for ${mpn}: ${copied ? "success" : "skipped/failed"}`);
+      } catch (err: any) {
+        console.error(`AI copy generation error for ${mpn}:`, err.message);
+      }
+    }
+  }
+
   return `item ${entityId} upserted as SKU ${skuCode}`;
 }
 
