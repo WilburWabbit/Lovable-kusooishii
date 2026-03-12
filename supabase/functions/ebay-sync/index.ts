@@ -387,9 +387,8 @@ Deno.serve(async (req) => {
         const price = offer?.pricingSummary?.price?.value ? parseFloat(offer.pricingSummary.price.value) : null;
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
-        // Auto-link to local SKU
-        const localCode = normaliseSkuCode(item.sku);
-        const matchedSkuId = skuMap.get(localCode.toLowerCase()) || skuMap.get(item.sku.toLowerCase()) || null;
+        // Direct lookup — eBay SKU should match sku_code exactly
+        const matchedSkuId = skuMap.get(item.sku.trim().toLowerCase()) || null;
 
         const { error: upsertErr } = await admin
           .from("channel_listing")

@@ -636,9 +636,8 @@ Deno.serve(async (req) => {
       if (matchedSku.qbo_item_id) {
         itemRef = { value: matchedSku.qbo_item_id };
       } else {
-        // Query QBO by SKU (dot notation: MPN.Grade)
-        const dotSku = ebaySku || matchedSku.sku_code.replace("-G", ".");
-        const qboItem = await findQboItemBySku(qboToken, realmId, dotSku);
+        // Query QBO by SKU — sku_code is already in QBO format
+        const qboItem = await findQboItemBySku(qboToken, realmId, matchedSku.sku_code);
         if (qboItem) itemRef = { value: qboItem.id, name: qboItem.name };
       }
 

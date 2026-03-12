@@ -158,7 +158,9 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const skuCode = `${mpn}-G${conditionGrade}`;
+      // Use the raw QBO SKU verbatim as sku_code (canonical identifier)
+      const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
+      const skuCode = rawSku;
       const productId = productByMpn.get(mpn) ?? null;
 
       // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,

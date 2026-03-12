@@ -110,7 +110,8 @@ Deno.serve(async (req) => {
     for (const line of stockLines) {
       const conditionGrade = validGrades.includes(line.condition_grade) ? line.condition_grade : "1";
       const mpn = line.mpn;
-      const skuCode = `${mpn}-G${conditionGrade}`;
+      // Use the sku_code from the receipt line if available, otherwise reconstruct from mpn + grade
+      const skuCode = line.sku_code || (conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn);
 
       // Optionally link to product if MPN matches
       const { data: product } = await supabaseAdmin

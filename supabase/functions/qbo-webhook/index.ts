@@ -592,7 +592,9 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (!mpn) return `item ${entityId} — could not extract MPN`;
 
-  const skuCode = `${mpn}-G${conditionGrade}`;
+  // Use the raw QBO SKU verbatim as sku_code
+  const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
+  const skuCode = rawSku;
 
   // Look up product by MPN
   const { data: productRecord } = await admin
