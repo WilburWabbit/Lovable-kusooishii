@@ -310,8 +310,8 @@ export default function ProductDetailAdminPage() {
   const handleCalculateAllPricing = async () => {
     if (!product) return;
     for (const sku of product.skus) {
-      for (const cl of sku.channel_listings) {
-        await handleCalculatePricing(sku.id, cl.channel);
+      for (const ch of CHANNELS) {
+        await handleCalculatePricing(sku.id, ch);
       }
     }
   };
