@@ -150,7 +150,7 @@ export default function HomePage() {
                 }
                       {set.best_grade &&
                 <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                          Grade {set.best_grade}
+                          {gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}`}
                         </span>
                 }
                     </div>
