@@ -3,11 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { ThemesGrid } from "@/components/ThemesGrid";
 
 const gradeOptions = [
   { value: null, label: "All" },
@@ -22,11 +23,20 @@ const gradeLabels: Record<string, string> = {
 };
 
 export default function BrowsePage() {
+  const [searchParams] = useSearchParams();
+  const viewMode = searchParams.get("view");
+  const themeFromUrl = searchParams.get("theme");
+
   const [search, setSearch] = useState("");
-  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
+  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(themeFromUrl);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
   const [yearRange, setYearRange] = useState<[number, number] | null>(null);
+
+  // Sync theme filter from URL
+  useEffect(() => {
+    setSelectedThemeId(themeFromUrl);
+  }, [themeFromUrl]);
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -65,6 +75,7 @@ export default function BrowsePage() {
         yearMax: maxYear === -Infinity ? null : maxYear,
       };
     },
+    enabled: viewMode !== "themes",
   });
 
   const themes = filterMeta?.themes;
@@ -89,6 +100,7 @@ export default function BrowsePage() {
         total_stock: number; img_url: string | null;
       }[];
     },
+    enabled: viewMode !== "themes",
   });
 
   const filteredProducts = useMemo(() => {
@@ -98,6 +110,14 @@ export default function BrowsePage() {
       (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
     );
   }, [products, yearRange]);
+
+  if (viewMode === "themes") {
+    return (
+      <StorefrontLayout>
+        <ThemesGrid />
+      </StorefrontLayout>
+    );
+  }
 
   return (
     <StorefrontLayout>
