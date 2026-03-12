@@ -172,9 +172,14 @@ Deno.serve(async (req) => {
       const skuCode = rawSku;
       let productId = productByMpn.get(mpn) ?? null;
 
-      // Auto-create product from catalog if no product exists
+      // Auto-create product from catalog if no product exists (on-demand lookup)
       if (!productId && mpn) {
-        const catalog = catalogByMpn.get(mpn);
+        const { data: catalog } = await admin
+          .from("lego_catalog")
+          .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+          .eq("mpn", mpn)
+          .eq("status", "active")
+          .maybeSingle();
         if (catalog) {
           const { data: newProduct, error: prodErr } = await admin.from("product").insert({
             mpn,
