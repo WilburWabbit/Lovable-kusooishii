@@ -263,19 +263,6 @@ async function resolveSalesTaxInfo(
   return { taxCodeId: pick.Id, taxRateId: String(salesRateId), ratePercent: 20 };
 }
 
-// ─── SKU helpers ────────────────────────────────────────────
-
-function normaliseSkuCode(ebaySku: string): string {
-  const trimmed = ebaySku.trim();
-  const dotIdx = trimmed.indexOf(".");
-  if (dotIdx > 0) {
-    const mpn = trimmed.substring(0, dotIdx);
-    const grade = trimmed.substring(dotIdx + 1) || "1";
-    return `${mpn}-G${["1","2","3","4","5"].includes(grade) ? grade : "1"}`;
-  }
-  return trimmed;
-}
-
 // ─── Inventory push ─────────────────────────────────────────
 
 async function updateInventoryQuantity(ebayToken: string, sku: string, quantity: number) {
