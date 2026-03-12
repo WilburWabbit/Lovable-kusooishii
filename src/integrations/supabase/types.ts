@@ -1527,11 +1527,21 @@ export type Database = {
           channel: string
           cost: number
           created_at: string
+          est_delivery: string | null
           id: string
+          max_compensation: number | null
+          max_depth_cm: number | null
+          max_girth_cm: number | null
           max_length_cm: number | null
           max_weight_kg: number
+          max_width_cm: number | null
+          price_ex_vat: number
+          price_inc_vat: number
           service_name: string
+          size_band: string | null
+          tracked: boolean
           updated_at: string
+          vat_exempt: boolean
         }
         Insert: {
           active?: boolean
@@ -1539,11 +1549,21 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          est_delivery?: string | null
           id?: string
+          max_compensation?: number | null
+          max_depth_cm?: number | null
+          max_girth_cm?: number | null
           max_length_cm?: number | null
           max_weight_kg: number
+          max_width_cm?: number | null
+          price_ex_vat?: number
+          price_inc_vat?: number
           service_name: string
+          size_band?: string | null
+          tracked?: boolean
           updated_at?: string
+          vat_exempt?: boolean
         }
         Update: {
           active?: boolean
@@ -1551,11 +1571,21 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          est_delivery?: string | null
           id?: string
+          max_compensation?: number | null
+          max_depth_cm?: number | null
+          max_girth_cm?: number | null
           max_length_cm?: number | null
           max_weight_kg?: number
+          max_width_cm?: number | null
+          price_ex_vat?: number
+          price_inc_vat?: number
           service_name?: string
+          size_band?: string | null
+          tracked?: boolean
           updated_at?: string
+          vat_exempt?: boolean
         }
         Relationships: []
       }
