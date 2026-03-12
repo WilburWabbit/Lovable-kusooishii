@@ -131,7 +131,7 @@ export function QboSettingsPanel() {
     if (!status?.realm_id) return;
     setDisconnecting(true);
     try {
-      const data = await invokeWithAuth("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
       if (data?.error) throw new Error(data.error);
       toast({ title: "Disconnected", description: "QuickBooks connection removed." });
       setStatus({ connected: false });
