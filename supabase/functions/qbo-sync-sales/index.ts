@@ -380,10 +380,10 @@ async function processSalesReceipt(
     let skuCode: string | null = null;
 
     // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField).trim()) {
-      skuCode = String(skuField).trim();
+    if (skuField && String(skuField)) {
+      skuCode = String(skuField);
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name).trim();
+      skuCode = String(detail.ItemRef.name);
     }
 
     let skuId: string | null = null;
@@ -553,10 +553,10 @@ async function processRefundReceipt(
     let skuCode: string | null = null;
 
     // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField).trim()) {
-      skuCode = String(skuField).trim();
+    if (skuField && String(skuField)) {
+      skuCode = String(skuField);
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name).trim();
+      skuCode = String(detail.ItemRef.name);
     }
 
     let skuId: string | null = null;
