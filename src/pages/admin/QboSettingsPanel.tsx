@@ -73,7 +73,7 @@ export function QboSettingsPanel() {
         const month = months[i];
         setSyncProgress({ current: i + 1, total: months.length, month });
 
-        const data = await invokeWithAuth("qbo-sync-purchases", { month });
+        const data = await invokeWithAuth<Record<string, any>>("qbo-sync-purchases", { month });
         if (data?.error) throw new Error(data.error);
 
         totals.total += data.total ?? 0;
