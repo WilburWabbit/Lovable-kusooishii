@@ -263,19 +263,6 @@ async function resolveSalesTaxInfo(
   return { taxCodeId: pick.Id, taxRateId: String(salesRateId), ratePercent: 20 };
 }
 
-// ─── SKU helpers ────────────────────────────────────────────
-
-function normaliseSkuCode(ebaySku: string): string {
-  const trimmed = ebaySku.trim();
-  const dotIdx = trimmed.indexOf(".");
-  if (dotIdx > 0) {
-    const mpn = trimmed.substring(0, dotIdx);
-    const grade = trimmed.substring(dotIdx + 1) || "1";
-    return `${mpn}-G${["1","2","3","4","5"].includes(grade) ? grade : "1"}`;
-  }
-  return trimmed;
-}
-
 // ─── Inventory push ─────────────────────────────────────────
 
 async function updateInventoryQuantity(ebayToken: string, sku: string, quantity: number) {
@@ -625,8 +612,8 @@ Deno.serve(async (req) => {
 
     for (const li of lineItems) {
       const ebaySku = li.sku || "";
-      const localCode = normaliseSkuCode(ebaySku);
-      const matchedSku = skuMap.get(localCode.toLowerCase()) || skuMap.get(ebaySku.toLowerCase());
+      // Direct lookup — eBay SKU should match sku_code exactly
+      const matchedSku = skuMap.get(ebaySku.trim().toLowerCase());
 
       if (!matchedSku) {
         console.warn(`No SKU match for eBay SKU "${ebaySku}" in order ${orderId}`);
@@ -649,9 +636,8 @@ Deno.serve(async (req) => {
       if (matchedSku.qbo_item_id) {
         itemRef = { value: matchedSku.qbo_item_id };
       } else {
-        // Query QBO by SKU (dot notation: MPN.Grade)
-        const dotSku = ebaySku || matchedSku.sku_code.replace("-G", ".");
-        const qboItem = await findQboItemBySku(qboToken, realmId, dotSku);
+        // Query QBO by SKU — sku_code is already in QBO format
+        const qboItem = await findQboItemBySku(qboToken, realmId, matchedSku.sku_code);
         if (qboItem) itemRef = { value: qboItem.id, name: qboItem.name };
       }
 

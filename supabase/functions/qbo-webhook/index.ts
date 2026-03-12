@@ -91,13 +91,12 @@ async function resolveSkuFromQboItem(admin: any, baseUrl: string, accessToken: s
   const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${itemRefValue}`);
   const qboItem = itemData?.Item ?? null;
   const skuField = qboItem?.Sku;
+  // Use the raw QBO SKU verbatim as sku_code
   let skuCode: string | null = null;
   if (skuField && String(skuField).trim()) {
-    const p = parseSku(String(skuField));
-    skuCode = `${p.mpn}-G${p.conditionGrade}`;
+    skuCode = String(skuField).trim();
   } else if (itemRefName) {
-    const p = parseSku(String(itemRefName));
-    skuCode = `${p.mpn}-G${p.conditionGrade}`;
+    skuCode = String(itemRefName).trim();
   }
   if (!skuCode) return { skuId: null, skuCode: null };
   const { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
@@ -184,15 +183,18 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let mpn: string | null = null;
     let conditionGrade: string | null = null;
 
+    let rawSkuCode: string | null = null;
     if (isStockLine && detail.ItemRef?.value) {
       const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${detail.ItemRef.value}`);
       const qboItem = itemData?.Item ?? null;
       const skuField = qboItem?.Sku;
       if (skuField && String(skuField).trim()) {
+        rawSkuCode = String(skuField).trim();
         const parsed = parseSku(String(skuField));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
       } else if (detail.ItemRef?.name) {
+        rawSkuCode = String(detail.ItemRef.name).trim();
         const parsed = parseSku(String(detail.ItemRef.name));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
@@ -211,6 +213,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       mpn,
       condition_grade: conditionGrade,
       qbo_tax_code_ref: taxCodeRef,
+      sku_code: rawSkuCode,
     });
   }
 
@@ -244,7 +247,8 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
   for (let i = 0; i < stockLines.length; i++) {
     const line = stockLines[i];
     const cg = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
-    const skuCode = `${line.mpn}-G${cg}`;
+    // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
+    const skuCode = line.sku_code || (cg !== "1" ? `${line.mpn}.${cg}` : line.mpn!);
     const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
@@ -592,7 +596,9 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (!mpn) return `item ${entityId} — could not extract MPN`;
 
-  const skuCode = `${mpn}-G${conditionGrade}`;
+  // Use the raw QBO SKU verbatim as sku_code
+  const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
+  const skuCode = rawSku;
 
   // Look up product by MPN
   const { data: productRecord } = await admin

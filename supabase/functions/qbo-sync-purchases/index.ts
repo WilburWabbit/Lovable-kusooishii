@@ -206,6 +206,7 @@ async function autoProcessReceipt(
     quantity: number;
     unit_cost: number;
     description?: string | null;
+    sku_code?: string | null;
   }>
 ): Promise<{ processed: boolean; skipped: string[] }> {
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
@@ -229,7 +230,8 @@ async function autoProcessReceipt(
   for (const line of stockLines) {
     const conditionGrade = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     const mpn = line.mpn!;
-    const skuCode = `${mpn}-G${conditionGrade}`;
+    // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
+    const skuCode = line.sku_code || (conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn);
 
     const { data: product } = await supabaseAdmin
       .from("product")
@@ -577,14 +579,17 @@ Deno.serve(async (req) => {
         let mpn: string | null = null;
         let conditionGrade: string | null = null;
 
+        let rawSkuCode: string | null = null;
         if (isStockLine && detail.ItemRef?.value) {
           const qboItem = await fetchQboItem(detail.ItemRef.value, itemCache, baseUrl, accessToken);
           const skuField = qboItem?.Sku;
           if (skuField && String(skuField).trim()) {
+            rawSkuCode = String(skuField).trim();
             const parsed = parseSku(String(skuField));
             mpn = parsed.mpn;
             conditionGrade = parsed.conditionGrade;
           } else if (detail.ItemRef?.name) {
+            rawSkuCode = String(detail.ItemRef.name).trim();
             const parsed = parseSku(String(detail.ItemRef.name));
             mpn = parsed.mpn;
             conditionGrade = parsed.conditionGrade;
@@ -604,6 +609,7 @@ Deno.serve(async (req) => {
           mpn,
           condition_grade: conditionGrade,
           qbo_tax_code_ref: taxCodeRef,
+          sku_code: rawSkuCode,
         });
       }
 

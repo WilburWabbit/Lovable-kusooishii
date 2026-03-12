@@ -163,19 +163,6 @@ async function updateInventoryQuantity(token: string, sku: string, quantity: num
   });
 }
 
-/* ── SKU code helper: eBay SKU → local sku_code convention ── */
-function normaliseSkuCode(ebaySku: string): string {
-  // eBay SKUs use dot notation e.g. "10311.1", local sku_code uses "10311-G1"
-  const trimmed = ebaySku.trim();
-  const dotIdx = trimmed.indexOf(".");
-  if (dotIdx > 0) {
-    const mpn = trimmed.substring(0, dotIdx);
-    const grade = trimmed.substring(dotIdx + 1) || "1";
-    return `${mpn}-G${["1","2","3","4","5"].includes(grade) ? grade : "1"}`;
-  }
-  return trimmed;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -346,10 +333,8 @@ Deno.serve(async (req) => {
             let skuId: string | null = null;
 
             if (ebaySku) {
-              const localCode = normaliseSkuCode(ebaySku);
-              skuId = skuMap.get(localCode.toLowerCase()) || null;
-              // Fallback: try exact match
-              if (!skuId) skuId = skuMap.get(ebaySku.toLowerCase()) || null;
+              // Direct lookup — eBay SKU should match sku_code exactly
+              skuId = skuMap.get(ebaySku.trim().toLowerCase()) || null;
             }
 
             if (!skuId) {
@@ -402,9 +387,8 @@ Deno.serve(async (req) => {
         const price = offer?.pricingSummary?.price?.value ? parseFloat(offer.pricingSummary.price.value) : null;
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
-        // Auto-link to local SKU
-        const localCode = normaliseSkuCode(item.sku);
-        const matchedSkuId = skuMap.get(localCode.toLowerCase()) || skuMap.get(item.sku.toLowerCase()) || null;
+        // Direct lookup — eBay SKU should match sku_code exactly
+        const matchedSkuId = skuMap.get(item.sku.trim().toLowerCase()) || null;
 
         const { error: upsertErr } = await admin
           .from("channel_listing")
