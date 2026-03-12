@@ -1,22 +1,29 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Link2, RefreshCw, Unplug } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Loader2, Link2, RefreshCw, Unplug, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-/** Invoke an edge function with the current session token explicitly */
-async function invokeWithAuth(fnName: string, body?: Record<string, unknown>) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error("Not authenticated – please log in again.");
-  const { data, error } = await supabase.functions.invoke(fnName, {
-    body,
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-  if (error) throw error;
-  return data;
+/** Generate month labels from current month back to April 2023 */
+function generateMonthList(): string[] {
+  const months: string[] = [];
+  const now = new Date();
+  let year = now.getFullYear();
+  let month = now.getMonth() + 1;
+  const endYear = 2023;
+  const endMonth = 4;
+
+  while (year > endYear || (year === endYear && month >= endMonth)) {
+    months.push(`${year}-${String(month).padStart(2, "0")}`);
+    month--;
+    if (month < 1) { month = 12; year--; }
+  }
+  return months;
 }
 
 export function QboSettingsPanel() {
@@ -25,15 +32,17 @@ export function QboSettingsPanel() {
   const [status, setStatus] = useState<{ connected: boolean; realm_id?: string; last_updated?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; month: string } | null>(null);
   const [syncingSales, setSyncingSales] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingItems, setSyncingItems] = useState(false);
+  const [cancelSync, setCancelSync] = useState(false);
+  const cancelRef = useRef(false);
 
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      // Status check doesn't need auth, safe to use default invoke
       const { data, error } = await supabase.functions.invoke("qbo-auth", {
         body: { action: "status" },
       });
@@ -46,13 +55,67 @@ export function QboSettingsPanel() {
     }
   };
 
-  useEffect(() => {
-    fetchStatus();
-  }, []);
+  useEffect(() => { fetchStatus(); }, []);
+
+  const syncPurchases = async () => {
+    setSyncing(true);
+    cancelRef.current = false;
+    const months = generateMonthList();
+    const totals = {
+      total: 0, auto_processed: 0, left_pending: 0,
+      skipped_existing: 0, skipped_no_items: 0, cleaned_up: 0,
+      backfilled_tax_codes: 0, backfilled_stock_links: 0,
+    };
+
+    try {
+      for (let i = 0; i < months.length; i++) {
+        if (cancelRef.current) break;
+        const month = months[i];
+        setSyncProgress({ current: i + 1, total: months.length, month });
+
+        const data = await invokeWithAuth<Record<string, any>>("qbo-sync-purchases", { month });
+        if (data?.error) throw new Error(data.error);
+
+        totals.total += data.total ?? 0;
+        totals.auto_processed += data.auto_processed ?? 0;
+        totals.left_pending += data.left_pending ?? 0;
+        totals.skipped_existing += data.skipped_existing ?? 0;
+        totals.skipped_no_items += data.skipped_no_items ?? 0;
+        totals.cleaned_up += data.cleaned_up ?? 0;
+        totals.backfilled_tax_codes += data.backfilled_tax_codes ?? 0;
+        totals.backfilled_stock_links += data.backfilled_stock_links ?? 0;
+      }
+
+      const parts = [`${totals.auto_processed} auto-processed`];
+      if (totals.left_pending) parts.push(`${totals.left_pending} pending review`);
+      if (totals.skipped_existing) parts.push(`${totals.skipped_existing} unchanged`);
+      if (totals.skipped_no_items) parts.push(`${totals.skipped_no_items} non-stock skipped`);
+      if (totals.cleaned_up) parts.push(`${totals.cleaned_up} empty receipts cleaned up`);
+      if (totals.backfilled_tax_codes) parts.push(`${totals.backfilled_tax_codes} tax codes backfilled`);
+      if (totals.backfilled_stock_links) parts.push(`${totals.backfilled_stock_links} stock units linked`);
+
+      toast({
+        title: cancelRef.current ? "Sync stopped" : "Sync complete",
+        description: `${totals.total} purchases: ${parts.join(", ")}.`,
+      });
+      fetchStatus();
+    } catch (err) {
+      toast({
+        title: "Sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  };
+
+  const stopSync = () => { cancelRef.current = true; };
 
   const connectQbo = async () => {
     try {
-      const data = await invokeWithAuth("qbo-auth", { action: "authorize_url" });
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "authorize_url" });
       if (data?.error) throw new Error(data.error);
       window.location.href = data.url;
     } catch (err) {
@@ -68,7 +131,7 @@ export function QboSettingsPanel() {
     if (!status?.realm_id) return;
     setDisconnecting(true);
     try {
-      const data = await invokeWithAuth("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
       if (data?.error) throw new Error(data.error);
       toast({ title: "Disconnected", description: "QuickBooks connection removed." });
       setStatus({ connected: false });
@@ -83,39 +146,10 @@ export function QboSettingsPanel() {
     }
   };
 
-  const syncPurchases = async () => {
-    setSyncing(true);
-    try {
-      const data = await invokeWithAuth("qbo-sync-purchases");
-      if (data?.error) throw new Error(data.error);
-      const parts = [`${data.auto_processed ?? 0} auto-processed`];
-      if (data.left_pending) parts.push(`${data.left_pending} pending review`);
-      if (data.skipped_existing) parts.push(`${data.skipped_existing} unchanged`);
-      if (data.skipped_no_items) parts.push(`${data.skipped_no_items} non-stock skipped`);
-      if (data.cleaned_up) parts.push(`${data.cleaned_up} empty receipts cleaned up`);
-      if (data.backfilled_tax_codes) parts.push(`${data.backfilled_tax_codes} tax codes backfilled`);
-      if (data.backfilled_stock_links) parts.push(`${data.backfilled_stock_links} stock units linked`);
-      toast({
-        title: "Sync complete",
-        description: `${data.total} purchases: ${parts.join(", ")}.`,
-      });
-      fetchStatus();
-    } catch (err) {
-      toast({
-        title: "Sync failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-
   const syncCustomers = async () => {
     setSyncingCustomers(true);
     try {
-      const data = await invokeWithAuth("qbo-sync-customers");
+      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-customers");
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
       if (data.upserted) parts.push(`${data.upserted} customers synced`);
@@ -139,7 +173,7 @@ export function QboSettingsPanel() {
   const syncItems = async () => {
     setSyncingItems(true);
     try {
-      const data = await invokeWithAuth("qbo-sync-items");
+      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-items");
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
       if (data.upserted) parts.push(`${data.upserted} items upserted`);
@@ -165,7 +199,7 @@ export function QboSettingsPanel() {
   const syncSales = async () => {
     setSyncingSales(true);
     try {
-      const data = await invokeWithAuth("qbo-sync-sales");
+      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales");
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
       if (data.sales_created) parts.push(`${data.sales_created} sales imported`);
@@ -217,6 +251,23 @@ export function QboSettingsPanel() {
                 Last token update: {new Date(status.last_updated).toLocaleString()}
               </p>
             )}
+
+            {/* Progress indicator for purchase sync */}
+            {syncProgress && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="font-body text-xs text-muted-foreground">
+                    Syncing {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
+                  </p>
+                  <Button size="sm" variant="ghost" onClick={stopSync} className="h-6 px-2 text-xs">
+                    <Square className="mr-1 h-3 w-3" />
+                    Stop
+                  </Button>
+                </div>
+                <Progress value={(syncProgress.current / syncProgress.total) * 100} className="h-2" />
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}

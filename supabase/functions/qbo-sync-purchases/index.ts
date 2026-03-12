@@ -408,7 +408,7 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    // Parse request body for optional month filter
+    // Parse request body for required month parameter
     let targetMonth: string | null = null;
     try {
       const body = await req.json();
@@ -416,7 +416,13 @@ Deno.serve(async (req) => {
         targetMonth = body.month; // e.g. "2025-06"
       }
     } catch {
-      // No body or invalid JSON — sync all months
+      // No body or invalid JSON — default to current month
+    }
+
+    // Default to current month if none provided
+    if (!targetMonth) {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     }
 
     if (!isWebhook) {
@@ -441,44 +447,15 @@ Deno.serve(async (req) => {
     // Generate a correlation ID for this sync run
     const correlationId = crypto.randomUUID();
 
-    // ── Build month ranges from current month back to April 2023 ──
-    function generateMonthRanges(singleMonth?: string | null): Array<{ start: string; end: string; label: string }> {
-      if (singleMonth) {
-        const [y, m] = singleMonth.split("-").map(Number);
-        const start = `${y}-${String(m).padStart(2, "0")}-01`;
-        const lastDay = new Date(y, m, 0).getDate();
-        const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-        return [{ start, end, label: singleMonth }];
-      }
+    // ── Build single month range ──
+    const [y, m] = targetMonth.split("-").map(Number);
+    const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    const monthLabel = targetMonth;
+    console.log(`Processing single month: ${monthLabel} (${monthStart} → ${monthEnd})`);
 
-      const ranges: Array<{ start: string; end: string; label: string }> = [];
-      const now = new Date();
-      let year = now.getFullYear();
-      let month = now.getMonth() + 1; // 1-indexed
-
-      const endYear = 2023;
-      const endMonth = 4;
-
-      while (year > endYear || (year === endYear && month >= endMonth)) {
-        const start = `${year}-${String(month).padStart(2, "0")}-01`;
-        const lastDay = new Date(year, month, 0).getDate();
-        const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-        const label = `${year}-${String(month).padStart(2, "0")}`;
-        ranges.push({ start, end, label });
-
-        month--;
-        if (month < 1) {
-          month = 12;
-          year--;
-        }
-      }
-      return ranges;
-    }
-
-    const monthRanges = generateMonthRanges(targetMonth);
-    console.log(`Will process ${monthRanges.length} month(s): ${monthRanges[0]?.label} → ${monthRanges[monthRanges.length - 1]?.label}`);
-
-    // Accumulated totals across all months
+    // Totals for this single month
     let totalPurchases = 0;
     let totalLanded = 0;
     let autoProcessed = 0;
@@ -490,34 +467,27 @@ Deno.serve(async (req) => {
     let totalItemsCached = 0;
     const pendingReasons: string[] = [];
 
-    for (const { start, end, label } of monthRanges) {
-      // Query purchases for this month
-      const query = encodeURIComponent(
-        `SELECT * FROM Purchase WHERE TxnDate >= '${start}' AND TxnDate <= '${end}' MAXRESULTS 1000`
-      );
-      console.log(`[${label}] Querying QBO purchases...`);
-      const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
-        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-      });
+    // Query purchases for this month
+    const query = encodeURIComponent(
+      `SELECT * FROM Purchase WHERE TxnDate >= '${monthStart}' AND TxnDate <= '${monthEnd}' MAXRESULTS 1000`
+    );
+    console.log(`[${monthLabel}] Querying QBO purchases...`);
+    const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
 
-      if (!purchaseRes.ok) {
-        const errBody = await purchaseRes.text();
-        console.error(`[${label}] QBO API failed [${purchaseRes.status}]: ${errBody}`);
-        // Continue to next month instead of failing entirely
-        continue;
-      }
+    if (!purchaseRes.ok) {
+      const errBody = await purchaseRes.text();
+      throw new Error(`[${monthLabel}] QBO API failed [${purchaseRes.status}]: ${errBody}`);
+    }
 
-      const purchaseData = await purchaseRes.json();
-      const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
-      totalPurchases += purchases.length;
+    const purchaseData = await purchaseRes.json();
+    const purchases = purchaseData?.QueryResponse?.Purchase ?? [];
+    totalPurchases = purchases.length;
 
-      if (purchases.length === 0) {
-        console.log(`[${label}] No purchases found, skipping.`);
-        continue;
-      }
-
+    if (purchases.length > 0) {
       // ── Phase 1: Land all raw purchases ──
-      console.log(`[${label}] Landing ${purchases.length} purchases...`);
+      console.log(`[${monthLabel}] Landing ${purchases.length} purchases...`);
       const landingResults: Array<{ purchase: any; landingId: string; alreadyLanded: boolean }> = [];
 
       for (const purchase of purchases) {
@@ -525,224 +495,223 @@ Deno.serve(async (req) => {
           const result = await landPurchase(supabaseAdmin, purchase, correlationId);
           landingResults.push({ purchase, ...result });
         } catch (err) {
-          console.error(`[${label}] Failed to land purchase ${purchase.Id}:`, err);
+          console.error(`[${monthLabel}] Failed to land purchase ${purchase.Id}:`, err);
         }
       }
-      totalLanded += landingResults.length;
+      totalLanded = landingResults.length;
 
       // Fast-path: if ALL purchases in this month are already landed, skip heavy processing
       const newLandings = landingResults.filter(r => !r.alreadyLanded);
       if (newLandings.length === 0) {
-        console.log(`[${label}] All ${landingResults.length} purchases already committed, skipping.`);
-        skippedExisting += landingResults.length;
-        continue;
-      }
+        console.log(`[${monthLabel}] All ${landingResults.length} purchases already committed, skipping.`);
+        skippedExisting = landingResults.length;
+      } else {
+        console.log(`[${monthLabel}] ${newLandings.length} new/pending, ${landingResults.length - newLandings.length} already committed.`);
+        skippedExisting = landingResults.length - newLandings.length;
 
-      console.log(`[${label}] ${newLandings.length} new/pending, ${landingResults.length - newLandings.length} already committed.`);
-      skippedExisting += landingResults.length - newLandings.length;
-
-      // ── Phase 2: Pre-fetch QBO items for NEW purchases only and land them ──
-      const uniqueItemIds = new Set<string>();
-      for (const { purchase } of newLandings) {
-        for (const line of (purchase.Line ?? [])) {
-          if (line.DetailType === "ItemBasedExpenseLineDetail" && line.ItemBasedExpenseLineDetail?.ItemRef?.value) {
-            uniqueItemIds.add(line.ItemBasedExpenseLineDetail.ItemRef.value);
-          }
-        }
-      }
-
-      const itemCache = new Map<string, any>();
-      const itemIdArray = Array.from(uniqueItemIds);
-      const BATCH_SIZE = 5;
-      for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
-        const batch = itemIdArray.slice(i, i + BATCH_SIZE);
-        await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
-        if (i + BATCH_SIZE < itemIdArray.length) {
-          await new Promise(r => setTimeout(r, 250));
-        }
-      }
-      totalItemsCached += itemCache.size;
-
-      // Land all fetched QBO items
-      for (const [, item] of itemCache) {
-        if (item) {
-          try {
-            await landQboItem(supabaseAdmin, item, correlationId);
-          } catch (err) {
-            console.error(`[${label}] Failed to land QBO item ${item?.Id}:`, err);
-          }
-        }
-      }
-
-      // ── Phase 3: Process NEW landings into canonical tables ──
-      for (const { purchase, landingId } of newLandings) {
-        const qboPurchaseId = purchase.Id;
-
-        const hasItemLines = (purchase.Line ?? []).some(
-          (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
-        );
-        if (!hasItemLines) {
-          skippedNoItems++;
-          await supabaseAdmin
-            .from("landing_raw_qbo_purchase")
-            .update({ status: "skipped", processed_at: new Date().toISOString() })
-            .eq("id", landingId);
-          continue;
-        }
-
-        const vendorName = purchase.EntityRef?.name ?? null;
-        const txnDate = purchase.TxnDate ?? null;
-        const totalAmount = purchase.TotalAmt ?? 0;
-        const currency = purchase.CurrencyRef?.value ?? "GBP";
-        const globalTaxCalc = purchase.GlobalTaxCalculation ?? null;
-        const taxTotal = purchase.TxnTaxDetail?.TotalTax ?? 0;
-
-        const { data: receipt, error: receiptErr } = await supabaseAdmin
-          .from("inbound_receipt")
-          .upsert(
-            {
-              qbo_purchase_id: qboPurchaseId,
-              vendor_name: vendorName,
-              txn_date: txnDate,
-              total_amount: totalAmount,
-              currency,
-              raw_payload: purchase,
-              tax_total: taxTotal,
-              global_tax_calculation: globalTaxCalc,
-            },
-            { onConflict: "qbo_purchase_id" }
-          )
-          .select("id, status")
-          .single();
-
-        if (receiptErr) {
-          console.error(`[${label}] Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
-          await markLandingError(supabaseAdmin, landingId, `Upsert failed: ${receiptErr.message}`);
-          continue;
-        }
-
-        // Already processed — run backfill, then mark landing as committed
-        if (receipt.status === "processed") {
-          try {
-            const bf = await backfillProcessedReceipt(supabaseAdmin, receipt.id, purchase);
-            backfilledTaxCodes += bf.taxCodesUpdated;
-            backfilledStockLinks += bf.stockUnitsLinked;
-          } catch (bfErr) {
-            console.error(`[${label}] Backfill failed for receipt ${receipt.id}:`, bfErr);
-          }
-          skippedExisting++;
-          await markLandingCommitted(supabaseAdmin, landingId);
-          continue;
-        }
-
-        await supabaseAdmin
-          .from("inbound_receipt_line")
-          .delete()
-          .eq("inbound_receipt_id", receipt.id);
-
-        const lines = purchase.Line?.filter((l: any) =>
-          l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
-        ) ?? [];
-
-        const lineRows = [];
-        for (const line of lines) {
-          const detail = line.ItemBasedExpenseLineDetail ?? line.AccountBasedExpenseLineDetail ?? {};
-          const isStockLine = line.DetailType === "ItemBasedExpenseLineDetail";
-
-          let mpn: string | null = null;
-          let conditionGrade: string | null = null;
-
-          let rawSkuCode: string | null = null;
-          if (isStockLine && detail.ItemRef?.value) {
-            const qboItem = await fetchQboItem(detail.ItemRef.value, itemCache, baseUrl, accessToken);
-            const skuField = qboItem?.Sku;
-            if (skuField && String(skuField).trim()) {
-              rawSkuCode = String(skuField).trim();
-              const parsed = parseSku(String(skuField));
-              mpn = parsed.mpn;
-              conditionGrade = parsed.conditionGrade;
-            } else if (detail.ItemRef?.name) {
-              rawSkuCode = String(detail.ItemRef.name).trim();
-              const parsed = parseSku(String(detail.ItemRef.name));
-              mpn = parsed.mpn;
-              conditionGrade = parsed.conditionGrade;
+        // ── Phase 2: Pre-fetch QBO items for NEW purchases only and land them ──
+        const uniqueItemIds = new Set<string>();
+        for (const { purchase } of newLandings) {
+          for (const line of (purchase.Line ?? [])) {
+            if (line.DetailType === "ItemBasedExpenseLineDetail" && line.ItemBasedExpenseLineDetail?.ItemRef?.value) {
+              uniqueItemIds.add(line.ItemBasedExpenseLineDetail.ItemRef.value);
             }
           }
-
-          const taxCodeRef = detail.TaxCodeRef?.value ?? null;
-
-          lineRows.push({
-            inbound_receipt_id: receipt.id,
-            description: line.Description ?? detail.ItemRef?.name ?? "No description",
-            quantity: detail.Qty ?? 1,
-            unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
-            line_total: line.Amount ?? 0,
-            qbo_item_id: detail.ItemRef?.value ?? null,
-            is_stock_line: isStockLine,
-            mpn,
-            condition_grade: conditionGrade,
-            qbo_tax_code_ref: taxCodeRef,
-            sku_code: rawSkuCode,
-          });
         }
 
-        if (lineRows.length > 0) {
-          const { data: insertedLines, error: insertErr } = await supabaseAdmin
-            .from("inbound_receipt_line")
-            .insert(lineRows)
-            .select("id, mpn, condition_grade, is_stock_line, qbo_tax_code_ref");
+        const itemCache = new Map<string, any>();
+        const itemIdArray = Array.from(uniqueItemIds);
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
+          const batch = itemIdArray.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
+          if (i + BATCH_SIZE < itemIdArray.length) {
+            await new Promise(r => setTimeout(r, 250));
+          }
+        }
+        totalItemsCached = itemCache.size;
 
-          if (insertErr) {
-            console.error(`[${label}] Failed to insert lines for receipt ${receipt.id}:`, insertErr);
-            await markLandingError(supabaseAdmin, landingId, `Line insert failed: ${insertErr.message}`);
+        // Land all fetched QBO items
+        for (const [, item] of itemCache) {
+          if (item) {
+            try {
+              await landQboItem(supabaseAdmin, item, correlationId);
+            } catch (err) {
+              console.error(`[${monthLabel}] Failed to land QBO item ${item?.Id}:`, err);
+            }
+          }
+        }
+
+        // ── Phase 3: Process NEW landings into canonical tables ──
+        for (const { purchase, landingId } of newLandings) {
+          const qboPurchaseId = purchase.Id;
+
+          const hasItemLines = (purchase.Line ?? []).some(
+            (l: any) => l.DetailType === "ItemBasedExpenseLineDetail"
+          );
+          if (!hasItemLines) {
+            skippedNoItems++;
+            await supabaseAdmin
+              .from("landing_raw_qbo_purchase")
+              .update({ status: "skipped", processed_at: new Date().toISOString() })
+              .eq("id", landingId);
             continue;
           }
 
-          // Resolve qbo_tax_code_ref → tax_code_id
-          for (const il of (insertedLines ?? [])) {
-            if (il.qbo_tax_code_ref) {
-              const { data: tc } = await supabaseAdmin
-                .from("tax_code")
-                .select("id")
-                .eq("qbo_tax_code_id", il.qbo_tax_code_ref)
-                .maybeSingle();
-              if (tc) {
-                await supabaseAdmin
-                  .from("inbound_receipt_line")
-                  .update({ tax_code_id: tc.id })
-                  .eq("id", il.id);
-              }
-            }
+          const vendorName = purchase.EntityRef?.name ?? null;
+          const txnDate = purchase.TxnDate ?? null;
+          const totalAmount = purchase.TotalAmt ?? 0;
+          const currency = purchase.CurrencyRef?.value ?? "GBP";
+          const globalTaxCalc = purchase.GlobalTaxCalculation ?? null;
+          const taxTotal = purchase.TxnTaxDetail?.TotalTax ?? 0;
+
+          const { data: receipt, error: receiptErr } = await supabaseAdmin
+            .from("inbound_receipt")
+            .upsert(
+              {
+                qbo_purchase_id: qboPurchaseId,
+                vendor_name: vendorName,
+                txn_date: txnDate,
+                total_amount: totalAmount,
+                currency,
+                raw_payload: purchase,
+                tax_total: taxTotal,
+                global_tax_calculation: globalTaxCalc,
+              },
+              { onConflict: "qbo_purchase_id" }
+            )
+            .select("id, status")
+            .single();
+
+          if (receiptErr) {
+            console.error(`[${monthLabel}] Failed to upsert purchase ${qboPurchaseId}:`, receiptErr);
+            await markLandingError(supabaseAdmin, landingId, `Upsert failed: ${receiptErr.message}`);
+            continue;
           }
 
-          const lineRowsWithIds = lineRows.map((lr, idx) => ({
-            ...lr,
-            id: insertedLines?.[idx]?.id ?? undefined,
-          }));
+          // Already processed — run backfill, then mark landing as committed
+          if (receipt.status === "processed") {
+            try {
+              const bf = await backfillProcessedReceipt(supabaseAdmin, receipt.id, purchase);
+              backfilledTaxCodes += bf.taxCodesUpdated;
+              backfilledStockLinks += bf.stockUnitsLinked;
+            } catch (bfErr) {
+              console.error(`[${monthLabel}] Backfill failed for receipt ${receipt.id}:`, bfErr);
+            }
+            skippedExisting++;
+            await markLandingCommitted(supabaseAdmin, landingId);
+            continue;
+          }
 
-          // Auto-process the receipt
-          try {
-            const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRowsWithIds);
-            if (result.processed) {
-              autoProcessed++;
-              await markLandingCommitted(supabaseAdmin, landingId);
-            } else {
-              leftPending++;
-              if (result.skipped.length > 0) {
-                pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
+          await supabaseAdmin
+            .from("inbound_receipt_line")
+            .delete()
+            .eq("inbound_receipt_id", receipt.id);
+
+          const lines = purchase.Line?.filter((l: any) =>
+            l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
+          ) ?? [];
+
+          const lineRows = [];
+          for (const line of lines) {
+            const detail = line.ItemBasedExpenseLineDetail ?? line.AccountBasedExpenseLineDetail ?? {};
+            const isStockLine = line.DetailType === "ItemBasedExpenseLineDetail";
+
+            let mpn: string | null = null;
+            let conditionGrade: string | null = null;
+
+            let rawSkuCode: string | null = null;
+            if (isStockLine && detail.ItemRef?.value) {
+              const qboItem = await fetchQboItem(detail.ItemRef.value, itemCache, baseUrl, accessToken);
+              const skuField = qboItem?.Sku;
+              if (skuField && String(skuField).trim()) {
+                rawSkuCode = String(skuField).trim();
+                const parsed = parseSku(String(skuField));
+                mpn = parsed.mpn;
+                conditionGrade = parsed.conditionGrade;
+              } else if (detail.ItemRef?.name) {
+                rawSkuCode = String(detail.ItemRef.name).trim();
+                const parsed = parseSku(String(detail.ItemRef.name));
+                mpn = parsed.mpn;
+                conditionGrade = parsed.conditionGrade;
               }
             }
-          } catch (procErr) {
-            console.error(`[${label}] Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
-            leftPending++;
-            await markLandingError(supabaseAdmin, landingId, `Auto-process error: ${procErr instanceof Error ? procErr.message : "Unknown"}`);
-            pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
+
+            const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+            lineRows.push({
+              inbound_receipt_id: receipt.id,
+              description: line.Description ?? detail.ItemRef?.name ?? "No description",
+              quantity: detail.Qty ?? 1,
+              unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
+              line_total: line.Amount ?? 0,
+              qbo_item_id: detail.ItemRef?.value ?? null,
+              is_stock_line: isStockLine,
+              mpn,
+              condition_grade: conditionGrade,
+              qbo_tax_code_ref: taxCodeRef,
+              sku_code: rawSkuCode,
+            });
+          }
+
+          if (lineRows.length > 0) {
+            const { data: insertedLines, error: insertErr } = await supabaseAdmin
+              .from("inbound_receipt_line")
+              .insert(lineRows)
+              .select("id, mpn, condition_grade, is_stock_line, qbo_tax_code_ref");
+
+            if (insertErr) {
+              console.error(`[${monthLabel}] Failed to insert lines for receipt ${receipt.id}:`, insertErr);
+              await markLandingError(supabaseAdmin, landingId, `Line insert failed: ${insertErr.message}`);
+              continue;
+            }
+
+            // Resolve qbo_tax_code_ref → tax_code_id
+            for (const il of (insertedLines ?? [])) {
+              if (il.qbo_tax_code_ref) {
+                const { data: tc } = await supabaseAdmin
+                  .from("tax_code")
+                  .select("id")
+                  .eq("qbo_tax_code_id", il.qbo_tax_code_ref)
+                  .maybeSingle();
+                if (tc) {
+                  await supabaseAdmin
+                    .from("inbound_receipt_line")
+                    .update({ tax_code_id: tc.id })
+                    .eq("id", il.id);
+                }
+              }
+            }
+
+            const lineRowsWithIds = lineRows.map((lr, idx) => ({
+              ...lr,
+              id: insertedLines?.[idx]?.id ?? undefined,
+            }));
+
+            // Auto-process the receipt
+            try {
+              const result = await autoProcessReceipt(supabaseAdmin, receipt.id, vendorName, lineRowsWithIds);
+              if (result.processed) {
+                autoProcessed++;
+                await markLandingCommitted(supabaseAdmin, landingId);
+              } else {
+                leftPending++;
+                if (result.skipped.length > 0) {
+                  pendingReasons.push(`Purchase ${qboPurchaseId}: ${result.skipped.join(", ")}`);
+                }
+              }
+            } catch (procErr) {
+              console.error(`[${monthLabel}] Auto-process failed for purchase ${qboPurchaseId}:`, procErr);
+              leftPending++;
+              await markLandingError(supabaseAdmin, landingId, `Auto-process error: ${procErr instanceof Error ? procErr.message : "Unknown"}`);
+              pendingReasons.push(`Purchase ${qboPurchaseId}: processing error`);
+            }
           }
         }
       }
-
-      console.log(`[${label}] Done.`);
     }
+
+    console.log(`[${monthLabel}] Done.`);
 
     // Clean up existing pending receipts that have zero stock lines
     const { data: pendingReceipts } = await supabaseAdmin
@@ -768,7 +737,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         correlation_id: correlationId,
-        months_processed: monthRanges.length,
+        month: monthLabel,
         total: totalPurchases,
         landed: totalLanded,
         auto_processed: autoProcessed,
