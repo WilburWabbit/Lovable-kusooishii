@@ -70,8 +70,49 @@ export function SellingCostDefaultsPanel() {
         {loading ? (
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         ) : (
-          <div className="space-y-4">
-            {defaults.map((d) => {
+          <div className="space-y-6">
+            {/* Group defaults by category */}
+            {["Cost", "Pricing", "Condition"].map((group) => {
+              const groupDefaults = defaults.filter((d) => {
+                const meta = LABELS[d.key];
+                return meta?.group === group;
+              });
+              if (groupDefaults.length === 0) return null;
+              return (
+                <div key={group}>
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">{group}</h4>
+                  <div className="space-y-4">
+                    {groupDefaults.map((d) => {
+                      const meta = LABELS[d.key] ?? { label: d.key, suffix: "", description: "" };
+                      return (
+                        <div key={d.key} className="flex items-end gap-3">
+                          <div className="flex-1 space-y-1">
+                            <Label>{meta.label}</Label>
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-muted-foreground">{meta.suffix}</span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                className="w-32"
+                                value={d.value}
+                                onChange={(e) => updateValue(d.key, Number(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => saveDefault(d.key, d.value)} disabled={saving === d.key}>
+                            {saving === d.key ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+                            Save
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {/* Ungrouped defaults */}
+            {defaults.filter((d) => !LABELS[d.key]?.group).map((d) => {
               const meta = LABELS[d.key] ?? { label: d.key, suffix: "", description: "" };
               return (
                 <div key={d.key} className="flex items-end gap-3">
