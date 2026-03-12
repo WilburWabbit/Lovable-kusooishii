@@ -108,15 +108,23 @@ Deno.serve(async (req) => {
     );
     console.log(`Fetched ${qboItems.length} QBO items (correlation: ${correlationId})`);
 
-    // Pre-fetch all products for MPN lookup
-    const { data: allProducts } = await admin.from("product").select("id, mpn");
+    // Pre-fetch all products and catalog entries for MPN lookup
+    const [{ data: allProducts }, { data: allCatalog }] = await Promise.all([
+      admin.from("product").select("id, mpn"),
+      admin.from("lego_catalog").select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type").eq("status", "active"),
+    ]);
     const productByMpn = new Map<string, string>();
     for (const p of allProducts ?? []) {
       productByMpn.set(p.mpn, p.id);
     }
+    const catalogByMpn = new Map<string, any>();
+    for (const c of allCatalog ?? []) {
+      catalogByMpn.set(c.mpn, c);
+    }
 
     let upserted = 0;
     let linked = 0;
+    let productsCreated = 0;
     let skippedNoMpn = 0;
     let errors = 0;
 
@@ -161,7 +169,35 @@ Deno.serve(async (req) => {
       // Use the raw QBO SKU verbatim as sku_code (canonical identifier)
       const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
-      const productId = productByMpn.get(mpn) ?? null;
+      let productId = productByMpn.get(mpn) ?? null;
+
+      // Auto-create product from catalog if no product exists
+      if (!productId && mpn) {
+        const catalog = catalogByMpn.get(mpn);
+        if (catalog) {
+          const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+            mpn,
+            name: catalog.name,
+            theme_id: catalog.theme_id,
+            piece_count: catalog.piece_count,
+            release_year: catalog.release_year,
+            retired_flag: catalog.retired_flag ?? false,
+            img_url: catalog.img_url,
+            subtheme_name: catalog.subtheme_name,
+            product_type: catalog.product_type ?? "set",
+            lego_catalog_id: catalog.id,
+            status: "active",
+          }).select("id").single();
+          if (prodErr) {
+            console.error(`Auto-create product for ${mpn}:`, prodErr.message);
+          } else if (newProduct) {
+            productId = newProduct.id;
+            productByMpn.set(mpn, newProduct.id);
+            productsCreated++;
+            console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
+          }
+        }
+      }
 
       // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,
       // link it to this QBO item before upserting (avoids sku_code unique violation)
@@ -226,6 +262,7 @@ Deno.serve(async (req) => {
         total: qboItems.length,
         upserted,
         linked,
+        products_created: productsCreated,
         skipped_no_mpn: skippedNoMpn,
         errors,
       }),
