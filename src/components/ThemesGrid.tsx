@@ -104,7 +104,7 @@ export function ThemesGrid() {
                   )}
                 </div>
 
-                <div className="flex items-center justify-between p-4">
+                <div className="flex items-center justify-between p-4 bg-card">
                   <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
                     {theme.theme_name}
                   </h3>
