@@ -12,9 +12,15 @@ interface DefaultEntry {
   value: number;
 }
 
-const LABELS: Record<string, { label: string; suffix: string; description: string }> = {
-  packaging_cost: { label: "Packaging Cost", suffix: "£", description: "Flat cost per shipment for packaging materials" },
-  risk_reserve_rate: { label: "Risk Reserve Rate", suffix: "%", description: "Percentage of sale price held as reserve for returns/damage" },
+const LABELS: Record<string, { label: string; suffix: string; description: string; group?: string }> = {
+  packaging_cost: { label: "Packaging Cost", suffix: "£", description: "Flat cost per shipment for packaging materials", group: "Cost" },
+  risk_reserve_rate: { label: "Risk Reserve Rate", suffix: "%", description: "Percentage of sale price held as reserve for returns/damage", group: "Cost" },
+  minimum_profit_amount: { label: "Minimum Profit", suffix: "£", description: "Minimum profit amount required per sale", group: "Pricing" },
+  minimum_margin_rate: { label: "Minimum Margin Rate", suffix: "", description: "Minimum margin rate (e.g. 0.15 = 15%)", group: "Pricing" },
+  condition_multiplier_1: { label: "Grade 1 Multiplier", suffix: "×", description: "Market price multiplier for Sealed/New condition", group: "Condition" },
+  condition_multiplier_2: { label: "Grade 2 Multiplier", suffix: "×", description: "Market price multiplier for Like New condition", group: "Condition" },
+  condition_multiplier_3: { label: "Grade 3 Multiplier", suffix: "×", description: "Market price multiplier for Good condition", group: "Condition" },
+  condition_multiplier_4: { label: "Grade 4 Multiplier", suffix: "×", description: "Market price multiplier for Fair condition", group: "Condition" },
 };
 
 export function SellingCostDefaultsPanel() {

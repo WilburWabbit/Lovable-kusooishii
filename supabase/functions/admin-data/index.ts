@@ -665,6 +665,193 @@ Deno.serve(async (req) => {
         margin_percent: salePrice > 0 ? Math.round(((salePrice - totalCostToSell) / salePrice) * 10000) / 100 : 0,
       };
 
+    /* ── Pricing Engine ── */
+
+    } else if (action === "calculate-pricing") {
+      const { sku_id, channel } = params;
+      if (!sku_id || !channel) throw new Error("sku_id and channel are required");
+
+      // 1. Get SKU + product info
+      const { data: skuData } = await admin
+        .from("sku")
+        .select("id, sku_code, price, condition_grade, product:product_id(id, mpn, weight_kg, length_cm, width_cm, height_cm)")
+        .eq("id", sku_id)
+        .single();
+      if (!skuData) throw new Error("SKU not found");
+      const product = (skuData.product as any) ?? {};
+      const mpn = product.mpn;
+
+      // 2. Get defaults
+      const { data: defaults } = await admin
+        .from("selling_cost_defaults")
+        .select("key, value");
+      const dm: Record<string, number> = {};
+      for (const d of defaults ?? []) dm[d.key] = Number(d.value);
+      const minProfit = dm["minimum_profit_amount"] ?? 1;
+      const minMargin = dm["minimum_margin_rate"] ?? 0.15;
+      const packagingCost = dm["packaging_cost"] ?? 0;
+      const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
+      const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
+
+      // 3. Get carrying value (avg of available stock)
+      const { data: stockUnits } = await admin
+        .from("stock_unit")
+        .select("carrying_value")
+        .eq("sku_id", sku_id)
+        .eq("status", "available");
+      const avgCarrying = stockUnits && stockUnits.length > 0
+        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+        : 0;
+
+      // 4. Get shipping cost (cheapest rate that fits)
+      const weightKg = product.weight_kg ?? 0;
+      const { data: allRates } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .or(`channel.eq.${channel},channel.eq.default`)
+        .eq("active", true)
+        .gte("max_weight_kg", weightKg)
+        .order("cost", { ascending: true });
+      
+      const lengthCm = product.length_cm;
+      const widthCm = product.width_cm;
+      const heightCm = product.height_cm;
+      const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
+      let matchedRate: any = null;
+      if (hasDimensions && allRates && allRates.length > 0) {
+        matchedRate = allRates.find((r: any) =>
+          (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
+          (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
+          (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
+        );
+      }
+      if (!matchedRate) {
+        const evriSmall = (allRates ?? []).filter((r: any) => r.carrier === "Evri" && r.size_band === "Small Parcel");
+        matchedRate = evriSmall.length > 0 ? evriSmall[0] : (allRates && allRates.length > 0 ? allRates[0] : null);
+      }
+      const shippingCost = matchedRate ? Number(matchedRate.cost) : 0;
+
+      // 5. Get channel fees
+      const { data: fees } = await admin
+        .from("channel_fee_schedule")
+        .select("*")
+        .eq("channel", channel)
+        .eq("active", true);
+
+      // For floor calculation, we need a cost_base that doesn't depend on sale_price
+      // cost_base = carrying_value + packaging + shipping
+      const costBase = avgCarrying + packagingCost + shippingCost;
+
+      // 6. Get BrickEconomy valuation as market_consensus
+      let marketConsensus: number | null = null;
+      let beConfidence = 0;
+      if (mpn) {
+        // Try to match by item_number (mpn without version suffix)
+        const baseMpn = mpn.replace(/-\d+$/, "");
+        const { data: beData } = await admin
+          .from("brickeconomy_collection")
+          .select("current_value")
+          .eq("item_number", baseMpn)
+          .limit(1)
+          .maybeSingle();
+        if (beData?.current_value != null) {
+          marketConsensus = Number(beData.current_value);
+          beConfidence = 1;
+        }
+      }
+
+      // 7. Compute prices
+      // floor = (cost_base + min_profit) / (1 - min_margin - fee_rate_estimate)
+      // We estimate fee rate from channel fees (sum of rate_percent / 100)
+      const totalFeeRate = (fees ?? []).reduce((sum: number, f: any) => sum + (f.rate_percent / 100), 0);
+      const riskRate = riskReserveRate / 100;
+      const effectiveMargin = Math.max(minMargin, 0.01);
+      const floorPrice = Math.round(((costBase + minProfit) / (1 - effectiveMargin - totalFeeRate - riskRate)) * 100) / 100;
+
+      let targetPrice: number | null = null;
+      if (marketConsensus != null) {
+        targetPrice = Math.round(marketConsensus * condMultiplier * 100) / 100;
+        // Ensure target is at least the floor
+        if (targetPrice < floorPrice) targetPrice = floorPrice;
+      }
+
+      const ceilingPrice = Math.round(Math.max(floorPrice, marketConsensus ?? floorPrice) * 100) / 100;
+
+      // 8. Confidence score (0-1): based on data availability
+      let confidence = 0;
+      if (avgCarrying > 0) confidence += 0.3; // have stock cost
+      if (beConfidence > 0) confidence += 0.4; // have market data
+      if (hasDimensions) confidence += 0.15; // have dimensions for shipping
+      if ((fees ?? []).length > 0) confidence += 0.15; // have channel fees
+      confidence = Math.round(confidence * 100) / 100;
+
+      result = {
+        sku_id,
+        channel,
+        floor_price: floorPrice,
+        target_price: targetPrice,
+        ceiling_price: ceilingPrice,
+        cost_base: Math.round(costBase * 100) / 100,
+        carrying_value: Math.round(avgCarrying * 100) / 100,
+        market_consensus: marketConsensus,
+        condition_multiplier: condMultiplier,
+        confidence_score: confidence,
+        breakdown: {
+          carrying_value: Math.round(avgCarrying * 100) / 100,
+          packaging_cost: packagingCost,
+          shipping_cost: shippingCost,
+          total_fee_rate: Math.round(totalFeeRate * 10000) / 100,
+          risk_reserve_rate: riskReserveRate,
+          min_profit: minProfit,
+          min_margin: minMargin * 100,
+        },
+      };
+
+    } else if (action === "batch-calculate-pricing") {
+      const { channel: batchChannel } = params;
+      // Get all active listings, optionally filtered by channel
+      let query = admin
+        .from("channel_listing")
+        .select("id, sku_id, channel")
+        .not("sku_id", "is", null);
+      if (batchChannel && batchChannel !== "all") {
+        query = query.eq("channel", batchChannel);
+      }
+      const { data: listings, error: lErr } = await query;
+      if (lErr) throw lErr;
+
+      const results: any[] = [];
+      for (const listing of listings ?? []) {
+        try {
+          // Re-invoke the pricing logic inline (reuse by calling the same endpoint pattern)
+          // For efficiency, we'll compute inline here
+          const innerReq = new Request(req.url, {
+            method: "POST",
+            headers: req.headers,
+            body: JSON.stringify({ action: "calculate-pricing", sku_id: listing.sku_id, channel: listing.channel }),
+          });
+          // Instead of recursion, just store the listing info and compute separately
+          results.push({ listing_id: listing.id, sku_id: listing.sku_id, channel: listing.channel });
+        } catch {
+          // skip failures
+        }
+      }
+      // For batch, return the list of listings to price (frontend will call individual pricing)
+      result = { listings: results, total: results.length };
+
+    } else if (action === "update-listing-prices") {
+      const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn } = params;
+      if (!listing_id) throw new Error("listing_id is required");
+      const updates: Record<string, any> = { priced_at: new Date().toISOString() };
+      if (price_floor !== undefined) updates.price_floor = price_floor;
+      if (price_target !== undefined) updates.price_target = price_target;
+      if (price_ceiling !== undefined) updates.price_ceiling = price_ceiling;
+      if (cs !== undefined) updates.confidence_score = cs;
+      if (pn !== undefined) updates.pricing_notes = pn;
+      const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
+      if (error) throw error;
+      result = { success: true };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
