@@ -547,6 +547,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Skip already-committed landings entirely during incremental sync
+      if (alreadyLanded) {
+        skippedExisting++;
+        continue;
+      }
+
       const vendorName = purchase.EntityRef?.name ?? null;
       const txnDate = purchase.TxnDate ?? null;
       const totalAmount = purchase.TotalAmt ?? 0;
