@@ -8,31 +8,31 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useState } from "react";
 
-const gradeLabels: Record<string, { label: string; desc: string }> = {
+const gradeLabels: Record<string, {label: string;desc: string;}> = {
   "1": { label: "Mint", desc: "Box and contents in near-perfect condition. No visible damage, creasing, or shelf wear." },
   "2": { label: "Excellent", desc: "Minor shelf wear or light marks. Contents complete and in great condition." },
   "3": { label: "Good", desc: "Noticeable wear, minor creasing, or small marks. Contents complete." },
   "4": { label: "Acceptable", desc: "Significant wear, dents or tears. All pieces present but box shows heavy use." },
-  "5": { label: "Fair", desc: "Heavy wear or damage. May have missing non-essential items." },
+  "5": { label: "Fair", desc: "Heavy wear or damage. May have missing non-essential items." }
 };
 
 export default function ProductDetailPage() {
-  const { mpn } = useParams<{ mpn: string }>();
+  const { mpn } = useParams<{mpn: string;}>();
 
   // Fetch product
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ["product", mpn],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, theme:theme_id(name)")
-        .eq("mpn", mpn!)
-        .eq("status", "active")
-        .maybeSingle();
+      const { data, error } = await supabase.
+      from("product").
+      select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, theme:theme_id(name)").
+      eq("mpn", mpn!).
+      eq("status", "active").
+      maybeSingle();
       if (error) throw error;
       return data;
     },
-    enabled: !!mpn,
+    enabled: !!mpn
   });
 
   // Fetch offers
@@ -41,9 +41,9 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase.rpc("product_detail_offers", { p_mpn: mpn! });
       if (error) throw error;
-      return data as { sku_id: string; sku_code: string; condition_grade: string; price: number | null; stock_count: number }[];
+      return data as {sku_id: string;sku_code: string;condition_grade: string;price: number | null;stock_count: number;}[];
     },
-    enabled: !!mpn,
+    enabled: !!mpn
   });
 
   // Fetch BrickEconomy enrichment data
@@ -51,44 +51,44 @@ export default function ProductDetailPage() {
     queryKey: ["brickeconomy_enrichment", mpn],
     queryFn: async () => {
       const setNumber = mpn!.split("-")[0];
-      const { data, error } = await supabase
-        .from("brickeconomy_collection")
-        .select("minifigs_count, retail_price, current_value, growth, retired_date, currency")
-        .eq("item_number", setNumber)
-        .eq("item_type", "set")
-        .maybeSingle();
+      const { data, error } = await supabase.
+      from("brickeconomy_collection").
+      select("minifigs_count, retail_price, current_value, growth, retired_date, currency").
+      eq("item_number", setNumber).
+      eq("item_type", "set").
+      maybeSingle();
       if (error) throw error;
       return data;
     },
-    enabled: !!mpn,
+    enabled: !!mpn
   });
 
   // Fetch product media
   const { data: mediaItems = [] } = useQuery({
     queryKey: ["product_media_storefront", product?.id],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("product_media")
-        .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
-        .eq("product_id", product!.id)
-        .order("sort_order", { ascending: true });
+      const { data, error } = await (supabase as any).
+      from("product_media").
+      select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)").
+      eq("product_id", product!.id).
+      order("sort_order", { ascending: true });
       if (error) throw error;
       return (data ?? []).map((pm: any) => ({
         id: pm.id,
         url: pm.media_asset?.original_url,
         alt: pm.media_asset?.alt_text ?? "",
-        is_primary: pm.is_primary,
+        is_primary: pm.is_primary
       }));
     },
-    enabled: !!product?.id,
+    enabled: !!product?.id
   });
 
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = product?.theme && typeof product.theme === "object" && !Array.isArray(product.theme)
-    ? (product.theme as { name: string }).name
-    : null;
+  const themeName = product?.theme && typeof product.theme === "object" && !Array.isArray(product.theme) ?
+  (product.theme as {name: string;}).name :
+  null;
 
   if (!isLoading && !product) {
     return (
@@ -102,8 +102,8 @@ export default function ProductDetailPage() {
             <Link to="/browse"><ArrowLeft className="mr-1.5 h-3.5 w-3.5" /> Back to browse</Link>
           </Button>
         </div>
-      </StorefrontLayout>
-    );
+      </StorefrontLayout>);
+
   }
 
   return (
@@ -112,23 +112,23 @@ export default function ProductDetailPage() {
         {/* Breadcrumb */}
         <div className="border-b border-border bg-kuso-paper">
           <div className="container flex items-center gap-2 py-3">
-            <Link to="/browse" className="flex items-center gap-1 font-body text-xs text-muted-foreground hover:text-foreground">
+            <Link to="/browse" className="flex items-center gap-1 font-body text-muted-foreground hover:text-foreground text-sm">
               <ArrowLeft className="h-3 w-3" /> Back to browse
             </Link>
-            {themeName && (
-              <>
-                <span className="font-body text-xs text-muted-foreground">/</span>
-                <span className="font-body text-xs text-muted-foreground">{themeName}</span>
+            {themeName &&
+            <>
+                <span className="font-body text-muted-foreground text-sm">/</span>
+                <span className="font-body text-muted-foreground text-sm">{themeName}</span>
               </>
-            )}
-            <span className="font-body text-xs text-muted-foreground">/</span>
-            <span className="font-body text-xs text-foreground">{mpn}</span>
+            }
+            <span className="font-body text-muted-foreground text-sm">/</span>
+            <span className="font-body text-foreground text-sm">{mpn}</span>
           </div>
         </div>
 
         <div className="container py-8 lg:py-12">
-          {isLoading ? (
-            <div className="grid gap-10 lg:grid-cols-2">
+          {isLoading ?
+          <div className="grid gap-10 lg:grid-cols-2">
               <Skeleton className="aspect-square w-full rounded-none" />
               <div className="space-y-4">
                 <Skeleton className="h-4 w-32" />
@@ -137,144 +137,144 @@ export default function ProductDetailPage() {
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-24 w-full" />
               </div>
-            </div>
-          ) : product ? (
-            <div className="grid gap-10 lg:grid-cols-2">
+            </div> :
+          product ?
+          <div className="grid gap-10 lg:grid-cols-2">
               {/* Image gallery */}
               <div>
-                {mediaItems.length > 0 ? (
-                  <div className="space-y-3">
+                {mediaItems.length > 0 ?
+              <div className="space-y-3">
                     <div className="aspect-square bg-background overflow-hidden border border-border">
                       <img
-                        src={mediaItems[selectedImage]?.url}
-                        alt={mediaItems[selectedImage]?.alt || product.name || ""}
-                        className="h-full w-full object-cover"
-                      />
+                    src={mediaItems[selectedImage]?.url}
+                    alt={mediaItems[selectedImage]?.alt || product.name || ""}
+                    className="h-full w-full object-cover" />
+                  
                     </div>
-                    {mediaItems.length > 1 && (
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {mediaItems.map((img, idx) => (
-                          <button
-                            key={img.id}
-                            onClick={() => setSelectedImage(idx)}
-                            className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors ${
-                              idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
-                            }`}
-                          >
+                    {mediaItems.length > 1 &&
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                        {mediaItems.map((img, idx) =>
+                  <button
+                    key={img.id}
+                    onClick={() => setSelectedImage(idx)}
+                    className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors ${
+                    idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"}`
+                    }>
+                    
                             <img src={img.url} alt={img.alt || ""} className="h-full w-full object-cover" />
                           </button>
-                        ))}
+                  )}
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="aspect-square bg-kuso-mist flex items-center justify-center">
+                }
+                  </div> :
+
+              <div className="aspect-square bg-kuso-mist flex items-center justify-center">
                     <span className="font-display text-6xl font-bold text-muted-foreground/15">
                       {product.mpn.split("-")[0]}
                     </span>
                   </div>
-                )}
+              }
               </div>
 
               {/* Product info */}
               <div>
                 <div className="flex items-center gap-2">
-                  {themeName && <span className="font-body text-xs text-muted-foreground">{themeName}</span>}
-                  <span className="font-body text-xs text-muted-foreground">·</span>
-                  <span className="font-body text-xs text-muted-foreground">{product.mpn}</span>
-                  {product.retired_flag && (
-                    <Badge variant="destructive" className="ml-auto font-display text-[10px] uppercase tracking-wider">
+                  {themeName && <span className="font-body text-muted-foreground text-sm">{themeName}</span>}
+                  <span className="font-body text-muted-foreground text-sm">·</span>
+                  <span className="font-body text-muted-foreground text-sm">{product.mpn}</span>
+                  {product.retired_flag &&
+                <Badge variant="destructive" className="ml-auto font-display text-[10px] uppercase tracking-wider">
                       Retired
                     </Badge>
-                  )}
+                }
                 </div>
 
                 <h1 className="mt-3 font-display text-2xl font-bold text-foreground lg:text-3xl">
                   {product.name}
                 </h1>
 
-                {product.description && (
-                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground">
+                {product.description &&
+              <p className="mt-4 font-body leading-relaxed text-muted-foreground text-base">
                     {product.description}
                   </p>
-                )}
+              }
 
                 <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
                   {(() => {
-                    const specs: { label: string; value: string }[] = [];
-                    const themeName = (product as any).theme?.name;
-                    if (themeName) specs.push({ label: "Theme", value: themeName });
-                    if ((product as any).subtheme_name) specs.push({ label: "Subtheme", value: (product as any).subtheme_name });
-                    if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
-                    if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
-                    if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
-                    if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
-                    if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
-                    if ((offers?.length ?? 0) > 1) specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
-                    return specs.map((s) => (
-                      <div key={s.label}>
-                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
-                        <p className="mt-1 font-display text-sm font-bold text-foreground">{s.value}</p>
+                  const specs: {label: string;value: string;}[] = [];
+                  const themeName = (product as any).theme?.name;
+                  if (themeName) specs.push({ label: "Theme", value: themeName });
+                  if ((product as any).subtheme_name) specs.push({ label: "Subtheme", value: (product as any).subtheme_name });
+                  if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
+                  if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
+                  if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
+                  if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
+                  if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
+                  if ((offers?.length ?? 0) > 1) specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
+                  return specs.map((s) =>
+                  <div key={s.label}>
+                        <p className="font-display font-semibold uppercase tracking-widest text-muted-foreground text-sm">{s.label}</p>
+                        <p className="mt-1 font-display font-bold text-foreground text-base">{s.value}</p>
                       </div>
-                    ));
-                  })()}
+                  );
+                })()}
                 </div>
 
                 {/* Dimensions */}
-                {((product as any).length_cm || (product as any).width_cm || (product as any).height_cm || (product as any).weight_kg) && (
-                  <div className="mt-4 flex gap-6 flex-wrap">
-                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
-                      <div>
+                {((product as any).length_cm || (product as any).width_cm || (product as any).height_cm || (product as any).weight_kg) &&
+              <div className="mt-4 flex gap-6 flex-wrap">
+                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null &&
+                <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Dimensions</p>
                         <p className="mt-1 font-display text-sm font-bold text-foreground">
                           {(product as any).length_cm} × {(product as any).width_cm} × {(product as any).height_cm} cm
                         </p>
                       </div>
-                    )}
-                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
-                      <div>
+                }
+                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null &&
+                <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Girth</p>
                         <p className="mt-1 font-display text-sm font-bold text-foreground">
                           {(2 * (((product as any).width_cm ?? 0) + ((product as any).height_cm ?? 0))).toFixed(1)} cm
                         </p>
                       </div>
-                    )}
-                    {(product as any).weight_kg != null && (
-                      <div>
+                }
+                    {(product as any).weight_kg != null &&
+                <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Weight</p>
                         <p className="mt-1 font-display text-sm font-bold text-foreground">{(product as any).weight_kg} kg</p>
                       </div>
-                    )}
+                }
                   </div>
-                )}
+              }
 
                 {/* Offers by grade */}
                 <div className="mt-6 space-y-3">
                   <h3 className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
                     Available Conditions
                   </h3>
-                  {offers && offers.length > 0 ? (
-                    offers.map((offer) => (
-                      <div
-                        key={offer.sku_id}
-                        className="flex items-center justify-between border border-border p-4 transition-colors hover:border-primary"
-                      >
+                  {offers && offers.length > 0 ?
+                offers.map((offer) =>
+                <div
+                  key={offer.sku_id}
+                  className="flex items-center justify-between border border-border p-4 transition-colors hover:border-primary">
+                  
                         <div className="flex items-center gap-3 max-w-[60%]">
                           <div className="flex h-8 w-8 items-center justify-center bg-foreground font-display text-xs font-bold text-background">
                             G{offer.condition_grade}
                           </div>
                           <div>
-                            <p className="font-display text-sm font-semibold text-foreground">
+                            <p className="font-display font-semibold text-foreground text-base">
                               {gradeLabels[offer.condition_grade]?.label ?? `Grade ${offer.condition_grade}`}
                             </p>
-                            <p className="font-body text-xs text-muted-foreground">
+                            <p className="font-body text-muted-foreground text-sm">
                               {gradeLabels[offer.condition_grade]?.desc ?? ""}
                             </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-right">
-                            <p className="font-display text-lg font-bold text-foreground">
+                            <p className="font-display font-bold text-foreground text-xl">
                               {offer.price != null ? `£${Number(offer.price).toFixed(2)}` : "—"}
                             </p>
                             <p className="font-body text-[11px] text-muted-foreground">
@@ -286,10 +286,10 @@ export default function ProductDetailPage() {
                           </Button>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <p className="font-body text-sm text-muted-foreground">No stock currently available.</p>
-                  )}
+                ) :
+
+                <p className="font-body text-sm text-muted-foreground">No stock currently available.</p>
+                }
                 </div>
 
                 {/* Actions */}
@@ -317,10 +317,10 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            </div> :
+          null}
         </div>
       </div>
-    </StorefrontLayout>
-  );
+    </StorefrontLayout>);
+
 }
