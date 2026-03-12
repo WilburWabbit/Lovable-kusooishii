@@ -80,8 +80,8 @@ export default function HomePage() {
           <div key={title} className="flex items-center gap-4 px-6 py-6">
               <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
               <div>
-                <p className="font-display text-sm font-semibold text-foreground">{title}</p>
-                <p className="font-body text-xs text-muted-foreground">{desc}</p>
+                <p className="font-display font-semibold text-foreground text-base">{title}</p>
+                <p className="font-body text-muted-foreground text-sm">{desc}</p>
               </div>
             </div>
           )}
@@ -150,7 +150,7 @@ export default function HomePage() {
                 }
                       {set.best_grade &&
                 <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                          {gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}`}
+                          Grade {set.best_grade}
                         </span>
                 }
                     </div>
@@ -168,7 +168,7 @@ export default function HomePage() {
                           {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
                         </span>
                         <span className="font-body text-muted-foreground text-sm">
-                          {set.total_stock > 0 ? `${set.total_stock} in stock` : "Out of stock"}
+                          {set.best_grade ? gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
                         </span>
                       </div>
                     </div>
