@@ -19,7 +19,7 @@ export function StorefrontFooter() {
             </p>
             <div className="flex items-center gap-2 text-primary-foreground/50 text-sm">
               <MapPin className="h-4 w-4" />
-              <span className="font-body">Brookville, Norfolk, UK</span>
+              <span className="font-body">Brookville, Norfolk UK</span>
             </div>
             <div className="flex gap-2">
               <Button variant="ghost" size="icon" className="text-primary-foreground/70 hover:text-primary-foreground" asChild>
