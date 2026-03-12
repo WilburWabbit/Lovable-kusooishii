@@ -199,7 +199,7 @@ export function QboSettingsPanel() {
   const syncSales = async () => {
     setSyncingSales(true);
     try {
-      const data = await invokeWithAuth("qbo-sync-sales");
+      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales");
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
       if (data.sales_created) parts.push(`${data.sales_created} sales imported`);
