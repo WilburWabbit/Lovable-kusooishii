@@ -184,6 +184,13 @@ export default function PricingDashboardPage() {
             <Label htmlFor="below-floor" className="text-xs whitespace-nowrap">Below floor only</Label>
           </div>
           <ColumnSelector allColumns={ALL_COLUMNS} visibleColumns={prefs.visibleColumns} onToggleColumn={toggleColumn} onMoveColumn={moveColumn} />
+          <div className="flex items-center gap-1.5 ml-auto">
+            {autoPriceConfigs.map((c) => (
+              <Badge key={c.channel} variant={c.auto_price_enabled ? "default" : "outline"} className="text-[10px] capitalize">
+                {c.channel} {c.auto_price_enabled ? "Auto" : "Manual"}
+              </Badge>
+            ))}
+          </div>
         </div>
 
         {/* Table */}
