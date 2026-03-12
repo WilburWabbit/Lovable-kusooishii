@@ -202,15 +202,15 @@ export default function ProductDetailPage() {
                 <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
-                    if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
-                    if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
-                    if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
-                    if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
-                    if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
                     if ((product as any).subtheme_name) specs.push({ label: "Subtheme", value: (product as any).subtheme_name });
-                    if (beData?.retail_price != null) specs.push({ label: "RRP", value: `£${Number(beData.retail_price).toFixed(2)}` });
-                    if (beData?.current_value != null) specs.push({ label: "Market Value", value: `£${Number(beData.current_value).toFixed(2)}` });
+                    if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
+                    if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
+                    if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
+                    if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
+                    if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
                     if (beData?.growth != null) specs.push({ label: "Growth", value: `${beData.growth > 0 ? "+" : ""}${Number(beData.growth).toFixed(1)}%` });
+                    if (beData?.current_value != null) specs.push({ label: "Market Value", value: `£${Number(beData.current_value).toFixed(2)}` });
+                    if (beData?.retail_price != null) specs.push({ label: "RRP", value: `£${Number(beData.retail_price).toFixed(2)}` });
                     if ((offers?.length ?? 0) > 1) specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
                     return specs.map((s) => (
                       <div key={s.label}>
