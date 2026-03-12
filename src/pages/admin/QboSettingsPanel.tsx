@@ -115,7 +115,7 @@ export function QboSettingsPanel() {
 
   const connectQbo = async () => {
     try {
-      const data = await invokeWithAuth("qbo-auth", { action: "authorize_url" });
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "authorize_url" });
       if (data?.error) throw new Error(data.error);
       window.location.href = data.url;
     } catch (err) {
