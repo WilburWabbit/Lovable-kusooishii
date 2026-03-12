@@ -508,9 +508,22 @@ Deno.serve(async (req) => {
       result = data;
 
     } else if (action === "upsert-shipping-rate") {
-      const { id: rateId, channel, carrier, service_name, max_weight_kg, max_length_cm, cost, active } = params;
-      const row: Record<string, any> = { channel: channel ?? "default", carrier, service_name, max_weight_kg, cost: cost ?? 0, active: active ?? true };
+      const { id: rateId, channel, carrier, service_name, max_weight_kg, max_length_cm, max_width_cm, max_depth_cm, max_girth_cm, size_band, cost, price_ex_vat, price_inc_vat, vat_exempt, tracked, max_compensation, est_delivery, active } = params;
+      const row: Record<string, any> = {
+        channel: channel ?? "default", carrier, service_name, max_weight_kg,
+        cost: cost ?? price_ex_vat ?? 0, active: active ?? true,
+      };
       if (max_length_cm !== undefined) row.max_length_cm = max_length_cm;
+      if (max_width_cm !== undefined) row.max_width_cm = max_width_cm;
+      if (max_depth_cm !== undefined) row.max_depth_cm = max_depth_cm;
+      if (max_girth_cm !== undefined) row.max_girth_cm = max_girth_cm;
+      if (size_band !== undefined) row.size_band = size_band;
+      if (price_ex_vat !== undefined) { row.price_ex_vat = price_ex_vat; row.cost = price_ex_vat; }
+      if (price_inc_vat !== undefined) row.price_inc_vat = price_inc_vat;
+      if (vat_exempt !== undefined) row.vat_exempt = vat_exempt;
+      if (tracked !== undefined) row.tracked = tracked;
+      if (max_compensation !== undefined) row.max_compensation = max_compensation;
+      if (est_delivery !== undefined) row.est_delivery = est_delivery;
       if (rateId) row.id = rateId;
       const { error } = await admin.from("shipping_rate_table").upsert(row, { onConflict: "id" });
       if (error) throw error;
