@@ -44,6 +44,7 @@ import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
 import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
+import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
