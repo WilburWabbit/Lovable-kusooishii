@@ -182,6 +182,51 @@ export type Database = {
         }
         Relationships: []
       }
+      channel_fee_schedule: {
+        Row: {
+          active: boolean
+          applies_to: string
+          channel: string
+          created_at: string
+          fee_name: string
+          fixed_amount: number
+          id: string
+          max_amount: number | null
+          min_amount: number | null
+          notes: string | null
+          rate_percent: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          applies_to?: string
+          channel: string
+          created_at?: string
+          fee_name: string
+          fixed_amount?: number
+          id?: string
+          max_amount?: number | null
+          min_amount?: number | null
+          notes?: string | null
+          rate_percent?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          applies_to?: string
+          channel?: string
+          created_at?: string
+          fee_name?: string
+          fixed_amount?: number
+          id?: string
+          max_amount?: number | null
+          min_amount?: number | null
+          notes?: string | null
+          rate_percent?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       channel_listing: {
         Row: {
           channel: string
@@ -1453,6 +1498,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      selling_cost_defaults: {
+        Row: {
+          id: string
+          key: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          id?: string
+          key: string
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          id?: string
+          key?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: []
+      }
+      shipping_rate_table: {
+        Row: {
+          active: boolean
+          carrier: string
+          channel: string
+          cost: number
+          created_at: string
+          id: string
+          max_length_cm: number | null
+          max_weight_kg: number
+          service_name: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          carrier: string
+          channel?: string
+          cost?: number
+          created_at?: string
+          id?: string
+          max_length_cm?: number | null
+          max_weight_kg: number
+          service_name: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          carrier?: string
+          channel?: string
+          cost?: number
+          created_at?: string
+          id?: string
+          max_length_cm?: number | null
+          max_weight_kg?: number
+          service_name?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       sku: {
         Row: {
