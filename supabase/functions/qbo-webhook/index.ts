@@ -183,15 +183,18 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let mpn: string | null = null;
     let conditionGrade: string | null = null;
 
+    let rawSkuCode: string | null = null;
     if (isStockLine && detail.ItemRef?.value) {
       const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${detail.ItemRef.value}`);
       const qboItem = itemData?.Item ?? null;
       const skuField = qboItem?.Sku;
       if (skuField && String(skuField).trim()) {
+        rawSkuCode = String(skuField).trim();
         const parsed = parseSku(String(skuField));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
       } else if (detail.ItemRef?.name) {
+        rawSkuCode = String(detail.ItemRef.name).trim();
         const parsed = parseSku(String(detail.ItemRef.name));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
@@ -210,6 +213,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       mpn,
       condition_grade: conditionGrade,
       qbo_tax_code_ref: taxCodeRef,
+      sku_code: rawSkuCode,
     });
   }
 
