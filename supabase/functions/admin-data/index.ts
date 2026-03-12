@@ -746,12 +746,14 @@ Deno.serve(async (req) => {
       let marketConsensus: number | null = null;
       let beConfidence = 0;
       if (mpn) {
-        // Try to match by item_number (mpn without version suffix)
+        // Match by both full MPN (e.g. "10281-1") and base MPN (e.g. "10281")
         const baseMpn = mpn.replace(/-\d+$/, "");
+        const candidates = [mpn];
+        if (baseMpn !== mpn) candidates.push(baseMpn);
         const { data: beData } = await admin
           .from("brickeconomy_collection")
           .select("current_value")
-          .eq("item_number", baseMpn)
+          .in("item_number", candidates)
           .limit(1)
           .maybeSingle();
         if (beData?.current_value != null) {
