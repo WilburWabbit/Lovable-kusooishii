@@ -29,7 +29,12 @@ export function StorefrontHeader() {
   { name: 'About', path: '/about' }];
 
 
-  const isActive = (path: string) => location.pathname === path.split('?')[0];
+  const isActive = (path: string) => {
+    const [pathname, search] = path.split('?');
+    if (pathname !== location.pathname) return false;
+    if (!search) return !location.search;
+    return location.search === `?${search}`;
+  };
 
   const handleSignOut = async () => {
     await signOut();
