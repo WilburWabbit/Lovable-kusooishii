@@ -210,6 +210,37 @@ export default function BrowsePage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Release Year slider */}
+                {yearMin !== yearMax && (
+                  <div>
+                    <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+                      Release Year
+                    </label>
+                    <div className="mt-3 px-1">
+                      <Slider
+                        min={yearMin}
+                        max={yearMax}
+                        step={1}
+                        value={yearRange ?? [yearMin, yearMax]}
+                        onValueChange={(v) => setYearRange([v[0], v[1]])}
+                        className="w-full"
+                      />
+                      <div className="mt-2 flex justify-between font-body text-xs text-muted-foreground">
+                        <span>{yearRange ? yearRange[0] : yearMin}</span>
+                        <span>{yearRange ? yearRange[1] : yearMax}</span>
+                      </div>
+                    </div>
+                    {yearRange && (
+                      <button
+                        onClick={() => setYearRange(null)}
+                        className="mt-1 font-body text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </aside>
 
