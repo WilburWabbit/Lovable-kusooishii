@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowRight, Star, Shield, Truck } from "lucide-react";
+import { ArrowRight, Star, Bell, Truck } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
