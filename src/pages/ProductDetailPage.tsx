@@ -200,28 +200,25 @@ export default function ProductDetailPage() {
                 )}
 
                 <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
-                  {product.piece_count && (
-                    <div>
-                      <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Pieces</p>
-                      <p className="mt-1 font-display text-sm font-bold text-foreground">{product.piece_count.toLocaleString()}</p>
-                    </div>
-                  )}
-                  {product.release_year && (
-                    <div>
-                      <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Released</p>
-                      <p className="mt-1 font-display text-sm font-bold text-foreground">{product.release_year}</p>
-                    </div>
-                  )}
-                  {(product as any).age_range && (
-                    <div>
-                      <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ages</p>
-                      <p className="mt-1 font-display text-sm font-bold text-foreground">{(product as any).age_range}</p>
-                    </div>
-                  )}
-                  <div>
-                    <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Variants</p>
-                    <p className="mt-1 font-display text-sm font-bold text-foreground">{offers?.length ?? 0}</p>
-                  </div>
+                  {(() => {
+                    const specs: { label: string; value: string }[] = [];
+                    if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
+                    if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
+                    if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
+                    if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
+                    if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
+                    if ((product as any).subtheme_name) specs.push({ label: "Subtheme", value: (product as any).subtheme_name });
+                    if (beData?.retail_price != null) specs.push({ label: "RRP", value: `£${Number(beData.retail_price).toFixed(2)}` });
+                    if (beData?.current_value != null) specs.push({ label: "Market Value", value: `£${Number(beData.current_value).toFixed(2)}` });
+                    if (beData?.growth != null) specs.push({ label: "Growth", value: `${beData.growth > 0 ? "+" : ""}${Number(beData.growth).toFixed(1)}%` });
+                    specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
+                    return specs.map((s) => (
+                      <div key={s.label}>
+                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
+                        <p className="mt-1 font-display text-sm font-bold text-foreground">{s.value}</p>
+                      </div>
+                    ));
+                  })()}
                 </div>
 
                 {/* Dimensions */}
