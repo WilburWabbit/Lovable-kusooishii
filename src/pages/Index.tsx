@@ -73,7 +73,7 @@ export default function HomePage() {
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
-            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4" },
+            { icon: Bell, title: "Condition Graded", desc: "Every set inspected and rated 1–4" },
             { icon: Star, title: "Version Tracked", desc: "MPN version suffixes preserved" },
             { icon: Truck, title: "Club Collection", desc: "Free pickup at local LEGO clubs" },
           ].map(({ icon: Icon, title, desc }) => (
