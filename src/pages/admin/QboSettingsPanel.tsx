@@ -173,7 +173,7 @@ export function QboSettingsPanel() {
   const syncItems = async () => {
     setSyncingItems(true);
     try {
-      const data = await invokeWithAuth("qbo-sync-items");
+      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-items");
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
       if (data.upserted) parts.push(`${data.upserted} items upserted`);
