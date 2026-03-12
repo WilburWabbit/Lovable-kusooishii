@@ -81,45 +81,95 @@ export default function PricingDashboardPage() {
     { key: "product_name", dir: "asc" },
   );
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("channel_listing")
-        .select("id, channel, listed_price, price_floor, price_target, price_ceiling, confidence_score, priced_at, offer_status, sku:sku_id(sku_code, condition_grade, product:product_id(name, mpn))")
-        .order("channel");
+  const loadData = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("channel_listing")
+      .select("id, channel, listed_price, price_floor, price_target, price_ceiling, confidence_score, priced_at, offer_status, sku:sku_id(sku_code, condition_grade, product:product_id(name, mpn))")
+      .order("channel");
 
-      if (error) {
-        console.error(error);
-        setLoading(false);
-        return;
-      }
-
-      const mapped: PricingRow[] = (data ?? []).map((r: any) => ({
-        id: r.id,
-        channel: r.channel,
-        listed_price: r.listed_price,
-        price_floor: r.price_floor,
-        price_target: r.price_target,
-        price_ceiling: r.price_ceiling,
-        confidence_score: r.confidence_score,
-        priced_at: r.priced_at,
-        offer_status: r.offer_status,
-        sku_code: r.sku?.sku_code ?? "—",
-        condition_grade: r.sku?.condition_grade ?? "—",
-        product_name: r.sku?.product?.name ?? "—",
-        mpn: r.sku?.product?.mpn ?? "—",
-      }));
-      setRows(mapped);
+    if (error) {
+      console.error(error);
       setLoading(false);
-    })();
-  }, []);
+      return;
+    }
+
+    const mapped: PricingRow[] = (data ?? []).map((r: any) => ({
+      id: r.id,
+      channel: r.channel,
+      listed_price: r.listed_price,
+      price_floor: r.price_floor,
+      price_target: r.price_target,
+      price_ceiling: r.price_ceiling,
+      confidence_score: r.confidence_score,
+      priced_at: r.priced_at,
+      offer_status: r.offer_status,
+      sku_code: r.sku?.sku_code ?? "—",
+      condition_grade: r.sku?.condition_grade ?? "—",
+      product_name: r.sku?.product?.name ?? "—",
+      mpn: r.sku?.product?.mpn ?? "—",
+    }));
+    setRows(mapped);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadData(); }, []);
 
   useEffect(() => {
     invokeWithAuth<ChannelConfig[]>("admin-data", { action: "list-channel-pricing-config" })
       .then((data) => setAutoPriceConfigs(data))
       .catch(() => {});
   }, []);
+
+  const handleRunAllPricing = async () => {
+    setBatchRunning(true);
+    setBatchProgress({ done: 0, total: 0 });
+    try {
+      // Get all listings to price
+      const batch = await invokeWithAuth<{ listings: { listing_id: string; sku_id: string; channel: string }[]; total: number }>("admin-data", {
+        action: "batch-calculate-pricing",
+        channel: channelFilter !== "all" ? channelFilter : undefined,
+      });
+      const listings = batch.listings ?? [];
+      setBatchProgress({ done: 0, total: listings.length });
+
+      let completed = 0;
+      let errors = 0;
+      for (const item of listings) {
+        try {
+          const result = await invokeWithAuth<any>("admin-data", {
+            action: "calculate-pricing",
+            sku_id: item.sku_id,
+            channel: item.channel,
+          });
+          // Persist prices with auto_price
+          await invokeWithAuth("admin-data", {
+            action: "update-listing-prices",
+            listing_id: item.listing_id,
+            price_floor: result.floor_price,
+            price_target: result.target_price,
+            price_ceiling: result.ceiling_price,
+            confidence_score: result.confidence_score,
+            auto_price: true,
+          });
+        } catch {
+          errors++;
+        }
+        completed++;
+        setBatchProgress({ done: completed, total: listings.length });
+      }
+
+      toast({
+        title: "Batch pricing complete",
+        description: `${completed - errors} of ${listings.length} priced successfully${errors > 0 ? `, ${errors} errors` : ""}`,
+      });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: "Batch pricing failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBatchRunning(false);
+    }
+  };
 
   // Filter
   const q = search.toLowerCase();
