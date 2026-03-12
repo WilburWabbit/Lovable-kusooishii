@@ -46,6 +46,23 @@ export default function ProductDetailPage() {
     enabled: !!mpn,
   });
 
+  // Fetch BrickEconomy enrichment data
+  const { data: beData } = useQuery({
+    queryKey: ["brickeconomy_enrichment", mpn],
+    queryFn: async () => {
+      const setNumber = mpn!.split("-")[0];
+      const { data, error } = await supabase
+        .from("brickeconomy_collection")
+        .select("minifigs_count, retail_price, current_value, growth, retired_date, currency")
+        .eq("item_number", setNumber)
+        .eq("item_type", "set")
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!mpn,
+  });
+
   // Fetch product media
   const { data: mediaItems = [] } = useQuery({
     queryKey: ["product_media_storefront", product?.id],
