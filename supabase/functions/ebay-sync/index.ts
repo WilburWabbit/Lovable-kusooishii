@@ -333,10 +333,8 @@ Deno.serve(async (req) => {
             let skuId: string | null = null;
 
             if (ebaySku) {
-              const localCode = normaliseSkuCode(ebaySku);
-              skuId = skuMap.get(localCode.toLowerCase()) || null;
-              // Fallback: try exact match
-              if (!skuId) skuId = skuMap.get(ebaySku.toLowerCase()) || null;
+              // Direct lookup — eBay SKU should match sku_code exactly
+              skuId = skuMap.get(ebaySku.trim().toLowerCase()) || null;
             }
 
             if (!skuId) {
