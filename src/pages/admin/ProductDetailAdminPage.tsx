@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import {
-  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle, Sparkles, Loader2, Plus, X,
+  ArrowLeft, Package, PoundSterling, ShoppingBag, TrendingUp, Save, CheckCircle2, Circle, Sparkles, Loader2, Plus, X, Calculator,
 } from "lucide-react";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
@@ -133,6 +133,9 @@ export default function ProductDetailAdminPage() {
   const [savingChannel, setSavingChannel] = useState<string | null>(null);
   // Listing action loading state: "ebay:sku_id" or "web:sku_id"
   const [listingAction, setListingAction] = useState<string | null>(null);
+  // Pricing state
+  const [pricingResults, setPricingResults] = useState<Record<string, any>>({});
+  const [pricingLoading, setPricingLoading] = useState<string | null>(null);
 
   // Initialize form when product loads
   useEffect(() => {
@@ -254,6 +257,42 @@ export default function ProductDetailAdminPage() {
       toast.error(err.message ?? "Save failed");
     } finally {
       setSavingChannel(null);
+    }
+  };
+
+  const handleCalculatePricing = async (skuId: string, channel: string) => {
+    const key = `${skuId}:${channel}`;
+    setPricingLoading(key);
+    try {
+      const result = await invokeWithAuth<any>("admin-data", { action: "calculate-pricing", sku_id: skuId, channel });
+      setPricingResults((prev) => ({ ...prev, [key]: result }));
+      
+      // Find the listing to persist prices
+      const listing = product?.channel_listings.find((cl) => cl.sku_id === skuId && cl.channel === channel);
+      if (listing) {
+        await invokeWithAuth("admin-data", {
+          action: "update-listing-prices",
+          listing_id: listing.id,
+          price_floor: result.floor_price,
+          price_target: result.target_price,
+          price_ceiling: result.ceiling_price,
+          confidence_score: result.confidence_score,
+        });
+      }
+      toast.success("Pricing calculated");
+    } catch (err: any) {
+      toast.error(err.message ?? "Pricing failed");
+    } finally {
+      setPricingLoading(null);
+    }
+  };
+
+  const handleCalculateAllPricing = async () => {
+    if (!product) return;
+    for (const sku of product.skus) {
+      for (const cl of sku.channel_listings) {
+        await handleCalculatePricing(sku.id, cl.channel);
+      }
     }
   };
 
@@ -677,6 +716,87 @@ export default function ProductDetailAdminPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pricing Engine */}
+        {product.skus.length > 0 && product.channel_listings.length > 0 && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium">Pricing Engine</CardTitle>
+              <Button size="sm" variant="outline" onClick={handleCalculateAllPricing}>
+                <Calculator className="h-3.5 w-3.5 mr-1.5" />
+                Calculate All
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {product.skus.flatMap((s) =>
+                  s.channel_listings.map((cl) => {
+                    const key = `${s.id}:${cl.channel}`;
+                    const pricing = pricingResults[key];
+                    const isLoading = pricingLoading === key;
+                    return (
+                      <div key={key} className="border border-border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-medium">{s.sku_code}</span>
+                            <Badge variant="outline" className="text-[10px]">{CHANNEL_LABELS[cl.channel] ?? cl.channel}</Badge>
+                            <span className="text-xs text-muted-foreground">Listed: {fmt(cl.listed_price)}</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={isLoading}
+                            onClick={() => handleCalculatePricing(s.id, cl.channel)}
+                          >
+                            {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3 mr-1" />}
+                            Price
+                          </Button>
+                        </div>
+                        {pricing && (
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Floor</p>
+                              <p className="text-sm font-bold font-display font-mono">{fmt(pricing.floor_price)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Target</p>
+                              <p className="text-sm font-bold font-display font-mono">{fmt(pricing.target_price)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Ceiling</p>
+                              <p className="text-sm font-bold font-display font-mono">{fmt(pricing.ceiling_price)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Cost Base</p>
+                              <p className="text-sm font-bold font-display font-mono">{fmt(pricing.cost_base)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Confidence</p>
+                              <Badge variant="outline" className={`text-[10px] ${
+                                pricing.confidence_score >= 0.7 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                                pricing.confidence_score >= 0.4 ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                                "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400"
+                              }`}>
+                                {pricing.confidence_score >= 0.7 ? "High" : pricing.confidence_score >= 0.4 ? "Medium" : "Low"}
+                                {` (${Math.round(pricing.confidence_score * 100)}%)`}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+                        {pricing && cl.listed_price != null && cl.listed_price < pricing.floor_price && (
+                          <p className="text-xs text-destructive font-medium">
+                            ⚠ Listed price ({fmt(cl.listed_price)}) is below floor ({fmt(pricing.floor_price)})
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </CardContent>
           </Card>

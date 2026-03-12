@@ -230,6 +230,7 @@ export type Database = {
       channel_listing: {
         Row: {
           channel: string
+          confidence_score: number | null
           created_at: string
           external_listing_id: string | null
           external_sku: string
@@ -239,6 +240,11 @@ export type Database = {
           listing_description: string | null
           listing_title: string | null
           offer_status: string | null
+          price_ceiling: number | null
+          price_floor: number | null
+          price_target: number | null
+          priced_at: string | null
+          pricing_notes: string | null
           raw_data: Json | null
           sku_id: string | null
           synced_at: string
@@ -246,6 +252,7 @@ export type Database = {
         }
         Insert: {
           channel?: string
+          confidence_score?: number | null
           created_at?: string
           external_listing_id?: string | null
           external_sku: string
@@ -255,6 +262,11 @@ export type Database = {
           listing_description?: string | null
           listing_title?: string | null
           offer_status?: string | null
+          price_ceiling?: number | null
+          price_floor?: number | null
+          price_target?: number | null
+          priced_at?: string | null
+          pricing_notes?: string | null
           raw_data?: Json | null
           sku_id?: string | null
           synced_at?: string
@@ -262,6 +274,7 @@ export type Database = {
         }
         Update: {
           channel?: string
+          confidence_score?: number | null
           created_at?: string
           external_listing_id?: string | null
           external_sku?: string
@@ -271,6 +284,11 @@ export type Database = {
           listing_description?: string | null
           listing_title?: string | null
           offer_status?: string | null
+          price_ceiling?: number | null
+          price_floor?: number | null
+          price_target?: number | null
+          priced_at?: string | null
+          pricing_notes?: string | null
           raw_data?: Json | null
           sku_id?: string | null
           synced_at?: string

@@ -12,9 +12,15 @@ interface DefaultEntry {
   value: number;
 }
 
-const LABELS: Record<string, { label: string; suffix: string; description: string }> = {
-  packaging_cost: { label: "Packaging Cost", suffix: "£", description: "Flat cost per shipment for packaging materials" },
-  risk_reserve_rate: { label: "Risk Reserve Rate", suffix: "%", description: "Percentage of sale price held as reserve for returns/damage" },
+const LABELS: Record<string, { label: string; suffix: string; description: string; group?: string }> = {
+  packaging_cost: { label: "Packaging Cost", suffix: "£", description: "Flat cost per shipment for packaging materials", group: "Cost" },
+  risk_reserve_rate: { label: "Risk Reserve Rate", suffix: "%", description: "Percentage of sale price held as reserve for returns/damage", group: "Cost" },
+  minimum_profit_amount: { label: "Minimum Profit", suffix: "£", description: "Minimum profit amount required per sale", group: "Pricing" },
+  minimum_margin_rate: { label: "Minimum Margin Rate", suffix: "", description: "Minimum margin rate (e.g. 0.15 = 15%)", group: "Pricing" },
+  condition_multiplier_1: { label: "Grade 1 Multiplier", suffix: "×", description: "Market price multiplier for Sealed/New condition", group: "Condition" },
+  condition_multiplier_2: { label: "Grade 2 Multiplier", suffix: "×", description: "Market price multiplier for Like New condition", group: "Condition" },
+  condition_multiplier_3: { label: "Grade 3 Multiplier", suffix: "×", description: "Market price multiplier for Good condition", group: "Condition" },
+  condition_multiplier_4: { label: "Grade 4 Multiplier", suffix: "×", description: "Market price multiplier for Fair condition", group: "Condition" },
 };
 
 export function SellingCostDefaultsPanel() {
@@ -64,8 +70,49 @@ export function SellingCostDefaultsPanel() {
         {loading ? (
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         ) : (
-          <div className="space-y-4">
-            {defaults.map((d) => {
+          <div className="space-y-6">
+            {/* Group defaults by category */}
+            {["Cost", "Pricing", "Condition"].map((group) => {
+              const groupDefaults = defaults.filter((d) => {
+                const meta = LABELS[d.key];
+                return meta?.group === group;
+              });
+              if (groupDefaults.length === 0) return null;
+              return (
+                <div key={group}>
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">{group}</h4>
+                  <div className="space-y-4">
+                    {groupDefaults.map((d) => {
+                      const meta = LABELS[d.key] ?? { label: d.key, suffix: "", description: "" };
+                      return (
+                        <div key={d.key} className="flex items-end gap-3">
+                          <div className="flex-1 space-y-1">
+                            <Label>{meta.label}</Label>
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-muted-foreground">{meta.suffix}</span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                className="w-32"
+                                value={d.value}
+                                onChange={(e) => updateValue(d.key, Number(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => saveDefault(d.key, d.value)} disabled={saving === d.key}>
+                            {saving === d.key ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+                            Save
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {/* Ungrouped defaults */}
+            {defaults.filter((d) => !LABELS[d.key]?.group).map((d) => {
               const meta = LABELS[d.key] ?? { label: d.key, suffix: "", description: "" };
               return (
                 <div key={d.key} className="flex items-end gap-3">
