@@ -467,6 +467,165 @@ Deno.serve(async (req) => {
       }
       result = { success: true };
 
+    /* ── Channel Fee Schedule CRUD ── */
+
+    } else if (action === "list-channel-fees") {
+      const { data, error } = await admin
+        .from("channel_fee_schedule")
+        .select("*")
+        .order("channel")
+        .order("fee_name");
+      if (error) throw error;
+      result = data;
+
+    } else if (action === "upsert-channel-fee") {
+      const { id: feeId, channel, fee_name, rate_percent, fixed_amount, min_amount, max_amount, applies_to, active, notes } = params;
+      const row: Record<string, any> = { channel, fee_name, rate_percent: rate_percent ?? 0, fixed_amount: fixed_amount ?? 0, applies_to: applies_to ?? "sale_price", active: active ?? true };
+      if (min_amount !== undefined) row.min_amount = min_amount;
+      if (max_amount !== undefined) row.max_amount = max_amount;
+      if (notes !== undefined) row.notes = notes;
+      if (feeId) row.id = feeId;
+      const { error } = await admin.from("channel_fee_schedule").upsert(row, { onConflict: "id" });
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "delete-channel-fee") {
+      const { id: feeId } = params;
+      if (!feeId) throw new Error("id is required");
+      const { error } = await admin.from("channel_fee_schedule").delete().eq("id", feeId);
+      if (error) throw error;
+      result = { success: true };
+
+    /* ── Shipping Rate Table CRUD ── */
+
+    } else if (action === "list-shipping-rates") {
+      const { data, error } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .order("carrier")
+        .order("max_weight_kg");
+      if (error) throw error;
+      result = data;
+
+    } else if (action === "upsert-shipping-rate") {
+      const { id: rateId, channel, carrier, service_name, max_weight_kg, max_length_cm, cost, active } = params;
+      const row: Record<string, any> = { channel: channel ?? "default", carrier, service_name, max_weight_kg, cost: cost ?? 0, active: active ?? true };
+      if (max_length_cm !== undefined) row.max_length_cm = max_length_cm;
+      if (rateId) row.id = rateId;
+      const { error } = await admin.from("shipping_rate_table").upsert(row, { onConflict: "id" });
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "delete-shipping-rate") {
+      const { id: rateId } = params;
+      if (!rateId) throw new Error("id is required");
+      const { error } = await admin.from("shipping_rate_table").delete().eq("id", rateId);
+      if (error) throw error;
+      result = { success: true };
+
+    /* ── Selling Cost Defaults CRUD ── */
+
+    } else if (action === "list-selling-cost-defaults") {
+      const { data, error } = await admin
+        .from("selling_cost_defaults")
+        .select("*")
+        .order("key");
+      if (error) throw error;
+      result = data;
+
+    } else if (action === "upsert-selling-cost-default") {
+      const { key: dKey, value: dValue } = params;
+      if (!dKey) throw new Error("key is required");
+      const { error } = await admin.from("selling_cost_defaults").upsert(
+        { key: dKey, value: dValue ?? 0, updated_at: new Date().toISOString() },
+        { onConflict: "key" }
+      );
+      if (error) throw error;
+      result = { success: true };
+
+    /* ── Calculate Selling Costs ── */
+
+    } else if (action === "calculate-selling-costs") {
+      const { sku_id, channel, sale_price, shipping_charged } = params;
+      if (!sku_id || !channel || sale_price === undefined) throw new Error("sku_id, channel, and sale_price are required");
+
+      // 1. Get SKU → product weight
+      const { data: skuData } = await admin
+        .from("sku")
+        .select("id, price, product:product_id(weight_kg)")
+        .eq("id", sku_id)
+        .single();
+      const weightKg = (skuData?.product as any)?.weight_kg ?? 0;
+
+      // 2. Get carrying value (avg of available stock)
+      const { data: stockUnits } = await admin
+        .from("stock_unit")
+        .select("carrying_value")
+        .eq("sku_id", sku_id)
+        .eq("status", "available");
+      const avgCarrying = stockUnits && stockUnits.length > 0
+        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+        : 0;
+
+      // 3. Get active fees for channel
+      const { data: fees } = await admin
+        .from("channel_fee_schedule")
+        .select("*")
+        .eq("channel", channel)
+        .eq("active", true);
+
+      // 4. Calculate channel fees
+      let totalChannelFees = 0;
+      const feeBreakdown: { fee_name: string; amount: number }[] = [];
+      const salePrice = Number(sale_price);
+      const shippingCharged = Number(shipping_charged ?? 0);
+      for (const fee of fees ?? []) {
+        let base = salePrice;
+        if (fee.applies_to === "sale_plus_shipping") base = salePrice + shippingCharged;
+        else if (fee.applies_to === "sale_price_inc_vat") base = salePrice * 1.2; // UK VAT
+        let amount = (base * (fee.rate_percent / 100)) + (fee.fixed_amount ?? 0);
+        if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
+        if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
+        amount = Math.round(amount * 100) / 100;
+        totalChannelFees += amount;
+        feeBreakdown.push({ fee_name: fee.fee_name, amount });
+      }
+
+      // 5. Get shipping cost from rate table
+      const { data: rates } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .or(`channel.eq.${channel},channel.eq.default`)
+        .eq("active", true)
+        .gte("max_weight_kg", weightKg)
+        .order("max_weight_kg", { ascending: true })
+        .limit(1);
+      const shippingCost = rates && rates.length > 0 ? Number(rates[0].cost) : 0;
+
+      // 6. Get defaults
+      const { data: defaults } = await admin
+        .from("selling_cost_defaults")
+        .select("key, value");
+      const defaultsMap: Record<string, number> = {};
+      for (const d of defaults ?? []) defaultsMap[d.key] = Number(d.value);
+      const packagingCost = defaultsMap["packaging_cost"] ?? 0;
+      const riskReserveRate = defaultsMap["risk_reserve_rate"] ?? 0;
+      const riskReserve = Math.round(salePrice * (riskReserveRate / 100) * 100) / 100;
+
+      const totalCostToSell = Math.round((avgCarrying + packagingCost + shippingCost + totalChannelFees + riskReserve) * 100) / 100;
+
+      result = {
+        carrying_value: Math.round(avgCarrying * 100) / 100,
+        packaging_cost: packagingCost,
+        shipping_cost: shippingCost,
+        channel_fees: Math.round(totalChannelFees * 100) / 100,
+        fee_breakdown: feeBreakdown,
+        risk_reserve: riskReserve,
+        total_cost_to_sell: totalCostToSell,
+        margin: Math.round((salePrice - totalCostToSell) * 100) / 100,
+        margin_percent: salePrice > 0 ? Math.round(((salePrice - totalCostToSell) / salePrice) * 10000) / 100 : 0,
+      };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
