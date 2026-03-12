@@ -78,6 +78,7 @@ export default function PricingDashboardPage() {
       .from("sku")
       .select("id, sku_code, condition_grade, price, product:product_id(name, mpn)")
       .eq("active_flag", true)
+      .not("product_id", "is", null)
       .order("sku_code");
 
     if (skuError) {
