@@ -222,6 +222,7 @@ export default function BrowsePage() {
                             </span>
                           </div>
                         )}
+                      </div>
 
                       <div className="absolute left-2 top-2 flex gap-1">
                         {set.retired_flag && (
