@@ -3,6 +3,7 @@ import {
   Package,
   PackageOpen,
   Box,
+  Calculator,
   ShoppingCart,
   BarChart3,
   ListChecks,
