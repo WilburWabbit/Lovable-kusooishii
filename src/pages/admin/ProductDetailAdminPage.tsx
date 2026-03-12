@@ -296,7 +296,7 @@ export default function ProductDetailAdminPage() {
     }
   };
 
-
+  if (isLoading) {
     return (
       <BackOfficeLayout title="Product">
         <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
