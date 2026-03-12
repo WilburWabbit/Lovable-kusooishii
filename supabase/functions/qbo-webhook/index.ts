@@ -249,7 +249,29 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     const cg = validGrades.includes(line.condition_grade!) ? line.condition_grade! : "1";
     // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
     const skuCode = line.sku_code || (cg !== "1" ? `${line.mpn}.${cg}` : line.mpn!);
+    // Look up product, auto-create from lego_catalog if missing
+    let productId: string | null = null;
     const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
+    if (product) {
+      productId = product.id;
+    } else if (line.mpn) {
+      const { data: catalog } = await admin
+        .from("lego_catalog")
+        .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+        .eq("mpn", line.mpn).eq("status", "active").maybeSingle();
+      if (catalog) {
+        const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+          mpn: line.mpn, name: catalog.name, theme_id: catalog.theme_id,
+          piece_count: catalog.piece_count, release_year: catalog.release_year,
+          retired_flag: catalog.retired_flag ?? false, img_url: catalog.img_url,
+          subtheme_name: catalog.subtheme_name, product_type: catalog.product_type ?? "set",
+          lego_catalog_id: catalog.id, status: "active",
+        }).select("id").single();
+        if (!prodErr && newProduct) { productId = newProduct.id; }
+        else if (prodErr) { console.error(`Auto-create product for ${line.mpn}:`, prodErr.message); }
+      }
+    }
+
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
@@ -258,13 +280,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
       const { data: newSku, error: skuErr } = await admin.from("sku").insert({
-        product_id: product?.id ?? null,
+        product_id: productId,
         condition_grade: cg,
         sku_code: skuCode,
         name: cleanQboName(line.description ?? line.mpn),
         price: landedCost,
         active_flag: true,
-        saleable_flag: !!product,
+        saleable_flag: !!productId,
       }).select("id").single();
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
@@ -600,14 +622,46 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
   const skuCode = rawSku;
 
-  // Look up product by MPN
+  // Look up product by MPN, auto-create from lego_catalog if missing
+  let productId: string | null = null;
   const { data: productRecord } = await admin
     .from("product")
     .select("id")
     .eq("mpn", mpn)
     .maybeSingle();
 
-  const productId = productRecord?.id ?? null;
+  if (productRecord) {
+    productId = productRecord.id;
+  } else {
+    // Auto-create product from lego_catalog (same logic as qbo-sync-items)
+    const { data: catalog } = await admin
+      .from("lego_catalog")
+      .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+      .eq("mpn", mpn)
+      .eq("status", "active")
+      .maybeSingle();
+    if (catalog) {
+      const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+        mpn,
+        name: catalog.name,
+        theme_id: catalog.theme_id,
+        piece_count: catalog.piece_count,
+        release_year: catalog.release_year,
+        retired_flag: catalog.retired_flag ?? false,
+        img_url: catalog.img_url,
+        subtheme_name: catalog.subtheme_name,
+        product_type: catalog.product_type ?? "set",
+        lego_catalog_id: catalog.id,
+        status: "active",
+      }).select("id").single();
+      if (!prodErr && newProduct) {
+        productId = newProduct.id;
+        console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
+      } else if (prodErr) {
+        console.error(`Auto-create product for ${mpn}:`, prodErr.message);
+      }
+    }
+  }
 
   // Pre-check: if a SKU with this sku_code exists but has a different/null qbo_item_id,
   // update it to link to this QBO item before upserting (avoids sku_code unique violation)
