@@ -59,7 +59,7 @@ export default function HomePage() {
                   Browse Sets <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-              <Button asChild variant="outline" size="lg" className="border-primary-foreground/20 font-display font-semibold text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+              <Button asChild variant="outline" size="lg" className="border-primary font-display font-semibold text-primary hover:bg-primary hover:text-primary-foreground">
                 <Link to="/grading">
                   How We Grade
                 </Link>
