@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import kusoLogo from '@/assets/kuso-logo.png';
 import { Instagram, Twitter, Mail, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
