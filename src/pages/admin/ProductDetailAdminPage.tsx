@@ -742,7 +742,7 @@ export default function ProductDetailAdminPage() {
         )}
 
         {/* Pricing Engine */}
-        {product.skus.length > 0 && product.channel_listings.length > 0 && (
+        {product.skus.length > 0 && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium">Pricing Engine</CardTitle>
