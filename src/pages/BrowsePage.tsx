@@ -23,11 +23,28 @@ const gradeLabels: Record<string, string> = {
 };
 
 export default function BrowsePage() {
+  const [searchParams] = useSearchParams();
+  const viewMode = searchParams.get("view");
+  const themeFromUrl = searchParams.get("theme");
+
   const [search, setSearch] = useState("");
-  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
+  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(themeFromUrl);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
   const [yearRange, setYearRange] = useState<[number, number] | null>(null);
+
+  // Sync theme filter from URL
+  useEffect(() => {
+    setSelectedThemeId(themeFromUrl);
+  }, [themeFromUrl]);
+
+  if (viewMode === "themes") {
+    return (
+      <StorefrontLayout>
+        <ThemesGrid />
+      </StorefrontLayout>
+    );
+  }
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
