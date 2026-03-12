@@ -73,12 +73,12 @@ export default function HomePage() {
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
-            { icon: Bell, title: "Condition Graded", desc: "Every set inspected and rated 1–4" },
-            { icon: Star, title: "Version Tracked", desc: "MPN version suffixes preserved" },
-            { icon: Truck, title: "Club Collection", desc: "Free pickup at local LEGO clubs" },
-          ].map(({ icon: Icon, title, desc }) => (
+            { icon: Bell, title: "Condition Graded", desc: "Every set inspected and rated 1–4", color: "text-blue-500" },
+            { icon: Star, title: "Version Tracked", desc: "MPN version suffixes preserved", color: "text-primary" },
+            { icon: Truck, title: "Club Collection", desc: "Free pickup at local LEGO clubs", color: "text-primary" },
+          ].map(({ icon: Icon, title, desc, color }) => (
             <div key={title} className="flex items-center gap-4 px-6 py-6">
-              <Icon className="h-5 w-5 shrink-0 text-blue-500" />
+              <Icon className={`h-5 w-5 shrink-0 ${color}`} />
               <div>
                 <p className="font-display text-sm font-semibold text-foreground">{title}</p>
                 <p className="font-body text-xs text-muted-foreground">{desc}</p>
