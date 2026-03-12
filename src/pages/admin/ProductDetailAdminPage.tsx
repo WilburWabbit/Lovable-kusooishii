@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProductMediaCard } from "@/components/admin/ProductMediaCard";
@@ -119,6 +120,25 @@ export default function ProductDetailAdminPage() {
       return data;
     },
     enabled: !!user && !!id,
+  });
+
+  // BrickEconomy valuation query
+  const { data: beValuation } = useQuery({
+    queryKey: ["be-valuation", product?.mpn],
+    queryFn: async () => {
+      const mpn = product!.mpn;
+      const baseMpn = mpn.replace(/-\d+$/, "");
+      const candidates = [mpn];
+      if (baseMpn !== mpn) candidates.push(baseMpn);
+      const { data } = await supabase
+        .from("brickeconomy_collection")
+        .select("item_number, name, current_value, growth, synced_at, condition")
+        .in("item_number", candidates)
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!product?.mpn,
   });
 
   // Content form state
@@ -732,6 +752,34 @@ export default function ProductDetailAdminPage() {
               </Button>
             </CardHeader>
             <CardContent>
+              {beValuation && (
+                <div className="mb-4 p-3 rounded-lg bg-muted/50 border border-border">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium text-muted-foreground">BrickEconomy Market Data</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Current Value</p>
+                      <p className="text-sm font-bold font-mono">{fmt(beValuation.current_value)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Growth</p>
+                      <p className={`text-sm font-bold font-mono ${beValuation.growth != null && beValuation.growth > 0 ? "text-emerald-600 dark:text-emerald-400" : beValuation.growth != null && beValuation.growth < 0 ? "text-destructive" : ""}`}>
+                        {beValuation.growth != null ? `${beValuation.growth > 0 ? "+" : ""}${beValuation.growth.toFixed(1)}%` : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Condition</p>
+                      <p className="text-sm font-mono">{beValuation.condition ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Synced</p>
+                      <p className="text-xs text-muted-foreground">{beValuation.synced_at ? new Date(beValuation.synced_at).toLocaleDateString() : "—"}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="space-y-3">
                 {product.skus.flatMap((s) =>
                   s.channel_listings.map((cl) => {
