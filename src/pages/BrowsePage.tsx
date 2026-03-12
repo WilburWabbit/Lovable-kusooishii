@@ -249,12 +249,12 @@ export default function BrowsePage() {
                       </div>
 
                       <div className="flex flex-1 flex-col p-3">
-                        <p className="font-body text-[11px] text-muted-foreground">
-                          {set.theme_name ?? "Uncategorised"} · {set.mpn}
-                        </p>
-                        <h3 className="mt-0.5 font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                        <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">
                           {set.name}
                         </h3>
+                        <p className="mt-0.5 font-body text-[11px] text-muted-foreground">
+                          {set.theme_name ?? "Uncategorised"} · {set.mpn}
+                        </p>
                         <div className="mt-auto flex items-baseline justify-between pt-2">
                           <span className="font-display text-base font-bold text-foreground">
                             {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
