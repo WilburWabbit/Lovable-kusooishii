@@ -41,6 +41,9 @@ import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
+import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
+import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
+import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -93,6 +96,9 @@ const App = () => (
             <Route path="/admin/analytics" element={<AnalyticsPage />} />
             <Route path="/admin/audit" element={<AuditPage />} />
             <Route path="/admin/settings" element={<SettingsPage />} />
+            <Route path="/admin/settings/integrations" element={<IntegrationsSettingsPage />} />
+            <Route path="/admin/settings/selling-fees" element={<SellingFeesSettingsPage />} />
+            <Route path="/admin/settings/shipping-rates" element={<ShippingRatesSettingsPage />} />
             <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
             <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
             <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
