@@ -91,6 +91,14 @@ export default function BrowsePage() {
     },
   });
 
+  const filteredProducts = useMemo(() => {
+    if (!products) return products;
+    if (!yearRange) return products;
+    return products.filter(
+      (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
+    );
+  }, [products, yearRange]);
+
   return (
     <StorefrontLayout>
       <div className="bg-background">
