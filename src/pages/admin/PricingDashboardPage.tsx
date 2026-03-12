@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
