@@ -43,7 +43,9 @@ export function StorefrontHeader() {
       <div className="container flex items-center justify-between h-16">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <img src={kusoLogo} alt="Kuso Oishii" className="h-8" />
+          <span className="font-display text-xl font-bold tracking-tight text-foreground">
+            Kuso Oishii
+          </span>
         </Link>
 
         {/* Desktop Nav */}
