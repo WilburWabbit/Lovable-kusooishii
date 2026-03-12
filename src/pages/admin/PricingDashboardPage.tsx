@@ -71,6 +71,9 @@ export default function PricingDashboardPage() {
   const [channelFilter, setChannelFilter] = useState("all");
   const [belowFloorOnly, setBelowFloorOnly] = useState(false);
   const [autoPriceConfigs, setAutoPriceConfigs] = useState<ChannelConfig[]>([]);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const { toast } = useToast();
 
   const { prefs, toggleSort, toggleColumn, moveColumn } = useTablePreferences(
     "admin-pricing",
