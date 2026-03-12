@@ -133,6 +133,9 @@ export default function ProductDetailAdminPage() {
   const [savingChannel, setSavingChannel] = useState<string | null>(null);
   // Listing action loading state: "ebay:sku_id" or "web:sku_id"
   const [listingAction, setListingAction] = useState<string | null>(null);
+  // Pricing state
+  const [pricingResults, setPricingResults] = useState<Record<string, any>>({});
+  const [pricingLoading, setPricingLoading] = useState<string | null>(null);
 
   // Initialize form when product loads
   useEffect(() => {
