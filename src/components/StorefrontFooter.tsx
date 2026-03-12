@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import kusoLogo from '@/assets/kuso-logo.png';
 import { Instagram, Twitter, Mail, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,9 +11,7 @@ export function StorefrontFooter() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4">
           {/* Brand */}
           <div className="space-y-4">
-            <span className="font-display text-xl font-bold">
-              KUSO<span className="text-primary">.</span>OISHII
-            </span>
+            <img src={kusoLogo} alt="Kuso Oishii" className="h-8 brightness-0 invert" />
             <p className="font-body text-sm text-primary-foreground/60">
               Affordable LEGO®, responsibly re-sold. Rescued stock from UK retailers at fair prices.
             </p>

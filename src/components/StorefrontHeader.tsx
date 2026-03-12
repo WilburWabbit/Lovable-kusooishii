@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import kusoLogo from '@/assets/kuso-logo.png';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Search, Menu, X, Heart, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,9 +43,7 @@ export function StorefrontHeader() {
       <div className="container flex items-center justify-between h-16">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <span className="font-display text-xl font-bold tracking-tight text-foreground">
-            KUSO<span className="text-primary">.</span>OISHII
-          </span>
+          <img src={kusoLogo} alt="Kuso Oishii" className="h-8" />
         </Link>
 
         {/* Desktop Nav */}
