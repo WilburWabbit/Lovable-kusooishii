@@ -78,6 +78,42 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
+/**
+ * Parse QBO parent item name to extract brand and item type.
+ * Convention: "LEGO:<ItemType>" → { brand: "LEGO", itemType: "<ItemType>" }
+ *             "Other:<Brand>"   → { brand: "<Brand>", itemType: null }
+ */
+function parseParentCategory(parentName: string): { brand: string | null; itemType: string | null } {
+  const trimmed = parentName.trim();
+  const colonIdx = trimmed.indexOf(":");
+  if (colonIdx <= 0) return { brand: null, itemType: null };
+  const prefix = trimmed.substring(0, colonIdx).trim();
+  const suffix = trimmed.substring(colonIdx + 1).trim();
+  if (!suffix) return { brand: null, itemType: null };
+  if (prefix.toUpperCase() === "LEGO") {
+    return { brand: "LEGO", itemType: suffix };
+  }
+  // "Other:<Brand>" pattern
+  return { brand: suffix, itemType: null };
+}
+
+/**
+ * Fetch QBO parent item and extract brand/itemType from its name.
+ * Returns { parentItemId, brand, itemType }.
+ */
+async function resolveParentCategory(
+  baseUrl: string, accessToken: string, item: any
+): Promise<{ parentItemId: string | null; brand: string | null; itemType: string | null }> {
+  if (!item.ParentRef?.value) return { parentItemId: null, brand: null, itemType: null };
+  const parentItemId = String(item.ParentRef.value);
+  // Fetch the parent item to get its Name
+  const parentData = await fetchQboEntity(baseUrl, accessToken, `item/${parentItemId}`);
+  const parentName = parentData?.Item?.Name;
+  if (!parentName) return { parentItemId, brand: null, itemType: null };
+  const { brand, itemType } = parseParentCategory(parentName);
+  return { parentItemId, brand, itemType };
+}
+
 async function resolveVatRateId(admin: any, txnTaxDetail: any): Promise<string | null> {
   const taxLines = txnTaxDetail?.TaxLine ?? [];
   if (taxLines.length === 0) return null;
@@ -184,6 +220,9 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     let conditionGrade: string | null = null;
 
     let rawSkuCode: string | null = null;
+    let parentItemId: string | null = null;
+    let brand: string | null = null;
+    let itemType: string | null = null;
     if (isStockLine && detail.ItemRef?.value) {
       const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${detail.ItemRef.value}`);
       const qboItem = itemData?.Item ?? null;
@@ -198,6 +237,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         const parsed = parseSku(String(detail.ItemRef.name));
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
+      }
+      // Resolve parent category from QBO item
+      if (qboItem) {
+        const parentInfo = await resolveParentCategory(baseUrl, accessToken, qboItem);
+        parentItemId = parentInfo.parentItemId;
+        brand = parentInfo.brand;
+        itemType = parentInfo.itemType;
       }
     }
 
@@ -214,6 +260,9 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       condition_grade: conditionGrade,
       qbo_tax_code_ref: taxCodeRef,
       sku_code: rawSkuCode,
+      _parentItemId: parentItemId,
+      _brand: brand,
+      _itemType: itemType,
     });
   }
 
@@ -250,10 +299,20 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
     const skuCode = line.sku_code || (cg !== "1" ? `${line.mpn}.${cg}` : line.mpn!);
     // Look up product, auto-create from lego_catalog if missing
+    const lineBrand = line._brand as string | null;
+    const lineItemType = line._itemType as string | null;
+    const lineParentItemId = line._parentItemId as string | null;
     let productId: string | null = null;
     const { data: product } = await admin.from("product").select("id").eq("mpn", line.mpn).maybeSingle();
     if (product) {
       productId = product.id;
+      // Update brand/product_type from parent category if available
+      const updates: Record<string, any> = {};
+      if (lineBrand) updates.brand = lineBrand;
+      if (lineItemType) updates.product_type = lineItemType;
+      if (Object.keys(updates).length > 0) {
+        await admin.from("product").update(updates).eq("id", product.id);
+      }
     } else if (line.mpn) {
       const { data: catalog } = await admin
         .from("lego_catalog")
@@ -264,11 +323,20 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
           mpn: line.mpn, name: catalog.name, theme_id: catalog.theme_id,
           piece_count: catalog.piece_count, release_year: catalog.release_year,
           retired_flag: catalog.retired_flag ?? false, img_url: catalog.img_url,
-          subtheme_name: catalog.subtheme_name, product_type: catalog.product_type ?? "set",
+          subtheme_name: catalog.subtheme_name,
+          product_type: lineItemType ?? catalog.product_type ?? "set",
           lego_catalog_id: catalog.id, status: "active",
+          brand: lineBrand,
         }).select("id").single();
         if (!prodErr && newProduct) { productId = newProduct.id; }
         else if (prodErr) { console.error(`Auto-create product for ${line.mpn}:`, prodErr.message); }
+      } else if (lineBrand || lineItemType) {
+        const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+          mpn: line.mpn, name: cleanQboName(line.description ?? line.mpn),
+          product_type: lineItemType ?? "set", brand: lineBrand, status: "active",
+        }).select("id").single();
+        if (!prodErr && newProduct) { productId = newProduct.id; }
+        else if (prodErr) { console.error(`Create product for ${line.mpn}:`, prodErr.message); }
       }
     }
 
@@ -287,6 +355,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         price: landedCost,
         active_flag: true,
         saleable_flag: !!productId,
+        qbo_parent_item_id: lineParentItemId,
       }).select("id").single();
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
@@ -622,6 +691,9 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
   const skuCode = rawSku;
 
+  // Resolve parent item category (brand / item type)
+  const { parentItemId, brand, itemType } = await resolveParentCategory(baseUrl, accessToken, item);
+
   // Look up product by MPN, auto-create from lego_catalog if missing
   let productId: string | null = null;
   const { data: productRecord } = await admin
@@ -632,6 +704,13 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (productRecord) {
     productId = productRecord.id;
+    // Update brand and product_type from parent category if available
+    const updates: Record<string, any> = {};
+    if (brand) updates.brand = brand;
+    if (itemType) updates.product_type = itemType;
+    if (Object.keys(updates).length > 0) {
+      await admin.from("product").update(updates).eq("id", productRecord.id);
+    }
   } else {
     // Auto-create product from lego_catalog (same logic as qbo-sync-items)
     const { data: catalog } = await admin
@@ -650,15 +729,31 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
         retired_flag: catalog.retired_flag ?? false,
         img_url: catalog.img_url,
         subtheme_name: catalog.subtheme_name,
-        product_type: catalog.product_type ?? "set",
+        product_type: itemType ?? catalog.product_type ?? "set",
         lego_catalog_id: catalog.id,
         status: "active",
+        brand: brand,
       }).select("id").single();
       if (!prodErr && newProduct) {
         productId = newProduct.id;
         console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
       } else if (prodErr) {
         console.error(`Auto-create product for ${mpn}:`, prodErr.message);
+      }
+    } else if (brand || itemType) {
+      // No catalog match — create a minimal product with parent category info
+      const { data: newProduct, error: prodErr } = await admin.from("product").insert({
+        mpn,
+        name: cleanQboName(item.Name ?? mpn),
+        product_type: itemType ?? "set",
+        brand: brand,
+        status: "active",
+      }).select("id").single();
+      if (!prodErr && newProduct) {
+        productId = newProduct.id;
+        console.log(`Created product for MPN ${mpn} with brand=${brand} type=${itemType}`);
+      } else if (prodErr) {
+        console.error(`Create product for ${mpn}:`, prodErr.message);
       }
     }
   }
@@ -675,6 +770,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     // Link the existing SKU to this QBO item ID
     await admin.from("sku").update({
       qbo_item_id: qboItemId,
+      qbo_parent_item_id: parentItemId,
       name: cleanQboName(item.Name ?? mpn),
       product_id: productId ?? existingByCode.product_id,
       active_flag: item.Active !== false,
@@ -686,6 +782,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   // Upsert SKU (now safe — unique index on qbo_item_id exists)
   const { error } = await admin.from("sku").upsert({
     qbo_item_id: qboItemId,
+    qbo_parent_item_id: parentItemId,
     sku_code: skuCode,
     name: cleanQboName(item.Name ?? mpn),
     product_id: productId,
