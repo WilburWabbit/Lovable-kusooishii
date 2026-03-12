@@ -554,6 +554,7 @@ export type Database = {
           qbo_item_id: string | null
           qbo_tax_code_ref: string | null
           quantity: number
+          sku_code: string | null
           tax_code_id: string | null
           unit_cost: number
         }
@@ -569,6 +570,7 @@ export type Database = {
           qbo_item_id?: string | null
           qbo_tax_code_ref?: string | null
           quantity?: number
+          sku_code?: string | null
           tax_code_id?: string | null
           unit_cost?: number
         }
@@ -584,6 +586,7 @@ export type Database = {
           qbo_item_id?: string | null
           qbo_tax_code_ref?: string | null
           quantity?: number
+          sku_code?: string | null
           tax_code_id?: string | null
           unit_cost?: number
         }
