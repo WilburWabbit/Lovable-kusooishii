@@ -310,8 +310,8 @@ export default function ProductDetailAdminPage() {
   const handleCalculateAllPricing = async () => {
     if (!product) return;
     for (const sku of product.skus) {
-      for (const cl of sku.channel_listings) {
-        await handleCalculatePricing(sku.id, cl.channel);
+      for (const ch of CHANNELS) {
+        await handleCalculatePricing(sku.id, ch);
       }
     }
   };
@@ -742,7 +742,7 @@ export default function ProductDetailAdminPage() {
         )}
 
         {/* Pricing Engine */}
-        {product.skus.length > 0 && product.channel_listings.length > 0 && (
+        {product.skus.length > 0 && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium">Pricing Engine</CardTitle>
@@ -782,24 +782,35 @@ export default function ProductDetailAdminPage() {
               )}
               <div className="space-y-3">
                 {product.skus.flatMap((s) =>
-                  s.channel_listings.map((cl) => {
-                    const key = `${s.id}:${cl.channel}`;
+                  CHANNELS.map((ch) => {
+                    const cl = s.channel_listings.find((l) => l.channel === ch);
+                    const key = `${s.id}:${ch}`;
                     const pricing = pricingResults[key];
                     const isLoading = pricingLoading === key;
+                    const listedPrice = cl?.listed_price ?? null;
                     return (
                       <div key={key} className="border border-border rounded-lg p-3 space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs font-medium">{s.sku_code}</span>
-                            <Badge variant="outline" className="text-[10px]">{CHANNEL_LABELS[cl.channel] ?? cl.channel}</Badge>
-                            <span className="text-xs text-muted-foreground">Listed: {fmt(cl.listed_price)}</span>
+                            <Badge variant="outline" className="text-[10px]">{CHANNEL_LABELS[ch] ?? ch}</Badge>
+                            {cl ? (
+                              <>
+                                <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+                                  {cl.offer_status ?? "—"}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">Listed: {fmt(listedPrice)}</span>
+                              </>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] bg-muted text-muted-foreground">Not Listed</Badge>
+                            )}
                           </div>
                           <Button
                             size="sm"
                             variant="outline"
                             className="h-7 text-xs"
                             disabled={isLoading}
-                            onClick={() => handleCalculatePricing(s.id, cl.channel)}
+                            onClick={() => handleCalculatePricing(s.id, ch)}
                           >
                             {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3 mr-1" />}
                             Price
@@ -836,9 +847,9 @@ export default function ProductDetailAdminPage() {
                             </div>
                           </div>
                         )}
-                        {pricing && cl.listed_price != null && cl.listed_price < pricing.floor_price && (
+                        {pricing && listedPrice != null && listedPrice < pricing.floor_price && (
                           <p className="text-xs text-destructive font-medium">
-                            ⚠ Listed price ({fmt(cl.listed_price)}) is below floor ({fmt(pricing.floor_price)})
+                            ⚠ Listed price ({fmt(listedPrice)}) is below floor ({fmt(pricing.floor_price)})
                           </p>
                         )}
                       </div>
