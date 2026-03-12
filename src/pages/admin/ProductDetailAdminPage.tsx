@@ -297,6 +297,7 @@ export default function ProductDetailAdminPage() {
           price_target: result.target_price,
           price_ceiling: result.ceiling_price,
           confidence_score: result.confidence_score,
+          auto_price: true,
         });
       }
       toast.success("Pricing calculated");

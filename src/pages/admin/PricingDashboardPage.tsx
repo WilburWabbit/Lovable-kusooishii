@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,12 +56,18 @@ function fmt(v: number | null) {
   return v != null ? `£${v.toFixed(2)}` : "—";
 }
 
+interface ChannelConfig {
+  channel: string;
+  auto_price_enabled: boolean;
+}
+
 export default function PricingDashboardPage() {
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
   const [belowFloorOnly, setBelowFloorOnly] = useState(false);
+  const [autoPriceConfigs, setAutoPriceConfigs] = useState<ChannelConfig[]>([]);
 
   const { prefs, toggleSort, toggleColumn, moveColumn } = useTablePreferences(
     "admin-pricing",
@@ -100,6 +107,12 @@ export default function PricingDashboardPage() {
       setRows(mapped);
       setLoading(false);
     })();
+  }, []);
+
+  useEffect(() => {
+    invokeWithAuth<ChannelConfig[]>("admin-data", { action: "list-channel-pricing-config" })
+      .then((data) => setAutoPriceConfigs(data))
+      .catch(() => {});
   }, []);
 
   // Filter
@@ -177,6 +190,13 @@ export default function PricingDashboardPage() {
             <Label htmlFor="below-floor" className="text-xs whitespace-nowrap">Below floor only</Label>
           </div>
           <ColumnSelector allColumns={ALL_COLUMNS} visibleColumns={prefs.visibleColumns} onToggleColumn={toggleColumn} onMoveColumn={moveColumn} />
+          <div className="flex items-center gap-1.5 ml-auto">
+            {autoPriceConfigs.map((c) => (
+              <Badge key={c.channel} variant={c.auto_price_enabled ? "default" : "outline"} className="text-[10px] capitalize">
+                {c.channel} {c.auto_price_enabled ? "Auto" : "Manual"}
+              </Badge>
+            ))}
+          </div>
         </div>
 
         {/* Table */}

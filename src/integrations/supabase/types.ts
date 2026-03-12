@@ -304,6 +304,39 @@ export type Database = {
           },
         ]
       }
+      channel_pricing_config: {
+        Row: {
+          auto_price_enabled: boolean
+          channel: string
+          id: string
+          max_decrease_amount: number | null
+          max_decrease_pct: number | null
+          max_increase_amount: number | null
+          max_increase_pct: number | null
+          updated_at: string
+        }
+        Insert: {
+          auto_price_enabled?: boolean
+          channel: string
+          id?: string
+          max_decrease_amount?: number | null
+          max_decrease_pct?: number | null
+          max_increase_amount?: number | null
+          max_increase_pct?: number | null
+          updated_at?: string
+        }
+        Update: {
+          auto_price_enabled?: boolean
+          channel?: string
+          id?: string
+          max_decrease_amount?: number | null
+          max_decrease_pct?: number | null
+          max_increase_amount?: number | null
+          max_increase_pct?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       club: {
         Row: {
           active: boolean

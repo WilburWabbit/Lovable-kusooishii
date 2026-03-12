@@ -842,7 +842,7 @@ Deno.serve(async (req) => {
       result = { listings: results, total: results.length };
 
     } else if (action === "update-listing-prices") {
-      const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn } = params;
+      const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn, auto_price } = params;
       if (!listing_id) throw new Error("listing_id is required");
       const updates: Record<string, any> = { priced_at: new Date().toISOString() };
       if (price_floor !== undefined) updates.price_floor = price_floor;
@@ -850,7 +850,80 @@ Deno.serve(async (req) => {
       if (price_ceiling !== undefined) updates.price_ceiling = price_ceiling;
       if (cs !== undefined) updates.confidence_score = cs;
       if (pn !== undefined) updates.pricing_notes = pn;
+
+      let auto_price_applied = false;
+      let auto_price_reason = "";
+
+      if (auto_price && price_target != null) {
+        // Look up listing to get channel and current listed_price
+        const { data: listing } = await admin.from("channel_listing").select("channel, listed_price").eq("id", listing_id).single();
+        if (listing) {
+          const { data: config } = await admin.from("channel_pricing_config").select("*").eq("channel", listing.channel).single();
+          if (config?.auto_price_enabled) {
+            const currentPrice = listing.listed_price;
+            if (currentPrice == null) {
+              // No current price, just set it
+              updates.listed_price = price_target;
+              auto_price_applied = true;
+              auto_price_reason = "Initial price set";
+            } else {
+              const delta = price_target - currentPrice;
+              if (Math.abs(delta) < 0.005) {
+                auto_price_reason = "No change needed";
+              } else if (delta > 0) {
+                // Price increase
+                const pctOk = config.max_increase_pct == null || (delta / currentPrice) <= config.max_increase_pct;
+                const amtOk = config.max_increase_amount == null || delta <= config.max_increase_amount;
+                if (pctOk && amtOk) {
+                  updates.listed_price = price_target;
+                  auto_price_applied = true;
+                  auto_price_reason = `Auto-increased from £${currentPrice} to £${price_target}`;
+                } else {
+                  auto_price_reason = `Increase £${delta.toFixed(2)} exceeds threshold (max ${config.max_increase_pct != null ? (config.max_increase_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_increase_amount != null ? '£' + config.max_increase_amount : '∞'})`;
+                }
+              } else {
+                // Price decrease
+                const absDelta = Math.abs(delta);
+                const pctOk = config.max_decrease_pct == null || (absDelta / currentPrice) <= config.max_decrease_pct;
+                const amtOk = config.max_decrease_amount == null || absDelta <= config.max_decrease_amount;
+                if (pctOk && amtOk) {
+                  updates.listed_price = price_target;
+                  auto_price_applied = true;
+                  auto_price_reason = `Auto-decreased from £${currentPrice} to £${price_target}`;
+                } else {
+                  auto_price_reason = `Decrease £${absDelta.toFixed(2)} exceeds threshold (max ${config.max_decrease_pct != null ? (config.max_decrease_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_decrease_amount != null ? '£' + config.max_decrease_amount : '∞'})`;
+                }
+              }
+            }
+            if (auto_price_reason) {
+              updates.pricing_notes = [pn, auto_price_reason].filter(Boolean).join("; ");
+            }
+          } else {
+            auto_price_reason = "Auto-pricing disabled for channel";
+          }
+        }
+      }
+
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
+      if (error) throw error;
+      result = { success: true, auto_price_applied, auto_price_reason };
+
+    } else if (action === "list-channel-pricing-config") {
+      const { data, error } = await admin.from("channel_pricing_config").select("*").order("channel");
+      if (error) throw error;
+      result = data;
+
+    } else if (action === "upsert-channel-pricing-config") {
+      const { channel, auto_price_enabled, max_increase_pct, max_increase_amount, max_decrease_pct, max_decrease_amount } = params;
+      if (!channel) throw new Error("channel is required");
+      const { error } = await admin.from("channel_pricing_config").upsert({
+        channel,
+        auto_price_enabled: auto_price_enabled ?? false,
+        max_increase_pct: max_increase_pct ?? null,
+        max_increase_amount: max_increase_amount ?? null,
+        max_decrease_pct: max_decrease_pct ?? null,
+        max_decrease_amount: max_decrease_amount ?? null,
+      }, { onConflict: "channel" });
       if (error) throw error;
       result = { success: true };
 
