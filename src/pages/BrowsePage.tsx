@@ -33,13 +33,25 @@ export default function BrowsePage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch themes
+  // Fetch only themes that have in-stock products
   const { data: themes } = useQuery({
-    queryKey: ["themes"],
+    queryKey: ["themes_with_stock"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("theme").select("id, name").order("name");
+      const { data, error } = await supabase
+        .from("product")
+        .select("theme_id, theme:theme_id(id, name)")
+        .eq("status", "active")
+        .not("theme_id", "is", null);
       if (error) throw error;
-      return data;
+      // Deduplicate and extract theme info
+      const themeMap = new Map<string, { id: string; name: string }>();
+      for (const row of data) {
+        const t = row.theme as unknown as { id: string; name: string } | null;
+        if (t && !themeMap.has(t.id)) {
+          themeMap.set(t.id, t);
+        }
+      }
+      return Array.from(themeMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     },
   });
 
