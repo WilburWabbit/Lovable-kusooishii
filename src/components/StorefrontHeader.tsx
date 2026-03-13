@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Search, Menu, X, Heart, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { useStore } from '@/lib/store';
 import { useAuth } from '@/hooks/useAuth';
 import SearchBar from '@/components/SearchBar';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 export function StorefrontHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -21,12 +23,31 @@ export function StorefrontHeader() {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
 
-  const navItems = [
-  { name: 'Shop', path: '/browse' },
-  { name: 'Themes', path: '/browse?view=themes' },
-  { name: 'Just Landed', path: '/browse?new=true' },
-  { name: 'Deals', path: '/browse?deals=true' },
-  { name: 'About', path: '/about' }];
+  // Check if any non-Mint (grade > 1) items exist for Deals link visibility
+  const { data: hasDeals } = useQuery({
+    queryKey: ['has_deals'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('browse_catalog', {
+        search_term: null, filter_theme_id: null, filter_grade: null, filter_retired: null,
+      });
+      if (error) throw error;
+      return (data as any[]).some(
+        (p) => p.best_grade != null && parseInt(p.best_grade, 10) > 1
+      );
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const navItems = useMemo(() => {
+    const items = [
+      { name: 'Shop', path: '/browse' },
+      { name: 'Themes', path: '/browse?view=themes' },
+      { name: 'Just Landed', path: '/browse?new=true' },
+      ...(hasDeals ? [{ name: 'Deals', path: '/browse?deals=true' }] : []),
+      { name: 'About', path: '/about' },
+    ];
+    return items;
+  }, [hasDeals]);
 
 
   const isActive = (path: string) => {

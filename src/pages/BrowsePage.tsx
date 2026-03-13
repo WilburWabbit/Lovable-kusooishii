@@ -82,7 +82,7 @@ export default function BrowsePage() {
         search_term: debouncedSearch || null,
         filter_theme_id: selectedThemeId || null,
         filter_grade: selectedGrade || null,
-        filter_retired: isDealsMode ? true : retiredFilter,
+        filter_retired: retiredFilter,
       });
       if (error) throw error;
       return data as {
@@ -95,19 +95,60 @@ export default function BrowsePage() {
     enabled: viewMode !== "themes",
   });
 
+  // Fetch product created_at dates for "Just Landed" mode
+  const { data: productDates } = useQuery({
+    queryKey: ["product_dates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product")
+        .select("id, created_at")
+        .eq("status", "active");
+      if (error) throw error;
+      const map = new Map<string, string>();
+      for (const row of data ?? []) map.set(row.id, row.created_at);
+      return map;
+    },
+    enabled: isNewMode,
+  });
+
   const filteredProducts = useMemo(() => {
     if (!products) return products;
     let result = products;
+
+    // Deals: only items where best grade is worse than Mint (grade > 1)
+    if (isDealsMode) {
+      result = result.filter(
+        (p) => p.best_grade != null && parseInt(p.best_grade, 10) > 1
+      );
+    }
+
+    // Just Landed: items added within last month, minimum 12
+    if (isNewMode && productDates) {
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      const cutoff = oneMonthAgo.toISOString();
+
+      // Sort all by created_at descending
+      const withDates = result
+        .map((p) => ({ ...p, _createdAt: productDates.get(p.product_id) ?? "" }))
+        .sort((a, b) => b._createdAt.localeCompare(a._createdAt));
+
+      const recent = withDates.filter((p) => p._createdAt >= cutoff);
+      if (recent.length >= 12) {
+        result = recent;
+      } else {
+        // Pad with next most recent items up to 12
+        result = withDates.slice(0, Math.max(12, recent.length));
+      }
+    }
+
     if (yearRange) {
       result = result.filter(
         (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
       );
     }
-    if (isNewMode) {
-      result = [...result].sort((a, b) => (b.release_year ?? 0) - (a.release_year ?? 0));
-    }
     return result;
-  }, [products, yearRange, isNewMode]);
+  }, [products, yearRange, isNewMode, isDealsMode, productDates]);
 
   if (viewMode === "themes") {
     return (
