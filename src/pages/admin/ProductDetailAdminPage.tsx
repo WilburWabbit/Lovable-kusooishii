@@ -12,7 +12,8 @@ import { ProductStatsCards } from "@/components/admin/product-detail/ProductStat
 import { ProductIssuesBanner } from "@/components/admin/product-detail/ProductIssuesBanner";
 import { ProductContentTab } from "@/components/admin/product-detail/ProductContentTab";
 import { ProductMediaCard } from "@/components/admin/ProductMediaCard";
-import { ProductChannelsTab } from "@/components/admin/product-detail/ProductChannelsTab";
+import { ProductListingsTab } from "@/components/admin/product-detail/ProductListingsTab";
+import { ProductPricingTab } from "@/components/admin/product-detail/ProductPricingTab";
 
 import type { ProductDetail, BrickEconomyValuation } from "@/components/admin/product-detail/types";
 
@@ -20,7 +21,7 @@ export default function ProductDetailAdminPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("content-media");
+  const [activeTab, setActiveTab] = useState("content");
 
   const { data: product, isLoading } = useQuery({
     queryKey: ["admin-product", id],
@@ -75,18 +76,27 @@ export default function ProductDetailAdminPage() {
         <ProductIssuesBanner product={product} onNavigateToTab={setActiveTab} />
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full grid grid-cols-2">
-            <TabsTrigger value="content-media">Content & Media</TabsTrigger>
-            <TabsTrigger value="channels">Channels</TabsTrigger>
+          <TabsList className="w-full grid grid-cols-4">
+            <TabsTrigger value="content">Content</TabsTrigger>
+            <TabsTrigger value="media">Media</TabsTrigger>
+            <TabsTrigger value="listings">Listings</TabsTrigger>
+            <TabsTrigger value="pricing">Pricing</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="content-media" className="mt-4 space-y-4">
+          <TabsContent value="content" className="mt-4">
             <ProductContentTab product={product} onInvalidate={handleInvalidate} />
+          </TabsContent>
+
+          <TabsContent value="media" className="mt-4">
             <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} />
           </TabsContent>
 
-          <TabsContent value="channels" className="mt-4">
-            <ProductChannelsTab product={product} beValuation={beValuation} onInvalidate={handleInvalidate} />
+          <TabsContent value="listings" className="mt-4">
+            <ProductListingsTab product={product} onInvalidate={handleInvalidate} />
+          </TabsContent>
+
+          <TabsContent value="pricing" className="mt-4">
+            <ProductPricingTab product={product} beValuation={beValuation} onInvalidate={handleInvalidate} />
           </TabsContent>
         </Tabs>
       </div>

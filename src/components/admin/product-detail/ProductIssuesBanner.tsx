@@ -24,25 +24,25 @@ function computeIssues(product: ProductDetail): Issue[] {
   const issues: Issue[] = [];
 
   if (!product.name) {
-    issues.push({ severity: "error", message: "Missing product name", tab: "content-media" });
+    issues.push({ severity: "error", message: "Missing product name", tab: "content" });
   }
   if (!product.description) {
-    issues.push({ severity: "warning", message: "Missing description", tab: "content-media" });
+    issues.push({ severity: "warning", message: "Missing description", tab: "content" });
   }
   if (!product.product_hook) {
-    issues.push({ severity: "warning", message: "Missing product hook", tab: "content-media" });
+    issues.push({ severity: "warning", message: "Missing product hook", tab: "content" });
   }
   if (product.seo_title && product.seo_title.length > 60) {
-    issues.push({ severity: "warning", message: `SEO title exceeds 60 chars (${product.seo_title.length})`, tab: "content-media" });
+    issues.push({ severity: "warning", message: `SEO title exceeds 60 chars (${product.seo_title.length})`, tab: "content" });
   }
   if (product.seo_description && product.seo_description.length > 160) {
-    issues.push({ severity: "warning", message: `SEO description exceeds 160 chars (${product.seo_description.length})`, tab: "content-media" });
+    issues.push({ severity: "warning", message: `SEO description exceeds 160 chars (${product.seo_description.length})`, tab: "content" });
   }
   if (product.product_hook && product.product_hook.length > 160) {
-    issues.push({ severity: "warning", message: `Product hook exceeds 160 chars (${product.product_hook.length})`, tab: "content-media" });
+    issues.push({ severity: "warning", message: `Product hook exceeds 160 chars (${product.product_hook.length})`, tab: "content" });
   }
   if (product.call_to_action && product.call_to_action.length > 80) {
-    issues.push({ severity: "warning", message: `CTA exceeds 80 chars (${product.call_to_action.length})`, tab: "content-media" });
+    issues.push({ severity: "warning", message: `CTA exceeds 80 chars (${product.call_to_action.length})`, tab: "content" });
   }
 
   // eBay title check across all listings
@@ -52,14 +52,14 @@ function computeIssues(product: ProductDetail): Issue[] {
       issues.push({
         severity: "warning",
         message: `eBay title exceeds 80 chars on ${cl.external_sku} (${cl.listing_title.length})`,
-        tab: "channels",
+        tab: "listings",
       });
     }
     if (cl.listed_price != null && cl.price_floor != null && cl.listed_price < cl.price_floor) {
       issues.push({
         severity: "error",
         message: `${cl.external_sku} listed at £${cl.listed_price.toFixed(2)} — below floor £${cl.price_floor.toFixed(2)}`,
-        tab: "channels",
+        tab: "pricing",
       });
     }
   }
