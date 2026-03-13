@@ -23,6 +23,7 @@ import ReturnsPage from "./pages/ReturnsPage";
 import OrderTrackingPage from "./pages/OrderTrackingPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import BlueBellClubPage from "./pages/BlueBellClubPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
   ReconciliationPage,
@@ -76,6 +77,7 @@ const App = () => (
             <Route path="/order-tracking" element={<OrderTrackingPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/blue-bell-club" element={<BlueBellClubPage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />
