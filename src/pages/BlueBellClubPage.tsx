@@ -45,15 +45,14 @@ It's magnificent.
 
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <h2 className="font-display text-lg font-bold text-foreground lg:text-xl">The Deal</h2>
-            <p>
-              1. Create a Kuso Oishii account
-2. Add a set to your basket
-3. Choose Blue Bell collection during checkout
-4. We'll knock 5% off -- because you're one of us now. 
-5. Pick your set up behind the bar on club night while you're getting a round in
-
-No couriers. No "sorry we missed you" cards. Just bricks and beer.
-            </p>
+            <ol className="list-decimal list-inside space-y-2 font-body text-sm leading-relaxed text-muted-foreground">
+              <li>Create a Kuso Oishii account</li>
+              <li>Add a set to your basket</li>
+              <li>Choose Blue Bell collection during checkout</li>
+              <li>We'll knock 5% off — because you're one of us now.</li>
+              <li>Pick your set up behind the bar on club night while you're getting a round in</li>
+            </ol>
+            <p>No couriers. No "sorry we missed you" cards. Just bricks and beer.</p>
           </div>
 
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
