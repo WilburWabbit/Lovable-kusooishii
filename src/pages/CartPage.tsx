@@ -33,6 +33,7 @@ export default function CartPage() {
   const isCollection = selectedShipping === 'collection';
   const subtotal = cartTotal();
   const collectionDiscount = isCollection ? subtotal * 0.05 : 0;
+  const blueBellDonation = isCollection ? subtotal * 0.05 : 0;
 
   const handleCheckout = async () => {
     setIsCheckingOut(true);
