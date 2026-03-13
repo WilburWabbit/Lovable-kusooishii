@@ -50,16 +50,10 @@ export default function CartPage() {
           headers: { ...headers, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
           body: JSON.stringify({
             items: cart.map(i => ({
-              name: i.name,
-              setNumber: i.setNumber,
-              price: i.price,
+              skuId: i.id,
               quantity: i.quantity,
-              conditionGrade: i.conditionGrade,
-              image: i.image,
             })),
             shippingMethod: selectedShipping,
-            shippingPrice,
-            collectionDiscount,
           }),
         }
       );
