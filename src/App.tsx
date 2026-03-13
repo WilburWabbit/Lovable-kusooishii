@@ -46,6 +46,7 @@ import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
 import NotFound from "./pages/NotFound";
+import { RequireAdmin } from "./components/RequireAdmin";
 
 const queryClient = new QueryClient();
 
