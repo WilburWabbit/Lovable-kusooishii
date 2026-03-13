@@ -1,10 +1,31 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import kusoLogo from '@/assets/kuso-logo.png';
-import { Instagram, Twitter, Mail, MapPin } from 'lucide-react';
+import { Instagram, Twitter, Mail, MapPin, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 export function StorefrontFooter() {
+  const [footerEmail, setFooterEmail] = useState('');
+  const navigate = useNavigate();
+
+  // Check if any non-Mint (grade > 1) items exist for Deals link visibility
+  const { data: hasDeals } = useQuery({
+    queryKey: ['has_deals'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('browse_catalog', {
+        search_term: null, filter_theme_id: null, filter_grade: null, filter_retired: null,
+      });
+      if (error) throw error;
+      return (data as any[]).some(
+        (p) => p.best_grade != null && parseInt(p.best_grade, 10) > 1
+      );
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   return (
     <footer className="bg-kuso-ink text-primary-foreground">
       <div className="container py-12">
@@ -37,7 +58,7 @@ export function StorefrontFooter() {
               <Link to="/browse" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shop All Sets</Link>
               <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
               <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Just Landed</Link>
-              <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>
+              {hasDeals && <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>}
               <Link to="/about" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">About Us</Link>
             </nav>
           </div>
@@ -54,18 +75,34 @@ export function StorefrontFooter() {
             </nav>
           </div>
 
-          {/* Newsletter */}
+          {/* Join */}
           <div className="space-y-4">
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">First Dibs</h4>
             <p className="font-body text-sm text-primary-foreground/60">
-              Get first dibs on rescued sets. No spam. Just bricks.
+              Create an account for wishlists, stock alerts, and club perks. No spam. Just bricks.
             </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input placeholder="Enter your email" className="bg-primary-foreground/10 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/40 flex-1 font-body" />
-              <Button className="font-display whitespace-nowrap">
-                <Mail className="h-4 w-4 mr-2" /> Subscribe
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const params = footerEmail ? `?email=${encodeURIComponent(footerEmail)}` : '';
+                navigate(`/signup${params}`);
+              }}
+              className="flex flex-col gap-2 sm:flex-row"
+            >
+              <Input
+                type="email"
+                placeholder="Enter your email"
+                value={footerEmail}
+                onChange={(e) => setFooterEmail(e.target.value)}
+                className="bg-primary-foreground/10 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/40 flex-1 font-body"
+              />
+              <Button type="submit" className="font-display whitespace-nowrap">
+                <ArrowRight className="h-4 w-4 mr-2" /> Get Started
               </Button>
-            </div>
+            </form>
+            <p className="font-body text-xs text-primary-foreground/40">
+              Already have an account? <Link to="/login" className="text-primary hover:underline">Sign in</Link>
+            </p>
           </div>
         </div>
 
