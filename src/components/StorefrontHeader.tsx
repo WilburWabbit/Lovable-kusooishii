@@ -45,6 +45,7 @@ export function StorefrontHeader() {
       { name: 'Just Landed', path: '/browse?new=true' },
       ...(hasDeals ? [{ name: 'Deals', path: '/browse?deals=true' }] : []),
       { name: 'About', path: '/about' },
+      { name: 'Blue Bell', path: '/bluebell', className: 'text-blue-500 hover:text-blue-600' },
     ];
     return items;
   }, [hasDeals]);
@@ -79,10 +80,11 @@ export function StorefrontHeader() {
           <Link
             key={item.name}
             to={item.path}
-            className={`font-body text-sm font-medium transition-colors hover:text-primary ${
-            isActive(item.path) ? 'text-primary' : 'text-muted-foreground'}`
-            }>
-            
+            className={`font-body text-sm font-medium transition-colors ${
+              item.className
+                ? item.className
+                : `hover:text-primary ${isActive(item.path) ? 'text-primary' : 'text-muted-foreground'}`
+            }`}>
               {item.name}
             </Link>
           )}
@@ -166,9 +168,12 @@ export function StorefrontHeader() {
           <Link
             key={item.name}
             to={item.path}
-            className={`font-body text-sm font-medium ${isActive(item.path) ? 'text-primary' : 'text-foreground'}`}
+            className={`font-body text-sm font-medium ${
+              item.className
+                ? item.className
+                : isActive(item.path) ? 'text-primary' : 'text-foreground'
+            }`}
             onClick={() => setIsMenuOpen(false)}>
-            
                 {item.name}
               </Link>
           )}
