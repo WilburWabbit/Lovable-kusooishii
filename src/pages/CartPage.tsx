@@ -168,7 +168,7 @@ export default function CartPage() {
                         </div>
                       ))}
                     </RadioGroup>
-                    {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the Blue Bell LEGO Club</p>}
+                    {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the <Link to="/bluebell" className="text-primary underline">Blue Bell LEGO Club</Link></p>}
                   </div>
 
                   {isCollection && (
