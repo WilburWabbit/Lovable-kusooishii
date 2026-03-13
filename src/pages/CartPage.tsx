@@ -15,10 +15,10 @@ import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
 
 const shippingOptions = [
-  { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
-  { id: 'express', label: 'Express', carrier: 'Royal Mail Tracked 24', price: 5.99, est: '1–2 working days' },
-  { id: 'collection', label: 'Collection', carrier: 'Blue Bell LEGO Club', price: 0, est: 'Next club meet' },
-];
+{ id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
+{ id: 'express', label: 'Express', carrier: 'Royal Mail Tracked 24', price: 5.99, est: '1–2 working days' },
+{ id: 'collection', label: 'Collection', carrier: 'Blue Bell LEGO Club', price: 0, est: 'Next club meet' }];
+
 
 export default function CartPage() {
   const { cart, updateQuantity, removeFromCart, cartTotal } = useStore();
@@ -26,8 +26,8 @@ export default function CartPage() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [selectedShipping, setSelectedShipping] = useState('standard');
 
-  const availableOptions = shippingOptions.filter(o => o.id !== 'collection' || user);
-  const selectedOption = availableOptions.find(o => o.id === selectedShipping) ?? availableOptions[0];
+  const availableOptions = shippingOptions.filter((o) => o.id !== 'collection' || user);
+  const selectedOption = availableOptions.find((o) => o.id === selectedShipping) ?? availableOptions[0];
   const shippingPrice = selectedOption?.price ?? 0;
   const isCollection = selectedShipping === 'collection';
   const subtotal = cartTotal();
@@ -49,12 +49,12 @@ export default function CartPage() {
           method: 'POST',
           headers: { ...headers, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
           body: JSON.stringify({
-            items: cart.map(i => ({
+            items: cart.map((i) => ({
               skuId: i.id,
-              quantity: i.quantity,
+              quantity: i.quantity
             })),
-            shippingMethod: selectedShipping,
-          }),
+            shippingMethod: selectedShipping
+          })
         }
       );
 
@@ -85,8 +85,8 @@ export default function CartPage() {
             </Button>
           </div>
         </div>
-      </StorefrontLayout>
-    );
+      </StorefrontLayout>);
+
   }
 
   return (
@@ -96,16 +96,16 @@ export default function CartPage() {
           <div className="lg:col-span-2">
             <h1 className="font-display text-3xl font-bold mb-8">Shopping Cart</h1>
             <div className="space-y-4">
-              {cart.map(item => (
-                <Card key={item.id}>
+              {cart.map((item) =>
+              <Card key={item.id}>
                   <CardContent className="p-4">
                     <div className="flex flex-col sm:flex-row gap-4">
                       <div className="w-full sm:w-24 h-24 bg-kuso-mist rounded-sm overflow-hidden shrink-0">
-                        {item.image ? (
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="flex h-full items-center justify-center font-display text-xl text-muted-foreground/30">{item.setNumber.split('-')[0]}</div>
-                        )}
+                        {item.image ?
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> :
+
+                      <div className="flex h-full items-center justify-center font-display text-xl text-muted-foreground/30">{item.setNumber.split('-')[0]}</div>
+                      }
                       </div>
                       <div className="flex-1 space-y-2">
                         <div>
@@ -134,7 +134,7 @@ export default function CartPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              )}
             </div>
           </div>
 
@@ -152,8 +152,8 @@ export default function CartPage() {
                   <div className="space-y-3">
                     <span className="font-display text-xs font-semibold uppercase tracking-widest">Shipping</span>
                     <RadioGroup value={selectedShipping} onValueChange={setSelectedShipping} className="space-y-2">
-                      {availableOptions.map(opt => (
-                        <div key={opt.id} className="flex items-start gap-3 rounded-sm border border-border p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                      {availableOptions.map((opt) =>
+                      <div key={opt.id} className="flex items-start gap-3 rounded-sm border border-border p-3 cursor-pointer hover:bg-muted/50 transition-colors">
                           <RadioGroupItem value={opt.id} id={`ship-${opt.id}`} className="mt-0.5" />
                           <Label htmlFor={`ship-${opt.id}`} className="flex-1 cursor-pointer space-y-0.5">
                             <div className="flex items-center justify-between">
@@ -166,17 +166,17 @@ export default function CartPage() {
                             <p className="font-body text-[11px] text-muted-foreground">{opt.carrier} · {opt.est}</p>
                           </Label>
                         </div>
-                      ))}
+                      )}
                     </RadioGroup>
                     {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the <Link to="/bluebell" className="text-primary underline">Blue Bell LEGO Club</Link></p>}
                   </div>
 
-                  {isCollection && (
-                    <div className="flex justify-between font-body text-xs text-green-600">
+                  {isCollection &&
+                  <div className="flex justify-between font-body text-xs text-blue-600">
                       <span className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" />Member collection discount (5%)</span>
                       <span>−£{collectionDiscount.toFixed(2)}</span>
                     </div>
-                  )}
+                  }
 
                   <Separator />
                   <div className="flex justify-between font-display text-lg font-bold">
@@ -197,6 +197,6 @@ export default function CartPage() {
           </div>
         </div>
       </div>
-    </StorefrontLayout>
-  );
+    </StorefrontLayout>);
+
 }
