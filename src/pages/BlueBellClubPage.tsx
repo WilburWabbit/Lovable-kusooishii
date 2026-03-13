@@ -31,7 +31,7 @@ The Blue Bell gets 5%
       <section className="bg-muted/30 py-16 lg:py-24">
         <div className="container max-w-3xl space-y-8 text-2xl">
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
-            <p className="font-display text-lg font-bold text-foreground lg:text-xl">
+            <p className="font-display text-lg font-bold text-foreground text-left lg:text-3xl">
               Bricks. Beer. Absolute chaos.
             </p>
             <p>We're the proud sponsor of LEGO Club at The Blue Bell, Stoke Ferry — where supposed adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
@@ -67,7 +67,7 @@ It's magnificent.
             <p>
               Get yourself an account. Browse our stock — returned, open-box, and damaged-box sets at prices that leave you with actual beer money. Pick Blue Bell LEGO Club delivery at checkout, your 5% comes off automatically, and your set turns up at the pub ready for you to crack open at the table like the beautiful disaster you are.
             </p>
-            <p className="font-display text-sm font-semibold text-foreground">
+            <p className="font-display font-semibold text-base text-blue-600">
               See you at the bar. First round's on you.
             </p>
           </div>
