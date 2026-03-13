@@ -11,6 +11,7 @@ import { ProductHeader } from "@/components/admin/product-detail/ProductHeader";
 import { ProductStatsCards } from "@/components/admin/product-detail/ProductStatsCards";
 import { ProductIssuesBanner } from "@/components/admin/product-detail/ProductIssuesBanner";
 import { ProductContentTab } from "@/components/admin/product-detail/ProductContentTab";
+import { AgeRangeExtractor } from "@/components/admin/product-detail/AgeRangeExtractor";
 import { ProductMediaCard } from "@/components/admin/ProductMediaCard";
 import { ProductChannelsTab } from "@/components/admin/product-detail/ProductChannelsTab";
 
@@ -82,6 +83,12 @@ export default function ProductDetailAdminPage() {
 
           <TabsContent value="content-media" className="mt-4 space-y-4">
             <ProductContentTab product={product} onInvalidate={handleInvalidate} />
+            <AgeRangeExtractor
+              productId={product.id}
+              mpn={product.mpn}
+              currentAgeRange={product.age_range}
+              onSaved={handleInvalidate}
+            />
             <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} />
           </TabsContent>
 
