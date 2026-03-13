@@ -1,70 +1,27 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { User, Heart, MapPin, Package, LogOut, Shield } from "lucide-react";
 import WishlistTab from "@/components/WishlistTab";
+import ProfileTab from "@/components/account/ProfileTab";
+import AddressesTab from "@/components/account/AddressesTab";
+import OrdersTab from "@/components/account/OrdersTab";
 
 export default function AccountPage() {
-  const { user, profile, loading, signOut, isStaffOrAdmin } = useAuth();
+  const { user, profile, loading, signOut, isStaffOrAdmin, refreshProfile } = useAuth();
   const navigate = useNavigate();
-  const [displayName, setDisplayName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [wishlistItems, setWishlistItems] = useState<any[]>([]);
-  const [addresses, setAddresses] = useState<any[]>([]);
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get("tab") || "profile";
 
   useEffect(() => {
     if (!loading && !user) {
       navigate("/login");
     }
   }, [user, loading, navigate]);
-
-  useEffect(() => {
-    if (profile?.display_name) {
-      setDisplayName(profile.display_name);
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    // Fetch addresses
-    const fetchAddresses = async () => {
-      const { data } = await supabase
-        .from("member_address")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("is_default", { ascending: false });
-      setAddresses(data || []);
-    };
-
-    fetchAddresses();
-  }, [user]);
-
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    setSaving(true);
-
-    const { error } = await supabase
-      .from("profile")
-      .update({ display_name: displayName })
-      .eq("user_id", user.id);
-
-    if (error) {
-      toast.error("Failed to update profile.");
-    } else {
-      toast.success("Profile updated.");
-    }
-    setSaving(false);
-  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -100,7 +57,7 @@ export default function AccountPage() {
         </div>
 
         <div className="container py-8">
-          <Tabs defaultValue="profile" className="space-y-6">
+          <Tabs defaultValue={defaultTab} className="space-y-6">
             <TabsList className="bg-kuso-mist">
               <TabsTrigger value="profile" className="font-display text-xs">
                 <User className="mr-1.5 h-3.5 w-3.5" /> Profile
@@ -123,34 +80,7 @@ export default function AccountPage() {
 
             {/* Profile Tab */}
             <TabsContent value="profile">
-              <Card className="max-w-lg border-border">
-                <CardHeader>
-                  <CardTitle className="font-display text-sm font-semibold">Profile Details</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleUpdateProfile} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label className="font-display text-xs font-semibold uppercase tracking-widest">
-                        Display Name
-                      </Label>
-                      <Input
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        className="font-body"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="font-display text-xs font-semibold uppercase tracking-widest">
-                        Email
-                      </Label>
-                      <Input value={user.email || ""} disabled className="font-body opacity-60" />
-                    </div>
-                    <Button type="submit" size="sm" disabled={saving} className="font-display text-xs font-semibold">
-                      {saving ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
+              <ProfileTab user={user} profile={profile} onProfileUpdated={refreshProfile} />
             </TabsContent>
 
             {/* Wishlist Tab */}
@@ -160,52 +90,12 @@ export default function AccountPage() {
 
             {/* Addresses Tab */}
             <TabsContent value="addresses">
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="font-display text-sm font-semibold">Saved Addresses</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {addresses.length === 0 ? (
-                    <p className="font-body text-sm text-muted-foreground">
-                      No saved addresses yet. Add one during checkout.
-                    </p>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {addresses.map((addr: any) => (
-                        <div key={addr.id} className="border border-border p-4">
-                          <div className="flex items-center gap-2">
-                            <p className="font-display text-xs font-semibold text-foreground">{addr.label}</p>
-                            {addr.is_default && (
-                              <span className="bg-primary px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-primary-foreground">
-                                Default
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-1 font-body text-xs text-muted-foreground">
-                            {addr.line_1}{addr.line_2 && `, ${addr.line_2}`}<br />
-                            {addr.city}, {addr.postcode}<br />
-                            {addr.country}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <AddressesTab userId={user.id} />
             </TabsContent>
 
             {/* Orders Tab */}
             <TabsContent value="orders">
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="font-display text-sm font-semibold">Order History</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="font-body text-sm text-muted-foreground">
-                    No orders yet. When you make a purchase, your order history will appear here.
-                  </p>
-                </CardContent>
-              </Card>
+              <OrdersTab userId={user.id} userEmail={user.email || ""} />
             </TabsContent>
           </Tabs>
         </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Search, Menu, X, Heart, User, LogOut } from 'lucide-react';
+import { ShoppingBag, Search, Menu, X, Heart, User, LogOut, Store, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -20,7 +20,7 @@ export function StorefrontHeader() {
   const location = useLocation();
   const cartCount = useStore((state) => state.cartCount());
   const wishlistItems = useStore((state) => state.wishlistItems);
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, isStaffOrAdmin } = useAuth();
   const navigate = useNavigate();
 
   // Check if any non-Mint (grade > 1) items exist for Deals link visibility
@@ -142,6 +142,17 @@ export function StorefrontHeader() {
                 <DropdownMenuItem asChild className="font-body text-sm cursor-pointer">
                   <Link to="/account?tab=orders">Orders</Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild className="font-body text-sm cursor-pointer">
+                  <Link to="/browse"><Store className="mr-2 h-3.5 w-3.5" /> Store</Link>
+                </DropdownMenuItem>
+                {isStaffOrAdmin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild className="font-body text-sm cursor-pointer">
+                      <Link to="/admin"><Shield className="mr-2 h-3.5 w-3.5" /> Admin</Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut} className="font-body text-sm cursor-pointer text-destructive">
                   <LogOut className="mr-2 h-3.5 w-3.5" /> Sign Out
@@ -182,6 +193,14 @@ export function StorefrontHeader() {
                 <Link to="/account" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
                   My Account
                 </Link>
+                <Link to="/browse" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
+                  Store
+                </Link>
+                {isStaffOrAdmin && (
+                  <Link to="/admin" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
+                    Admin
+                  </Link>
+                )}
                 <button onClick={() => {handleSignOut();setIsMenuOpen(false);}} className="text-left font-body text-sm font-medium text-destructive">
                   Sign Out
                 </button>
