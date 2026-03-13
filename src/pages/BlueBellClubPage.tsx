@@ -19,8 +19,9 @@ export default function BlueBellClubPage() {
           <h1 className="mt-6 font-display text-3xl font-bold text-foreground lg:text-5xl">
             Blue Bell LEGO Club
           </h1>
-          <p className="mt-4 font-body text-base leading-relaxed text-muted-foreground lg:text-lg">
-            We're the proud sponsor of LEGO Club nights at The Blue Bell, Stoke Ferry — where grown adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
+          <p className="mt-4 font-body text-base leading-relaxed text-muted-foreground lg:text-lg">Members save 5%
+
+
           </p>
         </div>
       </section>
