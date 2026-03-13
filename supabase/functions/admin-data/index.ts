@@ -681,22 +681,10 @@ Deno.serve(async (req) => {
       const product = (skuData.product as any) ?? {};
       const mpn = product.mpn;
 
-      // 2-6. Run independent queries in parallel
-      const weightKg = product.weight_kg ?? 0;
-      const baseMpn = mpn ? mpn.replace(/-\d+$/, "") : null;
-      const beCandidates = mpn ? (baseMpn !== mpn ? [mpn, baseMpn] : [mpn]) : [];
-
-      const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-        admin.from("selling_cost_defaults").select("key, value"),
-        admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-        admin.from("shipping_rate_table").select("*").or(`channel.eq.${channel},channel.eq.default`).eq("active", true).gte("max_weight_kg", weightKg).order("cost", { ascending: true }),
-        admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-        beCandidates.length > 0
-          ? admin.from("brickeconomy_collection").select("current_value").in("item_number", beCandidates).limit(1).maybeSingle()
-          : Promise.resolve({ data: null }),
-      ]);
-
-      const defaults = defaultsRes.data;
+      // 2. Get defaults
+      const { data: defaults } = await admin
+        .from("selling_cost_defaults")
+        .select("key, value");
       const dm: Record<string, number> = {};
       for (const d of defaults ?? []) dm[d.key] = Number(d.value);
       const minProfit = dm["minimum_profit_amount"] ?? 1;
@@ -705,12 +693,26 @@ Deno.serve(async (req) => {
       const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
       const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
 
-      const stockUnits = stockRes.data;
+      // 3. Get carrying value (avg of available stock)
+      const { data: stockUnits } = await admin
+        .from("stock_unit")
+        .select("carrying_value")
+        .eq("sku_id", sku_id)
+        .eq("status", "available");
       const avgCarrying = stockUnits && stockUnits.length > 0
         ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
         : 0;
 
-      const allRates = ratesRes.data;
+      // 4. Get shipping cost (cheapest rate that fits)
+      const weightKg = product.weight_kg ?? 0;
+      const { data: allRates } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .or(`channel.eq.${channel},channel.eq.default`)
+        .eq("active", true)
+        .gte("max_weight_kg", weightKg)
+        .order("cost", { ascending: true });
+      
       const lengthCm = product.length_cm;
       const widthCm = product.width_cm;
       const heightCm = product.height_cm;
@@ -729,16 +731,35 @@ Deno.serve(async (req) => {
       }
       const shippingCost = matchedRate ? Number(matchedRate.cost) : 0;
 
-      const fees = feesRes.data;
+      // 5. Get channel fees
+      const { data: fees } = await admin
+        .from("channel_fee_schedule")
+        .select("*")
+        .eq("channel", channel)
+        .eq("active", true);
 
+      // For floor calculation, we need a cost_base that doesn't depend on sale_price
+      // cost_base = carrying_value + packaging + shipping
       const costBase = avgCarrying + packagingCost + shippingCost;
 
+      // 6. Get BrickEconomy valuation as market_consensus
       let marketConsensus: number | null = null;
       let beConfidence = 0;
-      const beData = beRes.data as any;
-      if (beData?.current_value != null) {
-        marketConsensus = Number(beData.current_value);
-        beConfidence = 1;
+      if (mpn) {
+        // Match by both full MPN (e.g. "10281-1") and base MPN (e.g. "10281")
+        const baseMpn = mpn.replace(/-\d+$/, "");
+        const candidates = [mpn];
+        if (baseMpn !== mpn) candidates.push(baseMpn);
+        const { data: beData } = await admin
+          .from("brickeconomy_collection")
+          .select("current_value")
+          .in("item_number", candidates)
+          .limit(1)
+          .maybeSingle();
+        if (beData?.current_value != null) {
+          marketConsensus = Number(beData.current_value);
+          beConfidence = 1;
+        }
       }
 
       // 7. Compute prices
