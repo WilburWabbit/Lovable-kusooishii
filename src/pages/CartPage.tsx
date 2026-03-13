@@ -175,7 +175,7 @@ export default function CartPage() {
 
                   {isCollection &&
                   <div className="flex justify-between font-body text-xs text-blue-600">
-                      <span className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" />Member collection discount (5%)</span>
+                      <span className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" />Blue Bell LEGO Club discount (5%)</span>
                       <span>−£{collectionDiscount.toFixed(2)}</span>
                     </div>
                   }
