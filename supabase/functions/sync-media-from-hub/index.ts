@@ -12,9 +12,42 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // --- Auth: require admin or staff ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await admin.auth.getUser(token);
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: roles } = await admin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id);
+
+    const hasAccess = (roles ?? []).some(
+      (r: { role: string }) => r.role === "admin" || r.role === "staff"
+    );
+    if (!hasAccess) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Connect to Kuso Hub
     const hubUrl = Deno.env.get("KUSO_HUB_SUPABASE_URL")!;
