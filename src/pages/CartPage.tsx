@@ -180,6 +180,13 @@ export default function CartPage() {
                     </div>
                   }
 
+                  {isCollection &&
+                  <div className="flex justify-between font-body text-xs text-blue-600">
+                      <span className="flex items-center gap-1.5"><img src={BeerIcon} alt="" className="h-3.5 w-3.5 text-blue-600" style={{ filter: 'invert(29%) sepia(98%) saturate(1834%) hue-rotate(212deg) brightness(95%) contrast(93%)' }} />Blue Bell Donation (5%)</span>
+                      <span>£{blueBellDonation.toFixed(2)}</span>
+                    </div>
+                  }
+
                   <Separator />
                   <div className="flex justify-between font-display text-lg font-bold">
                     <span>Total</span>
