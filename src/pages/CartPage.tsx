@@ -13,6 +13,7 @@ import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
+import BeerIcon from '@/assets/beer-icon.svg';
 
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
@@ -32,6 +33,7 @@ export default function CartPage() {
   const isCollection = selectedShipping === 'collection';
   const subtotal = cartTotal();
   const collectionDiscount = isCollection ? subtotal * 0.05 : 0;
+  const blueBellDonation = isCollection ? subtotal * 0.05 : 0;
 
   const handleCheckout = async () => {
     setIsCheckingOut(true);
@@ -175,6 +177,13 @@ export default function CartPage() {
                   <div className="flex justify-between font-body text-xs text-blue-600">
                       <span className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" />Member collection discount (5%)</span>
                       <span>−£{collectionDiscount.toFixed(2)}</span>
+                    </div>
+                  }
+
+                  {isCollection &&
+                  <div className="flex justify-between font-body text-xs text-blue-600">
+                      <span className="flex items-center gap-1.5"><img src={BeerIcon} alt="" className="h-3.5 w-3.5 text-blue-600" style={{ filter: 'invert(29%) sepia(98%) saturate(1834%) hue-rotate(212deg) brightness(95%) contrast(93%)' }} />Blue Bell Donation (5%)</span>
+                      <span>£{blueBellDonation.toFixed(2)}</span>
                     </div>
                   }
 
