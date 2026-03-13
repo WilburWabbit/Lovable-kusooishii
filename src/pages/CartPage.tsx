@@ -13,6 +13,7 @@ import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
+import BeerIcon from '@/assets/beer-icon.svg';
 
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
