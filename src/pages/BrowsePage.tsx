@@ -3,29 +3,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Link, useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect } from "react";
 import { ThemesGrid } from "@/components/ThemesGrid";
-
-const gradeOptions = [
-  { value: null, label: "All" },
-  { value: "1", label: "1 — Mint" },
-  { value: "2", label: "2 — Excellent" },
-  { value: "3", label: "3 — Good" },
-  { value: "4", label: "4 — Acceptable" },
-];
-
-const gradeLabels: Record<string, string> = {
-  "1": "Mint", "2": "Excellent", "3": "Good", "4": "Acceptable", "5": "Fair",
-};
+import { GRADE_OPTIONS, GRADE_LABELS } from "@/lib/grades";
 
 export default function BrowsePage() {
   const [searchParams] = useSearchParams();
   const viewMode = searchParams.get("view");
   const themeFromUrl = searchParams.get("theme");
+  const isNewMode = searchParams.get("new") === "true";
+  const isDealsMode = searchParams.get("deals") === "true";
 
   const [search, setSearch] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(themeFromUrl);
@@ -40,7 +32,7 @@ export default function BrowsePage() {
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  useMemo(() => {
+  useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
@@ -84,13 +76,13 @@ export default function BrowsePage() {
 
   // Fetch browse data
   const { data: products, isLoading } = useQuery({
-    queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter],
+    queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter, isDealsMode],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("browse_catalog", {
         search_term: debouncedSearch || null,
         filter_theme_id: selectedThemeId || null,
         filter_grade: selectedGrade || null,
-        filter_retired: retiredFilter,
+        filter_retired: isDealsMode ? true : retiredFilter,
       });
       if (error) throw error;
       return data as {
@@ -105,11 +97,17 @@ export default function BrowsePage() {
 
   const filteredProducts = useMemo(() => {
     if (!products) return products;
-    if (!yearRange) return products;
-    return products.filter(
-      (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
-    );
-  }, [products, yearRange]);
+    let result = products;
+    if (yearRange) {
+      result = result.filter(
+        (p) => p.release_year != null && p.release_year >= yearRange[0] && p.release_year <= yearRange[1]
+      );
+    }
+    if (isNewMode) {
+      result = [...result].sort((a, b) => (b.release_year ?? 0) - (a.release_year ?? 0));
+    }
+    return result;
+  }, [products, yearRange, isNewMode]);
 
   if (viewMode === "themes") {
     return (
@@ -119,15 +117,153 @@ export default function BrowsePage() {
     );
   }
 
+  const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Sets";
+  const pageSubtitle = isNewMode
+    ? "Newest arrivals, sorted by release year"
+    : isDealsMode
+    ? "Retired sets — collectible bargains"
+    : `${filteredProducts?.length ?? 0} sets available · condition graded · version tracked`;
+
+  const filterContent = (
+    <div className="space-y-6">
+      {/* Search */}
+      <div>
+        <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+          Search
+        </label>
+        <div className="relative mt-2">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Set name or MPN..."
+            className="pl-8 font-body text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Theme filter */}
+      <div>
+        <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+          Theme
+        </label>
+        <div className="mt-2 flex flex-col gap-1">
+          <button
+            onClick={() => setSelectedThemeId(null)}
+            className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
+              selectedThemeId === null
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            All
+          </button>
+          {themes?.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSelectedThemeId(t.id)}
+              className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
+                selectedThemeId === t.id
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Grade filter */}
+      <div>
+        <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+          Condition
+        </label>
+        <div className="mt-2 flex flex-col gap-1">
+          {GRADE_OPTIONS.map((g) => (
+            <button
+              key={g.label}
+              onClick={() => setSelectedGrade(g.value)}
+              className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
+                selectedGrade === g.value
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Retired toggle */}
+      <div>
+        <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+          Status
+        </label>
+        <div className="mt-2 flex gap-1">
+          {([
+            { value: null, label: "All" },
+            { value: true, label: "Retired" },
+            { value: false, label: "Current" },
+          ] as const).map((opt) => (
+            <button
+              key={String(opt.value)}
+              onClick={() => setRetiredFilter(opt.value)}
+              className={`rounded px-3 py-1.5 font-body text-xs transition-colors ${
+                retiredFilter === opt.value
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Release Year slider */}
+      {yearMin !== yearMax && (
+        <div>
+          <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+            Release Year
+          </label>
+          <div className="mt-3 px-1">
+            <Slider
+              min={yearMin}
+              max={yearMax}
+              step={1}
+              value={yearRange ?? [yearMin, yearMax]}
+              onValueChange={(v) => setYearRange([v[0], v[1]])}
+              className="w-full"
+            />
+            <div className="mt-2 flex justify-between font-body text-xs text-muted-foreground">
+              <span>{yearRange ? yearRange[0] : yearMin}</span>
+              <span>{yearRange ? yearRange[1] : yearMax}</span>
+            </div>
+          </div>
+          {yearRange && (
+            <button
+              onClick={() => setYearRange(null)}
+              className="mt-1 font-body text-xs text-muted-foreground hover:text-foreground"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <StorefrontLayout>
       <div className="bg-background">
         {/* Header */}
         <div className="border-b border-border bg-kuso-paper py-8">
           <div className="container">
-            <h1 className="font-display text-2xl font-bold text-foreground">Browse Sets</h1>
+            <h1 className="font-display text-2xl font-bold text-foreground">{pageTitle}</h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">
-              {isLoading ? "Loading…" : `${filteredProducts?.length ?? 0} sets available`} · condition graded · version tracked
+              {isLoading ? "Loading…" : pageSubtitle}
             </p>
           </div>
         </div>
@@ -136,139 +272,24 @@ export default function BrowsePage() {
           <div className="flex flex-col gap-8 lg:flex-row">
             {/* Filters sidebar */}
             <aside className="w-full shrink-0 lg:w-56">
-              <div className="flex items-center gap-2 lg:hidden">
-                <Button variant="outline" size="sm" className="font-display text-xs">
-                  <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" /> Filters
-                </Button>
-              </div>
-
-              <div className="hidden space-y-6 lg:block">
-                {/* Search */}
-                <div>
-                  <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
-                    Search
-                  </label>
-                  <div className="relative mt-2">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Set name or MPN..."
-                      className="pl-8 font-body text-sm"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="sm" className="font-display text-xs lg:hidden">
+                    <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" /> Filters
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="overflow-y-auto">
+                  <SheetHeader>
+                    <SheetTitle className="font-display">Filters</SheetTitle>
+                  </SheetHeader>
+                  <div className="mt-6">
+                    {filterContent}
                   </div>
-                </div>
+                </SheetContent>
+              </Sheet>
 
-                {/* Theme filter */}
-                <div>
-                  <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
-                    Theme
-                  </label>
-                  <div className="mt-2 flex flex-col gap-1">
-                    <button
-                      onClick={() => setSelectedThemeId(null)}
-                      className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
-                        selectedThemeId === null
-                          ? "bg-foreground text-background"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      All
-                    </button>
-                    {themes?.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setSelectedThemeId(t.id)}
-                        className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
-                          selectedThemeId === t.id
-                            ? "bg-foreground text-background"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Grade filter */}
-                <div>
-                  <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
-                    Condition
-                  </label>
-                  <div className="mt-2 flex flex-col gap-1">
-                    {gradeOptions.map((g) => (
-                      <button
-                        key={g.label}
-                        onClick={() => setSelectedGrade(g.value)}
-                        className={`rounded px-2 py-1.5 text-left font-body text-sm transition-colors ${
-                          selectedGrade === g.value
-                            ? "bg-foreground text-background"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        {g.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Retired toggle */}
-                <div>
-                  <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
-                    Status
-                  </label>
-                  <div className="mt-2 flex gap-1">
-                    {([
-                      { value: null, label: "All" },
-                      { value: true, label: "Retired" },
-                      { value: false, label: "Current" },
-                    ] as const).map((opt) => (
-                      <button
-                        key={String(opt.value)}
-                        onClick={() => setRetiredFilter(opt.value)}
-                        className={`rounded px-3 py-1.5 font-body text-xs transition-colors ${
-                          retiredFilter === opt.value
-                            ? "bg-foreground text-background"
-                            : "text-muted-foreground hover:bg-muted"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Release Year slider */}
-                {yearMin !== yearMax && (
-                  <div>
-                    <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
-                      Release Year
-                    </label>
-                    <div className="mt-3 px-1">
-                      <Slider
-                        min={yearMin}
-                        max={yearMax}
-                        step={1}
-                        value={yearRange ?? [yearMin, yearMax]}
-                        onValueChange={(v) => setYearRange([v[0], v[1]])}
-                        className="w-full"
-                      />
-                      <div className="mt-2 flex justify-between font-body text-xs text-muted-foreground">
-                        <span>{yearRange ? yearRange[0] : yearMin}</span>
-                        <span>{yearRange ? yearRange[1] : yearMax}</span>
-                      </div>
-                    </div>
-                    {yearRange && (
-                      <button
-                        onClick={() => setYearRange(null)}
-                        className="mt-1 font-body text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </div>
-                )}
+              <div className="hidden lg:block">
+                {filterContent}
               </div>
             </aside>
 
@@ -319,7 +340,7 @@ export default function BrowsePage() {
                         )}
                         {set.best_grade && (
                           <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
-                            {gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}`}
+                            {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
                           </span>
                         )}
                       </div>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { usePageSeo } from '@/hooks/use-page-seo';
+import { GRADE_DETAILS } from '@/lib/grades';
 
 export default function FAQPage() {
   usePageSeo({ title: 'Frequently Asked Questions', description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.', path: '/faq' });
@@ -12,9 +13,12 @@ export default function FAQPage() {
       title: 'Condition Grades',
       badge: 'Important',
       items: [
-        { id: 'sealed', q: 'Sealed — What does it mean?', a: 'The set is factory sealed. All bags are unopened. The box may have minor shelf wear, but the contents are untouched. Expect: As close to buying from a shop as you\'ll get, minus the full retail price tag.' },
-        { id: 'openbox', q: 'Open-box — What does it mean?', a: 'The outer box has been opened — usually by the original retailer during a returns check. We inspect the contents and note which bags are sealed vs open. If any are open, we hand-count and verify.' },
-        { id: 'damagedbox', q: 'Damaged-box — What does it mean?', a: 'The box has cosmetic damage — dents, tears, water stains, crushed corners. The LEGO inside is unaffected. Not for box-pristine collectors. If you\'re building the set, you won\'t care.' },
+        { id: 'grading-overview', q: 'How does your grading system work?', a: 'Every set is inspected and assigned a grade from 1 (Mint) to 5 (Fair) based on the condition of the box, contents, and completeness. See our full grading guide at /grading.' },
+        { id: 'grade-1', q: `Grade 1 — ${GRADE_DETAILS["1"].label}`, a: GRADE_DETAILS["1"].desc },
+        { id: 'grade-2', q: `Grade 2 — ${GRADE_DETAILS["2"].label}`, a: GRADE_DETAILS["2"].desc },
+        { id: 'grade-3', q: `Grade 3 — ${GRADE_DETAILS["3"].label}`, a: GRADE_DETAILS["3"].desc },
+        { id: 'grade-4', q: `Grade 4 — ${GRADE_DETAILS["4"].label}`, a: GRADE_DETAILS["4"].desc },
+        { id: 'grade-5', q: `Grade 5 — ${GRADE_DETAILS["5"].label}`, a: GRADE_DETAILS["5"].desc },
       ],
     },
     {

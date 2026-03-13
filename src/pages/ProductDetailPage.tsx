@@ -7,17 +7,45 @@ import { ShoppingBag, Heart, Shield, Package, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useState } from "react";
+import { GRADE_DETAILS } from "@/lib/grades";
+import { useStore, type Product } from "@/lib/store";
+import { toast } from "sonner";
 
-const gradeLabels: Record<string, { label: string; desc: string }> = {
-  "1": { label: "Mint", desc: "Box and contents in near-perfect condition. No visible damage, creasing, or shelf wear." },
-  "2": { label: "Excellent", desc: "Minor shelf wear or light marks. Contents complete and in great condition." },
-  "3": { label: "Good", desc: "Noticeable wear, minor creasing, or small marks. Contents complete." },
-  "4": { label: "Acceptable", desc: "Significant wear, dents or tears. All pieces present but box shows heavy use." },
-  "5": { label: "Fair", desc: "Heavy wear or damage. May have missing non-essential items." },
-};
+interface ProductDetailRow {
+  id: string;
+  mpn: string;
+  name: string;
+  description: string | null;
+  piece_count: number | null;
+  release_year: number | null;
+  retired_flag: boolean;
+  age_range: string | null;
+  subtheme_name: string | null;
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  theme: { name: string } | null;
+}
+
+interface Offer {
+  sku_id: string;
+  sku_code: string;
+  condition_grade: string;
+  price: number | null;
+  stock_count: number;
+}
+
+interface MediaItem {
+  id: string;
+  url: string;
+  alt: string;
+  is_primary: boolean;
+}
 
 export default function ProductDetailPage() {
   const { mpn } = useParams<{ mpn: string }>();
+  const { addToCart, addToWishlist, isInWishlist } = useStore();
 
   // Fetch product
   const { data: product, isLoading: productLoading } = useQuery({
@@ -30,7 +58,7 @@ export default function ProductDetailPage() {
         .eq("status", "active")
         .maybeSingle();
       if (error) throw error;
-      return data;
+      return data as ProductDetailRow | null;
     },
     enabled: !!mpn,
   });
@@ -41,7 +69,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase.rpc("product_detail_offers", { p_mpn: mpn! });
       if (error) throw error;
-      return data as { sku_id: string; sku_code: string; condition_grade: string; price: number | null; stock_count: number }[];
+      return data as Offer[];
     },
     enabled: !!mpn,
   });
@@ -64,7 +92,7 @@ export default function ProductDetailPage() {
   });
 
   // Fetch product media
-  const { data: mediaItems = [] } = useQuery({
+  const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
     queryFn: async () => {
       const { data, error } = await (supabase as any)
@@ -86,9 +114,49 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = product?.theme && typeof product.theme === "object" && !Array.isArray(product.theme)
-    ? (product.theme as { name: string }).name
-    : null;
+  const themeName = product?.theme?.name ?? null;
+  const primaryImageUrl = mediaItems.find(m => m.is_primary)?.url ?? mediaItems[0]?.url ?? null;
+  const allImageUrls = mediaItems.map(m => m.url).filter(Boolean);
+  const inWishlist = product ? isInWishlist(product.id) : false;
+
+  function buildCartProduct(p: ProductDetailRow, offer: Offer): Product {
+    return {
+      id: offer.sku_id,
+      name: p.name,
+      setNumber: p.mpn,
+      price: offer.price ?? 0,
+      rrp: beData?.retail_price ?? 0,
+      image: primaryImageUrl ?? "",
+      images: allImageUrls,
+      theme: themeName ?? "Uncategorised",
+      themeId: null,
+      pieceCount: p.piece_count ?? 0,
+      condition: GRADE_DETAILS[offer.condition_grade]?.label ?? `Grade ${offer.condition_grade}`,
+      conditionGrade: parseInt(offer.condition_grade, 10),
+      ageRange: p.age_range ?? "",
+      hook: "",
+      description: p.description ?? "",
+      highlights: [],
+      stock: offer.stock_count,
+      retired: p.retired_flag,
+      yearReleased: p.release_year,
+      subtheme: p.subtheme_name ?? undefined,
+      weightKg: p.weight_kg ?? undefined,
+    };
+  }
+
+  function handleAddToCart(offer: Offer) {
+    if (!product) return;
+    addToCart(buildCartProduct(product, offer));
+    toast.success(`${product.name} (${GRADE_DETAILS[offer.condition_grade]?.label ?? "Grade " + offer.condition_grade}) added to cart`);
+  }
+
+  function handleToggleWishlist() {
+    if (!product) return;
+    if (inWishlist) return;
+    addToWishlist(product.id);
+    toast.success("Added to wishlist");
+  }
 
   if (!isLoading && !product) {
     return (
@@ -202,14 +270,13 @@ export default function ProductDetailPage() {
                 <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
-                    const themeName = (product as any).theme?.name;
                     if (themeName) specs.push({ label: "Theme", value: themeName });
-                    if ((product as any).subtheme_name) specs.push({ label: "Subtheme", value: (product as any).subtheme_name });
+                    if (product.subtheme_name) specs.push({ label: "Subtheme", value: product.subtheme_name });
                     if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
                     if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
                     if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
                     if (beData?.minifigs_count) specs.push({ label: "Minifigs", value: String(beData.minifigs_count) });
-                    if ((product as any).age_range) specs.push({ label: "Ages", value: (product as any).age_range });
+                    if (product.age_range) specs.push({ label: "Ages", value: product.age_range });
                     if ((offers?.length ?? 0) > 1) specs.push({ label: "Variants", value: String(offers?.length ?? 0) });
                     return specs.map((s) => (
                       <div key={s.label}>
@@ -221,28 +288,28 @@ export default function ProductDetailPage() {
                 </div>
 
                 {/* Dimensions */}
-                {((product as any).length_cm || (product as any).width_cm || (product as any).height_cm || (product as any).weight_kg) && (
+                {(product.length_cm || product.width_cm || product.height_cm || product.weight_kg) && (
                   <div className="mt-4 flex gap-6 flex-wrap">
-                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
+                    {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
                       <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Dimensions</p>
                         <p className="mt-1 font-display text-sm font-bold text-foreground">
-                          {(product as any).length_cm} × {(product as any).width_cm} × {(product as any).height_cm} cm
+                          {product.length_cm} × {product.width_cm} × {product.height_cm} cm
                         </p>
                       </div>
                     )}
-                    {(product as any).length_cm != null && (product as any).width_cm != null && (product as any).height_cm != null && (
+                    {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
                       <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Girth</p>
                         <p className="mt-1 font-display text-sm font-bold text-foreground">
-                          {(2 * (((product as any).width_cm ?? 0) + ((product as any).height_cm ?? 0))).toFixed(1)} cm
+                          {(2 * ((product.width_cm ?? 0) + (product.height_cm ?? 0))).toFixed(1)} cm
                         </p>
                       </div>
                     )}
-                    {(product as any).weight_kg != null && (
+                    {product.weight_kg != null && (
                       <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Weight</p>
-                        <p className="mt-1 font-display text-sm font-bold text-foreground">{(product as any).weight_kg} kg</p>
+                        <p className="mt-1 font-display text-sm font-bold text-foreground">{product.weight_kg} kg</p>
                       </div>
                     )}
                   </div>
@@ -265,10 +332,10 @@ export default function ProductDetailPage() {
                           </div>
                           <div>
                             <p className="font-display text-sm font-semibold text-foreground">
-                              {gradeLabels[offer.condition_grade]?.label ?? `Grade ${offer.condition_grade}`}
+                              {GRADE_DETAILS[offer.condition_grade]?.label ?? `Grade ${offer.condition_grade}`}
                             </p>
                             <p className="font-body text-xs text-muted-foreground">
-                              {gradeLabels[offer.condition_grade]?.desc ?? ""}
+                              {GRADE_DETAILS[offer.condition_grade]?.desc ?? ""}
                             </p>
                           </div>
                         </div>
@@ -281,7 +348,12 @@ export default function ProductDetailPage() {
                               {offer.stock_count} in stock
                             </p>
                           </div>
-                          <Button size="sm" className="font-display text-xs font-semibold">
+                          <Button
+                            size="sm"
+                            className="font-display text-xs font-semibold"
+                            disabled={offer.price == null || offer.stock_count === 0}
+                            onClick={() => handleAddToCart(offer)}
+                          >
                             <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> Add
                           </Button>
                         </div>
@@ -294,8 +366,14 @@ export default function ProductDetailPage() {
 
                 {/* Actions */}
                 <div className="mt-6 flex gap-2">
-                  <Button variant="outline" size="sm" className="font-display text-xs">
-                    <Heart className="mr-1.5 h-3.5 w-3.5" /> Add to Wishlist
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="font-display text-xs"
+                    onClick={handleToggleWishlist}
+                  >
+                    <Heart className={`mr-1.5 h-3.5 w-3.5 ${inWishlist ? "fill-current" : ""}`} />
+                    {inWishlist ? "In Wishlist" : "Add to Wishlist"}
                   </Button>
                 </div>
 

@@ -6,13 +6,7 @@ import { ArrowRight, Shield, Truck, Bell } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-
-const gradeLabels: Record<string, string> = {
-  "1": "Mint",
-  "2": "Excellent",
-  "3": "Good",
-  "4": "Acceptable",
-};
+import { GRADE_LABELS } from "@/lib/grades";
 
 export default function HomePage() {
   const { data: featuredSets, isLoading } = useQuery({
@@ -25,7 +19,9 @@ export default function HomePage() {
         filter_retired: null,
       });
       if (error) throw error;
-      return (data as any[]).slice(0, 6);
+      return (data as any[])
+        .sort((a: any, b: any) => (b.release_year ?? 0) - (a.release_year ?? 0))
+        .slice(0, 6);
     },
   });
 
@@ -168,7 +164,7 @@ export default function HomePage() {
                           {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
                         </span>
                         <span className="font-body text-xs text-muted-foreground">
-                          {set.best_grade ? gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
+                          {set.best_grade ? GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
                         </span>
                       </div>
                     </div>
@@ -195,7 +191,7 @@ export default function HomePage() {
           </p>
           <div className="mt-8">
             <Button asChild size="lg" className="font-display font-semibold">
-              <Link to="/login">Create Account</Link>
+              <Link to="/signup">Create Account</Link>
             </Button>
           </div>
         </div>

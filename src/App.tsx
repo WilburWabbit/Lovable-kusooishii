@@ -16,6 +16,7 @@ import CartPage from "./pages/CartPage";
 import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import AboutPage from "./pages/AboutPage";
 import FAQPage from "./pages/FAQPage";
+import GradingPage from "./pages/GradingPage";
 import ContactPage from "./pages/ContactPage";
 import ShippingPolicyPage from "./pages/ShippingPolicyPage";
 import ReturnsPage from "./pages/ReturnsPage";
@@ -67,6 +68,7 @@ const App = () => (
             {/* Content */}
             <Route path="/about" element={<AboutPage />} />
             <Route path="/faq" element={<FAQPage />} />
+            <Route path="/grading" element={<GradingPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/shipping-policy" element={<ShippingPolicyPage />} />
             <Route path="/returns-exchanges" element={<ReturnsPage />} />
