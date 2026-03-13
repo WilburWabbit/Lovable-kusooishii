@@ -75,7 +75,7 @@ export const HOME_DEFAULTS: HomeContent = {
     heading: "Want something we don't have?",
     description: "Add it to your wishlist. We track demand and source accordingly. Members get stock alerts when sets land.",
     buttonText: "Create Account",
-    buttonLink: "/login",
+    buttonLink: "/signup",
   },
 };
 
@@ -143,9 +143,12 @@ export const FAQ_DEFAULTS: FAQContent = {
       title: "Condition Grades",
       badge: "Important",
       items: [
-        { id: "sealed", q: "Sealed — What does it mean?", a: "The set is factory sealed. All bags are unopened. The box may have minor shelf wear, but the contents are untouched. Expect: As close to buying from a shop as you'll get, minus the full retail price tag." },
-        { id: "openbox", q: "Open-box — What does it mean?", a: "The outer box has been opened — usually by the original retailer during a returns check. We inspect the contents and note which bags are sealed vs open. If any are open, we hand-count and verify." },
-        { id: "damagedbox", q: "Damaged-box — What does it mean?", a: "The box has cosmetic damage — dents, tears, water stains, crushed corners. The LEGO inside is unaffected. Not for box-pristine collectors. If you're building the set, you won't care." },
+        { id: "grading-overview", q: "How does your grading system work?", a: "Every set is inspected and assigned a grade from 1 (Mint) to 5 (Fair) based on the condition of the box, contents, and completeness. See our full grading guide at /grading." },
+        { id: "grade-1", q: "Grade 1 — Mint", a: "Box and contents in near-perfect condition. No visible damage, creasing, or shelf wear." },
+        { id: "grade-2", q: "Grade 2 — Excellent", a: "Minor shelf wear or light marks. Contents complete and in great condition." },
+        { id: "grade-3", q: "Grade 3 — Good", a: "Noticeable wear, minor creasing, or small marks. Contents complete." },
+        { id: "grade-4", q: "Grade 4 — Acceptable", a: "Significant wear, dents or tears. All pieces present but box shows heavy use." },
+        { id: "grade-5", q: "Grade 5 — Fair", a: "Heavy wear or damage. May have missing non-essential items." },
       ],
     },
     {

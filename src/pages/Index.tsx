@@ -8,13 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useStorefrontContent } from "@/hooks/useStorefrontContent";
 import { HOME_DEFAULTS, type HomeContent } from "@/lib/content-defaults";
-
-const gradeLabels: Record<string, string> = {
-  "1": "Mint",
-  "2": "Excellent",
-  "3": "Good",
-  "4": "Acceptable"
-};
+import { GRADE_LABELS } from "@/lib/grades";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   shield: Shield,
@@ -36,11 +30,13 @@ export default function HomePage() {
         search_term: null,
         filter_theme_id: null,
         filter_grade: null,
-        filter_retired: null
+        filter_retired: null,
       });
       if (error) throw error;
-      return (data as any[]).slice(0, 6);
-    }
+      return (data as any[])
+        .sort((a: any, b: any) => (b.release_year ?? 0) - (a.release_year ?? 0))
+        .slice(0, 6);
+    },
   });
 
   const { data: content } = useStorefrontContent('home', HOME_DEFAULTS as unknown as Record<string, unknown>);
@@ -54,12 +50,13 @@ export default function HomePage() {
           <img
             src={heroImage}
             alt="Premium LEGO set with dramatic lighting"
-            className="h-full w-full object-cover opacity-60" />
+            className="h-full w-full object-cover opacity-60"
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-kuso-ink/90 via-kuso-ink/60 to-transparent" />
         </div>
         <div className="container relative z-10 py-24 lg:py-36">
           <div className="max-w-xl">
-            <p className="font-display font-semibold uppercase tracking-[0.2em] text-primary text-lg">
+            <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">
               {c.hero.tagline}
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold leading-tight text-primary-foreground lg:text-6xl">
@@ -94,8 +91,8 @@ export default function HomePage() {
               <div key={title} className="flex items-center gap-4 px-6 py-6">
                 <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
                 <div>
-                  <p className="font-display font-semibold text-foreground text-base">{title}</p>
-                  <p className="font-body text-muted-foreground text-sm">{desc}</p>
+                  <p className="font-display text-sm font-semibold text-foreground">{title}</p>
+                  <p className="font-body text-xs text-muted-foreground">{desc}</p>
                 </div>
               </div>
             );
@@ -108,22 +105,23 @@ export default function HomePage() {
         <div className="container">
           <div className="flex items-end justify-between">
             <div>
-              <p className="font-display font-semibold uppercase tracking-[0.2em] text-primary text-sm">Featured</p>
+              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">Featured</p>
               <h2 className="mt-2 font-display text-2xl font-bold text-foreground lg:text-3xl">
                 Latest arrivals
               </h2>
             </div>
             <Link
               to="/browse"
-              className="hidden font-display text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block">
+              className="hidden font-display text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block"
+            >
               View all →
             </Link>
           </div>
 
           <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {isLoading ?
-            Array.from({ length: 6 }).map((_, i) =>
-            <div key={i} className="border border-border">
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="border border-border">
                     <Skeleton className="aspect-square w-full rounded-none" />
                     <div className="space-y-2 p-4">
                       <Skeleton className="h-3 w-24" />
@@ -131,60 +129,63 @@ export default function HomePage() {
                       <Skeleton className="h-5 w-16" />
                     </div>
                   </div>
-            ) :
-            featuredSets?.map((set) =>
-            <Link
-              key={set.product_id}
-              to={`/sets/${set.mpn}`}
-              className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md">
+                ))
+              : featuredSets?.map((set) => (
+                  <Link
+                    key={set.product_id}
+                    to={`/sets/${set.mpn}`}
+                    className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
+                  >
                     {/* Image */}
                     <div className="aspect-square bg-background">
-                      {set.img_url ?
-                <img
-                  src={set.img_url}
-                  alt={set.name}
-                  className="h-full w-full object-contain p-4" /> :
-                <div className="flex h-full items-center justify-center p-8">
+                      {set.img_url ? (
+                        <img
+                          src={set.img_url}
+                          alt={set.name}
+                          className="h-full w-full object-contain p-4"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-8">
                           <span className="font-display text-4xl font-bold text-muted-foreground/20">
                             {set.mpn.split("-")[0]}
                           </span>
                         </div>
-                }
+                      )}
                     </div>
 
                     {/* Badges */}
                     <div className="absolute left-3 top-3 flex gap-1.5">
-                      {set.retired_flag &&
-                <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
+                      {set.retired_flag && (
+                        <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
                           Retired
                         </span>
-                }
-                      {set.best_grade &&
-                <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
+                      )}
+                      {set.best_grade && (
+                        <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
                           Grade {set.best_grade}
                         </span>
-                }
+                      )}
                     </div>
 
                     {/* Info */}
                     <div className="flex flex-1 flex-col p-4">
-                      <h3 className="font-display font-semibold text-foreground group-hover:text-primary transition-colors text-lg">
+                      <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
                         {set.name}
                       </h3>
-                      <p className="mt-1 font-body text-muted-foreground text-sm">
+                      <p className="mt-1 font-body text-xs text-muted-foreground">
                         {set.theme_name ?? "Uncategorised"} · {set.mpn}
                       </p>
                       <div className="mt-auto pt-3 flex items-baseline justify-between">
                         <span className="font-display text-lg font-bold text-foreground">
                           {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
                         </span>
-                        <span className="font-body text-muted-foreground text-sm">
-                          {set.best_grade ? gradeLabels[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
+                        <span className="font-body text-xs text-muted-foreground">
+                          {set.best_grade ? GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
                         </span>
                       </div>
                     </div>
                   </Link>
-            )}
+                ))}
           </div>
 
           <div className="mt-8 text-center sm:hidden">
@@ -201,7 +202,7 @@ export default function HomePage() {
           <h2 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
             {c.cta.heading}<span className="text-primary">?</span>
           </h2>
-          <p className="mx-auto mt-4 max-w-md font-body text-muted-foreground text-base">
+          <p className="mx-auto mt-4 max-w-md font-body text-sm text-muted-foreground">
             {c.cta.description}
           </p>
           <div className="mt-8">
@@ -211,5 +212,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-    </StorefrontLayout>);
+    </StorefrontLayout>
+  );
 }

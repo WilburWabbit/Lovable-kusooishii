@@ -220,8 +220,6 @@ export const useStore = create<StoreState>()(
         cart: state.cart,
         wishlistItems: state.wishlistItems,
         recentlyViewed: state.recentlyViewed,
-        searchQuery: state.searchQuery,
-        filters: state.filters,
       }),
     }
   )

@@ -12,8 +12,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
-
-const gradeLabels: Record<number, string> = { 1: 'Mint', 2: 'Excellent', 3: 'Good', 4: 'Acceptable', 5: 'Fair' };
+import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
 
 const shippingOptions = [
   { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
@@ -118,7 +117,7 @@ export default function CartPage() {
                         <div>
                           <h3 className="font-display text-sm font-semibold">{item.name}</h3>
                           <p className="font-body text-xs text-muted-foreground">#{item.setNumber} · {item.theme}</p>
-                          <Badge variant="secondary" className="mt-1 font-display text-[10px]">{gradeLabels[item.conditionGrade] || `Grade ${item.conditionGrade}`}</Badge>
+                          <Badge variant="secondary" className="mt-1 font-display text-[10px]">{GRADE_LABELS_NUMERIC[item.conditionGrade] || `Grade ${item.conditionGrade}`}</Badge>
                         </div>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Search, Menu, X, Heart, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,8 @@ import SearchBar from '@/components/SearchBar';
 import { toast } from 'sonner';
 import { useStorefrontContent } from '@/hooks/useStorefrontContent';
 import { HEADER_DEFAULTS, type HeaderContent } from '@/lib/content-defaults';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 export function StorefrontHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -25,7 +27,28 @@ export function StorefrontHeader() {
 
   const { data: hContent } = useStorefrontContent('header', HEADER_DEFAULTS as unknown as Record<string, unknown>);
   const hc = hContent as unknown as HeaderContent;
-  const navItems = hc.navItems;
+
+  // Check if any non-Mint (grade > 1) items exist for Deals link visibility
+  const { data: hasDeals } = useQuery({
+    queryKey: ['has_deals'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('browse_catalog', {
+        search_term: null, filter_theme_id: null, filter_grade: null, filter_retired: null,
+      });
+      if (error) throw error;
+      return (data as any[]).some(
+        (p) => p.best_grade != null && parseInt(p.best_grade, 10) > 1
+      );
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Use nav items from content, but filter Deals link based on hasDeals
+  const navItems = useMemo(() => {
+    return hc.navItems.filter(
+      (item) => item.path !== '/browse?deals=true' || hasDeals
+    );
+  }, [hc.navItems, hasDeals]);
 
 
   const isActive = (path: string) => {
@@ -53,17 +76,17 @@ export function StorefrontHeader() {
 
         {/* Desktop Nav */}
         <nav className="hidden lg:flex items-center gap-8">
-          {navItems.map((item) =>
-          <Link
-            key={item.name}
-            to={item.path}
-            className={`font-body text-sm font-medium transition-colors hover:text-primary ${
-            isActive(item.path) ? 'text-primary' : 'text-muted-foreground'}`
-            }>
-            
+          {navItems.map((item) => (
+            <Link
+              key={item.name}
+              to={item.path}
+              className={`font-body text-sm font-medium transition-colors hover:text-primary ${
+                isActive(item.path) ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
               {item.name}
             </Link>
-          )}
+          ))}
         </nav>
 
         {/* Actions */}
@@ -75,27 +98,27 @@ export function StorefrontHeader() {
           <Link to="/account?tab=wishlist">
             <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
               <Heart className="h-5 w-5" />
-              {wishlistItems.length > 0 &&
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+              {wishlistItems.length > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                   {wishlistItems.length}
                 </span>
-              }
+              )}
             </Button>
           </Link>
 
           <Link to="/cart">
             <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
               <ShoppingBag className="h-5 w-5" />
-              {cartCount > 0 &&
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+              {cartCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                   {cartCount}
                 </span>
-              }
+              )}
             </Button>
           </Link>
 
-          {user ?
-          <DropdownMenu>
+          {user ? (
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
                   <User className="h-5 w-5" />
@@ -123,12 +146,12 @@ export function StorefrontHeader() {
                   <LogOut className="mr-2 h-3.5 w-3.5" /> Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu> :
-
-          <Button variant="ghost" size="icon" asChild className="text-muted-foreground hover:text-foreground">
+            </DropdownMenu>
+          ) : (
+            <Button variant="ghost" size="icon" asChild className="text-muted-foreground hover:text-foreground">
               <Link to="/login"><User className="h-5 w-5" /></Link>
             </Button>
-          }
+          )}
 
           <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground lg:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)}>
             {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -137,45 +160,45 @@ export function StorefrontHeader() {
       </div>
 
       {/* Mobile Nav */}
-      {isMenuOpen &&
-      <div className="border-t border-border bg-background px-4 py-6 lg:hidden">
+      {isMenuOpen && (
+        <div className="border-t border-border bg-background px-4 py-6 lg:hidden">
           <nav className="flex flex-col gap-4">
-            {navItems.map((item) =>
-          <Link
-            key={item.name}
-            to={item.path}
-            className={`font-body text-sm font-medium ${isActive(item.path) ? 'text-primary' : 'text-foreground'}`}
-            onClick={() => setIsMenuOpen(false)}>
-            
+            {navItems.map((item) => (
+              <Link
+                key={item.name}
+                to={item.path}
+                className={`font-body text-sm font-medium ${isActive(item.path) ? 'text-primary' : 'text-foreground'}`}
+                onClick={() => setIsMenuOpen(false)}
+              >
                 {item.name}
               </Link>
-          )}
-            {user ?
-          <>
+            ))}
+            {user ? (
+              <>
                 <Link to="/account" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
                   My Account
                 </Link>
-                <button onClick={() => {handleSignOut();setIsMenuOpen(false);}} className="text-left font-body text-sm font-medium text-destructive">
+                <button onClick={() => { handleSignOut(); setIsMenuOpen(false); }} className="text-left font-body text-sm font-medium text-destructive">
                   Sign Out
                 </button>
-              </> :
-
-          <Link to="/login" className="font-body text-sm font-medium text-primary" onClick={() => setIsMenuOpen(false)}>
+              </>
+            ) : (
+              <Link to="/login" className="font-body text-sm font-medium text-primary" onClick={() => setIsMenuOpen(false)}>
                 Sign In
               </Link>
-          }
+            )}
           </nav>
         </div>
-      }
+      )}
 
       {/* Search Bar */}
-      {isSearchOpen &&
-      <div className="border-t border-border bg-background/95 backdrop-blur">
+      {isSearchOpen && (
+        <div className="border-t border-border bg-background/95 backdrop-blur">
           <div className="container py-4">
             <SearchBar onClose={() => setIsSearchOpen(false)} autoFocus />
           </div>
         </div>
-      }
-    </header>);
-
+      )}
+    </header>
+  );
 }
