@@ -51,13 +51,46 @@ Deno.serve(async (req) => {
 
   /* ── POST: Receive notification ── */
   if (req.method === "POST") {
+    // --- Signature verification ---
+    const rawBody = await req.text();
+    const sigHeader = req.headers.get("x-ebay-signature");
+    if (!sigHeader || !VERIFICATION_TOKEN) {
+      console.error("eBay notification: missing signature or verification token");
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Compute HMAC-SHA256 of the raw body using the verification token
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(VERIFICATION_TOKEN);
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const sigBytes = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(rawBody));
+    const computed = Array.from(new Uint8Array(sigBytes))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // Constant-time comparison
+    if (computed.length !== sigHeader.length || !crypto.subtle.timingSafeEqual
+      ? computed !== sigHeader
+      : !timingSafeEqual(computed, sigHeader)) {
+      console.error("eBay notification: signature mismatch");
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
 
     let payload: any;
     try {
-      payload = await req.json();
+      payload = JSON.parse(rawBody);
     } catch {
       console.error("eBay notification: invalid JSON body");
       return new Response(JSON.stringify({ success: true }), {
