@@ -46,7 +46,13 @@ It's magnificent.
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <h2 className="font-display text-lg font-bold text-foreground lg:text-xl">The Deal</h2>
             <p>
-              Create a Kuso Oishii account, buy a set for club night, and we'll knock 5% off because you're one of us now. We'll deliver it straight to The Blue Bell so it's behind the bar waiting for you. No couriers. No "sorry we missed you" cards. Just bricks and beer.
+              1. Create a Kuso Oishii account
+2. Add a set to your basket
+3. Choose Blue Bell collection during checkout
+4. We'll knock 5% off -- because you're one of us now. 
+5. Pick your set up behind the bar on club night while you're getting a round in
+
+No couriers. No "sorry we missed you" cards. Just bricks and beer.
             </p>
           </div>
 
@@ -76,13 +82,7 @@ It's magnificent.
             How it works
           </h2>
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[{ icon: Users, title: "Join the Club",
-              desc: "Become a member of Blue Bell LEGO Club through your local group."
-            },
-            {
-              icon: Percent,
-              title: "Save 5%",
-              desc: "Every order you place with us is automatically discounted at checkout."
+            {[{ icon: Users, title: "Join the Club", desc: "Become a member of Blue Bell LEGO Club through your local group." }, { icon: Percent, title: "Save 5%", desc: "Every order you place with us is automatically discounted at checkout."
             },
             {
               icon: Heart,
