@@ -23,6 +23,7 @@ import ReturnsPage from "./pages/ReturnsPage";
 import OrderTrackingPage from "./pages/OrderTrackingPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import BlueBellClubPage from "./pages/BlueBellClubPage";
 import AdminDashboard from "./pages/admin/Dashboard";
 import {
   ReconciliationPage,
