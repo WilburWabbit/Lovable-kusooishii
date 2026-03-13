@@ -55,7 +55,8 @@ export function useProfileUpdate(userId: string) {
         }));
 
       if (changeEntries.length > 0) {
-        await supabase.from("profile_change_log").insert(changeEntries);
+        // profile_change_log table not yet created — skip logging for now
+        console.log("Profile changes:", changeEntries);
       }
 
       // 3. Push to QBO immediately

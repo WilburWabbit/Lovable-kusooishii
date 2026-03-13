@@ -68,35 +68,27 @@ export default function UsersSettingsPage() {
   const tp = useTablePreferences("admin-users", DEFAULT_VISIBLE, { key: "user", dir: "asc" });
 
   const fetchUsers = async () => {
-    // Try detailed RPC first, fall back to basic
-    const { data, error } = await supabase.rpc("admin_list_users_detailed");
+    const { data, error } = await supabase.rpc("admin_list_users");
     if (error) {
-      // Fallback to basic RPC
-      const { data: basicData, error: basicError } = await supabase.rpc("admin_list_users");
-      if (basicError) {
-        toast.error("Failed to load users: " + basicError.message);
-        setLoading(false);
-        return;
-      }
-      setUsers(
-        (basicData as any[])?.map((u: any) => ({
-          ...u,
-          first_name: null,
-          last_name: null,
-          company_name: null,
-          phone: null,
-          mobile: null,
-          ebay_username: null,
-          facebook_handle: null,
-          instagram_handle: null,
-          order_count: 0,
-          total_order_value: 0,
-        })) ?? []
-      );
+      toast.error("Failed to load users: " + error.message);
       setLoading(false);
       return;
     }
-    setUsers((data as DetailedUserRow[]) ?? []);
+    setUsers(
+      (data as any[])?.map((u: any) => ({
+        ...u,
+        first_name: null,
+        last_name: null,
+        company_name: null,
+        phone: null,
+        mobile: null,
+        ebay_username: null,
+        facebook_handle: null,
+        instagram_handle: null,
+        order_count: 0,
+        total_order_value: 0,
+      })) ?? []
+    );
     setLoading(false);
   };
 
