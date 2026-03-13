@@ -77,6 +77,7 @@ const App = () => (
             <Route path="/order-tracking" element={<OrderTrackingPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/blue-bell-club" element={<BlueBellClubPage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />
