@@ -3,8 +3,13 @@ import kusoLogo from '@/assets/kuso-logo.png';
 import { Instagram, Twitter, Mail, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useStorefrontContent } from '@/hooks/useStorefrontContent';
+import { FOOTER_DEFAULTS, type FooterContent } from '@/lib/content-defaults';
 
 export function StorefrontFooter() {
+  const { data: content } = useStorefrontContent('footer', FOOTER_DEFAULTS as unknown as Record<string, unknown>);
+  const c = content as unknown as FooterContent;
+
   return (
     <footer className="bg-kuso-ink text-primary-foreground">
       <div className="container py-12">
@@ -15,15 +20,15 @@ export function StorefrontFooter() {
               KUSO OISHII
             </span>
             <p className="font-body text-sm text-primary-foreground/60">
-              Affordable LEGO®, responsibly re-sold. Rescued stock from UK retailers at fair prices.
+              {c.brandTagline}
             </p>
             <div className="flex items-center gap-2 text-primary-foreground/50 text-sm">
               <MapPin className="h-4 w-4" />
-              <span className="font-body">Brookville, Norfolk UK</span>
+              <span className="font-body">{c.location}</span>
             </div>
             <div className="flex gap-2">
               <Button variant="ghost" size="icon" className="text-primary-foreground/70 hover:text-primary-foreground" asChild>
-                <a href="https://www.instagram.com/kuso_oishii/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+                <a href={c.instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Instagram">
                   <Instagram className="h-5 w-5" />
                 </a>
               </Button>
@@ -34,11 +39,9 @@ export function StorefrontFooter() {
           <div className="space-y-4">
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Quick Links</h4>
             <nav className="flex flex-col gap-2">
-              <Link to="/browse" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shop All Sets</Link>
-              <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
-              <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Just Landed</Link>
-              <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>
-              <Link to="/about" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">About Us</Link>
+              {c.quickLinks.map(({ label, path }) => (
+                <Link key={path} to={path} className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">{label}</Link>
+              ))}
             </nav>
           </div>
 
@@ -46,19 +49,17 @@ export function StorefrontFooter() {
           <div className="space-y-4">
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Customer Service</h4>
             <nav className="flex flex-col gap-2">
-              <Link to="/faq" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">FAQ</Link>
-              <Link to="/contact" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Contact Us</Link>
-              <Link to="/order-tracking" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Track Your Order</Link>
-              <Link to="/returns-exchanges" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Returns & Exchanges</Link>
-              <Link to="/shipping-policy" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shipping Info</Link>
+              {c.customerServiceLinks.map(({ label, path }) => (
+                <Link key={path} to={path} className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">{label}</Link>
+              ))}
             </nav>
           </div>
 
           {/* Newsletter */}
           <div className="space-y-4">
-            <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">First Dibs</h4>
+            <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">{c.newsletterHeading}</h4>
             <p className="font-body text-sm text-primary-foreground/60">
-              Get first dibs on rescued sets. No spam. Just bricks.
+              {c.newsletterDescription}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input placeholder="Enter your email" className="bg-primary-foreground/10 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/40 flex-1 font-body" />
@@ -76,7 +77,7 @@ export function StorefrontFooter() {
                 © {new Date().getFullYear()} Kuso Oishii. All rights reserved.
               </p>
               <p className="font-body text-xs text-primary-foreground/30">
-                LEGO®, the LEGO logo and the Minifigure are trademarks of the LEGO Group, which does not sponsor, authorise or endorse Kuso Oishii.
+                {c.disclaimer}
               </p>
             </div>
             <div className="flex gap-6">
@@ -87,5 +88,4 @@ export function StorefrontFooter() {
         </div>
       </div>
     </footer>);
-
 }

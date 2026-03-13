@@ -45,6 +45,7 @@ import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
 import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
+import ContentEditorPage from "./pages/admin/ContentEditorPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -105,6 +106,7 @@ const App = () => (
             <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
             <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
             <Route path="/admin/ebay-callback" element={<EbayCallbackPage />} />
+            <Route path="/admin/content" element={<ContentEditorPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

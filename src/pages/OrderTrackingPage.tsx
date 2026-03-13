@@ -7,9 +7,13 @@ import { Package, Truck, MapPin, CheckCircle } from 'lucide-react';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { usePageSeo } from '@/hooks/use-page-seo';
 import { Link } from 'react-router-dom';
+import { useStorefrontContent } from '@/hooks/useStorefrontContent';
+import { ORDER_TRACKING_DEFAULTS, type PolicyContent } from '@/lib/content-defaults';
 
 export default function OrderTrackingPage() {
   usePageSeo({ title: 'Track Your Order', description: 'Track your Kuso Oishii LEGO® order with your order number and email address.', path: '/order-tracking' });
+  const { data: otContent } = useStorefrontContent('order-tracking', ORDER_TRACKING_DEFAULTS as unknown as Record<string, unknown>);
+  const ot = otContent as unknown as PolicyContent;
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderEmail, setOrderEmail] = useState('');
   const [trackingResult, setTrackingResult] = useState<any>(null);
@@ -35,8 +39,8 @@ export default function OrderTrackingPage() {
   return (
     <StorefrontLayout>
       <div className="container py-12 max-w-4xl">
-        <h1 className="font-display text-4xl font-bold text-center mb-4 text-foreground">Track Your Order</h1>
-        <p className="font-body text-muted-foreground text-center mb-8">Pop in your order number and email. We'll tell you where your bricks are.</p>
+        <h1 className="font-display text-4xl font-bold text-center mb-4 text-foreground">{ot.pageTitle}</h1>
+        <p className="font-body text-muted-foreground text-center mb-8">{ot.pageSubtitle}</p>
 
         <Card className="mb-8">
           <CardHeader>

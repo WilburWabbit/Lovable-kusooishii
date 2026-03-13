@@ -3,61 +3,24 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { usePageSeo } from '@/hooks/use-page-seo';
+import { useStorefrontContent } from '@/hooks/useStorefrontContent';
+import { FAQ_DEFAULTS, type FAQContent } from '@/lib/content-defaults';
 
 export default function FAQPage() {
   usePageSeo({ title: 'Frequently Asked Questions', description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.', path: '/faq' });
 
-  const sections = [
-    {
-      title: 'Condition Grades',
-      badge: 'Important',
-      items: [
-        { id: 'sealed', q: 'Sealed — What does it mean?', a: 'The set is factory sealed. All bags are unopened. The box may have minor shelf wear, but the contents are untouched. Expect: As close to buying from a shop as you\'ll get, minus the full retail price tag.' },
-        { id: 'openbox', q: 'Open-box — What does it mean?', a: 'The outer box has been opened — usually by the original retailer during a returns check. We inspect the contents and note which bags are sealed vs open. If any are open, we hand-count and verify.' },
-        { id: 'damagedbox', q: 'Damaged-box — What does it mean?', a: 'The box has cosmetic damage — dents, tears, water stains, crushed corners. The LEGO inside is unaffected. Not for box-pristine collectors. If you\'re building the set, you won\'t care.' },
-      ],
-    },
-    {
-      title: 'Buyer Education',
-      items: [
-        { id: 'genuine', q: 'Are these genuine LEGO® sets?', a: 'Yes, 100%. Every set comes from authorised UK retailers — they\'re returns, open-box, or damaged-box stock. We don\'t touch knock-offs.' },
-        { id: 'piececount', q: 'How do you verify piece counts?', a: 'For sealed bags, we weigh them against known references. For opened bags, we hand-count. If anything is missing, we list it clearly in the condition notes.' },
-        { id: 'instructions', q: 'Do sets come with instructions?', a: 'If the set included printed instructions and they\'re present, yes. If missing, we\'ll say so. LEGO\'s free digital instructions at lego.com/buildinginstructions cover every set.' },
-      ],
-    },
-    {
-      title: 'Ordering & Payment',
-      items: [
-        { id: 'payment', q: 'What payment methods do you accept?', a: 'Visa, Mastercard, American Express, and PayPal via Stripe. We never see or store your card details.' },
-        { id: 'confirmation', q: 'Will I get an order confirmation?', a: 'Yes — email confirmation immediately after placing your order, and a second email with tracking info once we ship.' },
-        { id: 'cancel', q: 'Can I cancel my order?', a: 'If we haven\'t shipped it yet, yes — email us at hello@kusooishii.com. Once dispatched, follow the returns process.' },
-      ],
-    },
-    {
-      title: 'Shipping & Delivery',
-      items: [
-        { id: 'options', q: 'What are the shipping options?', a: 'Standard (Free) via Evri, 3–5 working days. Express (Paid) via Royal Mail Tracked 24 or Parcelforce, 1–2 working days. Collection (Free) at the Blue Bell LEGO Club.' },
-        { id: 'international', q: 'Do you ship internationally?', a: 'Not yet — UK mainland only for now. International shipping is something we\'re looking at for the future.' },
-      ],
-    },
-    {
-      title: 'Returns & Refunds',
-      items: [
-        { id: 'returns', q: 'What\'s the return policy?', a: 'Sealed sets: 14-day return in original condition. Open-box and damaged-box: sold as-described. If something arrives damaged in transit or doesn\'t match the listing, get in touch.' },
-        { id: 'missing', q: 'What if pieces are missing?', a: 'If we listed a set as complete and you find missing pieces, email us with photos. We\'ll source missing parts, offer a partial refund, or arrange a return.' },
-      ],
-    },
-  ];
+  const { data: content } = useStorefrontContent('faq', FAQ_DEFAULTS as unknown as Record<string, unknown>);
+  const c = content as unknown as FAQContent;
 
   return (
     <StorefrontLayout>
       <div className="container py-12 max-w-3xl">
         <div className="text-center mb-12">
-          <h1 className="font-display text-4xl font-bold text-foreground mb-4">FAQ</h1>
-          <p className="font-body text-muted-foreground">Straight answers. No waffle.</p>
+          <h1 className="font-display text-4xl font-bold text-foreground mb-4">{c.pageTitle}</h1>
+          <p className="font-body text-muted-foreground">{c.pageSubtitle}</p>
         </div>
 
-        {sections.map(section => (
+        {c.sections.map(section => (
           <section key={section.title} className="mb-12">
             <h2 className="font-display text-2xl font-bold text-foreground mb-6 flex items-center gap-3">
               {section.title}
@@ -77,8 +40,8 @@ export default function FAQPage() {
         ))}
 
         <div className="text-center pt-8 border-t border-border">
-          <p className="font-body text-muted-foreground mb-4">Still got a question?</p>
-          <Link to="/contact" className="font-display text-primary hover:underline font-medium">Get in touch →</Link>
+          <p className="font-body text-muted-foreground mb-4">{c.ctaText}</p>
+          <Link to="/contact" className="font-display text-primary hover:underline font-medium">{c.ctaLinkText}</Link>
         </div>
       </div>
     </StorefrontLayout>

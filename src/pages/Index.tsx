@@ -6,12 +6,26 @@ import { ArrowRight, Shield, Truck, Bell } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useStorefrontContent } from "@/hooks/useStorefrontContent";
+import { HOME_DEFAULTS, type HomeContent } from "@/lib/content-defaults";
 
 const gradeLabels: Record<string, string> = {
   "1": "Mint",
   "2": "Excellent",
   "3": "Good",
   "4": "Acceptable"
+};
+
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  shield: Shield,
+  truck: Truck,
+  bell: Bell,
+};
+
+const iconClassMap: Record<string, string> = {
+  shield: "text-primary",
+  truck: "text-primary",
+  bell: "text-blue-500",
 };
 
 export default function HomePage() {
@@ -29,6 +43,9 @@ export default function HomePage() {
     }
   });
 
+  const { data: content } = useStorefrontContent('home', HOME_DEFAULTS as unknown as Record<string, unknown>);
+  const c = content as unknown as HomeContent;
+
   return (
     <StorefrontLayout>
       {/* Hero */}
@@ -38,20 +55,18 @@ export default function HomePage() {
             src={heroImage}
             alt="Premium LEGO set with dramatic lighting"
             className="h-full w-full object-cover opacity-60" />
-          
           <div className="absolute inset-0 bg-gradient-to-r from-kuso-ink/90 via-kuso-ink/60 to-transparent" />
         </div>
         <div className="container relative z-10 py-24 lg:py-36">
           <div className="max-w-xl">
             <p className="font-display font-semibold uppercase tracking-[0.2em] text-primary text-lg">
-              Curated Resale
+              {c.hero.tagline}
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold leading-tight text-primary-foreground lg:text-6xl">
-              Sets worth<br />
-              collecting<span className="text-primary">.</span>
+              {c.hero.heading.replace(/\.$/, '')}<span className="text-primary">.</span>
             </h1>
             <p className="mt-6 font-body text-base leading-relaxed text-primary-foreground/70 lg:text-lg">
-              Graded, verified, and priced for adult collectors who know what they want. Every set condition-checked before it ships.
+              {c.hero.description}
             </p>
             <div className="mt-8 flex gap-3">
               <Button asChild size="lg" className="font-display font-semibold">
@@ -72,19 +87,19 @@ export default function HomePage() {
       {/* Value Props */}
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-          {[
-          { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4", iconClass: "text-primary" },
-          { icon: Truck, title: "Free UK Shipping", desc: "Express shipping also available", iconClass: "text-primary" },
-          { icon: Bell, title: "Blue Bell Lego Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500" }].
-          map(({ icon: Icon, title, desc, iconClass }) =>
-          <div key={title} className="flex items-center gap-4 px-6 py-6">
-              <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
-              <div>
-                <p className="font-display font-semibold text-foreground text-base">{title}</p>
-                <p className="font-body text-muted-foreground text-sm">{desc}</p>
+          {c.valueProps.map(({ title, desc, iconKey }) => {
+            const Icon = iconMap[iconKey] || Shield;
+            const iconClass = iconClassMap[iconKey] || "text-primary";
+            return (
+              <div key={title} className="flex items-center gap-4 px-6 py-6">
+                <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
+                <div>
+                  <p className="font-display font-semibold text-foreground text-base">{title}</p>
+                  <p className="font-body text-muted-foreground text-sm">{desc}</p>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
         </div>
       </section>
 
@@ -101,7 +116,6 @@ export default function HomePage() {
             <Link
               to="/browse"
               className="hidden font-display text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block">
-              
               View all →
             </Link>
           </div>
@@ -123,7 +137,6 @@ export default function HomePage() {
               key={set.product_id}
               to={`/sets/${set.mpn}`}
               className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md">
-              
                     {/* Image */}
                     <div className="aspect-square bg-background">
                       {set.img_url ?
@@ -131,8 +144,6 @@ export default function HomePage() {
                   src={set.img_url}
                   alt={set.name}
                   className="h-full w-full object-contain p-4" /> :
-
-
                 <div className="flex h-full items-center justify-center p-8">
                           <span className="font-display text-4xl font-bold text-muted-foreground/20">
                             {set.mpn.split("-")[0]}
@@ -188,18 +199,17 @@ export default function HomePage() {
       <section className="border-t border-border bg-kuso-paper py-16 lg:py-24">
         <div className="container text-center">
           <h2 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
-            Want something we don't have<span className="text-primary">?</span>
+            {c.cta.heading}<span className="text-primary">?</span>
           </h2>
           <p className="mx-auto mt-4 max-w-md font-body text-muted-foreground text-base">
-            Add it to your wishlist. We track demand and source accordingly. Members get stock alerts when sets land.
+            {c.cta.description}
           </p>
           <div className="mt-8">
             <Button asChild size="lg" className="font-display font-semibold">
-              <Link to="/login">Create Account</Link>
+              <Link to={c.cta.buttonLink}>{c.cta.buttonText}</Link>
             </Button>
           </div>
         </div>
       </section>
     </StorefrontLayout>);
-
 }

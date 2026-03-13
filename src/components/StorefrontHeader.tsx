@@ -11,6 +11,8 @@ import { useStore } from '@/lib/store';
 import { useAuth } from '@/hooks/useAuth';
 import SearchBar from '@/components/SearchBar';
 import { toast } from 'sonner';
+import { useStorefrontContent } from '@/hooks/useStorefrontContent';
+import { HEADER_DEFAULTS, type HeaderContent } from '@/lib/content-defaults';
 
 export function StorefrontHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -21,12 +23,9 @@ export function StorefrontHeader() {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
 
-  const navItems = [
-  { name: 'Shop', path: '/browse' },
-  { name: 'Themes', path: '/browse?view=themes' },
-  { name: 'Just Landed', path: '/browse?new=true' },
-  { name: 'Deals', path: '/browse?deals=true' },
-  { name: 'About', path: '/about' }];
+  const { data: hContent } = useStorefrontContent('header', HEADER_DEFAULTS as unknown as Record<string, unknown>);
+  const hc = hContent as unknown as HeaderContent;
+  const navItems = hc.navItems;
 
 
   const isActive = (path: string) => {
@@ -48,7 +47,7 @@ export function StorefrontHeader() {
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <span className="font-display tracking-tight text-primary text-2xl font-extrabold">
-            KUSO OISHII
+            {hc.logo}
           </span>
         </Link>
 

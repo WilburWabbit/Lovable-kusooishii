@@ -8,10 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { usePageSeo } from '@/hooks/use-page-seo';
 import { toast } from 'sonner';
+import { useStorefrontContent } from '@/hooks/useStorefrontContent';
+import { CONTACT_DEFAULTS, type ContactContent } from '@/lib/content-defaults';
 
 export default function ContactPage() {
   usePageSeo({ title: 'Contact Us', description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO sets?', path: '/contact' });
   const [submitting, setSubmitting] = useState(false);
+  const { data: content } = useStorefrontContent('contact', CONTACT_DEFAULTS as unknown as Record<string, unknown>);
+  const c = content as unknown as ContactContent;
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -27,8 +31,8 @@ export default function ContactPage() {
     <StorefrontLayout>
       <div className="container py-12 max-w-4xl">
         <div className="text-center mb-12">
-          <h1 className="font-display text-4xl font-bold text-foreground mb-4">Contact Us</h1>
-          <p className="font-body text-muted-foreground max-w-xl mx-auto">Got a question about an order, a set, or anything else? Drop us a message.</p>
+          <h1 className="font-display text-4xl font-bold text-foreground mb-4">{c.pageTitle}</h1>
+          <p className="font-body text-muted-foreground max-w-xl mx-auto">{c.pageDescription}</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -36,9 +40,9 @@ export default function ContactPage() {
             <Card>
               <CardContent className="p-6 space-y-5">
                 {[
-                  { icon: Mail, title: 'Email', content: <a href="mailto:hello@kusooishii.com" className="font-body text-sm text-muted-foreground hover:text-foreground transition-colors">hello@kusooishii.com</a> },
-                  { icon: MapPin, title: 'Location', content: <p className="font-body text-sm text-muted-foreground">Brookville, Norfolk, UK</p> },
-                  { icon: Clock, title: 'Response Time', content: <p className="font-body text-sm text-muted-foreground">We reply within 1 working day, Monday to Friday.</p> },
+                  { icon: Mail, title: 'Email', content: <a href={`mailto:${c.email}`} className="font-body text-sm text-muted-foreground hover:text-foreground transition-colors">{c.email}</a> },
+                  { icon: MapPin, title: 'Location', content: <p className="font-body text-sm text-muted-foreground">{c.location}</p> },
+                  { icon: Clock, title: 'Response Time', content: <p className="font-body text-sm text-muted-foreground">{c.responseTime}</p> },
                 ].map(({ icon: Icon, title, content }) => (
                   <div key={title} className="flex items-start gap-3">
                     <Icon className="h-5 w-5 text-primary shrink-0 mt-0.5" />
