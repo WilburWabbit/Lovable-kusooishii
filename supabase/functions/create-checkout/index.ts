@@ -8,79 +8,175 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const VALID_SHIPPING_METHODS = ["standard", "express", "collection"] as const;
+type ShippingMethod = (typeof VALID_SHIPPING_METHODS)[number];
+
+// Hardcoded shipping prices (must match storefront display)
+const SHIPPING_PRICES: Record<ShippingMethod, number> = {
+  standard: 0,
+  express: 5.99,
+  collection: 0,
+};
+
+const COLLECTION_DISCOUNT_RATE = 0.05;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const {
-      items,
-      shippingMethod,
-      shippingPrice,
-      collectionDiscount,
-    } = await req.json();
+    const { items, shippingMethod } = await req.json();
 
+    // --- Input validation ---
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new Error("Cart is empty");
     }
+
+    if (!VALID_SHIPPING_METHODS.includes(shippingMethod)) {
+      throw new Error(`Invalid shipping method: ${shippingMethod}`);
+    }
+
+    const validatedItems: { skuId: string; quantity: number }[] = items.map(
+      (item: { skuId: string; quantity: number }, i: number) => {
+        if (!item.skuId || typeof item.skuId !== "string") {
+          throw new Error(`Item ${i}: missing skuId`);
+        }
+        const qty = Number(item.quantity);
+        if (!Number.isInteger(qty) || qty < 1) {
+          throw new Error(`Item ${i}: invalid quantity`);
+        }
+        return { skuId: item.skuId, quantity: qty };
+      }
+    );
 
     const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
       apiVersion: "2025-08-27.basil",
     });
 
-    const supabaseClient = createClient(
+    // Use service role to look up canonical prices
+    const adminClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+
+    // Anon client for auth check
+    const anonClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_ANON_KEY") ?? ""
     );
 
-    // Check for authenticated user (optional — supports guest checkout)
+    // --- Authenticate user (optional — supports guest checkout) ---
+    let userId: string | undefined;
     let userEmail: string | undefined;
     let customerId: string | undefined;
     const authHeader = req.headers.get("Authorization");
     if (authHeader) {
       const token = authHeader.replace("Bearer ", "");
-      const { data } = await supabaseClient.auth.getUser(token);
-      if (data.user?.email) {
-        userEmail = data.user.email;
-        const customers = await stripe.customers.list({
-          email: userEmail,
-          limit: 1,
-        });
-        if (customers.data.length > 0) {
-          customerId = customers.data[0].id;
+      const { data } = await anonClient.auth.getUser(token);
+      if (data.user) {
+        userId = data.user.id;
+        userEmail = data.user.email ?? undefined;
+        if (userEmail) {
+          const customers = await stripe.customers.list({
+            email: userEmail,
+            limit: 1,
+          });
+          if (customers.data.length > 0) {
+            customerId = customers.data[0].id;
+          }
         }
       }
     }
 
-    const isCollection = shippingMethod === "collection";
-    const origin = req.headers.get("origin") || "https://workspace-charm-market.lovable.app";
+    // --- Look up canonical SKU prices from database ---
+    const skuIds = validatedItems.map((i) => i.skuId);
+    const { data: skuRows, error: skuError } = await adminClient
+      .from("sku")
+      .select(
+        "id, sku_code, price, name, condition_grade, product:product_id(mpn, name, img_url)"
+      )
+      .in("id", skuIds)
+      .eq("active_flag", true)
+      .eq("saleable_flag", true);
 
-    // Build line items from cart
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map(
-      (item: {
-        name: string;
-        setNumber: string;
-        price: number;
-        quantity: number;
-        conditionGrade: number;
-        image?: string;
-      }) => ({
+    if (skuError) {
+      throw new Error("Failed to look up products");
+    }
+
+    // Build a map for quick lookup
+    const skuMap = new Map<string, (typeof skuRows)[0]>();
+    for (const row of skuRows ?? []) {
+      skuMap.set(row.id, row);
+    }
+
+    // Validate every requested item exists and has a price
+    for (const item of validatedItems) {
+      const sku = skuMap.get(item.skuId);
+      if (!sku) {
+        throw new Error(`Product not found or unavailable: ${item.skuId}`);
+      }
+      if (sku.price == null || sku.price <= 0) {
+        throw new Error(`Product has no valid price: ${item.skuId}`);
+      }
+    }
+
+    // --- Validate collection discount eligibility ---
+    const isCollection = shippingMethod === "collection";
+    let collectionDiscount = 0;
+
+    if (isCollection) {
+      if (!userId) {
+        throw new Error(
+          "You must be signed in to use collection shipping"
+        );
+      }
+
+      // Verify user is an approved club member
+      const { data: clubLink } = await adminClient
+        .from("member_club_link")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("approved", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (!clubLink) {
+        throw new Error(
+          "Collection is only available for approved club members"
+        );
+      }
+    }
+
+    // --- Build line items with server-side prices ---
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+    let merchandiseSubtotal = 0;
+
+    for (const item of validatedItems) {
+      const sku = skuMap.get(item.skuId)!;
+      const product = sku.product as any;
+      const unitPrice = Number(sku.price);
+      merchandiseSubtotal += unitPrice * item.quantity;
+
+      const primaryImage = product?.img_url;
+
+      lineItems.push({
         price_data: {
           currency: "gbp",
           product_data: {
-            name: item.name,
-            description: `#${item.setNumber} · Grade ${item.conditionGrade}`,
-            ...(item.image ? { images: [item.image] } : {}),
+            name: product?.name ?? sku.name ?? "LEGO Set",
+            description: `#${product?.mpn ?? sku.sku_code} · Grade ${sku.condition_grade}`,
+            ...(primaryImage ? { images: [primaryImage] } : {}),
           },
-          unit_amount: Math.round(item.price * 100),
+          unit_amount: Math.round(unitPrice * 100),
         },
         quantity: item.quantity,
-      })
-    );
+      });
+    }
 
-    // Add shipping as a line item if not free
-    if (shippingPrice && shippingPrice > 0) {
+    // --- Shipping (server-derived) ---
+    const shippingPrice = SHIPPING_PRICES[shippingMethod as ShippingMethod];
+    if (shippingPrice > 0) {
       lineItems.push({
         price_data: {
           currency: "gbp",
@@ -96,7 +192,11 @@ serve(async (req) => {
       });
     }
 
-    // Build session params
+    const origin =
+      req.headers.get("origin") ||
+      "https://workspace-charm-market.lovable.app";
+
+    // --- Build session params ---
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
       line_items: lineItems,
@@ -109,28 +209,29 @@ serve(async (req) => {
       ...(customerId
         ? { customer: customerId }
         : userEmail
-        ? { customer_email: userEmail }
-        : {}),
+          ? { customer_email: userEmail }
+          : {}),
     };
 
     // Allow promo codes for non-collection orders
     if (!isCollection) {
       sessionParams.allow_promotion_codes = true;
-      // Collect shipping address for delivered orders
       sessionParams.shipping_address_collection = {
         allowed_countries: ["GB"],
       };
     }
 
-    // Apply collection discount as a coupon
-    if (isCollection && collectionDiscount && collectionDiscount > 0) {
-      // Create an ad-hoc coupon for the collection discount
-      const coupon = await stripe.coupons.create({
-        percent_off: 5,
-        duration: "once",
-        name: "LEGO Club Collection Discount (5%)",
-      });
-      sessionParams.discounts = [{ coupon: coupon.id }];
+    // Apply collection discount as a coupon (server-calculated)
+    if (isCollection) {
+      collectionDiscount = merchandiseSubtotal * COLLECTION_DISCOUNT_RATE;
+      if (collectionDiscount > 0) {
+        const coupon = await stripe.coupons.create({
+          percent_off: 5,
+          duration: "once",
+          name: "LEGO Club Collection Discount (5%)",
+        });
+        sessionParams.discounts = [{ coupon: coupon.id }];
+      }
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);

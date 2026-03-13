@@ -11,6 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect } from "react";
 import { ThemesGrid } from "@/components/ThemesGrid";
 import { GRADE_OPTIONS, GRADE_LABELS } from "@/lib/grades";
+import { usePagination } from "@/hooks/usePagination";
+import { PaginationControls } from "@/components/PaginationControls";
 
 export default function BrowsePage() {
   const [searchParams] = useSearchParams();
@@ -149,6 +151,17 @@ export default function BrowsePage() {
     }
     return result;
   }, [products, yearRange, isNewMode, isDealsMode, productDates]);
+
+  const {
+    paginatedItems: paginatedProducts,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    pageSizeOptions,
+  } = usePagination(filteredProducts);
 
   if (viewMode === "themes") {
     return (
@@ -349,9 +362,10 @@ export default function BrowsePage() {
                     </div>
                   ))}
                 </div>
-              ) : filteredProducts && filteredProducts.length > 0 ? (
+              ) : paginatedProducts && paginatedProducts.length > 0 ? (
+                <>
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {filteredProducts.map((set) => (
+                  {paginatedProducts.map((set) => (
                     <Link
                       key={set.product_id}
                       to={`/sets/${set.mpn}`}
@@ -405,6 +419,17 @@ export default function BrowsePage() {
                     </Link>
                   ))}
                 </div>
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalItems}
+                  pageSize={pageSize}
+                  pageSizeOptions={pageSizeOptions}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={setPageSize}
+                  itemLabel="sets"
+                />
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <p className="font-display text-lg font-semibold text-foreground">No sets found</p>

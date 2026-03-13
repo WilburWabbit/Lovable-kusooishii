@@ -154,15 +154,33 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
   /* ── Set Primary ── */
   const handleSetPrimary = async (item: MediaItem) => {
     setSettingPrimary(item.id);
+
+    // Optimistic update: mark as primary and move to position 0
+    const previousItems = queryClient.getQueryData<MediaItem[]>(queryKey);
+    const optimistic = items.map((i) => ({ ...i, is_primary: i.id === item.id }));
+    const primaryIdx = optimistic.findIndex((i) => i.id === item.id);
+    if (primaryIdx > 0) {
+      const [primary] = optimistic.splice(primaryIdx, 1);
+      optimistic.unshift(primary);
+    }
+    const withSortOrder = optimistic.map((i, idx) => ({ ...i, sort_order: idx }));
+    queryClient.setQueryData(queryKey, withSortOrder);
+
     try {
       await invokeWithAuth("admin-data", {
         action: "set-primary-media",
         product_id: productId,
         product_media_id: item.id,
       });
+      // Persist the new order
+      await invokeWithAuth("admin-data", {
+        action: "reorder-product-media",
+        items: withSortOrder.map((i) => ({ id: i.id, sort_order: i.sort_order })),
+      });
       toast.success("Primary image set");
       invalidate();
     } catch (err: any) {
+      queryClient.setQueryData(queryKey, previousItems);
       toast.error(err.message ?? "Failed");
     } finally {
       setSettingPrimary(null);
@@ -271,15 +289,20 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
     setDragIdx(null);
     setDragOverIdx(null);
 
+    // Optimistic update
+    const previousItems = queryClient.getQueryData<MediaItem[]>(queryKey);
+    const updatedItems = reordered.map((item, idx) => ({ ...item, sort_order: idx }));
+    queryClient.setQueryData(queryKey, updatedItems);
+
     // Save new order
     try {
-      const reorderItems = reordered.map((item, idx) => ({ id: item.id, sort_order: idx }));
       await invokeWithAuth("admin-data", {
         action: "reorder-product-media",
-        items: reorderItems,
+        items: updatedItems.map((item) => ({ id: item.id, sort_order: item.sort_order })),
       });
       invalidate();
     } catch (err: any) {
+      queryClient.setQueryData(queryKey, previousItems);
       toast.error(err.message ?? "Reorder failed");
     }
   };
