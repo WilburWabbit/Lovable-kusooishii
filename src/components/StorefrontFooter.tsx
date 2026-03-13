@@ -59,6 +59,7 @@ export function StorefrontFooter() {
               <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
               <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Just Landed</Link>
               {hasDeals && <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>}
+              <Link to="/bluebell" className="font-body text-sm text-blue-400 hover:text-blue-300 transition-colors">Blue Bell LEGO Club</Link>
               <Link to="/about" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">About Us</Link>
             </nav>
           </div>
