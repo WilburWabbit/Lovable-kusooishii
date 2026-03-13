@@ -74,9 +74,14 @@ Deno.serve(async (req) => {
       .join("");
 
     // Constant-time comparison
-    if (computed.length !== sigHeader.length || !crypto.subtle.timingSafeEqual
-      ? computed !== sigHeader
-      : !timingSafeEqual(computed, sigHeader)) {
+    const enc = new TextEncoder();
+    const a = enc.encode(computed);
+    const b = enc.encode(sigHeader);
+    let mismatch = a.length !== b.length ? 1 : 0;
+    for (let i = 0; i < a.length; i++) {
+      mismatch |= (a[i] ?? 0) ^ (b[i] ?? 0);
+    }
+    if (mismatch !== 0) {
       console.error("eBay notification: signature mismatch");
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
