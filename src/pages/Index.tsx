@@ -69,17 +69,17 @@ export default function HomePage() {
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
-            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4", iconClass: "text-primary" },
-            { icon: Truck, title: "Free UK Shipping", desc: "Express shipping also available", iconClass: "text-primary" },
-            { icon: Bell, title: "Blue Bell Lego Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500" },
-          ].map(({ icon: Icon, title, desc, iconClass }) => (
-            <div key={title} className="flex items-center gap-4 px-6 py-6">
+            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4", iconClass: "text-primary", to: "/grading" },
+            { icon: Truck, title: "Free UK Shipping", desc: "Express shipping also available", iconClass: "text-primary", to: "/shipping-policy" },
+            { icon: Bell, title: "Blue Bell Lego Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500", to: "/blue-bell-club" },
+          ].map(({ icon: Icon, title, desc, iconClass, to }) => (
+            <Link key={title} to={to} className="flex items-center gap-4 px-6 py-6 transition-colors hover:bg-muted/50">
               <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
               <div>
                 <p className="font-display text-sm font-semibold text-foreground">{title}</p>
                 <p className="font-body text-xs text-muted-foreground">{desc}</p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
