@@ -90,7 +90,7 @@ export const CONTENT_FIELDS: {
   { key: "highlights", label: "Highlights", type: "textarea", hint: "One per line" },
   { key: "call_to_action", label: "Call to Action", type: "input", maxLen: 80 },
   { key: "seo_title", label: "SEO Title", type: "input", maxLen: 60 },
-  { key: "seo_description", label: "SEO Description", type: "textarea", maxLen: 160 },
+  { key: "seo_description", label: "SEO Description", type: "textarea", maxLen: 400 },
 ];
 
 export function fmt(v: number | null | undefined) {
