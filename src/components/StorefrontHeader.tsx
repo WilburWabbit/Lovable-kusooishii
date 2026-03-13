@@ -80,10 +80,11 @@ export function StorefrontHeader() {
           <Link
             key={item.name}
             to={item.path}
-            className={`font-body text-sm font-medium transition-colors hover:text-primary ${
-            isActive(item.path) ? 'text-primary' : 'text-muted-foreground'}`
-            }>
-            
+            className={`font-body text-sm font-medium transition-colors ${
+              item.className
+                ? item.className
+                : `hover:text-primary ${isActive(item.path) ? 'text-primary' : 'text-muted-foreground'}`
+            }`}>
               {item.name}
             </Link>
           )}
