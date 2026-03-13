@@ -7,7 +7,7 @@ export default function BlueBellClubPage() {
     title: "Blue Bell LEGO Club | Kuso Oishii",
     description:
       "Join the Blue Bell LEGO Club and enjoy 5% off every order, with a matching 5% donated to the club. Supporting your local LEGO community.",
-    path: "/blue-bell-club",
+    path: "/bluebell",
   });
 
   return (
