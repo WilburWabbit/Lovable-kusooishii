@@ -25,44 +25,8 @@ export default function BlueBellClubPage() {
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="bg-muted/30 py-16 lg:py-24">
-        <div className="container max-w-4xl">
-          <h2 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
-            How it works
-          </h2>
-          <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[
-              {
-                icon: Users,
-                title: "Join the Club",
-                desc: "Become a member of Blue Bell LEGO Club through your local group.",
-              },
-              {
-                icon: Percent,
-                title: "Save 5%",
-                desc: "Every order you place with us is automatically discounted at checkout.",
-              },
-              {
-                icon: Heart,
-                title: "Give 5%",
-                desc: "We donate a matching 5% of your order value directly to Blue Bell.",
-              },
-            ].map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex flex-col items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-500/10">
-                  <Icon className="h-5 w-5 text-blue-500" />
-                </div>
-                <h3 className="font-display text-sm font-semibold text-foreground">{title}</h3>
-                <p className="font-body text-sm leading-relaxed text-muted-foreground">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Copy */}
-      <section className="border-t border-border bg-background py-16 lg:py-24">
+      <section className="bg-muted/30 py-16 lg:py-24">
         <div className="container max-w-3xl space-y-8">
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <p className="font-display text-lg font-bold text-foreground lg:text-xl">
@@ -98,6 +62,42 @@ export default function BlueBellClubPage() {
             <p className="font-display text-sm font-semibold text-foreground">
               See you at the bar. First round's on you.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="border-t border-border bg-background py-16 lg:py-24">
+        <div className="container max-w-4xl">
+          <h2 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
+            How it works
+          </h2>
+          <div className="mt-10 grid gap-8 sm:grid-cols-3">
+            {[
+              {
+                icon: Users,
+                title: "Join the Club",
+                desc: "Become a member of Blue Bell LEGO Club through your local group.",
+              },
+              {
+                icon: Percent,
+                title: "Save 5%",
+                desc: "Every order you place with us is automatically discounted at checkout.",
+              },
+              {
+                icon: Heart,
+                title: "Give 5%",
+                desc: "We donate a matching 5% of your order value directly to Blue Bell.",
+              },
+            ].map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex flex-col items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-500/10">
+                  <Icon className="h-5 w-5 text-blue-500" />
+                </div>
+                <h3 className="font-display text-sm font-semibold text-foreground">{title}</h3>
+                <p className="font-body text-sm leading-relaxed text-muted-foreground">{desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
