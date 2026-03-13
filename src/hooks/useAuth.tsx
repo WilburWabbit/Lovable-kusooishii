@@ -47,10 +47,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from("profile")
-      .select("display_name, avatar_url, first_name, last_name, company_name, phone, mobile, ebay_username, facebook_handle, instagram_handle")
+      .select("display_name, avatar_url, phone")
       .eq("user_id", userId)
       .single();
-    setProfile(data);
+    setProfile(data ? {
+      display_name: data.display_name,
+      avatar_url: data.avatar_url,
+      first_name: null,
+      last_name: null,
+      company_name: null,
+      phone: data.phone,
+      mobile: null,
+      ebay_username: null,
+      facebook_handle: null,
+      instagram_handle: null,
+    } : null);
   }, []);
 
   const fetchRoles = useCallback(async (userId: string) => {
