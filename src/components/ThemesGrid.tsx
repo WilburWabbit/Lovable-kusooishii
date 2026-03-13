@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Package } from "lucide-react";
+import { usePagination } from "@/hooks/usePagination";
+import { PaginationControls } from "@/components/PaginationControls";
 
 interface ThemeWithCount {
   theme_id: string;
@@ -54,6 +56,17 @@ export function ThemesGrid() {
     },
   });
 
+  const {
+    paginatedItems: paginatedThemes,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    pageSizeOptions,
+  } = usePagination(themes);
+
   return (
     <div className="bg-background">
       <div className="border-b border-border bg-kuso-paper py-8">
@@ -82,9 +95,10 @@ export function ThemesGrid() {
               </div>
             ))}
           </div>
-        ) : themes && themes.length > 0 ? (
+        ) : paginatedThemes && paginatedThemes.length > 0 ? (
+          <>
           <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {themes.map((theme) => (
+            {paginatedThemes.map((theme) => (
               <Link
                 key={theme.theme_id}
                 to={`/browse?theme=${theme.theme_id}`}
@@ -116,6 +130,17 @@ export function ThemesGrid() {
               </Link>
             ))}
           </div>
+          <PaginationControls
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            pageSizeOptions={pageSizeOptions}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            itemLabel="themes"
+          />
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <p className="font-display text-lg font-semibold text-foreground">
