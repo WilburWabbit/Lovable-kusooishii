@@ -34,12 +34,13 @@ The Blue Bell gets 5%
             <p className="font-display text-lg font-bold text-foreground lg:text-xl">
               Bricks. Beer. Absolute chaos.
             </p>
-            <p>
-              We're the proud sponsor of LEGO Club at <a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
+            <p>We're the proud sponsor of LEGO Club at The Blue Bell, Stoke Ferry — where supposed adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
+              <a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
             </p>
-            <p>
-              This isn't a quiet Tuesday night craft session. This is a pub full of people who know what a kragle is, who think "just one more set" is a perfectly reasonable thing to say, right after "just one more pint." It's magnificent.
-            </p>
+            <p>This isn't a quiet  craft session. This is a pub full of people who know what kragle is, who think "just one more set" is a perfectly reasonable thing to say, right after "just one more pint." 
+
+It's magnificent.
+</p>
           </div>
 
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
@@ -75,8 +76,7 @@ The Blue Bell gets 5%
             How it works
           </h2>
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[{ icon: Users,
-              title: "Join the Club",
+            {[{ icon: Users, title: "Join the Club",
               desc: "Become a member of Blue Bell LEGO Club through your local group."
             },
             {
