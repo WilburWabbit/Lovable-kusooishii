@@ -45,7 +45,7 @@ export function StorefrontHeader() {
       { name: 'Just Landed', path: '/browse?new=true' },
       ...(hasDeals ? [{ name: 'Deals', path: '/browse?deals=true' }] : []),
       { name: 'About', path: '/about' },
-      { name: 'Blue Bell', path: '/bluebell', className: 'text-blue-500 hover:text-blue-600' },
+      { name: 'Blue Bell', path: '/bluebell', className: 'text-blue-600 hover:text-blue-700' },
     ];
     return items;
   }, [hasDeals]);
