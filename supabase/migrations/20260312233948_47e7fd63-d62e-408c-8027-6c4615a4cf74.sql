@@ -1,0 +1,1 @@
+DROP POLICY "Customers readable by all" ON public.customer;

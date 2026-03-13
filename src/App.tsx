@@ -47,6 +47,7 @@ import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
 import NotFound from "./pages/NotFound";
+import { RequireAdmin } from "./components/RequireAdmin";
 
 const queryClient = new QueryClient();
 
@@ -86,27 +87,27 @@ const App = () => (
             <Route path="/account" element={<AccountPage />} />
 
             {/* Back Office */}
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/intake" element={<IntakePage />} />
-            <Route path="/admin/inventory" element={<InventoryPage />} />
-            <Route path="/admin/products" element={<ProductsPage />} />
-            <Route path="/admin/products/:id" element={<ProductDetailAdminPage />} />
-            <Route path="/admin/listings" element={<ListingsPage />} />
-            <Route path="/admin/pricing" element={<PricingDashboardPage />} />
-            <Route path="/admin/orders" element={<OrdersPage />} />
-            <Route path="/admin/customers" element={<CustomersPage />} />
-            <Route path="/admin/reconciliation" element={<ReconciliationPage />} />
-            <Route path="/admin/demand" element={<DemandPage />} />
-            <Route path="/admin/analytics" element={<AnalyticsPage />} />
-            <Route path="/admin/audit" element={<AuditPage />} />
-            <Route path="/admin/settings" element={<SettingsPage />} />
-            <Route path="/admin/settings/integrations" element={<IntegrationsSettingsPage />} />
-            <Route path="/admin/settings/selling-fees" element={<SellingFeesSettingsPage />} />
-            <Route path="/admin/settings/shipping-rates" element={<ShippingRatesSettingsPage />} />
-            <Route path="/admin/settings/users" element={<UsersSettingsPage />} />
-            <Route path="/admin/settings/vat-rates" element={<VatRatesSettingsPage />} />
-            <Route path="/admin/qbo-callback" element={<QboCallbackPage />} />
-            <Route path="/admin/ebay-callback" element={<EbayCallbackPage />} />
+            <Route path="/admin" element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
+            <Route path="/admin/intake" element={<RequireAdmin><IntakePage /></RequireAdmin>} />
+            <Route path="/admin/inventory" element={<RequireAdmin><InventoryPage /></RequireAdmin>} />
+            <Route path="/admin/products" element={<RequireAdmin><ProductsPage /></RequireAdmin>} />
+            <Route path="/admin/products/:id" element={<RequireAdmin><ProductDetailAdminPage /></RequireAdmin>} />
+            <Route path="/admin/listings" element={<RequireAdmin><ListingsPage /></RequireAdmin>} />
+            <Route path="/admin/pricing" element={<RequireAdmin><PricingDashboardPage /></RequireAdmin>} />
+            <Route path="/admin/orders" element={<RequireAdmin><OrdersPage /></RequireAdmin>} />
+            <Route path="/admin/customers" element={<RequireAdmin><CustomersPage /></RequireAdmin>} />
+            <Route path="/admin/reconciliation" element={<RequireAdmin><ReconciliationPage /></RequireAdmin>} />
+            <Route path="/admin/demand" element={<RequireAdmin><DemandPage /></RequireAdmin>} />
+            <Route path="/admin/analytics" element={<RequireAdmin><AnalyticsPage /></RequireAdmin>} />
+            <Route path="/admin/audit" element={<RequireAdmin><AuditPage /></RequireAdmin>} />
+            <Route path="/admin/settings" element={<RequireAdmin><SettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/integrations" element={<RequireAdmin><IntegrationsSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/selling-fees" element={<RequireAdmin><SellingFeesSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/shipping-rates" element={<RequireAdmin><ShippingRatesSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/users" element={<RequireAdmin><UsersSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/vat-rates" element={<RequireAdmin><VatRatesSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
+            <Route path="/admin/ebay-callback" element={<RequireAdmin><EbayCallbackPage /></RequireAdmin>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
