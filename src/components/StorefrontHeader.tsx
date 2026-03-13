@@ -168,9 +168,12 @@ export function StorefrontHeader() {
           <Link
             key={item.name}
             to={item.path}
-            className={`font-body text-sm font-medium ${isActive(item.path) ? 'text-primary' : 'text-foreground'}`}
+            className={`font-body text-sm font-medium ${
+              item.className
+                ? item.className
+                : isActive(item.path) ? 'text-primary' : 'text-foreground'
+            }`}
             onClick={() => setIsMenuOpen(false)}>
-            
                 {item.name}
               </Link>
           )}
