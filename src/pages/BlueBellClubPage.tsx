@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Bell, Heart, Users, Percent } from "lucide-react";
 import { usePageSeo } from "@/hooks/use-page-seo";
