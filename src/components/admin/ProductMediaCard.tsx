@@ -413,6 +413,15 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
                     >
                       {deleting === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] px-2 text-muted-foreground cursor-not-allowed opacity-50"
+                      disabled
+                      title="Coming soon — requires schema update to assign images to variants"
+                    >
+                      Variant
+                    </Button>
                   </div>
                 </div>
               </div>
