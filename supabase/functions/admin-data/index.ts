@@ -455,7 +455,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "update-media-alt-text") {
       const { media_asset_id: maId, alt_text } = params;
-      if (!maId) throw new Error("media_asset_id is required");
+      if (!maId) throw new ValidationError("media_asset_id is required");
       const { error } = await admin.from("media_asset").update({ alt_text }).eq("id", maId);
       if (error) throw error;
       result = { success: true };
