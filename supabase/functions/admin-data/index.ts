@@ -690,7 +690,7 @@ Deno.serve(async (req) => {
         .select("id, sku_code, price, condition_grade, product:product_id(id, mpn, weight_kg, length_cm, width_cm, height_cm)")
         .eq("id", sku_id)
         .single();
-      if (!skuData) throw new Error("SKU not found");
+      if (!skuData) throw new ValidationError("SKU not found");
       const product = (skuData.product as any) ?? {};
       const mpn = product.mpn;
 
