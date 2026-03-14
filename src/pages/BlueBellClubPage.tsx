@@ -45,7 +45,7 @@ It's magnificent.
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <h2 className="font-display text-lg font-bold text-foreground lg:text-xl">The Deal</h2>
             <ol className="list-decimal list-inside space-y-2 font-body text-sm leading-relaxed text-muted-foreground">
-              <li><Link to="/login" className="text-primary underline hover:text-primary/80">Create a Kuso Oishii account</Link></li>
+              <li><Link to="/login" className="text-blue-600 underline hover:text-blue-700">Create a Kuso Oishii account</Link></li>
               <li>Add a set to your basket</li>
               <li>Choose Blue Bell collection during checkout</li>
               <li>We'll knock 5% off — because you're one of us now.</li>
