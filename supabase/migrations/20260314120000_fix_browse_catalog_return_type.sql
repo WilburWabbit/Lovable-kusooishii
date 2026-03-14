@@ -1,10 +1,21 @@
+-- Remediation: re-apply browse_catalog with img_url return column.
+-- Migration 20260312214410 used CREATE OR REPLACE without DROP,
+-- which fails in PostgreSQL when the return type changes.
+
 DROP FUNCTION IF EXISTS public.browse_catalog(text, uuid, text, boolean);
 
-CREATE OR REPLACE FUNCTION public.browse_catalog(search_term text DEFAULT NULL::text, filter_theme_id uuid DEFAULT NULL::uuid, filter_grade text DEFAULT NULL::text, filter_retired boolean DEFAULT NULL::boolean)
- RETURNS TABLE(product_id uuid, mpn text, name text, theme_name text, theme_id uuid, retired_flag boolean, release_year integer, piece_count integer, min_price numeric, best_grade text, total_stock bigint, img_url text)
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
+CREATE FUNCTION public.browse_catalog(
+  search_term text DEFAULT NULL,
+  filter_theme_id uuid DEFAULT NULL,
+  filter_grade text DEFAULT NULL,
+  filter_retired boolean DEFAULT NULL
+)
+RETURNS TABLE(
+  product_id uuid, mpn text, name text, theme_name text, theme_id uuid,
+  retired_flag boolean, release_year integer, piece_count integer,
+  min_price numeric, best_grade text, total_stock bigint, img_url text
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
 AS $function$
   SELECT
     p.id AS product_id, p.mpn, p.name, t.name AS theme_name, p.theme_id,
