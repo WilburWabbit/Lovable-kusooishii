@@ -78,7 +78,7 @@ export default function PricingDashboardPage() {
     // Fetch SKUs with product details
     const { data: skuData, error: skuError } = await supabase
       .from("sku")
-      .select("id, sku_code, condition_grade, price, product:product_id(name, mpn)")
+      .select("id, sku_code, condition_grade, price, product_id, product:product_id(name, mpn)")
       .eq("active_flag", true)
       .not("product_id", "is", null)
       .order("sku_code");
