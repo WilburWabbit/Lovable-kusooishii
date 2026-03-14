@@ -253,11 +253,12 @@ Deno.serve(async (req) => {
             productsCreated++;
             console.log(`Auto-created product for MPN ${mpn} (id: ${newProduct.id})`);
           }
-        } else if (brand || itemType) {
-          // No catalog match — create minimal product with parent category info
+      } else {
+          // No catalog match — create minimal product (covers minifigures, misc items)
+          const inferredType = itemType ?? "minifigure";
           const { data: newProduct, error: prodErr } = await admin.from("product").insert({
             mpn, name: cleanQboName(item.Name ?? mpn),
-            product_type: itemType ?? "set", brand: brand, status: "active",
+            product_type: inferredType, brand: brand ?? null, status: "active",
           }).select("id").single();
           if (prodErr) {
             console.error(`Create product for ${mpn}:`, prodErr.message);
