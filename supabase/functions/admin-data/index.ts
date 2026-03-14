@@ -339,7 +339,7 @@ Deno.serve(async (req) => {
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
       }
-      if (Object.keys(updates).length === 0) throw new Error("No valid fields to update");
+      if (Object.keys(updates).length === 0) throw new ValidationError("No valid fields to update");
       const { error } = await admin.from("product").update(updates).eq("id", product_id);
       if (error) throw error;
       result = { success: true };
