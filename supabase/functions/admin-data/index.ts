@@ -1020,7 +1020,7 @@ Deno.serve(async (req) => {
             external_sku: sku.sku_code,
             sku_id,
             listed_quantity: 0,
-            offer_status: "PUBLISHED",
+            offer_status: "DRAFT",
             synced_at: new Date().toISOString(),
           }, { onConflict: "channel,external_sku", ignoreDuplicates: false })
           .select("id")
