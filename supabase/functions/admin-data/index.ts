@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
+class ValidationError extends Error {
+  constructor(message: string) { super(message); this.name = "ValidationError"; }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
