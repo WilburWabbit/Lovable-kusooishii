@@ -21,7 +21,8 @@ export default function BrowsePage() {
   const isNewMode = searchParams.get("new") === "true";
   const isDealsMode = searchParams.get("deals") === "true";
 
-  const [search, setSearch] = useState("");
+  const searchFromUrl = searchParams.get("q") ?? "";
+  const [search, setSearch] = useState(searchFromUrl);
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(themeFromUrl);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
@@ -31,6 +32,11 @@ export default function BrowsePage() {
   useEffect(() => {
     setSelectedThemeId(themeFromUrl);
   }, [themeFromUrl]);
+
+  // Sync search from URL query param
+  useEffect(() => {
+    if (searchFromUrl) setSearch(searchFromUrl);
+  }, [searchFromUrl]);
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
