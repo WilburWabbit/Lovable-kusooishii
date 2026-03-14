@@ -136,6 +136,7 @@ export default function PricingDashboardPage() {
         condition_grade: r.condition_grade ?? "—",
         product_name: r.product?.name ?? "—",
         mpn: r.product?.mpn ?? "—",
+        product_id: r.product_id ?? null,
         stock_qty: stockMap.get(r.id) ?? 0,
         price: r.price,
         price_floor: pricing?.price_floor ?? null,
