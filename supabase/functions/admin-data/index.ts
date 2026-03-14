@@ -876,7 +876,7 @@ Deno.serve(async (req) => {
           external_sku: s.sku_code,
           sku_id: s.id,
           listed_quantity: 0,
-          offer_status: "DRAFT",
+          offer_status: "PUBLISHED",
           synced_at: new Date().toISOString(),
         }));
         await admin.from("channel_listing").upsert(newRows, { onConflict: "channel,external_sku", ignoreDuplicates: true });
