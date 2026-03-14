@@ -884,7 +884,7 @@ Deno.serve(async (req) => {
           external_sku: s.sku_code,
           sku_id: s.id,
           listed_quantity: 0,
-          offer_status: "PUBLISHED",
+          offer_status: "DRAFT",
           synced_at: new Date().toISOString(),
         }));
         await admin.from("channel_listing").upsert(newRows, { onConflict: "channel,external_sku", ignoreDuplicates: true });
@@ -968,6 +968,15 @@ Deno.serve(async (req) => {
 
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
+
+      // If auto-price was applied on the web channel, also update sku.price so the storefront picks it up
+      if (auto_price_applied && updates.listed_price != null) {
+        const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
+        if (listingRow?.channel === "web" && listingRow.sku_id) {
+          await admin.from("sku").update({ price: updates.listed_price }).eq("id", listingRow.sku_id);
+        }
+      }
+
       result = { success: true, auto_price_applied, auto_price_reason };
 
     } else if (action === "list-channel-pricing-config") {
@@ -1020,7 +1029,7 @@ Deno.serve(async (req) => {
             external_sku: sku.sku_code,
             sku_id,
             listed_quantity: 0,
-            offer_status: "PUBLISHED",
+            offer_status: "DRAFT",
             synced_at: new Date().toISOString(),
           }, { onConflict: "channel,external_sku", ignoreDuplicates: false })
           .select("id")

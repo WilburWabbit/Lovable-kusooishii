@@ -60,22 +60,24 @@ export function ProductChannelsTab({ product, beValuation, onInvalidate }: Produ
       });
       setPricingResults((prev) => ({ ...prev, [key]: result }));
 
-      const { listing_id } = await invokeWithAuth<{ listing_id: string; created: boolean }>(
-        "admin-data",
-        { action: "ensure-channel-listing", sku_id: skuId, channel },
-      );
+      // Only update prices on an existing listing — don't create one
+      const listing = product.skus
+        .find((s) => s.id === skuId)
+        ?.channel_listings.find((cl) => cl.channel === channel);
 
-      await invokeWithAuth("admin-data", {
-        action: "update-listing-prices",
-        listing_id,
-        price_floor: result.floor_price,
-        price_target: result.target_price,
-        price_ceiling: result.ceiling_price,
-        confidence_score: result.confidence_score,
-        auto_price: true,
-      });
+      if (listing) {
+        await invokeWithAuth("admin-data", {
+          action: "update-listing-prices",
+          listing_id: listing.id,
+          price_floor: result.floor_price,
+          price_target: result.target_price,
+          price_ceiling: result.ceiling_price,
+          confidence_score: result.confidence_score,
+          auto_price: true,
+        });
+        onInvalidate();
+      }
 
-      onInvalidate();
       toast.success("Pricing calculated");
     } catch (err: any) {
       toast.error(err.message ?? "Pricing failed");
