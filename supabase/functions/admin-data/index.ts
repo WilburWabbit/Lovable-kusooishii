@@ -361,6 +361,7 @@ Deno.serve(async (req) => {
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new Error("SKU not found");
+      if (!sku.price || sku.price <= 0) throw new Error("Cannot list: SKU has no valid price. Calculate pricing first.");
 
       // Upsert channel_listing for web
       const { error: uErr } = await admin.from("channel_listing").upsert(
