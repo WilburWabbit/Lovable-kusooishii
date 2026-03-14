@@ -95,7 +95,7 @@ export default function OrderTrackingPage() {
               <ul className="font-body text-sm text-muted-foreground space-y-1">
                 <li>• Standard via Evri (3–5 days): Free</li>
                 <li>• Express via Royal Mail / Parcelforce (1–2 days): Paid</li>
-                <li>• Collection at Blue Bell LEGO Club: Free</li>
+                <li>• Collection at Blue Bell LEGO® Club: Free</li>
               </ul>
             </CardContent>
           </Card>

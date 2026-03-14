@@ -26,7 +26,7 @@ export default function FAQPage() {
       items: [
         { id: 'genuine', q: 'Are these genuine LEGO® sets?', a: 'Yes, 100%. Every set comes from authorised UK retailers — they\'re returns, open-box, or damaged-box stock. We don\'t touch knock-offs.' },
         { id: 'piececount', q: 'How do you verify piece counts?', a: 'For sealed bags, we weigh them against known references. For opened bags, we hand-count. If anything is missing, we list it clearly in the condition notes.' },
-        { id: 'instructions', q: 'Do sets come with instructions?', a: 'If the set included printed instructions and they\'re present, yes. If missing, we\'ll say so. LEGO\'s free digital instructions at lego.com/buildinginstructions cover every set.' },
+        { id: 'instructions', q: 'Do sets come with instructions?', a: 'If the set included printed instructions and they\'re present, yes. If missing, we\'ll say so. LEGO®\'s free digital instructions at lego.com/buildinginstructions cover every set.' },
       ],
     },
     {
@@ -40,7 +40,7 @@ export default function FAQPage() {
     {
       title: 'Shipping & Delivery',
       items: [
-        { id: 'options', q: 'What are the shipping options?', a: 'Standard (Free) via Evri, 3–5 working days. Express (Paid) via Royal Mail Tracked 24 or Parcelforce, 1–2 working days. Collection (Free) at the Blue Bell LEGO Club.' },
+        { id: 'options', q: 'What are the shipping options?', a: 'Standard (Free) via Evri, 3–5 working days. Express (Paid) via Royal Mail Tracked 24 or Parcelforce, 1–2 working days. Collection (Free) at the Blue Bell LEGO® Club.' },
         { id: 'international', q: 'Do you ship internationally?', a: 'Not yet — UK mainland only for now. International shipping is something we\'re looking at for the future.' },
       ],
     },

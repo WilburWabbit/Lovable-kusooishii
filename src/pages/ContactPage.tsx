@@ -10,7 +10,7 @@ import { usePageSeo } from '@/hooks/use-page-seo';
 import { toast } from 'sonner';
 
 export default function ContactPage() {
-  usePageSeo({ title: 'Contact Us', description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO sets?', path: '/contact' });
+  usePageSeo({ title: 'Contact Us', description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO® sets?', path: '/contact' });
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {

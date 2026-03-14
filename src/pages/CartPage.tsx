@@ -18,7 +18,7 @@ import BeerIcon from '@/assets/beer-icon.svg';
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
 { id: 'express', label: 'Express', carrier: 'Royal Mail Tracked 24', price: 5.99, est: '1–2 working days' },
-{ id: 'collection', label: 'Collection', carrier: 'Blue Bell LEGO Club', price: 0, est: 'Next club meet' }];
+{ id: 'collection', label: 'Collection', carrier: 'Blue Bell LEGO® Club', price: 0, est: 'Next club meet' }];
 
 
 export default function CartPage() {
@@ -170,7 +170,7 @@ export default function CartPage() {
                         </div>
                       )}
                     </RadioGroup>
-                    {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the <Link to="/bluebell" className="text-primary underline">Blue Bell LEGO Club</Link></p>}
+                    {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the <Link to="/bluebell" className="text-primary underline">Blue Bell LEGO® Club</Link></p>}
                   </div>
 
                   {isCollection &&

@@ -32,7 +32,7 @@ export default function HomePage() {
         <div className="absolute inset-0">
           <img
             src={heroImage}
-            alt="Premium LEGO set with dramatic lighting"
+            alt="Premium LEGO® set with dramatic lighting"
             className="h-full w-full object-cover opacity-60"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-kuso-ink/90 via-kuso-ink/60 to-transparent" />
@@ -71,7 +71,7 @@ export default function HomePage() {
           {[
             { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4", iconClass: "text-primary", to: "/grading" },
             { icon: Truck, title: "Free UK Shipping", desc: "Express shipping also available", iconClass: "text-primary", to: "/shipping-policy" },
-            { icon: Bell, title: "Blue Bell Lego Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500", to: "/bluebell" },
+            { icon: Bell, title: "Blue Bell LEGO® Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500", to: "/bluebell" },
           ].map(({ icon: Icon, title, desc, iconClass, to }) => (
             <Link key={title} to={to} className="flex items-center gap-4 px-6 py-6 transition-colors hover:bg-muted/50">
               <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />

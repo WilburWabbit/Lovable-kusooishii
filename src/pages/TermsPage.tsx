@@ -19,7 +19,7 @@ export default function TermsPage() {
             { title: '3. Pricing', content: 'All prices are in GBP (£) and include VAT where applicable. Prices may change without notice.' },
             { title: '4. Shipping', content: 'We ship within the UK via Evri, Royal Mail, and Parcelforce. Free standard shipping on all orders. Delivery times are estimates and not guaranteed.' },
             { title: '5. Returns', content: 'Sealed items may be returned within 14 days in original condition. Open-box and damaged-box items are sold as-described — please read condition notes carefully. Statutory consumer rights under UK law are not affected.' },
-            { title: '6. Intellectual Property', content: 'LEGO® is a trademark of the LEGO Group of companies, which does not sponsor, authorise or endorse this site. All site content is © Kuso Oishii.' },
+            { title: '6. Intellectual Property', content: 'LEGO® is a trademark of the LEGO® Group of companies, which does not sponsor, authorise or endorse this site. All site content is © Kuso Oishii.' },
             { title: '7. Governing Law', content: 'These terms are governed by the laws of England and Wales.' },
           ].map(({ title, content }) => (
             <div key={title}>
