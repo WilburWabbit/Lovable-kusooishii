@@ -6,7 +6,7 @@ import { ArrowRight, Shield, Truck, Bell } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { GRADE_LABELS } from "@/lib/grades";
+import { GRADE_LABELS, GRADE_LABELS_NUMERIC } from "@/lib/grades";
 
 export default function HomePage() {
   const { data: featuredSets, isLoading } = useQuery({
@@ -146,7 +146,7 @@ export default function HomePage() {
                       )}
                       {set.best_grade && (
                         <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                          Grade {set.best_grade}
+                          {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
                         </span>
                       )}
                     </div>

@@ -103,7 +103,7 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
             )}
             {product.conditionGrade && (
               <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                Grade {product.conditionGrade}
+                {conditionLabels[product.conditionGrade] ?? `Grade ${product.conditionGrade}`}
               </span>
             )}
           </div>
