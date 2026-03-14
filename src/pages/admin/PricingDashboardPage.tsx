@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
@@ -19,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 interface PricingRow {
   id: string;
