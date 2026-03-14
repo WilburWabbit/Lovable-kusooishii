@@ -392,7 +392,7 @@ Deno.serve(async (req) => {
       result = { success: true };
     } else if (action === "remove-web-listing") {
       const { sku_id } = params;
-      if (!sku_id) throw new Error("sku_id is required");
+      if (!sku_id) throw new ValidationError("sku_id is required");
 
       const { error: dErr } = await admin
         .from("channel_listing")
