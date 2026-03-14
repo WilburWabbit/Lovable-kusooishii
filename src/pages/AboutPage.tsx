@@ -27,9 +27,9 @@ export default function AboutPage() {
         <div className="container max-w-3xl">
           <h2 className="font-display text-3xl font-bold text-foreground mb-8">The Story</h2>
           <div className="space-y-5 font-body text-muted-foreground leading-relaxed">
-            <p>Here's what happens when you return a LEGO set to a big retailer: they open the box to check it, slap a "returned" sticker on it, and it goes into a warehouse where nobody quite knows what to do with it. The box might have a dent. A bag might be open. Most times, the set is still in mint condition. Either way, there is nothing's actually wrong with the bricks — but the retailer can't sell it as new, so it sits there until the inevitable happens and it gets thrown into a skip.    </p>
+            <p>Here's what happens when you return a LEGO® set to a big retailer: they open the box to check it, slap a "returned" sticker on it, and it goes into a warehouse where nobody quite knows what to do with it. The box might have a dent. A bag might be open. Most times, the set is still in mint condition. Either way, there is nothing's actually wrong with the bricks — but the retailer can't sell it as new, so it sits there until the inevitable happens and it gets thrown into a skip.    </p>
             <p>That's where we come in. Kuso Oishii buys that stock from UK retailers, wholesalers, and trusted collectors. We inspect every set — weigh sealed bags, hand-count open ones, photograph the box condition, and write up honest notes so you know exactly what you're getting.</p>
-            <p>It's circular commerce without the greenwash. We're not saving the planet — we're just making sure perfectly good LEGO doesn't go to waste. And you get sets at fair prices without the "is this legit?" anxiety.</p>
+            <p>It's circular commerce without the greenwash. We're not saving the planet — we're just making sure perfectly good LEGO® doesn't go to waste. And you get sets at fair prices without the "is this legit?" anxiety.</p>
           </div>
         </div>
       </section>
@@ -43,7 +43,7 @@ export default function AboutPage() {
             { icon: ShieldCheck, title: 'Radical Honesty', desc: "Every set has detailed condition notes. Dented box? We'll say so. Missing a minifig arm? You'll know before you buy." },
             { icon: Search, title: 'Collector Detail', desc: 'Set numbers, minifig IDs, bag-by-bag inspection notes. We speak AFOL because we are AFOLs.' },
             { icon: Package, title: 'Fair Prices', desc: "No markup games. No 'rare find' surcharges. Rescued stock at rescued prices. Simple." },
-            { icon: Smile, title: 'No Corporate Waffle', desc: "We don't 'curate experiences.' We sell LEGO. You build it. Everyone's happy." }].
+            { icon: Smile, title: 'No Corporate Waffle', desc: "We don't 'curate experiences.' We sell LEGO®. You build it. Everyone's happy." }].
             map(({ icon: Icon, title, desc }) =>
             <Card key={title} className="border-none shadow-md">
                 <CardContent className="p-6 text-center space-y-3">
@@ -84,7 +84,7 @@ export default function AboutPage() {
           <Recycle className="h-12 w-12 mx-auto text-primary mb-6" />
           <h2 className="font-display text-3xl font-bold text-foreground mb-6">Circular, Not Preachy</h2>
           <p className="font-body text-muted-foreground leading-relaxed mb-8">
-            Every set we sell is one that didn't end up in clearance limbo or worse. We're not planting trees or offsetting carbon — we're just keeping good LEGO in circulation. That's it. No manifesto required.
+            Every set we sell is one that didn't end up in clearance limbo or worse. We're not planting trees or offsetting carbon — we're just keeping good LEGO® in circulation. That's it. No manifesto required.
           </p>
           <Button asChild size="lg" className="font-display font-semibold">
             <Link to="/browse">Browse the Rescued Stock</Link>

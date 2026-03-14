@@ -15,7 +15,7 @@ export default function PrivacyPage() {
         <div className="bg-card rounded-sm border border-border p-8 space-y-8">
           <div>
             <h2 className="font-display text-xl font-semibold mb-3 text-foreground">Who We Are</h2>
-            <p className="font-body text-muted-foreground text-sm">Kuso Oishii is a LEGO® resale business based in Brookville, Norfolk, UK. We rescue and resell quality LEGO stock at fair prices.</p>
+            <p className="font-body text-muted-foreground text-sm">Kuso Oishii is a LEGO® resale business based in Brookville, Norfolk, UK. We rescue and resell quality LEGO® stock at fair prices.</p>
           </div>
 
           <div>
@@ -73,7 +73,7 @@ export default function PrivacyPage() {
           </div>
 
           <p className="font-body text-xs text-muted-foreground">
-            LEGO® is a trademark of the LEGO Group of companies, which does not sponsor, authorise or endorse this site.
+            LEGO® is a trademark of the LEGO® Group of companies, which does not sponsor, authorise or endorse this site.
           </p>
         </div>
       </div>

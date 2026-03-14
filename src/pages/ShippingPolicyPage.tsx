@@ -17,7 +17,7 @@ export default function ShippingPolicyPage() {
               {[
                 { title: 'Standard — Free', desc: 'Via Evri. Tracked delivery in 3–5 working days. Free on all orders — no minimum spend.' },
                 { title: 'Express — Paid', desc: 'Via Royal Mail Tracked 24 or Parcelforce (depending on parcel size). 1–2 working days. Price calculated at checkout.' },
-                { title: 'Collection — Free', desc: 'Collect for free at the Blue Bell LEGO Club. Available at the next scheduled club meet.' },
+                { title: 'Collection — Free', desc: 'Collect for free at the Blue Bell LEGO® Club. Available at the next scheduled club meet.' },
               ].map(({ title, desc }) => (
                 <div key={title} className="p-4 rounded-sm border border-border">
                   <h3 className="font-display font-semibold mb-2">{title}</h3>

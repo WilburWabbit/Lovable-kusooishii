@@ -5,9 +5,9 @@ import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BlueBellClubPage() {
   usePageSeo({
-    title: "Blue Bell LEGO Club | Kuso Oishii",
+    title: "Blue Bell LEGO® Club | Kuso Oishii",
     description:
-    "Join the Blue Bell LEGO Club and enjoy 5% off every order, with a matching 5% donated to the club. Supporting your local LEGO community.",
+    "Join the Blue Bell LEGO® Club and enjoy 5% off every order, with a matching 5% donated to the club. Supporting your local LEGO® community.",
     path: "/bluebell"
   });
 
@@ -18,7 +18,7 @@ export default function BlueBellClubPage() {
         <div className="container max-w-3xl text-center">
           <Bell className="mx-auto h-10 w-10 text-blue-500" />
           <h1 className="mt-6 font-display text-3xl font-bold text-foreground lg:text-5xl">
-            Blue Bell LEGO Club
+            Blue Bell LEGO® Club
           </h1>
           <p className="mt-4 font-body text-base leading-relaxed text-muted-foreground lg:text-lg">A partnership built on bricks and beer
 You save 5% 
@@ -35,8 +35,8 @@ The Blue Bell gets 5%
             <p className="font-display text-lg font-bold text-foreground text-left lg:text-3xl">
               Bricks. Beer. Absolute chaos.
             </p>
-            <p>We're the proud sponsor of LEGO Club at The Blue Bell, Stoke Ferry — where supposed adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
-              <a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO like they're eight years old again except now they're allowed to swear when they step on a brick.
+            <p>We're the proud sponsor of LEGO® Club at The Blue Bell, Stoke Ferry — where supposed adults get together, sink a few pints, and build LEGO® like they're eight years old again except now they're allowed to swear when they step on a brick.
+              <a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO® like they're eight years old again except now they're allowed to swear when they step on a brick.
             </p>
             <p>This isn't a quiet  craft session. This is a pub full of people who know what kragle is, who think "just one more set" is a perfectly reasonable thing to say, right after "just one more pint." 
 
@@ -59,14 +59,14 @@ It's magnificent.
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <h2 className="font-display text-lg font-bold text-foreground lg:text-xl">Even Better.</h2>
             <p>
-              That discount we gave you? We'll donate a matching 5% direct to The Blue Bell too, because a community pub that lets a bunch of AFOLs get loud over LEGO deserves your money more than Amazon does.
+              That discount we gave you? We'll donate a matching 5% direct to The Blue Bell too, because a community pub that lets a bunch of AFOLs get loud over LEGO® deserves your money more than Amazon does.
             </p>
           </div>
 
           <div className="space-y-4 font-body text-sm leading-relaxed text-muted-foreground">
             <h2 className="font-display text-lg font-bold text-foreground lg:text-xl">How It Works</h2>
             <p>
-              Get yourself an account. Browse our stock — returned, open-box, and damaged-box sets at prices that leave you with actual beer money. Pick Blue Bell LEGO Club delivery at checkout, your 5% comes off automatically, and your set turns up at the pub ready for you to crack open at the table like the beautiful disaster you are.
+              Get yourself an account. Browse our stock — returned, open-box, and damaged-box sets at prices that leave you with actual beer money. Pick Blue Bell LEGO® Club delivery at checkout, your 5% comes off automatically, and your set turns up at the pub ready for you to crack open at the table like the beautiful disaster you are.
             </p>
             <p className="font-display font-semibold text-base text-blue-600">
               See you at the bar. First round's on you.
@@ -82,7 +82,7 @@ It's magnificent.
             How it works
           </h2>
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[{ icon: Users, title: "Join the Club", desc: "Become a member of Blue Bell LEGO Club through your local group." }, { icon: Percent, title: "Save 5%", desc: "Every order you place with us is automatically discounted at checkout."
+            {[{ icon: Users, title: "Join the Club", desc: "Become a member of Blue Bell LEGO® Club through your local group." }, { icon: Percent, title: "Save 5%", desc: "Every order you place with us is automatically discounted at checkout."
             },
             {
               icon: Heart,

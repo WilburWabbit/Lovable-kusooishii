@@ -13,7 +13,7 @@ const grades = Object.entries(GRADE_DETAILS).map(([key, val]) => ({
 export default function GradingPage() {
   usePageSeo({
     title: "How We Grade",
-    description: "Our 1–5 grading scale explained. Every LEGO set is inspected and condition-rated before listing.",
+    description: "Our 1–5 grading scale explained. Every LEGO® set is inspected and condition-rated before listing.",
     path: "/grading",
   });
 
@@ -32,7 +32,7 @@ export default function GradingPage() {
             <p className="mx-auto mt-4 max-w-lg font-body text-sm leading-relaxed text-muted-foreground">
               Every set is inspected by hand and assigned a grade from 1 (Mint) to 5 (Fair).
               The grade reflects the condition of the box, contents, and completeness — not the
-              quality of the LEGO bricks themselves, which are always genuine.
+              quality of the LEGO® bricks themselves, which are always genuine.
             </p>
           </div>
         </div>
@@ -62,7 +62,7 @@ export default function GradingPage() {
 
           <div className="mt-12 rounded bg-kuso-paper p-6 text-center">
             <p className="font-body text-sm text-muted-foreground">
-              All LEGO bricks are genuine and sourced from authorised UK retailers.
+              All LEGO® bricks are genuine and sourced from authorised UK retailers.
               Grading applies to packaging and completeness only.
             </p>
           </div>

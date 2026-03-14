@@ -59,7 +59,7 @@ export function StorefrontFooter() {
               <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
               <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Just Landed</Link>
               {hasDeals && <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>}
-              <Link to="/bluebell" className="font-body text-sm text-blue-400 hover:text-blue-300 transition-colors">Blue Bell LEGO Club</Link>
+              <Link to="/bluebell" className="font-body text-sm text-blue-400 hover:text-blue-300 transition-colors">Blue Bell LEGO® Club</Link>
               <Link to="/about" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">About Us</Link>
             </nav>
           </div>
@@ -114,7 +114,7 @@ export function StorefrontFooter() {
                 © {new Date().getFullYear()} Kuso Oishii. All rights reserved.
               </p>
               <p className="font-body text-xs text-primary-foreground/30">
-                LEGO®, the LEGO logo and the Minifigure are trademarks of the LEGO Group, which does not sponsor, authorise or endorse Kuso Oishii.
+                LEGO®, the LEGO® logo and the Minifigure are trademarks of the LEGO® Group, which does not sponsor, authorise or endorse Kuso Oishii.
               </p>
             </div>
             <div className="flex gap-6">

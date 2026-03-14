@@ -63,7 +63,7 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
           {product.image ? (
             <motion.img
               src={product.image}
-              alt={`${product.name} — ${conditionLabels[product.conditionGrade] || 'Graded'} LEGO set`}
+              alt={`${product.name} — ${conditionLabels[product.conditionGrade] || 'Graded'} LEGO® set`}
               className="w-full h-full object-cover"
               loading="lazy"
               width={400}
