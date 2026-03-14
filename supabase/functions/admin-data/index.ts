@@ -561,7 +561,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "upsert-selling-cost-default") {
       const { key: dKey, value: dValue } = params;
-      if (!dKey) throw new Error("key is required");
+      if (!dKey) throw new ValidationError("key is required");
       const { error } = await admin.from("selling_cost_defaults").upsert(
         { key: dKey, value: dValue ?? 0, updated_at: new Date().toISOString() },
         { onConflict: "key" }
