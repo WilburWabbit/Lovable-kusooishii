@@ -422,7 +422,7 @@ export function ListingsPage() {
                 </TableHeader>
                 <TableBody>
                   {sorted.map((r) => (
-                    <TableRow key={r.id}>
+                    <TableRow key={r.id} className={r.product_id ? "cursor-pointer hover:bg-muted/50" : ""} onClick={() => r.product_id && navigate(`/admin/products/${r.product_id}`)}>
                       {visibleCols.map((col) => (
                         <TableCell key={col.key} className={col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : ""}>
                           {renderCell(r, col.key)}
