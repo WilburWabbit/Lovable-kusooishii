@@ -504,7 +504,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-channel-fee") {
       const { id: feeId } = params;
-      if (!feeId) throw new Error("id is required");
+      if (!feeId) throw new ValidationError("id is required");
       const { error } = await admin.from("channel_fee_schedule").delete().eq("id", feeId);
       if (error) throw error;
       result = { success: true };
