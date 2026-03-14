@@ -35,10 +35,11 @@ export function ProductChannelsTab({ product, beValuation, onInvalidate }: Produ
         } else {
           const pricingKey = `${skuId}:${ch}`;
           const pricing = pricingResults[pricingKey];
+          const listPrice = pricing?.target_price ?? pricing?.ceiling_price ?? undefined;
           await invokeWithAuth("admin-data", {
             action: "create-web-listing",
             sku_id: skuId,
-            listed_price: pricing?.target_price ?? undefined,
+            listed_price: listPrice,
           });
           toast.success("Web listing created");
         }

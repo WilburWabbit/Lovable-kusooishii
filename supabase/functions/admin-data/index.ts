@@ -367,8 +367,20 @@ Deno.serve(async (req) => {
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
       // Resolve price: caller-supplied > database
-      const finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
+      let finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
+
+      // Validate against floor price from existing listing
+      const { data: existingListing } = await admin
+        .from("channel_listing")
+        .select("price_floor")
+        .eq("sku_id", sku_id)
+        .eq("channel", "web")
+        .maybeSingle();
+      if (existingListing?.price_floor != null && finalPrice < existingListing.price_floor) {
+        // Bump to floor price to prevent listing below cost
+        finalPrice = existingListing.price_floor;
+      }
 
       // Sync resolved price back to SKU
       await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);
@@ -829,14 +841,22 @@ Deno.serve(async (req) => {
         floorPrice = Math.round(neededPrice * 100) / 100;
       }
 
-      let targetPrice: number | null = null;
+      // Also consider existing SKU price as a reference when no market data
+      const existingSkuPrice = skuData.price != null ? Number(skuData.price) : null;
+
+      // Ceiling: highest of floor, market consensus, and existing SKU price
+      const ceilingBasis = Math.max(floorPrice, marketConsensus ?? floorPrice, existingSkuPrice ?? floorPrice);
+      const ceilingPrice = Math.floor(ceilingBasis) + 0.99;
+
+      let targetPrice: number;
       if (marketConsensus != null) {
         targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
         // Ensure target is at least the floor
         if (targetPrice < floorPrice) targetPrice = floorPrice;
+      } else {
+        // No market data — default target to ceiling price
+        targetPrice = ceilingPrice;
       }
-
-      const ceilingPrice = Math.floor(Math.max(floorPrice, marketConsensus ?? floorPrice)) + 0.99;
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
