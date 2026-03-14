@@ -887,7 +887,7 @@ Deno.serve(async (req) => {
 
         const topicMap = new Map(subs.map((s: any) => [s.topicId, s]));
         for (const topic of REQUIRED_TOPICS) {
-          const sub = topicMap.get(topic);
+          const sub = topicMap.get(topic) as { status?: string; destinationId?: string } | undefined;
           if (!sub) {
             configIssues.push(`Missing subscription for required topic: ${topic}`);
           } else if (sub.status !== "ENABLED") {

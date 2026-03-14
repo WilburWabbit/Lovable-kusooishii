@@ -269,11 +269,11 @@ Deno.serve(async (req) => {
       const errAdmin = createClient(supabaseUrl, serviceRoleKey);
       await errAdmin.from("landing_raw_brickeconomy").update({
         status: "error",
-        error_message: (err.message || "Unknown error").substring(0, 500),
+        error_message: ((err as Error).message || "Unknown error").substring(0, 500),
         processed_at: new Date().toISOString(),
       }).eq("status", "pending");
     } catch { /* best effort */ }
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

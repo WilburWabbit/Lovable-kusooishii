@@ -371,6 +371,14 @@ Deno.serve(async (req) => {
           listed_price: sku.price,
           listed_quantity: 0,
           offer_status: "PUBLISHED",
+          listing_title: null,
+          listing_description: null,
+          price_floor: null,
+          price_target: null,
+          price_ceiling: null,
+          confidence_score: null,
+          pricing_notes: null,
+          priced_at: null,
           synced_at: new Date().toISOString(),
         },
         { onConflict: "channel,external_sku", ignoreDuplicates: false }
@@ -1035,7 +1043,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

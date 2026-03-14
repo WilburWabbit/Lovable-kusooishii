@@ -25,8 +25,8 @@ serve(async (req) => {
   try {
     event = await stripe.webhooks.constructEventAsync(body, signature, endpointSecret);
   } catch (err) {
-    console.error("Webhook signature verification failed:", err.message);
-    return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+    console.error("Webhook signature verification failed:", (err as Error).message);
+    return new Response(`Webhook Error: ${(err as Error).message}`, { status: 400 });
   }
 
   // ── Land raw Stripe event ──
@@ -83,11 +83,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
     // Separate product lines from shipping lines
     const productLines = lineItems.data.filter(
-      (li) => !li.description?.toLowerCase().includes("shipping")
+      (li: any) => !li.description?.toLowerCase().includes("shipping")
     );
 
     const merchandiseSubtotal = productLines.reduce(
-      (sum, li) => sum + (li.amount_total || 0),
+      (sum: number, li: any) => sum + (li.amount_total || 0),
       0
     ) / 100;
 
