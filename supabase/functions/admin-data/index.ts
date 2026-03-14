@@ -544,7 +544,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-shipping-rate") {
       const { id: rateId } = params;
-      if (!rateId) throw new Error("id is required");
+      if (!rateId) throw new ValidationError("id is required");
       const { error } = await admin.from("shipping_rate_table").delete().eq("id", rateId);
       if (error) throw error;
       result = { success: true };
