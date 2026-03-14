@@ -365,7 +365,10 @@ export function ListingsPage() {
             <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No listings found.</div>
           ) : (
             sorted.map((r) => (
-              <MobileListCard key={r.id} showChevron={!!r.product_id} onClick={() => r.product_id && navigate(`/admin/products/${r.product_id}`)}>
+              <MobileListCard key={r.id} showChevron onClick={() => {
+                if (r.product_id) { navigate(`/admin/products/${r.product_id}`); }
+                else { toast.info("This item has no linked product record yet."); }
+              }}>
                 <MobileCardTitle>{r.sku_code} — {productName(r) || "—"}</MobileCardTitle>
                 <MobileCardMeta>
                   {r.product?.mpn && <span className="font-mono">{r.product.mpn}</span>}
