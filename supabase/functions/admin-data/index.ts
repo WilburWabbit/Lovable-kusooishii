@@ -361,6 +361,7 @@ Deno.serve(async (req) => {
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new Error("SKU not found");
+      if (!sku.price || sku.price <= 0) throw new Error("Cannot list: SKU has no valid price. Calculate pricing first.");
 
       // Upsert channel_listing for web
       const { error: uErr } = await admin.from("channel_listing").upsert(
@@ -917,6 +918,13 @@ Deno.serve(async (req) => {
       let auto_price_reason = "";
 
       if (auto_price && price_target != null) {
+        // Guard: reject zero/negative target
+        if (price_target <= 0) {
+          auto_price_reason = "Target price is zero or negative. Skipped.";
+        // Guard: reject target below floor
+        } else if (price_floor != null && price_target < price_floor) {
+          auto_price_reason = `Target £${price_target} is below floor £${price_floor}. Skipped.`;
+        } else {
         // Look up listing to get channel and current listed_price
         const { data: listing } = await admin.from("channel_listing").select("channel, listed_price").eq("id", listing_id).single();
         if (listing) {
@@ -963,6 +971,11 @@ Deno.serve(async (req) => {
           } else {
             auto_price_reason = "Auto-pricing disabled for channel";
           }
+        }
+        } // end else (valid target)
+        // If skipped due to guards, still record the reason
+        if (!auto_price_applied && auto_price_reason) {
+          updates.pricing_notes = [pn, auto_price_reason].filter(Boolean).join("; ");
         }
       }
 
