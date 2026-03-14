@@ -972,6 +972,11 @@ Deno.serve(async (req) => {
             auto_price_reason = "Auto-pricing disabled for channel";
           }
         }
+        } // end else (valid target)
+        // If skipped due to guards, still record the reason
+        if (!auto_price_applied && auto_price_reason) {
+          updates.pricing_notes = [pn, auto_price_reason].filter(Boolean).join("; ");
+        }
       }
 
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
