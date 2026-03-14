@@ -573,7 +573,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "calculate-selling-costs") {
       const { sku_id, channel, sale_price, shipping_charged } = params;
-      if (!sku_id || !channel || sale_price === undefined) throw new Error("sku_id, channel, and sale_price are required");
+      if (!sku_id || !channel || sale_price === undefined) throw new ValidationError("sku_id, channel, and sale_price are required");
 
       // 1. Get SKU → product dimensions
       const { data: skuData } = await admin
