@@ -483,7 +483,7 @@ Deno.serve(async (req) => {
         .from("product_media")
         .select("media_asset:media_asset_id(original_url)")
         .eq("id", product_media_id)
-        .single();
+        .maybeSingle();
       if (pmErr) throw pmErr;
       if (pm?.media_asset) {
         const { error: imgErr } = await admin.from("product").update({ img_url: (pm.media_asset as any).original_url }).eq("id", pid);
