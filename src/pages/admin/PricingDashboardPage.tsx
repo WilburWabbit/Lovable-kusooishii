@@ -57,6 +57,7 @@ function fmt(v: number | null) {
 }
 
 export default function PricingDashboardPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
