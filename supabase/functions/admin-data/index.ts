@@ -356,7 +356,7 @@ Deno.serve(async (req) => {
       result = { success: true };
     } else if (action === "create-web-listing") {
       const { sku_id } = params;
-      if (!sku_id) throw new Error("sku_id is required");
+      if (!sku_id) throw new ValidationError("sku_id is required");
 
       // Fetch SKU details
       const { data: sku, error: skuErr } = await admin
