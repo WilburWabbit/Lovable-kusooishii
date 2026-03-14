@@ -1,38 +1,53 @@
 
 
-## Fix: Pricing Calculation Edge Function Timeout
+## Problem Analysis
 
-### Problem
-The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+Items like `sw0574` are minifigures whose SKUs have `product_id = null` because no matching `product` record exists. This causes three symptoms:
 
-### Solution
-Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+1. **Not in Products page** — the `list-products` action groups SKUs by `product_id` and skips any with `null` (line 224 of admin-data).
+2. **Visible in Inventory & Listings** — those views query SKUs directly regardless of `product_id`.
+3. **Can't click to open from Listings** — the row click handler is `r.product_id && navigate(...)`, so null product_id rows are inert.
 
-### Changes
+## Plan
 
-**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
+### 1. Auto-create product records for orphan SKUs
 
-Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
+In `supabase/functions/admin-data/index.ts`, within the `list-listings` action (or as a separate preparatory step), detect SKUs where `product_id IS NULL` and auto-create a `product` record using the SKU's MPN and name. This mirrors what the QBO item sync already does for catalog items, but covers non-catalog items (minifigures etc.) that slipped through.
 
-```typescript
-// 1. Get SKU + product info (needs to run first — others depend on its results)
-const { data: skuData } = await admin.from("sku")...
+Alternatively, this can be a one-off migration + a fix in the QBO sync to always create a product record.
 
-// 2-6. Run remaining queries in parallel
-const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-  admin.from("selling_cost_defaults").select("key, value"),
-  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
-  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-  // BrickEconomy lookup (conditional on mpn)
-  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-]);
+### 2. Make Listings rows always clickable
+
+In `src/pages/admin/ListingsPage.tsx`, for SKUs without a `product_id`, navigate to a product detail page by SKU id or create a fallback detail view. The simplest approach: auto-create the product (option 1) so there's always a `product_id` to navigate to.
+
+### Recommended approach: Database migration + edge function fix
+
+**Step A — Migration**: Create `product` records for all orphan SKUs:
+
+```sql
+INSERT INTO product (mpn, name, product_type, status)
+SELECT DISTINCT su.mpn, s.name, 'minifigure', 'active'
+FROM sku s
+JOIN stock_unit su ON su.sku_id = s.id
+WHERE s.product_id IS NULL
+  AND su.mpn IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM product p WHERE p.mpn = su.mpn)
+ON CONFLICT DO NOTHING;
+
+-- Then link orphan SKUs to the newly created products
+UPDATE sku SET product_id = p.id
+FROM product p
+WHERE sku.product_id IS NULL
+  AND sku.sku_code LIKE p.mpn || '.%'
+  OR sku.sku_code = p.mpn;
 ```
 
-This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
+**Step B — Edge function**: In the QBO item sync (`qbo-sync-items`), ensure that when a new SKU is created for a non-catalog MPN, a `product` record is also created (same as it does for catalog items). This prevents future orphans.
 
-### Impact
-- No schema changes needed
-- No frontend changes needed
-- Same inputs/outputs — purely an internal optimization
+**Step C — UI fallback** (safety net): In `ListingsPage.tsx`, if `product_id` is still null, show the row as clickable but navigate to a search or show a toast explaining the item needs to be linked.
+
+### Files to change
+- `supabase/migrations/` — new migration to backfill product records for orphan SKUs
+- `supabase/functions/qbo-sync-items/index.ts` — ensure product creation for non-catalog items
+- `src/pages/admin/ListingsPage.tsx` — minor: make rows without product_id still provide feedback on click
 
