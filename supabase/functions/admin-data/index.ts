@@ -472,18 +472,22 @@ Deno.serve(async (req) => {
       if (!pid || !product_media_id) throw new ValidationError("product_id and product_media_id required");
 
       // Clear all primary flags for this product
-      await admin.from("product_media").update({ is_primary: false }).eq("product_id", pid);
+      const { error: clearErr } = await admin.from("product_media").update({ is_primary: false }).eq("product_id", pid);
+      if (clearErr) throw clearErr;
       // Set the chosen one
-      await admin.from("product_media").update({ is_primary: true }).eq("id", product_media_id);
+      const { error: setErr } = await admin.from("product_media").update({ is_primary: true }).eq("id", product_media_id);
+      if (setErr) throw setErr;
 
       // Update product.img_url from the media asset
-      const { data: pm } = await admin
+      const { data: pm, error: pmErr } = await admin
         .from("product_media")
         .select("media_asset:media_asset_id(original_url)")
         .eq("id", product_media_id)
         .single();
+      if (pmErr) throw pmErr;
       if (pm?.media_asset) {
-        await admin.from("product").update({ img_url: (pm.media_asset as any).original_url }).eq("id", pid);
+        const { error: imgErr } = await admin.from("product").update({ img_url: (pm.media_asset as any).original_url }).eq("id", pid);
+        if (imgErr) throw imgErr;
       }
       result = { success: true };
 
