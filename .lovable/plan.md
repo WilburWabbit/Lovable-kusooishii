@@ -1,38 +1,66 @@
 
 
-## Fix: Pricing Calculation Edge Function Timeout
+## Plan: Add Pricing Safeguards to Prevent £0.00 Listings
 
-### Problem
-The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+### Root Cause
 
-### Solution
-Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+Two issues allow items to be listed at £0.00:
+
+1. **`create-web-listing`** sets `listed_price: sku.price`. If `sku.price` is `null` or `0` (e.g. the SKU was never priced, or price was cleared during a previous re-list), it publishes at £0.00 with no validation.
+
+2. **`update-listing-prices`** auto-price logic checks threshold deltas but never validates the resulting price against the floor price. A target price of £0 would pass if the config allows it.
+
+There is no server-side guard anywhere that prevents a `PUBLISHED` listing from having a zero or below-floor price.
 
 ### Changes
 
-**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
+#### 1. `create-web-listing` — Block listing with no valid price (`supabase/functions/admin-data/index.ts`)
 
-Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
+After fetching the SKU, reject the request if `sku.price` is null, zero, or negative:
 
 ```typescript
-// 1. Get SKU + product info (needs to run first — others depend on its results)
-const { data: skuData } = await admin.from("sku")...
-
-// 2-6. Run remaining queries in parallel
-const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-  admin.from("selling_cost_defaults").select("key, value"),
-  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
-  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-  // BrickEconomy lookup (conditional on mpn)
-  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-]);
+if (!sku.price || sku.price <= 0) {
+  throw new Error("Cannot list: SKU has no valid price. Calculate pricing first.");
+}
 ```
 
-This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
+#### 2. `update-listing-prices` — Floor price guard (`supabase/functions/admin-data/index.ts`)
 
-### Impact
-- No schema changes needed
-- No frontend changes needed
-- Same inputs/outputs — purely an internal optimization
+Before applying `listed_price` in the auto-price logic, validate against the floor:
+
+```typescript
+// After deciding to set updates.listed_price = price_target:
+if (price_floor != null && price_target < price_floor) {
+  auto_price_applied = false;
+  auto_price_reason = `Target £${price_target} is below floor £${price_floor}. Skipped.`;
+  delete updates.listed_price;
+}
+```
+
+This check goes after the threshold checks but before finalizing `auto_price_applied`.
+
+#### 3. `update-listing-prices` — Reject zero/negative prices
+
+Add a general guard at the top of the auto-price block:
+
+```typescript
+if (price_target <= 0) {
+  auto_price_reason = "Target price is zero or negative. Skipped.";
+}
+```
+
+#### 4. Frontend — Show toast when listing is blocked (`ProductChannelsTab.tsx`)
+
+No structural changes needed. The existing `toast.error(err.message)` in `handleListingAction` will surface the new server-side error message ("Cannot list: SKU has no valid price").
+
+### Summary of Safeguards
+
+| Scenario | Current | After |
+|---|---|---|
+| List SKU with null/zero price | Lists at £0.00 | Error: "no valid price" |
+| Auto-price target below floor | Applied anyway | Skipped with reason |
+| Auto-price target is £0 | Applied | Skipped with reason |
+| Manual re-list after unlist (price cleared) | £0.00 published | Blocked until priced |
+
+No database changes needed. Two files edited: `admin-data/index.ts` and minor defensive messaging only.
 
