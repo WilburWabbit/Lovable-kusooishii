@@ -33,6 +33,11 @@ export default function BrowsePage() {
     setSelectedThemeId(themeFromUrl);
   }, [themeFromUrl]);
 
+  // Sync search from URL query param
+  useEffect(() => {
+    if (searchFromUrl) setSearch(searchFromUrl);
+  }, [searchFromUrl]);
+
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
