@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +45,7 @@ interface ListingRow {
   name: string | null;
   condition_grade: string;
   price: number | null;
+  product_id: string | null;
   product: { name: string; mpn: string } | null;
   stock_available: number;
   channel_listings: ChannelListing[];
@@ -197,6 +199,7 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
 
 export function ListingsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [coverageFilter, setCoverageFilter] = useState<string>("all");
@@ -362,7 +365,7 @@ export function ListingsPage() {
             <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No listings found.</div>
           ) : (
             sorted.map((r) => (
-              <MobileListCard key={r.id} showChevron={false}>
+              <MobileListCard key={r.id} showChevron={!!r.product_id} onClick={() => r.product_id && navigate(`/admin/products/${r.product_id}`)}>
                 <MobileCardTitle>{r.sku_code} — {productName(r) || "—"}</MobileCardTitle>
                 <MobileCardMeta>
                   {r.product?.mpn && <span className="font-mono">{r.product.mpn}</span>}
@@ -419,7 +422,7 @@ export function ListingsPage() {
                 </TableHeader>
                 <TableBody>
                   {sorted.map((r) => (
-                    <TableRow key={r.id}>
+                    <TableRow key={r.id} className={r.product_id ? "cursor-pointer hover:bg-muted/50" : ""} onClick={() => r.product_id && navigate(`/admin/products/${r.product_id}`)}>
                       {visibleCols.map((col) => (
                         <TableCell key={col.key} className={col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : ""}>
                           {renderCell(r, col.key)}

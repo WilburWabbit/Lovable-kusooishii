@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
       // 1. Active SKUs with catalog product info
       const { data: skus, error: skuErr } = await admin
         .from("sku")
-        .select("id, sku_code, name, condition_grade, price, active_flag, product:product_id(name, mpn)")
+        .select("id, sku_code, name, condition_grade, price, active_flag, product_id, product:product_id(name, mpn)")
         .eq("active_flag", true)
         .order("sku_code", { ascending: true });
       if (skuErr) throw skuErr;

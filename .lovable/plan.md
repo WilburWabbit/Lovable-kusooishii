@@ -1,29 +1,38 @@
 
 
-## Plan: Add Row-Click Navigation to Listings and Pricing Pages
+## Fix: Pricing Calculation Edge Function Timeout
 
 ### Problem
-- **Listings page**: Rows are not clickable -- no navigation to product detail on click.
-- **Pricing page**: Rows are not clickable -- no navigation to product detail on click. Also lacks a mobile card view.
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
 
 ### Changes
 
-#### 1. Listings Page (`src/pages/admin/ListingsPage.tsx`)
-- Import `useNavigate` from react-router-dom
-- Add `onClick` to each `MobileListCard` to navigate to `/admin/products/${r.product_id}` (need to pass product_id through the data)
-- Add `onClick` and `cursor-pointer` to each desktop `TableRow` to navigate to the product detail page
-- If the listing row doesn't carry `product_id`, update the data query to include it from the SKU's product reference
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
 
-#### 2. Pricing Page (`src/pages/admin/PricingDashboardPage.tsx`)
-- Import `useNavigate` from react-router-dom
-- Track `product_id` in the `PricingRow` interface (sourced from the SKU query which already joins `product:product_id(...)`)
-- Add `onClick` and `cursor-pointer` to each `TableRow` to navigate to `/admin/products/${row.product_id}`
-- Add a mobile card view (`md:hidden`) matching the pattern used by other admin pages, with navigation on tap
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
 
-#### 3. Data: Ensure product_id is available
-- **Pricing**: The SKU query already fetches `product:product_id(name, mpn)`. Add `product_id` to the select and map it into `PricingRow`.
-- **Listings**: Similarly ensure `product_id` is available from the SKU data and mapped into `ListingRow`.
+```typescript
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
 
-### Navigation Target
-All rows navigate to `/admin/products/:productId` since that is the existing product detail editor.
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
+```
+
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
+
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 

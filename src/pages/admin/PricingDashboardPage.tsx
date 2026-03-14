@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
@@ -19,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 interface PricingRow {
   id: string;
@@ -26,6 +26,7 @@ interface PricingRow {
   condition_grade: string;
   product_name: string;
   mpn: string;
+  product_id: string | null;
   stock_qty: number;
   price: number | null;
   price_floor: number | null;
@@ -56,6 +57,7 @@ function fmt(v: number | null) {
 }
 
 export default function PricingDashboardPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -76,7 +78,7 @@ export default function PricingDashboardPage() {
     // Fetch SKUs with product details
     const { data: skuData, error: skuError } = await supabase
       .from("sku")
-      .select("id, sku_code, condition_grade, price, product:product_id(name, mpn)")
+      .select("id, sku_code, condition_grade, price, product_id, product:product_id(name, mpn)")
       .eq("active_flag", true)
       .not("product_id", "is", null)
       .order("sku_code");
@@ -134,6 +136,7 @@ export default function PricingDashboardPage() {
         condition_grade: r.condition_grade ?? "—",
         product_name: r.product?.name ?? "—",
         mpn: r.product?.mpn ?? "—",
+        product_id: r.product_id ?? null,
         stock_qty: stockMap.get(r.id) ?? 0,
         price: r.price,
         price_floor: pricing?.price_floor ?? null,
@@ -294,7 +297,38 @@ export default function PricingDashboardPage() {
           <ColumnSelector allColumns={ALL_COLUMNS} visibleColumns={prefs.visibleColumns} onToggleColumn={toggleColumn} onMoveColumn={moveColumn} />
         </div>
 
-        {/* Table */}
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-2">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">No pricing data found.</div>
+          ) : (
+            sorted.map((row) => (
+              <MobileListCard
+                key={row.id}
+                showChevron={!!row.product_id}
+                onClick={() => row.product_id && navigate(`/admin/products/${row.product_id}`)}
+              >
+                <MobileCardTitle>{row.product_name}</MobileCardTitle>
+                <MobileCardMeta>
+                  <span className="font-mono">{row.mpn}</span>
+                  <span className="font-mono">{row.sku_code}</span>
+                  <Badge variant="outline" className="text-[10px]">{row.condition_grade}</Badge>
+                </MobileCardMeta>
+                <MobileCardMeta className="mt-0.5">
+                  <span>Stock: {row.stock_qty}</span>
+                  <span>Price: {fmt(row.price)}</span>
+                  {row.price_floor != null && <span>Floor: {fmt(row.price_floor)}</span>}
+                  {row.confidence_score != null && <span>Conf: {(row.confidence_score * 100).toFixed(0)}%</span>}
+                </MobileCardMeta>
+              </MobileListCard>
+            ))
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
         <Card>
           <div className="overflow-auto">
             <Table>
@@ -335,7 +369,11 @@ export default function PricingDashboardPage() {
                   </TableRow>
                 ) : (
                   sorted.map((row) => (
-                    <TableRow key={row.id}>
+                    <TableRow
+                      key={row.id}
+                      className={row.product_id ? "cursor-pointer hover:bg-muted/50" : ""}
+                      onClick={() => row.product_id && navigate(`/admin/products/${row.product_id}`)}
+                    >
                       {prefs.visibleColumns.map((key) => {
                         let content: React.ReactNode;
                         switch (key) {
@@ -389,6 +427,7 @@ export default function PricingDashboardPage() {
             </Table>
           </div>
         </Card>
+        </div>
       </div>
     </BackOfficeLayout>
   );
