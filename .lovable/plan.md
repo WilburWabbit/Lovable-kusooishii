@@ -1,27 +1,38 @@
 
 
-## Fix Product Media Card — Three Defects
+## Fix: Pricing Calculation Edge Function Timeout
 
-### Root Cause Analysis
+### Problem
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
 
-**Defect 1 & 3 (Primary resets, drag resets):** Same root cause. After the optimistic cache update, `invalidate()` is called immediately, which triggers a refetch. The refetch races with or arrives before the server has fully committed, so stale data overwrites the optimistic update. Additionally, `queryClient.cancelQueries()` is never called before setting optimistic data, so in-flight fetches can also overwrite it.
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
 
-**Defect 2 (Drag broken on mobile):** The component uses the HTML5 Drag and Drop API (`draggable`, `onDragStart`, `onDragOver`, `onDrop`), which is not supported on touch devices. A touch-compatible library is needed.
+### Changes
 
-### Plan
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
 
-**File: `src/components/admin/ProductMediaCard.tsx`**
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
 
-1. **Replace HTML5 drag with `@dnd-kit`** — Install `@dnd-kit/core` and `@dnd-kit/sortable` (already touch-compatible). Replace the `draggable`/`onDragStart`/`onDragOver`/`onDrop` handlers with `DndContext`, `SortableContext`, and `useSortable` per item. This fixes mobile drag (defect 2).
+```typescript
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
 
-2. **Fix optimistic update pattern for both `handleSetPrimary` and `handleDrop`:**
-   - Call `queryClient.cancelQueries({ queryKey })` before setting optimistic data to prevent in-flight fetches from overwriting.
-   - Remove `invalidate()` from the success path — the optimistic state is already correct. Only invalidate on error (rollback).
-   - Keep `invalidate()` for `["admin-product"]` only (to update the header image).
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
+```
 
-3. **Extract each media row into a `SortableMediaItem` sub-component** that uses `useSortable()` for drag handle and transform styling.
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
 
-### Dependencies
-
-- Add `@dnd-kit/core` and `@dnd-kit/sortable` (plus `@dnd-kit/utilities`) to `package.json`.
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 
