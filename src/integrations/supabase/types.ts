@@ -1140,6 +1140,13 @@ export type Database = {
             referencedRelation: "club"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "member_club_link_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "club_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       product: {
@@ -1461,6 +1468,13 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "club"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "club_public"
             referencedColumns: ["id"]
           },
           {
@@ -1983,7 +1997,36 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      club_public: {
+        Row: {
+          active: boolean | null
+          city: string | null
+          id: string | null
+          location_description: string | null
+          name: string | null
+          postcode: string | null
+          slug: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          city?: string | null
+          id?: string | null
+          location_description?: string | null
+          name?: string | null
+          postcode?: string | null
+          slug?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          city?: string | null
+          id?: string | null
+          location_description?: string | null
+          name?: string | null
+          postcode?: string | null
+          slug?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       admin_list_users: {
