@@ -829,14 +829,22 @@ Deno.serve(async (req) => {
         floorPrice = Math.round(neededPrice * 100) / 100;
       }
 
-      let targetPrice: number | null = null;
+      // Also consider existing SKU price as a reference when no market data
+      const existingSkuPrice = skuData.price != null ? Number(skuData.price) : null;
+
+      // Ceiling: highest of floor, market consensus, and existing SKU price
+      const ceilingBasis = Math.max(floorPrice, marketConsensus ?? floorPrice, existingSkuPrice ?? floorPrice);
+      const ceilingPrice = Math.floor(ceilingBasis) + 0.99;
+
+      let targetPrice: number;
       if (marketConsensus != null) {
         targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
         // Ensure target is at least the floor
         if (targetPrice < floorPrice) targetPrice = floorPrice;
+      } else {
+        // No market data — default target to ceiling price
+        targetPrice = ceilingPrice;
       }
-
-      const ceilingPrice = Math.floor(Math.max(floorPrice, marketConsensus ?? floorPrice)) + 0.99;
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
