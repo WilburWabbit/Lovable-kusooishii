@@ -26,6 +26,7 @@ interface PricingRow {
   condition_grade: string;
   product_name: string;
   mpn: string;
+  product_id: string | null;
   stock_qty: number;
   price: number | null;
   price_floor: number | null;
