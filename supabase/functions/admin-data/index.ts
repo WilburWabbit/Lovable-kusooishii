@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "reorder-product-media") {
       const { items } = params;
-      if (!Array.isArray(items)) throw new Error("items array is required");
+      if (!Array.isArray(items)) throw new ValidationError("items array is required");
       for (const item of items) {
         await admin.from("product_media").update({ sort_order: item.sort_order }).eq("id", item.id);
       }
