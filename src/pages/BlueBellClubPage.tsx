@@ -35,9 +35,7 @@ The Blue Bell gets 5%
             <p className="font-display text-lg font-bold text-foreground text-left lg:text-3xl">
               Bricks. Beer. Absolute chaos.
             </p>
-            <p>We're the proud sponsor of LEGO® Club at The Blue Bell, Stoke Ferry — where grown adults get together, sink a few pints, and build LEGO® like they're eight years old again except now they're allowed to swear when they step on a brick.
-              <a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO® like they're eight years old again except now they're allowed to swear when they step on a brick.
-            </p>
+            <p>We're the proud sponsor of LEGO® Club at .<a href="https://www.bluebellstokeferry.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">The Blue Bell, Stoke Ferry</a> — where grown adults get together, sink a few pints, and build LEGO® like they're eight years old again except now they're allowed to swear when they step on a brick.</p>
             <p>This isn't a quiet  craft session. This is a pub full of people who know what kragle is, who think "just one more set" is a perfectly reasonable thing to say, right after "just one more pint." 
 
 It's magnificent.
