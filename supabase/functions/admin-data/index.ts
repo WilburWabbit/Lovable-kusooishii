@@ -355,7 +355,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = { success: true };
     } else if (action === "create-web-listing") {
-      const { sku_id } = params;
+      const { sku_id, listed_price } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
 
       // Fetch SKU details
@@ -365,7 +365,13 @@ Deno.serve(async (req) => {
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new ValidationError("SKU not found");
-      if (!sku.price || sku.price <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
+
+      // Resolve price: caller-supplied > database
+      const finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
+      if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
+
+      // Sync resolved price back to SKU
+      await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);
 
       // Upsert channel_listing for web
       const { error: uErr } = await admin.from("channel_listing").upsert(
@@ -373,7 +379,7 @@ Deno.serve(async (req) => {
           channel: "web",
           external_sku: sku.sku_code,
           sku_id: sku.id,
-          listed_price: sku.price,
+          listed_price: finalPrice,
           listed_quantity: 0,
           offer_status: "PUBLISHED",
           listing_title: null,

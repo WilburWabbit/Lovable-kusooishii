@@ -33,7 +33,13 @@ export function ProductChannelsTab({ product, beValuation, onInvalidate }: Produ
           await invokeWithAuth("ebay-sync", { action: "create_listing", sku_id: skuId });
           toast.success("eBay listing created");
         } else {
-          await invokeWithAuth("admin-data", { action: "create-web-listing", sku_id: skuId });
+          const pricingKey = `${skuId}:${ch}`;
+          const pricing = pricingResults[pricingKey];
+          await invokeWithAuth("admin-data", {
+            action: "create-web-listing",
+            sku_id: skuId,
+            listed_price: pricing?.target_price ?? undefined,
+          });
           toast.success("Web listing created");
         }
       } else {
