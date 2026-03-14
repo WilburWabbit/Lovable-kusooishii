@@ -1,37 +1,38 @@
 
 
-## Plan: Fix Build Error and Investigate Navigation Issues
+## Fix: Pricing Calculation Edge Function Timeout
 
-### Problem 1: Build Error (stripe-webhook)
-The `supabase/functions/stripe-webhook/index.ts` uses `npm:@supabase/supabase-js@2.57.2` which Deno cannot resolve. Every other edge function uses the `https://esm.sh/` pattern. This build error may be blocking edge function deployment.
+### Problem
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
 
-**Fix:** Change line 3 of `stripe-webhook/index.ts` from:
-```ts
-import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+
+### Changes
+
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
+
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
+
+```typescript
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
+
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
 ```
-to:
-```ts
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-```
 
-### Problem 2: Navigation to Pages
-The routes in `App.tsx` are correctly defined:
-- `/admin/products/:id` → `ProductDetailAdminPage`
-- `/sets/:mpn` → `ProductDetailPage`
-- `/admin/listings` → `ListingsPage`
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
 
-The admin Products page navigates correctly via `navigate(\`/admin/products/\${p.id}\`)`. However, the Listings page has **no row-click navigation** — it displays listing data but doesn't link to a detail view.
-
-**Clarification needed:** "Can't get to" could mean:
-1. Pages show a blank/error screen (likely caused by the build error affecting edge functions like `admin-data` which powers `ProductDetailAdminPage`)
-2. There are no clickable links to reach these pages
-
-Since the build error could prevent the `admin-data` edge function from deploying correctly (all functions share a build pipeline), fixing the stripe-webhook import should resolve any downstream failures.
-
-### Implementation Steps
-1. Fix the `npm:` import in `stripe-webhook/index.ts` to use `esm.sh` (consistent with all other functions)
-
-### Technical Details
-- File: `supabase/functions/stripe-webhook/index.ts`, line 3
-- Single-line change from `npm:` to `https://esm.sh/` import specifier
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 
