@@ -682,7 +682,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "calculate-pricing") {
       const { sku_id, channel } = params;
-      if (!sku_id || !channel) throw new Error("sku_id and channel are required");
+      if (!sku_id || !channel) throw new ValidationError("sku_id and channel are required");
 
       // 1. Get SKU + product info
       const { data: skuData } = await admin
