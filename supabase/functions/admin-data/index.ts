@@ -826,12 +826,12 @@ Deno.serve(async (req) => {
 
       let targetPrice: number | null = null;
       if (marketConsensus != null) {
-        targetPrice = Math.round(marketConsensus * condMultiplier * 100) / 100;
+        targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
         // Ensure target is at least the floor
         if (targetPrice < floorPrice) targetPrice = floorPrice;
       }
 
-      const ceilingPrice = Math.round(Math.max(floorPrice, marketConsensus ?? floorPrice) * 100) / 100;
+      const ceilingPrice = Math.floor(Math.max(floorPrice, marketConsensus ?? floorPrice)) + 0.99;
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
