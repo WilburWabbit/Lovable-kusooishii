@@ -423,7 +423,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-product-media") {
       const { product_media_id, media_asset_id: maId } = params;
-      if (!product_media_id) throw new Error("product_media_id is required");
+      if (!product_media_id) throw new ValidationError("product_media_id is required");
 
       // Get the media asset to find storage path
       if (maId) {
