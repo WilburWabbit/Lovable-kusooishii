@@ -462,7 +462,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "set-primary-media") {
       const { product_id: pid, product_media_id } = params;
-      if (!pid || !product_media_id) throw new Error("product_id and product_media_id required");
+      if (!pid || !product_media_id) throw new ValidationError("product_id and product_media_id required");
 
       // Clear all primary flags for this product
       await admin.from("product_media").update({ is_primary: false }).eq("product_id", pid);
