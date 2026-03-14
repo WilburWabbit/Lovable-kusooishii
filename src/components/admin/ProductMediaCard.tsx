@@ -20,7 +20,6 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableMediaItem, type MediaItem } from "./SortableMediaItem";
 
 interface ProductMediaCardProps {
