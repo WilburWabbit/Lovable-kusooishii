@@ -406,7 +406,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "list-product-media") {
       const { product_id: pid } = params;
-      if (!pid) throw new Error("product_id is required");
+      if (!pid) throw new ValidationError("product_id is required");
       const { data, error } = await admin
         .from("product_media")
         .select("id, sort_order, is_primary, media_asset:media_asset_id(id, original_url, alt_text, mime_type, width, height, file_size_bytes)")
