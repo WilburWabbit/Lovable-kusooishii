@@ -1,27 +1,27 @@
 import { useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Upload, Trash2, Star, Sparkles, Loader2, GripVertical, ImageIcon,
-} from "lucide-react";
+import { Upload, Sparkles, Loader2, ImageIcon } from "lucide-react";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-
-interface MediaItem {
-  id: string; // product_media id
-  media_asset_id: string;
-  original_url: string;
-  alt_text: string | null;
-  sort_order: number;
-  is_primary: boolean;
-  mime_type: string | null;
-  width: number | null;
-  height: number | null;
-}
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { SortableMediaItem, type MediaItem } from "./SortableMediaItem";
 
 interface ProductMediaCardProps {
   productId: string;
@@ -53,12 +53,12 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
   const [settingPrimary, setSettingPrimary] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Drag state
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey });
+  const invalidateProduct = () => {
     queryClient.invalidateQueries({ queryKey: ["admin-product"] });
   };
 
@@ -77,17 +77,14 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         const ext = file.name.split(".").pop() ?? "jpg";
         const storagePath = `products/${productId}/${crypto.randomUUID()}.${ext}`;
 
-        // Upload to storage
         const { error: uploadErr } = await supabase.storage
           .from("media")
           .upload(storagePath, file, { contentType: file.type, upsert: false });
         if (uploadErr) throw uploadErr;
 
-        // Get public URL
         const { data: urlData } = supabase.storage.from("media").getPublicUrl(storagePath);
         const publicUrl = urlData.publicUrl;
 
-        // Create media_asset via service role (through admin-data won't work for insert, so use supabase directly with RLS — staff policy covers it)
         const { data: asset, error: assetErr } = await supabase
           .from("media_asset")
           .insert({
@@ -100,7 +97,6 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
           .single();
         if (assetErr) throw assetErr;
 
-        // Create product_media link
         const { error: linkErr } = await (supabase as any)
           .from("product_media")
           .insert({
@@ -111,12 +107,11 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
           });
         if (linkErr) throw linkErr;
 
-        // If this is the first image, set it as product img_url
         if (items.length === 0 && sortOrder === 0) {
           await invokeWithAuth("admin-data", {
             action: "set-primary-media",
             product_id: productId,
-            product_media_id: asset.id, // we'll need the product_media id — refetch after
+            product_media_id: asset.id,
           });
         }
 
@@ -124,7 +119,8 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
       }
 
       toast.success(`${files.length} image${files.length > 1 ? "s" : ""} uploaded`);
-      invalidate();
+      queryClient.invalidateQueries({ queryKey });
+      invalidateProduct();
     } catch (err: any) {
       toast.error(err.message ?? "Upload failed");
     } finally {
@@ -143,7 +139,8 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         media_asset_id: item.media_asset_id,
       });
       toast.success("Image deleted");
-      invalidate();
+      queryClient.invalidateQueries({ queryKey });
+      invalidateProduct();
     } catch (err: any) {
       toast.error(err.message ?? "Delete failed");
     } finally {
@@ -155,7 +152,9 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
   const handleSetPrimary = async (item: MediaItem) => {
     setSettingPrimary(item.id);
 
-    // Optimistic update: mark as primary and move to position 0
+    // Cancel in-flight queries to prevent stale data overwriting optimistic update
+    await queryClient.cancelQueries({ queryKey });
+
     const previousItems = queryClient.getQueryData<MediaItem[]>(queryKey);
     const optimistic = items.map((i) => ({ ...i, is_primary: i.id === item.id }));
     const primaryIdx = optimistic.findIndex((i) => i.id === item.id);
@@ -172,13 +171,13 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         product_id: productId,
         product_media_id: item.id,
       });
-      // Persist the new order
       await invokeWithAuth("admin-data", {
         action: "reorder-product-media",
         items: withSortOrder.map((i) => ({ id: i.id, sort_order: i.sort_order })),
       });
       toast.success("Primary image set");
-      invalidate();
+      // Only invalidate the product header (for img_url), NOT the media query
+      invalidateProduct();
     } catch (err: any) {
       queryClient.setQueryData(queryKey, previousItems);
       toast.error(err.message ?? "Failed");
@@ -198,7 +197,12 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         alt_text: text.trim() || null,
       });
       toast.success("Alt text saved");
-      invalidate();
+      // Update cache in-place instead of invalidating
+      queryClient.setQueryData<MediaItem[]>(queryKey, (old) =>
+        old?.map((i) =>
+          i.media_asset_id === item.media_asset_id ? { ...i, alt_text: text.trim() || null } : i
+        )
+      );
     } catch (err: any) {
       toast.error(err.message ?? "Save failed");
     } finally {
@@ -217,14 +221,17 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
         mpn,
       });
       setAltTexts((prev) => ({ ...prev, [item.media_asset_id]: result.alt_text }));
-      // Auto-save
       await invokeWithAuth("admin-data", {
         action: "update-media-alt-text",
         media_asset_id: item.media_asset_id,
         alt_text: result.alt_text,
       });
       toast.success("Alt text generated & saved");
-      invalidate();
+      queryClient.setQueryData<MediaItem[]>(queryKey, (old) =>
+        old?.map((i) =>
+          i.media_asset_id === item.media_asset_id ? { ...i, alt_text: result.alt_text } : i
+        )
+      );
     } catch (err: any) {
       toast.error(err.message ?? "Generation failed");
     } finally {
@@ -262,50 +269,41 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
     }
     toast.success(`Generated alt text for ${count} image${count !== 1 ? "s" : ""}`);
     setGeneratingAll(false);
-    invalidate();
+    queryClient.invalidateQueries({ queryKey });
   };
 
-  /* ── Drag & Drop Reorder ── */
-  const handleDragStart = (idx: number) => {
-    setDragIdx(idx);
-  };
+  /* ── Drag & Drop Reorder (@dnd-kit) ── */
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
-    e.preventDefault();
-    setDragOverIdx(idx);
-  };
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
 
-  const handleDrop = async (dropIdx: number) => {
-    if (dragIdx === null || dragIdx === dropIdx) {
-      setDragIdx(null);
-      setDragOverIdx(null);
-      return;
-    }
+    // Cancel in-flight queries to prevent stale data overwriting optimistic update
+    await queryClient.cancelQueries({ queryKey });
 
-    const reordered = [...items];
-    const [moved] = reordered.splice(dragIdx, 1);
-    reordered.splice(dropIdx, 0, moved);
-
-    setDragIdx(null);
-    setDragOverIdx(null);
-
-    // Optimistic update
     const previousItems = queryClient.getQueryData<MediaItem[]>(queryKey);
+    const reordered = arrayMove(items, oldIndex, newIndex);
     const updatedItems = reordered.map((item, idx) => ({ ...item, sort_order: idx }));
     queryClient.setQueryData(queryKey, updatedItems);
 
-    // Save new order
     try {
       await invokeWithAuth("admin-data", {
         action: "reorder-product-media",
         items: updatedItems.map((item) => ({ id: item.id, sort_order: item.sort_order })),
       });
-      invalidate();
+      // Don't invalidate — optimistic state is correct
     } catch (err: any) {
       queryClient.setQueryData(queryKey, previousItems);
       toast.error(err.message ?? "Reorder failed");
     }
   };
+
+  const handleAltTextChange = useCallback((mediaAssetId: string, value: string) => {
+    setAltTexts((prev) => ({ ...prev, [mediaAssetId]: value }));
+  }, []);
 
   return (
     <Card>
@@ -349,107 +347,32 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
             <p className="text-sm">No images yet. Upload to get started.</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {items.map((item, idx) => (
-              <div
-                key={item.id}
-                draggable
-                onDragStart={() => handleDragStart(idx)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDrop={() => handleDrop(idx)}
-                onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                className={`flex gap-3 border rounded-lg p-3 transition-colors ${
-                  dragOverIdx === idx ? "border-primary bg-primary/5" : "border-border"
-                } ${dragIdx === idx ? "opacity-50" : ""}`}
-              >
-                {/* Drag handle */}
-                <div className="flex items-center cursor-grab active:cursor-grabbing">
-                  <GripVertical className="h-4 w-4 text-muted-foreground" />
-                </div>
-
-                {/* Thumbnail */}
-                <div className="relative h-20 w-20 shrink-0 rounded overflow-hidden bg-muted">
-                  <img
-                    src={item.original_url}
-                    alt={getAltText(item) || "Product image"}
-                    className="h-full w-full object-cover"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-3">
+                {items.map((item) => (
+                  <SortableMediaItem
+                    key={item.id}
+                    item={item}
+                    altText={getAltText(item)}
+                    onAltTextChange={handleAltTextChange}
+                    onSaveAlt={handleSaveAlt}
+                    onGenerateAlt={handleGenerateAlt}
+                    onSetPrimary={handleSetPrimary}
+                    onDelete={handleDelete}
+                    savingAlt={savingAlt}
+                    generatingAlt={generatingAlt}
+                    settingPrimary={settingPrimary}
+                    deleting={deleting}
                   />
-                  {item.is_primary && (
-                    <Badge className="absolute top-1 left-1 text-[8px] px-1 py-0">Primary</Badge>
-                  )}
-                </div>
-
-                {/* Alt text + actions */}
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={getAltText(item)}
-                      onChange={(e) => setAltTexts((prev) => ({ ...prev, [item.media_asset_id]: e.target.value }))}
-                      placeholder="Alt text…"
-                      className="text-xs h-7 flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      disabled={savingAlt === item.media_asset_id}
-                      onClick={() => handleSaveAlt(item)}
-                    >
-                      {savingAlt === item.media_asset_id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] px-2"
-                      disabled={generatingAlt === item.media_asset_id}
-                      onClick={() => handleGenerateAlt(item)}
-                    >
-                      {generatingAlt === item.media_asset_id ? (
-                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3 w-3 mr-1" />
-                      )}
-                      AI Alt Text
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={item.is_primary ? "default" : "outline"}
-                      className="h-6 text-[10px] px-2"
-                      disabled={item.is_primary || settingPrimary === item.id}
-                      onClick={() => handleSetPrimary(item)}
-                    >
-                      {settingPrimary === item.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Star className={`h-3 w-3 mr-0.5 ${item.is_primary ? "fill-current" : ""}`} />
-                      )}
-                      Primary
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 text-[10px] px-2 text-destructive hover:text-destructive"
-                      disabled={deleting === item.id}
-                      onClick={() => handleDelete(item)}
-                    >
-                      {deleting === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 text-[10px] px-2 text-muted-foreground cursor-not-allowed opacity-50"
-                      disabled
-                      title="Coming soon — requires schema update to assign images to variants"
-                    >
-                      Variant
-                    </Button>
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+          </DndContext>
         )}
       </CardContent>
     </Card>
