@@ -1,38 +1,31 @@
 
 
-## Fix: Pricing Calculation Edge Function Timeout
+## Plan: Round target prices up to .99
 
-### Problem
-The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+### Change
 
-### Solution
-Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+In `supabase/functions/admin-data/index.ts`, after the target price is calculated (line ~829), round it up to the nearest `.99` ending. Same for the ceiling price.
 
-### Changes
+**Rounding logic:** `Math.floor(value) + 0.99` — e.g. £12.34 → £12.99, £25.00 → £25.99, £7.99 → £7.99.
 
-**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
+Edge case: if the value is already exactly `.99`, keep it as-is.
 
-Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
+### Lines affected (~827-834)
 
 ```typescript
-// 1. Get SKU + product info (needs to run first — others depend on its results)
-const { data: skuData } = await admin.from("sku")...
+// Current
+targetPrice = Math.round(marketConsensus * condMultiplier * 100) / 100;
+if (targetPrice < floorPrice) targetPrice = floorPrice;
 
-// 2-6. Run remaining queries in parallel
-const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-  admin.from("selling_cost_defaults").select("key, value"),
-  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
-  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-  // BrickEconomy lookup (conditional on mpn)
-  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-]);
+const ceilingPrice = Math.round(Math.max(floorPrice, marketConsensus ?? floorPrice) * 100) / 100;
+
+// Updated
+targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
+if (targetPrice < floorPrice) targetPrice = floorPrice;
+
+const ceilingPrice = Math.floor(Math.max(floorPrice, marketConsensus ?? floorPrice)) + 0.99;
 ```
 
-This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
-
-### Impact
-- No schema changes needed
-- No frontend changes needed
-- Same inputs/outputs — purely an internal optimization
+### Files
+- `supabase/functions/admin-data/index.ts` — apply `.99` rounding to target and ceiling prices
 
