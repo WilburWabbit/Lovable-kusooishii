@@ -918,6 +918,13 @@ Deno.serve(async (req) => {
       let auto_price_reason = "";
 
       if (auto_price && price_target != null) {
+        // Guard: reject zero/negative target
+        if (price_target <= 0) {
+          auto_price_reason = "Target price is zero or negative. Skipped.";
+        // Guard: reject target below floor
+        } else if (price_floor != null && price_target < price_floor) {
+          auto_price_reason = `Target £${price_target} is below floor £${price_floor}. Skipped.`;
+        } else {
         // Look up listing to get channel and current listed_price
         const { data: listing } = await admin.from("channel_listing").select("channel, listed_price").eq("id", listing_id).single();
         if (listing) {
