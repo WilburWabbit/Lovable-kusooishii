@@ -14,6 +14,18 @@ export async function invokeWithAuth<T = unknown>(
     headers: { Authorization: `Bearer ${session.access_token}` },
   });
 
-  if (error) throw error;
+  if (error) {
+    // Extract the actual error message from the response body
+    const context = (error as any).context;
+    if (context instanceof Response) {
+      try {
+        const body = await context.json();
+        throw new Error(body.error || error.message);
+      } catch (e) {
+        if (e instanceof Error && e.message !== error.message) throw e;
+      }
+    }
+    throw error;
+  }
   return data as T;
 }
