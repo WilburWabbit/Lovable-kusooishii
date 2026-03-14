@@ -367,8 +367,20 @@ Deno.serve(async (req) => {
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
       // Resolve price: caller-supplied > database
-      const finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
+      let finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
+
+      // Validate against floor price from existing listing
+      const { data: existingListing } = await admin
+        .from("channel_listing")
+        .select("price_floor")
+        .eq("sku_id", sku_id)
+        .eq("channel", "web")
+        .maybeSingle();
+      if (existingListing?.price_floor != null && finalPrice < existingListing.price_floor) {
+        // Bump to floor price to prevent listing below cost
+        finalPrice = existingListing.price_floor;
+      }
 
       // Sync resolved price back to SKU
       await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);
