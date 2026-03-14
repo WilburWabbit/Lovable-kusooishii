@@ -910,7 +910,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "update-listing-prices") {
       const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn, auto_price } = params;
-      if (!listing_id) throw new Error("listing_id is required");
+      if (!listing_id) throw new ValidationError("listing_id is required");
       const updates: Record<string, any> = { priced_at: new Date().toISOString() };
       if (price_floor !== undefined) updates.price_floor = price_floor;
       if (price_target !== undefined) updates.price_target = price_target;
