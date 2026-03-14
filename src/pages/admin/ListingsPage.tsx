@@ -199,6 +199,7 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
 
 export function ListingsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [coverageFilter, setCoverageFilter] = useState<string>("all");
