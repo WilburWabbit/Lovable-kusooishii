@@ -1,52 +1,38 @@
 
 
-## Plan: Fix Edge Function Error Handling for Listing Actions
+## Fix: Pricing Calculation Edge Function Timeout
 
-### Root Cause
+### Problem
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
 
-Two issues combine to produce a generic, unhelpful error:
-
-1. **Edge function returns 500 for validation errors** — When `create-web-listing` rejects a SKU with price 0 (our new safeguard working correctly), it throws, which the catch block returns as HTTP 500. This should be a 400 (client error).
-
-2. **`invokeWithAuth` discards the error message** — `supabase.functions.invoke` wraps non-2xx responses in a `FunctionsHttpError` whose `.message` is generic ("Edge Function returned a non-2xx status code"). The actual JSON error body (e.g., `"Cannot list: SKU has no valid price"`) is in the response context but never read.
-
-SKU `77251-1.2` currently has `price: 0` in the database, so the safeguard is correctly blocking the listing — but the user sees a useless error message instead of the helpful one.
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
 
 ### Changes
 
-#### 1. `supabase/functions/admin-data/index.ts` — Return 400 for validation errors
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
 
-Wrap known validation errors in a custom error class so the catch block can return 400 instead of 500:
-
-```typescript
-class ValidationError extends Error {
-  constructor(message: string) { super(message); this.name = "ValidationError"; }
-}
-```
-
-In the catch block, check `err instanceof ValidationError` and return 400 for those, 500 for unexpected errors. Update all `throw new Error(...)` for user-facing validation messages (like "SKU has no valid price", "sku_id is required") to use `throw new ValidationError(...)`.
-
-#### 2. `src/lib/invokeWithAuth.ts` — Extract the actual error message
-
-When `supabase.functions.invoke` returns an error, attempt to read the response body to get the server's error message:
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
 
 ```typescript
-if (error) {
-  // Try to extract the server's error message from the response context
-  const context = (error as any).context;
-  if (context instanceof Response) {
-    try {
-      const body = await context.json();
-      throw new Error(body.error || error.message);
-    } catch { /* fall through */ }
-  }
-  throw error;
-}
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
+
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
 ```
 
-This ensures the toast shows "Cannot list: SKU has no valid price. Calculate pricing first." instead of the generic message.
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
 
-### Files Changed
-- `supabase/functions/admin-data/index.ts` — Add `ValidationError` class; use 400 for validation, 500 for unexpected
-- `src/lib/invokeWithAuth.ts` — Extract error message from response context
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 

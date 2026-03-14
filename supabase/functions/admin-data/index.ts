@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
+class ValidationError extends Error {
+  constructor(message: string) { super(message); this.name = "ValidationError"; }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -335,7 +339,7 @@ Deno.serve(async (req) => {
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
       }
-      if (Object.keys(updates).length === 0) throw new Error("No valid fields to update");
+      if (Object.keys(updates).length === 0) throw new ValidationError("No valid fields to update");
       const { error } = await admin.from("product").update(updates).eq("id", product_id);
       if (error) throw error;
       result = { success: true };
@@ -346,13 +350,13 @@ Deno.serve(async (req) => {
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
       }
-      if (Object.keys(updates).length === 0) throw new Error("No valid fields to update");
+      if (Object.keys(updates).length === 0) throw new ValidationError("No valid fields to update");
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
       result = { success: true };
     } else if (action === "create-web-listing") {
       const { sku_id } = params;
-      if (!sku_id) throw new Error("sku_id is required");
+      if (!sku_id) throw new ValidationError("sku_id is required");
 
       // Fetch SKU details
       const { data: sku, error: skuErr } = await admin
@@ -360,8 +364,8 @@ Deno.serve(async (req) => {
         .select("id, sku_code, price")
         .eq("id", sku_id)
         .single();
-      if (skuErr || !sku) throw new Error("SKU not found");
-      if (!sku.price || sku.price <= 0) throw new Error("Cannot list: SKU has no valid price. Calculate pricing first.");
+      if (skuErr || !sku) throw new ValidationError("SKU not found");
+      if (!sku.price || sku.price <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
 
       // Upsert channel_listing for web
       const { error: uErr } = await admin.from("channel_listing").upsert(
@@ -388,7 +392,7 @@ Deno.serve(async (req) => {
       result = { success: true };
     } else if (action === "remove-web-listing") {
       const { sku_id } = params;
-      if (!sku_id) throw new Error("sku_id is required");
+      if (!sku_id) throw new ValidationError("sku_id is required");
 
       const { error: dErr } = await admin
         .from("channel_listing")
@@ -402,7 +406,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "list-product-media") {
       const { product_id: pid } = params;
-      if (!pid) throw new Error("product_id is required");
+      if (!pid) throw new ValidationError("product_id is required");
       const { data, error } = await admin
         .from("product_media")
         .select("id, sort_order, is_primary, media_asset:media_asset_id(id, original_url, alt_text, mime_type, width, height, file_size_bytes)")
@@ -419,7 +423,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-product-media") {
       const { product_media_id, media_asset_id: maId } = params;
-      if (!product_media_id) throw new Error("product_media_id is required");
+      if (!product_media_id) throw new ValidationError("product_media_id is required");
 
       // Get the media asset to find storage path
       if (maId) {
@@ -443,7 +447,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "reorder-product-media") {
       const { items } = params;
-      if (!Array.isArray(items)) throw new Error("items array is required");
+      if (!Array.isArray(items)) throw new ValidationError("items array is required");
       for (const item of items) {
         await admin.from("product_media").update({ sort_order: item.sort_order }).eq("id", item.id);
       }
@@ -451,14 +455,14 @@ Deno.serve(async (req) => {
 
     } else if (action === "update-media-alt-text") {
       const { media_asset_id: maId, alt_text } = params;
-      if (!maId) throw new Error("media_asset_id is required");
+      if (!maId) throw new ValidationError("media_asset_id is required");
       const { error } = await admin.from("media_asset").update({ alt_text }).eq("id", maId);
       if (error) throw error;
       result = { success: true };
 
     } else if (action === "set-primary-media") {
       const { product_id: pid, product_media_id } = params;
-      if (!pid || !product_media_id) throw new Error("product_id and product_media_id required");
+      if (!pid || !product_media_id) throw new ValidationError("product_id and product_media_id required");
 
       // Clear all primary flags for this product
       await admin.from("product_media").update({ is_primary: false }).eq("product_id", pid);
@@ -500,7 +504,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-channel-fee") {
       const { id: feeId } = params;
-      if (!feeId) throw new Error("id is required");
+      if (!feeId) throw new ValidationError("id is required");
       const { error } = await admin.from("channel_fee_schedule").delete().eq("id", feeId);
       if (error) throw error;
       result = { success: true };
@@ -540,7 +544,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "delete-shipping-rate") {
       const { id: rateId } = params;
-      if (!rateId) throw new Error("id is required");
+      if (!rateId) throw new ValidationError("id is required");
       const { error } = await admin.from("shipping_rate_table").delete().eq("id", rateId);
       if (error) throw error;
       result = { success: true };
@@ -557,7 +561,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "upsert-selling-cost-default") {
       const { key: dKey, value: dValue } = params;
-      if (!dKey) throw new Error("key is required");
+      if (!dKey) throw new ValidationError("key is required");
       const { error } = await admin.from("selling_cost_defaults").upsert(
         { key: dKey, value: dValue ?? 0, updated_at: new Date().toISOString() },
         { onConflict: "key" }
@@ -569,7 +573,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "calculate-selling-costs") {
       const { sku_id, channel, sale_price, shipping_charged } = params;
-      if (!sku_id || !channel || sale_price === undefined) throw new Error("sku_id, channel, and sale_price are required");
+      if (!sku_id || !channel || sale_price === undefined) throw new ValidationError("sku_id, channel, and sale_price are required");
 
       // 1. Get SKU → product dimensions
       const { data: skuData } = await admin
@@ -678,7 +682,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "calculate-pricing") {
       const { sku_id, channel } = params;
-      if (!sku_id || !channel) throw new Error("sku_id and channel are required");
+      if (!sku_id || !channel) throw new ValidationError("sku_id and channel are required");
 
       // 1. Get SKU + product info
       const { data: skuData } = await admin
@@ -686,7 +690,7 @@ Deno.serve(async (req) => {
         .select("id, sku_code, price, condition_grade, product:product_id(id, mpn, weight_kg, length_cm, width_cm, height_cm)")
         .eq("id", sku_id)
         .single();
-      if (!skuData) throw new Error("SKU not found");
+      if (!skuData) throw new ValidationError("SKU not found");
       const product = (skuData.product as any) ?? {};
       const mpn = product.mpn;
 
@@ -906,7 +910,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "update-listing-prices") {
       const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn, auto_price } = params;
-      if (!listing_id) throw new Error("listing_id is required");
+      if (!listing_id) throw new ValidationError("listing_id is required");
       const updates: Record<string, any> = { priced_at: new Date().toISOString() };
       if (price_floor !== undefined) updates.price_floor = price_floor;
       if (price_target !== undefined) updates.price_target = price_target;
@@ -1065,8 +1069,9 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
+    const status = err instanceof ValidationError ? 400 : 500;
     return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
