@@ -25,6 +25,8 @@ interface ProductDetailRow {
   width_cm: number | null;
   height_cm: number | null;
   weight_kg: number | null;
+  img_url: string | null;
+  include_catalog_img: boolean;
   theme: { name: string } | null;
 }
 
@@ -53,7 +55,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -115,8 +117,23 @@ export default function ProductDetailPage() {
 
   const isLoading = productLoading || offersLoading;
   const themeName = product?.theme?.name ?? null;
-  const primaryImageUrl = mediaItems.find(m => m.is_primary)?.url ?? mediaItems[0]?.url ?? null;
-  const allImageUrls = mediaItems.map(m => m.url).filter(Boolean);
+
+  // Append catalog image as the final gallery item when include_catalog_img is enabled
+  const displayMedia: MediaItem[] = (() => {
+    const base = [...mediaItems];
+    if (product?.include_catalog_img && product?.img_url) {
+      base.push({
+        id: "__catalog__",
+        url: product.img_url,
+        alt: product.name ?? "Catalog image",
+        is_primary: false,
+      });
+    }
+    return base;
+  })();
+
+  const primaryImageUrl = displayMedia.find(m => m.is_primary)?.url ?? displayMedia[0]?.url ?? null;
+  const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
 
   function buildCartProduct(p: ProductDetailRow, offer: Offer): Product {
@@ -210,18 +227,18 @@ export default function ProductDetailPage() {
             <div className="grid gap-10 lg:grid-cols-2">
               {/* Image gallery */}
               <div>
-                {mediaItems.length > 0 ? (
+                {displayMedia.length > 0 ? (
                   <div className="space-y-3">
                     <div className="aspect-square bg-background overflow-hidden border border-border">
                       <img
-                        src={mediaItems[selectedImage]?.url}
-                        alt={mediaItems[selectedImage]?.alt || product.name || ""}
+                        src={displayMedia[selectedImage]?.url}
+                        alt={displayMedia[selectedImage]?.alt || product.name || ""}
                         className="h-full w-full object-cover"
                       />
                     </div>
-                    {mediaItems.length > 1 && (
+                    {displayMedia.length > 1 && (
                       <div className="flex gap-2 overflow-x-auto pb-1">
-                        {mediaItems.map((img, idx) => (
+                        {displayMedia.map((img, idx) => (
                           <button
                             key={img.id}
                             onClick={() => setSelectedImage(idx)}
