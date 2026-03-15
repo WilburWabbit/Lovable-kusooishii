@@ -261,7 +261,7 @@ export default function ProductDetailPage() {
                       <img
                         src={displayMedia[selectedImage]?.url}
                         alt={displayMedia[selectedImage]?.alt || product.name || ""}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain"
                       />
                     </div>
                     {displayMedia.length > 1 && (
@@ -274,7 +274,7 @@ export default function ProductDetailPage() {
                               idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
                             }`}
                           >
-                            <img src={img.url} alt={img.alt || ""} className="h-full w-full object-cover" />
+                            <img src={img.url} alt={img.alt || ""} className="h-full w-full object-contain" />
                           </button>
                         ))}
                       </div>
