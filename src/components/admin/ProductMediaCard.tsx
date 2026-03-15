@@ -80,11 +80,11 @@ export function ProductMediaCard({ productId, productName, mpn, includeCatalogIm
   const handleToggleCatalog = async (checked: boolean) => {
     setTogglingCatalog(true);
     try {
-      await invokeWithAuth("admin-data", {
-        action: "update-product",
-        product_id: productId,
-        include_catalog_img: checked,
-      });
+      const { error } = await supabase
+        .from("product")
+        .update({ include_catalog_img: checked } as any)
+        .eq("id", productId);
+      if (error) throw error;
       toast.success(checked ? "Catalog image included" : "Catalog image excluded");
       onInvalidate();
     } catch (err: any) {
