@@ -1088,6 +1088,118 @@ Deno.serve(async (req) => {
         result = { listing_id: newListing!.id, created: true };
       }
 
+    /* ── LEGO Catalog ── */
+
+    } else if (action === "list-lego-catalog") {
+      const page = params.page ?? 1;
+      const pageSize = Math.min(params.pageSize ?? 25, 200);
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+      const sortKey = params.sortKey ?? "mpn";
+      const sortDir = params.sortDir === "desc" ? false : true; // ascending by default
+
+      let query = admin
+        .from("lego_catalog")
+        .select("*, theme:theme_id(name)", { count: "exact" });
+
+      // Search
+      if (params.search) {
+        const term = `%${params.search}%`;
+        query = query.or(`name.ilike.${term},mpn.ilike.${term}`);
+      }
+
+      // Filters
+      if (params.theme_id) query = query.eq("theme_id", params.theme_id);
+      if (params.subtheme_name) query = query.eq("subtheme_name", params.subtheme_name);
+      if (params.year) query = query.eq("release_year", Number(params.year));
+      if (params.retired === "yes") query = query.eq("retired_flag", true);
+      else if (params.retired === "no") query = query.eq("retired_flag", false);
+      if (params.product_type) query = query.eq("product_type", params.product_type);
+      if (params.status) query = query.eq("status", params.status);
+
+      // Sort & paginate
+      const sortColumn = ["mpn", "name", "release_year", "piece_count", "retired_flag", "product_type", "status", "created_at", "updated_at"].includes(sortKey) ? sortKey : "mpn";
+      query = query.order(sortColumn, { ascending: sortDir }).range(from, to);
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+
+      // Flatten theme name
+      const rows = (data ?? []).map((r: any) => ({
+        ...r,
+        theme_name: r.theme?.name ?? null,
+        theme: undefined,
+      }));
+
+      result = { rows, totalCount: count ?? 0 };
+
+    } else if (action === "lego-catalog-filter-options") {
+      // Fetch distinct values for filter dropdowns
+      const { data: themes, error: tErr } = await admin
+        .from("theme")
+        .select("id, name")
+        .order("name");
+      if (tErr) throw tErr;
+
+      const { data: subthemes, error: sErr } = await admin
+        .from("lego_catalog")
+        .select("subtheme_name")
+        .not("subtheme_name", "is", null)
+        .order("subtheme_name");
+      if (sErr) throw sErr;
+      const uniqueSubthemes = [...new Set((subthemes ?? []).map((r: any) => r.subtheme_name).filter(Boolean))].sort();
+
+      const { data: years, error: yErr } = await admin
+        .from("lego_catalog")
+        .select("release_year")
+        .not("release_year", "is", null)
+        .order("release_year", { ascending: false });
+      if (yErr) throw yErr;
+      const uniqueYears = [...new Set((years ?? []).map((r: any) => r.release_year).filter(Boolean))];
+
+      const { data: productTypes, error: ptErr } = await admin
+        .from("lego_catalog")
+        .select("product_type")
+        .order("product_type");
+      if (ptErr) throw ptErr;
+      const uniqueProductTypes = [...new Set((productTypes ?? []).map((r: any) => r.product_type).filter(Boolean))].sort();
+
+      result = {
+        themes: themes ?? [],
+        subthemes: uniqueSubthemes,
+        years: uniqueYears,
+        productTypes: uniqueProductTypes,
+      };
+
+    } else if (action === "update-lego-catalog") {
+      const { id, updates: rawUpdates } = params;
+      if (!id) throw new ValidationError("id is required");
+      if (!rawUpdates || typeof rawUpdates !== "object") throw new ValidationError("updates object is required");
+
+      const ALLOWED_FIELDS = new Set([
+        "name", "mpn", "subtheme_name", "piece_count", "release_year", "retired_flag",
+        "description", "img_url", "product_type", "status", "version_descriptor",
+        "brickeconomy_id", "bricklink_item_no", "brickowl_boid", "rebrickable_id", "theme_id",
+      ]);
+
+      const cleanUpdates: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rawUpdates)) {
+        if (ALLOWED_FIELDS.has(k)) cleanUpdates[k] = v;
+      }
+      if (Object.keys(cleanUpdates).length === 0) throw new ValidationError("No valid fields to update");
+
+      cleanUpdates.updated_at = new Date().toISOString();
+
+      const { data, error } = await admin
+        .from("lego_catalog")
+        .update(cleanUpdates)
+        .eq("id", id)
+        .select("*, theme:theme_id(name)")
+        .single();
+      if (error) throw error;
+
+      result = { ...data, theme_name: (data as any).theme?.name ?? null, theme: undefined };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

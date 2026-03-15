@@ -47,6 +47,7 @@ import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
 import SellingFeesSettingsPage from "./pages/admin/SellingFeesSettingsPage";
 import ShippingRatesSettingsPage from "./pages/admin/ShippingRatesSettingsPage";
 import PricingDashboardPage from "./pages/admin/PricingDashboardPage";
+import { LegoCatalogPage } from "./pages/admin/LegoCatalogPage";
 import NotFound from "./pages/NotFound";
 import { RequireAdmin } from "./components/RequireAdmin";
 
@@ -92,6 +93,7 @@ const App = () => (
             <Route path="/admin" element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
             <Route path="/admin/intake" element={<RequireAdmin><IntakePage /></RequireAdmin>} />
             <Route path="/admin/inventory" element={<RequireAdmin><InventoryPage /></RequireAdmin>} />
+            <Route path="/admin/lego-catalog" element={<RequireAdmin><LegoCatalogPage /></RequireAdmin>} />
             <Route path="/admin/products" element={<RequireAdmin><ProductsPage /></RequireAdmin>} />
             <Route path="/admin/products/:id" element={<RequireAdmin><ProductDetailAdminPage /></RequireAdmin>} />
             <Route path="/admin/listings" element={<RequireAdmin><ListingsPage /></RequireAdmin>} />
