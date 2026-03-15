@@ -257,11 +257,11 @@ export default function ProductDetailPage() {
               <div>
                 {displayMedia.length > 0 ? (
                   <div className="space-y-3">
-                    <div className="aspect-square bg-background overflow-hidden border border-border">
+                    <div className="aspect-square bg-background overflow-hidden border border-border relative">
                       <img
                         src={displayMedia[selectedImage]?.url}
                         alt={displayMedia[selectedImage]?.alt || product.name || ""}
-                        className="h-full w-full object-contain"
+                        className="absolute inset-0 h-full w-full object-contain"
                       />
                     </div>
                     {displayMedia.length > 1 && (
@@ -270,11 +270,11 @@ export default function ProductDetailPage() {
                           <button
                             key={img.id}
                             onClick={() => setSelectedImage(idx)}
-                            className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors ${
+                            className={`h-16 w-16 shrink-0 overflow-hidden border-2 transition-colors relative ${
                               idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
                             }`}
                           >
-                            <img src={img.url} alt={img.alt || ""} className="h-full w-full object-contain" />
+                            <img src={img.url} alt={img.alt || ""} className="absolute inset-0 h-full w-full object-contain" />
                           </button>
                         ))}
                       </div>
