@@ -119,14 +119,9 @@ export default function ProductDetailPage() {
   const themeName = product?.theme?.name ?? null;
 
   // Append catalog image as the final gallery item when include_catalog_img is enabled
-  // and the URL isn't already present in product_media
   const displayMedia: MediaItem[] = (() => {
     const base = [...mediaItems];
-    if (
-      product?.include_catalog_img &&
-      product?.img_url &&
-      !mediaItems.some((m) => m.url === product.img_url)
-    ) {
+    if (product?.include_catalog_img && product?.img_url) {
       base.push({
         id: "__catalog__",
         url: product.img_url,

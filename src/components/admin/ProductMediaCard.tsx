@@ -62,10 +62,8 @@ export function ProductMediaCard({ productId, productName, mpn, catalogImgUrl, i
 
   const [togglingCatalog, setTogglingCatalog] = useState(false);
 
-  // Show catalog image section only when img_url exists and isn't already in product_media
-  const catalogIsExternal =
-    !!catalogImgUrl &&
-    items.every((i) => i.original_url !== catalogImgUrl);
+  // Show catalog image section whenever img_url exists
+  const hasCatalogImg = !!catalogImgUrl;
 
   const handleToggleCatalog = async (checked: boolean) => {
     setTogglingCatalog(true);
@@ -414,8 +412,8 @@ export function ProductMediaCard({ productId, productName, mpn, catalogImgUrl, i
           </DndContext>
         )}
 
-        {/* Catalog image (external img_url not in product_media) */}
-        {catalogIsExternal && (
+        {/* Catalog image (product.img_url) */}
+        {hasCatalogImg && (
           <div className="mt-4 border-t border-border pt-4">
             <div className="flex gap-3 border rounded-lg p-3 border-dashed border-border bg-muted/30">
               {/* Thumbnail */}
