@@ -259,7 +259,7 @@ Deno.serve(async (req) => {
     } else if (action === "get-product") {
       const { data: product, error: pErr } = await admin
         .from("product")
-        .select("*, theme:theme_id(name)")
+        .select("*, theme:theme_id(name), lego_catalog:lego_catalog_id(img_url)")
         .eq("id", params.product_id)
         .single();
       if (pErr) throw pErr;
@@ -324,7 +324,9 @@ Deno.serve(async (req) => {
       result = {
         ...product,
         theme_name: product.theme?.name ?? null,
+        catalog_img_url: product.lego_catalog?.img_url ?? null,
         theme: undefined,
+        lego_catalog: undefined,
         stock_available: stockAvailable,
         carrying_value: carryingValue,
         units_sold: unitsSold,

@@ -33,6 +33,7 @@ export interface ProductDetail {
   release_year: number | null;
   retired_flag: boolean;
   img_url: string | null;
+  catalog_img_url: string | null;
   include_catalog_img: boolean;
   product_hook: string | null;
   description: string | null;

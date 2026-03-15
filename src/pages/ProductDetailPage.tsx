@@ -93,6 +93,21 @@ export default function ProductDetailPage() {
     enabled: !!mpn,
   });
 
+  // Fetch catalog image from lego_catalog by MPN
+  const { data: catalogImgUrl } = useQuery<string | null>({
+    queryKey: ["catalog-img-storefront", mpn],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("lego_catalog")
+        .select("img_url")
+        .eq("mpn", mpn!)
+        .maybeSingle();
+      return data?.img_url ?? null;
+    },
+    enabled: !!mpn,
+    staleTime: 60_000,
+  });
+
   // Fetch product media
   const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
@@ -121,10 +136,10 @@ export default function ProductDetailPage() {
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
     const base = [...mediaItems];
-    if (product?.include_catalog_img && product?.img_url) {
+    if (product?.include_catalog_img && catalogImgUrl) {
       base.push({
         id: "__catalog__",
-        url: product.img_url,
+        url: catalogImgUrl,
         alt: product.name ?? "Catalog image",
         is_primary: false,
       });
