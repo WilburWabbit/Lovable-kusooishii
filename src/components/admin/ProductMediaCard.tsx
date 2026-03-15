@@ -27,12 +27,11 @@ interface ProductMediaCardProps {
   productId: string;
   productName: string | null;
   mpn: string;
-  catalogImgUrl: string | null;
   includeCatalogImg: boolean;
   onInvalidate: () => void;
 }
 
-export function ProductMediaCard({ productId, productName, mpn, catalogImgUrl, includeCatalogImg, onInvalidate }: ProductMediaCardProps) {
+export function ProductMediaCard({ productId, productName, mpn, includeCatalogImg, onInvalidate }: ProductMediaCardProps) {
   const queryClient = useQueryClient();
   const queryKey = ["product-media", productId];
 
@@ -60,9 +59,22 @@ export function ProductMediaCard({ productId, productName, mpn, catalogImgUrl, i
     staleTime: 30_000,
   });
 
+  // Fetch catalog image directly from lego_catalog table (bypasses edge function)
+  const { data: catalogImgUrl } = useQuery<string | null>({
+    queryKey: ["catalog-img", productId],
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("product")
+        .select("lego_catalog:lego_catalog_id(img_url)")
+        .eq("id", productId)
+        .single();
+      return data?.lego_catalog?.img_url ?? null;
+    },
+    staleTime: 60_000,
+  });
+
   const [togglingCatalog, setTogglingCatalog] = useState(false);
 
-  // Show catalog image section whenever img_url exists
   const hasCatalogImg = !!catalogImgUrl;
 
   const handleToggleCatalog = async (checked: boolean) => {
