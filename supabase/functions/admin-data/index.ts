@@ -432,10 +432,10 @@ Deno.serve(async (req) => {
         .order("sort_order", { ascending: true });
       if (error) throw error;
       result = (data ?? []).map((pm: any) => ({
+        ...pm.media_asset,
         id: pm.id,
         sort_order: pm.sort_order,
         is_primary: pm.is_primary,
-        ...pm.media_asset,
         media_asset_id: pm.media_asset?.id,
       }));
 

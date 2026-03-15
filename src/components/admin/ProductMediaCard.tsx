@@ -96,21 +96,23 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
           .single();
         if (assetErr) throw assetErr;
 
-        const { error: linkErr } = await (supabase as any)
+        const { data: pmRow, error: linkErr } = await (supabase as any)
           .from("product_media")
           .insert({
             product_id: productId,
             media_asset_id: asset.id,
             sort_order: sortOrder,
             is_primary: items.length === 0 && sortOrder === 0,
-          });
+          })
+          .select("id")
+          .single();
         if (linkErr) throw linkErr;
 
         if (items.length === 0 && sortOrder === 0) {
           await invokeWithAuth("admin-data", {
             action: "set-primary-media",
             product_id: productId,
-            product_media_id: asset.id,
+            product_media_id: pmRow.id,
           });
         }
 
