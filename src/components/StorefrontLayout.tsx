@@ -15,7 +15,7 @@ export function StorefrontLayout({ children }: StorefrontLayoutProps) {
     <div className="flex min-h-screen flex-col">
       <ScrollToTop />
       <StorefrontHeader />
-      <main className="flex-1">{children}</main>
+      <main className="flex-1 overflow-x-hidden">{children}</main>
       <StorefrontFooter />
       <CookieConsent />
     </div>
