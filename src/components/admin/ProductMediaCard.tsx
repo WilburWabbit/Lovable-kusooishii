@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Upload, Sparkles, Loader2, ImageIcon } from "lucide-react";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,9 +27,12 @@ interface ProductMediaCardProps {
   productId: string;
   productName: string | null;
   mpn: string;
+  catalogImgUrl: string | null;
+  includeCatalogImg: boolean;
+  onInvalidate: () => void;
 }
 
-export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCardProps) {
+export function ProductMediaCard({ productId, productName, mpn, catalogImgUrl, includeCatalogImg, onInvalidate }: ProductMediaCardProps) {
   const queryClient = useQueryClient();
   const queryKey = ["product-media", productId];
 
@@ -55,6 +59,30 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
     },
     staleTime: 30_000,
   });
+
+  const [togglingCatalog, setTogglingCatalog] = useState(false);
+
+  // Show catalog image section only when img_url exists and isn't already in product_media
+  const catalogIsExternal =
+    !!catalogImgUrl &&
+    items.every((i) => i.original_url !== catalogImgUrl);
+
+  const handleToggleCatalog = async (checked: boolean) => {
+    setTogglingCatalog(true);
+    try {
+      await invokeWithAuth("admin-data", {
+        action: "update-product",
+        product_id: productId,
+        include_catalog_img: checked,
+      });
+      toast.success(checked ? "Catalog image included" : "Catalog image excluded");
+      onInvalidate();
+    } catch (err: any) {
+      toast.error(err.message ?? "Failed to update");
+    } finally {
+      setTogglingCatalog(false);
+    }
+  };
 
   const [uploading, setUploading] = useState(false);
   const [altTexts, setAltTexts] = useState<Record<string, string>>({});
@@ -384,6 +412,42 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
               </div>
             </SortableContext>
           </DndContext>
+        )}
+
+        {/* Catalog image (external img_url not in product_media) */}
+        {catalogIsExternal && (
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex gap-3 border rounded-lg p-3 border-dashed border-border bg-muted/30">
+              {/* Thumbnail */}
+              <div className="relative h-20 w-20 shrink-0 rounded overflow-hidden bg-muted">
+                <img
+                  src={catalogImgUrl!}
+                  alt="Catalog image"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+
+              {/* Label + checkbox */}
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Catalog Image</p>
+                  <p className="text-xs text-muted-foreground">
+                    {includeCatalogImg
+                      ? "Shown as the final image on the storefront"
+                      : "Not currently shown on the storefront"}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <Checkbox
+                    checked={includeCatalogImg}
+                    onCheckedChange={(checked) => handleToggleCatalog(!!checked)}
+                    disabled={togglingCatalog}
+                  />
+                  <span className="text-xs font-medium">Include</span>
+                </label>
+              </div>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
       };
     } else if (action === "update-product") {
       const { product_id, ...fields } = params;
-      const allowed = ["product_hook", "description", "highlights", "call_to_action", "seo_title", "seo_description", "age_range", "length_cm", "width_cm", "height_cm", "weight_kg"];
+      const allowed = ["product_hook", "description", "highlights", "call_to_action", "seo_title", "seo_description", "age_range", "length_cm", "width_cm", "height_cm", "weight_kg", "include_catalog_img"];
       const updates: Record<string, any> = {};
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
