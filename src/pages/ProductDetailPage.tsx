@@ -312,7 +312,7 @@ export default function ProductDetailPage() {
                   </p>
                 )}
 
-                <div className="mt-6 flex gap-6 border-t border-b border-border py-4 flex-wrap">
+                <div className="mt-6 flex gap-4 sm:gap-6 border-t border-b border-border py-4 flex-wrap">
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
                     if (themeName) specs.push({ label: "Theme", value: themeName });
@@ -334,7 +334,7 @@ export default function ProductDetailPage() {
 
                 {/* Dimensions */}
                 {(product.length_cm || product.width_cm || product.height_cm || product.weight_kg) && (
-                  <div className="mt-4 flex gap-6 flex-wrap">
+                  <div className="mt-4 flex gap-4 sm:gap-6 flex-wrap">
                     {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
                       <div>
                         <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Dimensions</p>
@@ -369,9 +369,9 @@ export default function ProductDetailPage() {
                     offers.map((offer) => (
                       <div
                         key={offer.sku_id}
-                        className="flex items-center justify-between border border-border p-4 transition-colors hover:border-primary"
+                        className="flex flex-wrap items-center justify-between gap-3 border border-border p-4 transition-colors hover:border-primary"
                       >
-                        <div className="flex items-center gap-3 max-w-[60%]">
+                        <div className="flex items-center gap-3 max-w-full sm:max-w-[60%]">
                           <div className="flex h-8 w-8 items-center justify-center bg-foreground font-display text-xs font-bold text-background">
                             G{offer.condition_grade}
                           </div>
