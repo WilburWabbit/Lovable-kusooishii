@@ -35,11 +35,23 @@ export function ProductMediaCard({ productId, productName, mpn }: ProductMediaCa
   const { data: items = [], isLoading } = useQuery({
     queryKey,
     queryFn: async () => {
-      const data = await invokeWithAuth<MediaItem[]>("admin-data", {
-        action: "list-product-media",
-        product_id: productId,
-      });
-      return data;
+      const { data, error } = await (supabase as any)
+        .from("product_media")
+        .select("id, sort_order, is_primary, media_asset:media_asset_id(id, original_url, alt_text, mime_type, width, height)")
+        .eq("product_id", productId)
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((pm: any): MediaItem => ({
+        id: pm.id,
+        sort_order: pm.sort_order,
+        is_primary: pm.is_primary,
+        media_asset_id: pm.media_asset?.id,
+        original_url: pm.media_asset?.original_url,
+        alt_text: pm.media_asset?.alt_text ?? null,
+        mime_type: pm.media_asset?.mime_type ?? null,
+        width: pm.media_asset?.width ?? null,
+        height: pm.media_asset?.height ?? null,
+      }));
     },
     staleTime: 30_000,
   });
