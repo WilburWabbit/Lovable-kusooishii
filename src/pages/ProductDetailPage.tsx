@@ -27,7 +27,6 @@ interface ProductDetailRow {
   weight_kg: number | null;
   img_url: string | null;
   include_catalog_img: boolean;
-  lego_catalog: { img_url: string | null } | null;
   theme: { name: string } | null;
 }
 
@@ -56,7 +55,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, lego_catalog:lego_catalog_id(img_url), theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -94,6 +93,21 @@ export default function ProductDetailPage() {
     enabled: !!mpn,
   });
 
+  // Fetch catalog image from lego_catalog by MPN
+  const { data: catalogImgUrl } = useQuery<string | null>({
+    queryKey: ["catalog-img-storefront", mpn],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("lego_catalog")
+        .select("img_url")
+        .eq("mpn", mpn!)
+        .maybeSingle();
+      return data?.img_url ?? null;
+    },
+    enabled: !!mpn,
+    staleTime: 60_000,
+  });
+
   // Fetch product media
   const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
@@ -122,11 +136,10 @@ export default function ProductDetailPage() {
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
     const base = [...mediaItems];
-    const catalogUrl = product?.lego_catalog?.img_url;
-    if (product?.include_catalog_img && catalogUrl) {
+    if (product?.include_catalog_img && catalogImgUrl) {
       base.push({
         id: "__catalog__",
-        url: catalogUrl,
+        url: catalogImgUrl,
         alt: product.name ?? "Catalog image",
         is_primary: false,
       });

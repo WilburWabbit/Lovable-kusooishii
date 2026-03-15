@@ -59,16 +59,16 @@ export function ProductMediaCard({ productId, productName, mpn, includeCatalogIm
     staleTime: 30_000,
   });
 
-  // Fetch catalog image directly from lego_catalog table (bypasses edge function)
+  // Fetch catalog image directly from lego_catalog table by MPN
   const { data: catalogImgUrl } = useQuery<string | null>({
-    queryKey: ["catalog-img", productId],
+    queryKey: ["catalog-img", mpn],
     queryFn: async () => {
-      const { data } = await (supabase as any)
-        .from("product")
-        .select("lego_catalog:lego_catalog_id(img_url)")
-        .eq("id", productId)
-        .single();
-      return data?.lego_catalog?.img_url ?? null;
+      const { data } = await supabase
+        .from("lego_catalog")
+        .select("img_url")
+        .eq("mpn", mpn)
+        .maybeSingle();
+      return data?.img_url ?? null;
     },
     staleTime: 60_000,
   });
