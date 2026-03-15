@@ -26,7 +26,6 @@ interface ProductDetailRow {
   height_cm: number | null;
   weight_kg: number | null;
   img_url: string | null;
-  include_catalog_img: boolean;
   theme: { name: string } | null;
 }
 
@@ -55,7 +54,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -108,6 +107,20 @@ export default function ProductDetailPage() {
     staleTime: 60_000,
   });
 
+  // Fetch include_catalog_img flag (separate query — resilient if column doesn't exist yet)
+  const { data: includeCatalogImg = false } = useQuery({
+    queryKey: ["include-catalog-img", product?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("product")
+        .select("include_catalog_img")
+        .eq("id", product!.id)
+        .maybeSingle();
+      return (data as any)?.include_catalog_img ?? false;
+    },
+    enabled: !!product?.id,
+  });
+
   // Fetch product media
   const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
@@ -136,7 +149,7 @@ export default function ProductDetailPage() {
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
     const base = [...mediaItems];
-    if (product?.include_catalog_img && catalogImgUrl) {
+    if (includeCatalogImg && catalogImgUrl) {
       base.push({
         id: "__catalog__",
         url: catalogImgUrl,
