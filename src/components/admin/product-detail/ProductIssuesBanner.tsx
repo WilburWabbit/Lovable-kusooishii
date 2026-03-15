@@ -35,8 +35,8 @@ function computeIssues(product: ProductDetail): Issue[] {
   if (product.seo_title && product.seo_title.length > 60) {
     issues.push({ severity: "warning", message: `SEO title exceeds 60 chars (${product.seo_title.length})`, tab: "content-media" });
   }
-  if (product.seo_description && product.seo_description.length > 160) {
-    issues.push({ severity: "warning", message: `SEO description exceeds 160 chars (${product.seo_description.length})`, tab: "content-media" });
+  if (product.seo_description && product.seo_description.length > 400) {
+    issues.push({ severity: "warning", message: `SEO description exceeds 400 chars (${product.seo_description.length})`, tab: "content-media" });
   }
   if (product.product_hook && product.product_hook.length > 160) {
     issues.push({ severity: "warning", message: `Product hook exceeds 160 chars (${product.product_hook.length})`, tab: "content-media" });
