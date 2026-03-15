@@ -89,7 +89,7 @@ export default function ProductDetailAdminPage() {
               currentAgeRange={product.age_range}
               onSaved={handleInvalidate}
             />
-            <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} catalogImgUrl={product.img_url} includeCatalogImg={product.include_catalog_img} onInvalidate={handleInvalidate} />
+            <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} catalogImgUrl={product.catalog_img_url} includeCatalogImg={product.include_catalog_img} onInvalidate={handleInvalidate} />
           </TabsContent>
 
           <TabsContent value="channels" className="mt-4">

@@ -27,6 +27,7 @@ interface ProductDetailRow {
   weight_kg: number | null;
   img_url: string | null;
   include_catalog_img: boolean;
+  lego_catalog: { img_url: string | null } | null;
   theme: { name: string } | null;
 }
 
@@ -55,7 +56,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, include_catalog_img, lego_catalog:lego_catalog_id(img_url), theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -121,10 +122,11 @@ export default function ProductDetailPage() {
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
     const base = [...mediaItems];
-    if (product?.include_catalog_img && product?.img_url) {
+    const catalogUrl = product?.lego_catalog?.img_url;
+    if (product?.include_catalog_img && catalogUrl) {
       base.push({
         id: "__catalog__",
-        url: product.img_url,
+        url: catalogUrl,
         alt: product.name ?? "Catalog image",
         is_primary: false,
       });
