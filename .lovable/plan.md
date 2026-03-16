@@ -1,38 +1,40 @@
 
 
-## Fix: Pricing Calculation Edge Function Timeout
+## Fix: eBay sync_listings MPN matching and sync_inventory linking
 
-### Problem
-The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+### Root Cause
 
-### Solution
-Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+The eBay inventory contains items with **three different SKU formats**:
+- Bare MPN: `76273-1`, `72032-1`
+- SKU with dot-grade suffix: `75418-1.1`, `col068.1`, `75230-1.1`
+- SKU with old `-G` suffix: `31172-1-G1`, `75418-1-G1`
+
+Both `sync_inventory` (line 391) and `sync_listings` (line 468-484) only do **exact** `skuMap.get(item.sku)` or `mpnToProduct.get(item.sku)` lookups. This means:
+
+1. eBay SKU `76273-1` won't match local sku_code `76273-1.1` (no grade suffix on eBay side)
+2. eBay SKU `75418-1.1` won't match MPN `75418-1` (grade suffix present on eBay side)
+3. eBay SKU `31172-1-G1` won't match MPN `31172-1` or sku_code `31172-1.1` (old format)
+
+Additionally, many matched SKUs have `product_id = null` (e.g. `sw0505`, `tgb005`, `col124`), so even when sync_inventory links the sku, sync_listings can't reach a product.
+
+### Fix
+
+**Add a shared `deriveMpn()` helper** that normalizes any eBay SKU format to an MPN:
+- Strip `.N` grade suffix: `75418-1.1` → `75418-1`
+- Strip `-GN` suffix: `31172-1-G1` → `31172-1`
+- Leave bare MPNs unchanged: `76273-1` → `76273-1`
+
+**In `sync_inventory`** (around line 391): After exact sku_code match fails, try:
+1. `deriveMpn(item.sku)` → find matching SKU by prefix (sku_code starts with derived MPN)
+2. Direct MPN → product lookup for enrichment
+
+**In `sync_listings`** (around line 468-484): Improve strategy 2 to use `deriveMpn(item.sku)` instead of raw `item.sku` for the MPN lookup.
+
+**Add logging** at each matching stage so future debugging is straightforward.
 
 ### Changes
 
-**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
-
-Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
-
-```typescript
-// 1. Get SKU + product info (needs to run first — others depend on its results)
-const { data: skuData } = await admin.from("sku")...
-
-// 2-6. Run remaining queries in parallel
-const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-  admin.from("selling_cost_defaults").select("key, value"),
-  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
-  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-  // BrickEconomy lookup (conditional on mpn)
-  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-]);
-```
-
-This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
-
-### Impact
-- No schema changes needed
-- No frontend changes needed
-- Same inputs/outputs — purely an internal optimization
+| File | Change |
+|------|--------|
+| `supabase/functions/ebay-sync/index.ts` | Add `deriveMpn()` helper; update matching logic in `sync_inventory` and `sync_listings` to use fuzzy MPN derivation with fallbacks; add console.log for unmatched items |
 
