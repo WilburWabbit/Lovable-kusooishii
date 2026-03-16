@@ -419,12 +419,36 @@ Deno.serve(async (req) => {
       const items = await fetchInventoryItems(accessToken);
       console.log(`Fetched ${items.length} eBay inventory items`);
 
-      // Pre-fetch SKU → product_id map
+      // Pre-fetch lookup maps for matching
       const { data: allSkus } = await admin.from("sku").select("id, sku_code, product_id").eq("active_flag", true);
       const skuToProduct = new Map<string, string>();
+      const skuIdToProduct = new Map<string, string>();
       for (const s of allSkus || []) {
-        if (s.product_id) skuToProduct.set(s.sku_code, s.product_id);
+        if (s.product_id) {
+          skuToProduct.set(s.sku_code, s.product_id);
+          skuIdToProduct.set(s.id, s.product_id);
+        }
       }
+
+      // MPN → product_id map (eBay SKU is often the MPN/set number itself)
+      const { data: allProducts } = await admin.from("product").select("id, mpn");
+      const mpnToProduct = new Map<string, string>();
+      for (const p of allProducts || []) {
+        if (p.mpn) mpnToProduct.set(p.mpn, p.id);
+      }
+
+      // channel_listing → sku_id map (populated by sync_inventory)
+      const { data: allListings } = await admin
+        .from("channel_listing")
+        .select("external_sku, sku_id")
+        .eq("channel", "ebay")
+        .not("sku_id", "is", null);
+      const listingSkuMap = new Map<string, string>();
+      for (const l of allListings || []) {
+        if (l.sku_id) listingSkuMap.set(l.external_sku, l.sku_id);
+      }
+
+      console.log(`Lookup maps: ${skuToProduct.size} sku→product, ${mpnToProduct.size} mpn→product, ${listingSkuMap.size} channel_listing→sku`);
 
       let productsMatched = 0;
       let productsUpdated = 0;
@@ -437,15 +461,29 @@ Deno.serve(async (req) => {
         try {
           if (!item.sku) continue;
 
-          // Match to local product: SKU lookup first, then MPN fallback
-          let productId = skuToProduct.get(item.sku) || null;
+          // Match to local product via multiple strategies
+          let productId: string | null = null;
+
+          // 1. SKU code → product_id (items listed through this system)
+          productId = skuToProduct.get(item.sku) || null;
+
+          // 2. eBay SKU as MPN directly (common for LEGO sellers: SKU = set number)
+          if (!productId) {
+            productId = mpnToProduct.get(item.sku) || null;
+          }
+
+          // 3. MPN from eBay item aspects
           if (!productId) {
             const mpn = item.product?.aspects?.MPN?.[0];
-            if (mpn) {
-              const { data: prod } = await admin.from("product").select("id").eq("mpn", mpn).maybeSingle();
-              productId = prod?.id || null;
-            }
+            if (mpn) productId = mpnToProduct.get(mpn) || null;
           }
+
+          // 4. channel_listing (from sync_inventory) → sku_id → product_id
+          if (!productId) {
+            const skuId = listingSkuMap.get(item.sku);
+            if (skuId) productId = skuIdToProduct.get(skuId) || null;
+          }
+
           if (!productId || processedProducts.has(productId)) continue;
           processedProducts.add(productId);
           productsMatched++;
