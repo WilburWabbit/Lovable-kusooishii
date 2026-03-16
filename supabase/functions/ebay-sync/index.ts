@@ -8,6 +8,16 @@ const corsHeaders = {
 
 const EBAY_API = "https://api.ebay.com";
 
+/**
+ * Normalise an eBay SKU to the canonical MPN.
+ *  - Strip dot-grade suffix:  75418-1.1  → 75418-1
+ *  - Strip legacy -G suffix:  31172-1-G1 → 31172-1
+ *  - Leave bare MPNs alone:   76273-1    → 76273-1
+ */
+function deriveMpn(sku: string): string {
+  return sku.replace(/-G\d+$/i, "").replace(/\.\d+$/, "");
+}
+
 /* ── OAuth token management (singleton) ── */
 async function getAccessToken(admin: any): Promise<string> {
   const { data: conn, error } = await admin
@@ -375,10 +385,15 @@ Deno.serve(async (req) => {
 
       // Pre-fetch local SKUs for auto-linking
       const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
-      const skuMap = new Map<string, string>();
+      const skuMap = new Map<string, string>();       // exact sku_code → id
+      const mpnSkuMap = new Map<string, string>();    // derived MPN → first matching sku id
       for (const s of allSkus || []) {
         skuMap.set(s.sku_code, s.id);
+        const mpn = deriveMpn(s.sku_code);
+        if (!mpnSkuMap.has(mpn)) mpnSkuMap.set(mpn, s.id);
       }
+
+      let unmatchedSkus: string[] = [];
 
       for (const item of items) {
         if (!item.sku) continue;
@@ -387,8 +402,18 @@ Deno.serve(async (req) => {
         const price = offer?.pricingSummary?.price?.value ? parseFloat(offer.pricingSummary.price.value) : null;
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
-        // Direct lookup — eBay SKU should match sku_code exactly
-        const matchedSkuId = skuMap.get(item.sku) || null;
+        // 1. Exact sku_code match
+        let matchedSkuId = skuMap.get(item.sku) || null;
+
+        // 2. Derive MPN from eBay SKU and find local SKU with that MPN prefix
+        if (!matchedSkuId) {
+          const mpn = deriveMpn(item.sku);
+          matchedSkuId = mpnSkuMap.get(mpn) || null;
+        }
+
+        if (!matchedSkuId) {
+          unmatchedSkus.push(item.sku);
+        }
 
         const { error: upsertErr } = await admin
           .from("channel_listing")
@@ -408,6 +433,10 @@ Deno.serve(async (req) => {
           );
         if (upsertErr) console.error(`Upsert listing ${item.sku}:`, upsertErr.message);
         results.inventory_synced++;
+      }
+
+      if (unmatchedSkus.length > 0) {
+        console.warn(`sync_inventory: ${unmatchedSkus.length} unmatched eBay SKUs: ${unmatchedSkus.slice(0, 20).join(", ")}${unmatchedSkus.length > 20 ? "..." : ""}`);
       }
     }
 
@@ -457,34 +486,57 @@ Deno.serve(async (req) => {
       let errors = 0;
       const processedProducts = new Set<string>();
 
+      const unmatchedListings: string[] = [];
+
       for (const item of items) {
         try {
           if (!item.sku) continue;
 
+          const normalizedMpn = deriveMpn(item.sku);
+
           // Match to local product via multiple strategies
           let productId: string | null = null;
+          let matchStrategy = "";
 
-          // 1. SKU code → product_id (items listed through this system)
+          // 1. Exact SKU code → product_id
           productId = skuToProduct.get(item.sku) || null;
+          if (productId) matchStrategy = "exact_sku";
 
-          // 2. eBay SKU as MPN directly (common for LEGO sellers: SKU = set number)
+          // 2. Derived MPN → product (strip grade/legacy suffixes)
           if (!productId) {
-            productId = mpnToProduct.get(item.sku) || null;
+            productId = mpnToProduct.get(normalizedMpn) || null;
+            if (productId) matchStrategy = "derived_mpn";
           }
 
-          // 3. MPN from eBay item aspects
+          // 3. Raw eBay SKU as MPN (already worked for bare MPNs)
+          if (!productId && normalizedMpn !== item.sku) {
+            productId = mpnToProduct.get(item.sku) || null;
+            if (productId) matchStrategy = "raw_sku_as_mpn";
+          }
+
+          // 4. MPN from eBay item aspects
           if (!productId) {
             const mpn = item.product?.aspects?.MPN?.[0];
-            if (mpn) productId = mpnToProduct.get(mpn) || null;
+            if (mpn) {
+              productId = mpnToProduct.get(mpn) || null;
+              if (productId) matchStrategy = "ebay_aspect_mpn";
+            }
           }
 
-          // 4. channel_listing (from sync_inventory) → sku_id → product_id
+          // 5. channel_listing (from sync_inventory) → sku_id → product_id
           if (!productId) {
             const skuId = listingSkuMap.get(item.sku);
-            if (skuId) productId = skuIdToProduct.get(skuId) || null;
+            if (skuId) {
+              productId = skuIdToProduct.get(skuId) || null;
+              if (productId) matchStrategy = "channel_listing_sku";
+            }
           }
 
-          if (!productId || processedProducts.has(productId)) continue;
+          if (!productId) {
+            unmatchedListings.push(item.sku);
+            continue;
+          }
+          if (processedProducts.has(productId)) continue;
           processedProducts.add(productId);
           productsMatched++;
 
@@ -631,6 +683,11 @@ Deno.serve(async (req) => {
           errors++;
         }
       }
+
+      if (unmatchedListings.length > 0) {
+        console.warn(`sync_listings: ${unmatchedListings.length} unmatched eBay SKUs: ${unmatchedListings.slice(0, 20).join(", ")}${unmatchedListings.length > 20 ? "..." : ""}`);
+      }
+      console.log(`sync_listings complete: matched=${productsMatched}, updated=${productsUpdated}, attrs=${attributesFilled}, images=${imagesDownloaded}, errors=${errors}`);
 
       return new Response(
         JSON.stringify({
