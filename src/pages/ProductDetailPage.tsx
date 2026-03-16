@@ -254,7 +254,7 @@ export default function ProductDetailPage() {
           ) : product ? (
             <div className="grid gap-10 lg:grid-cols-2">
               {/* Image gallery */}
-              <div>
+              <div className="min-w-0">
                 {displayMedia.length > 0 ? (
                   <div className="space-y-3">
                     <div className="aspect-square bg-background overflow-hidden border border-border relative">
