@@ -53,7 +53,7 @@ function initForm(product: ProductDetail): FormValues {
     width_cm: String(product.width_cm ?? ""),
     height_cm: String(product.height_cm ?? ""),
     weight_kg: String(product.weight_kg ?? ""),
-    brickeconomy_id: String(product.brickeconomy_id ?? src?.lego_catalog?.brickeconomy_id ?? ""),
+    brickeconomy_id: String(product.brickeconomy_id ?? src?.lego_catalog?.brickeconomy_id ?? src?.brickeconomy?.item_number ?? ""),
     bricklink_item_no: String(product.bricklink_item_no ?? src?.lego_catalog?.bricklink_item_no ?? ""),
     brickowl_boid: String(product.brickowl_boid ?? src?.lego_catalog?.brickowl_boid ?? ""),
     rebrickable_id: String(product.rebrickable_id ?? src?.lego_catalog?.rebrickable_id ?? ""),
