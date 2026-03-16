@@ -385,10 +385,15 @@ Deno.serve(async (req) => {
 
       // Pre-fetch local SKUs for auto-linking
       const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
-      const skuMap = new Map<string, string>();
+      const skuMap = new Map<string, string>();       // exact sku_code → id
+      const mpnSkuMap = new Map<string, string>();    // derived MPN → first matching sku id
       for (const s of allSkus || []) {
         skuMap.set(s.sku_code, s.id);
+        const mpn = deriveMpn(s.sku_code);
+        if (!mpnSkuMap.has(mpn)) mpnSkuMap.set(mpn, s.id);
       }
+
+      let unmatchedSkus: string[] = [];
 
       for (const item of items) {
         if (!item.sku) continue;
@@ -397,8 +402,18 @@ Deno.serve(async (req) => {
         const price = offer?.pricingSummary?.price?.value ? parseFloat(offer.pricingSummary.price.value) : null;
         const qty = item.availability?.shipToLocationAvailability?.quantity ?? null;
 
-        // Direct lookup — eBay SKU should match sku_code exactly
-        const matchedSkuId = skuMap.get(item.sku) || null;
+        // 1. Exact sku_code match
+        let matchedSkuId = skuMap.get(item.sku) || null;
+
+        // 2. Derive MPN from eBay SKU and find local SKU with that MPN prefix
+        if (!matchedSkuId) {
+          const mpn = deriveMpn(item.sku);
+          matchedSkuId = mpnSkuMap.get(mpn) || null;
+        }
+
+        if (!matchedSkuId) {
+          unmatchedSkus.push(item.sku);
+        }
 
         const { error: upsertErr } = await admin
           .from("channel_listing")
@@ -418,6 +433,10 @@ Deno.serve(async (req) => {
           );
         if (upsertErr) console.error(`Upsert listing ${item.sku}:`, upsertErr.message);
         results.inventory_synced++;
+      }
+
+      if (unmatchedSkus.length > 0) {
+        console.warn(`sync_inventory: ${unmatchedSkus.length} unmatched eBay SKUs: ${unmatchedSkus.slice(0, 20).join(", ")}${unmatchedSkus.length > 20 ? "..." : ""}`);
       }
     }
 
