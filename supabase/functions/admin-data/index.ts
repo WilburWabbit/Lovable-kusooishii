@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
       const baseMpn = product.mpn.replace(/-\d+$/, "");
       const { data: beRow } = await admin
         .from("brickeconomy_collection")
-        .select("minifigs_count, retail_price, released_date, retired_date")
+        .select("item_number, minifigs_count, retail_price, released_date, retired_date")
         .in("item_number", [product.mpn, baseMpn])
         .order("synced_at", { ascending: false })
         .limit(1)
