@@ -658,6 +658,23 @@ Deno.serve(async (req) => {
       });
       console.log(`Inventory item created/updated: ${sku.sku_code}`);
 
+      // Step 1.5: Fetch business policies for listing
+      const [fulfillmentRes, paymentRes, returnRes] = await Promise.all([
+        ebayFetch(accessToken, `/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_GB`),
+        ebayFetch(accessToken, `/sell/account/v1/payment_policy?marketplace_id=EBAY_GB`),
+        ebayFetch(accessToken, `/sell/account/v1/return_policy?marketplace_id=EBAY_GB`),
+      ]);
+
+      const fulfillmentPolicyId = fulfillmentRes?.fulfillmentPolicies?.[0]?.fulfillmentPolicyId;
+      const paymentPolicyId = paymentRes?.paymentPolicies?.[0]?.paymentPolicyId;
+      const returnPolicyId = returnRes?.returnPolicies?.[0]?.returnPolicyId;
+
+      if (!fulfillmentPolicyId || !paymentPolicyId || !returnPolicyId) {
+        throw new Error(
+          `eBay business policies missing. Found: fulfillment=${!!fulfillmentPolicyId}, payment=${!!paymentPolicyId}, return=${!!returnPolicyId}. Configure policies in eBay Seller Hub first.`
+        );
+      }
+
       // Step 2: POST offer
       const offerBody = {
         sku: sku.sku_code,
@@ -670,6 +687,11 @@ Deno.serve(async (req) => {
         },
         merchantLocationKey: "brookville",
         categoryId: "19006", // LEGO sets category
+        listingPolicies: {
+          fulfillmentPolicyId,
+          paymentPolicyId,
+          returnPolicyId,
+        },
       };
 
       let offerId: string | null = null;
@@ -697,15 +719,11 @@ Deno.serve(async (req) => {
 
       // Step 3: Publish offer
       if (offerId && !listingId) {
-        try {
-          const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
-            method: "POST",
-          });
-          listingId = publishRes?.listingId ?? null;
-          console.log(`Offer published, listing: ${listingId}`);
-        } catch (e: any) {
-          console.warn(`Publish failed (offer may need review): ${e.message}`);
-        }
+        const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
+          method: "POST",
+        });
+        listingId = publishRes?.listingId ?? null;
+        console.log(`Offer published, listing: ${listingId}`);
       }
 
       // Upsert channel_listing

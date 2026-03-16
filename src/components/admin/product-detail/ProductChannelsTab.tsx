@@ -44,8 +44,13 @@ export function ProductChannelsTab({ product, beValuation, onInvalidate }: Produ
           toast.success("Web listing created");
         }
       } else {
-        await invokeWithAuth("admin-data", { action: "remove-web-listing", sku_id: skuId });
-        toast.success("Web listing removed");
+        if (ch === "ebay") {
+          await invokeWithAuth("ebay-sync", { action: "remove_listing", sku_id: skuId });
+          toast.success("eBay listing removed");
+        } else {
+          await invokeWithAuth("admin-data", { action: "remove-web-listing", sku_id: skuId });
+          toast.success("Web listing removed");
+        }
       }
       onInvalidate();
     } catch (err: any) {
