@@ -658,25 +658,6 @@ Deno.serve(async (req) => {
       });
       console.log(`Inventory item created/updated: ${sku.sku_code}`);
 
-      // Step 1.5: Ensure merchant location exists
-      try {
-        await ebayFetch(accessToken, `/sell/inventory/v1/location/default`);
-      } catch {
-        console.log("Default location not found — creating it...");
-        await ebayFetch(accessToken, `/sell/inventory/v1/location/default`, {
-          method: "PUT",
-          body: JSON.stringify({
-            location: {
-              address: { city: "London", country: "GB", postalCode: "SW1A 1AA" },
-            },
-            locationTypes: ["WAREHOUSE"],
-            name: "Default Location",
-            merchantLocationStatus: "ENABLED",
-          }),
-        });
-        console.log("Default location created.");
-      }
-
       // Step 2: POST offer
       const offerBody = {
         sku: sku.sku_code,
@@ -687,7 +668,7 @@ Deno.serve(async (req) => {
         pricingSummary: {
           price: { value: String(sku.price ?? 0), currency: "GBP" },
         },
-        merchantLocationKey: "default",
+        merchantLocationKey: "brookville",
         categoryId: "19006", // LEGO sets category
       };
 
