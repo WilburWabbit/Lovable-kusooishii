@@ -334,7 +334,7 @@ export function ProductMediaCard({ productId, productName, mpn, includeCatalogIm
     // Cancel in-flight queries to prevent stale data overwriting optimistic update
     await queryClient.cancelQueries({ queryKey });
 
-    const reordered = arrayMove(items, oldIndex, newIndex);
+    const reordered = arrayMove(items, oldIndex, newIndex) as MediaItem[];
     const updatedItems = reordered.map((item, idx) => ({ ...item, sort_order: idx }));
     queryClient.setQueryData(queryKey, updatedItems);
 

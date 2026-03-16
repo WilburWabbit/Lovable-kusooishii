@@ -221,7 +221,7 @@ export default function ProductDetailPage() {
 
   return (
     <StorefrontLayout>
-      <div className="bg-background">
+      <div className="bg-background overflow-hidden">
         {/* Breadcrumb */}
         <div className="border-b border-border bg-kuso-paper">
           <div className="container flex items-center gap-2 py-3">
@@ -254,7 +254,7 @@ export default function ProductDetailPage() {
           ) : product ? (
             <div className="grid gap-10 lg:grid-cols-2">
               {/* Image gallery */}
-              <div>
+              <div className="min-w-0">
                 {displayMedia.length > 0 ? (
                   <div className="space-y-3">
                     <div className="aspect-square bg-background overflow-hidden border border-border relative">
@@ -290,7 +290,7 @@ export default function ProductDetailPage() {
               </div>
 
               {/* Product info */}
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   {themeName && <span className="font-body text-xs text-muted-foreground">{themeName}</span>}
                   <span className="font-body text-xs text-muted-foreground">·</span>
@@ -371,7 +371,7 @@ export default function ProductDetailPage() {
                         key={offer.sku_id}
                         className="flex flex-wrap items-center justify-between gap-3 border border-border p-4 transition-colors hover:border-primary"
                       >
-                        <div className="flex items-center gap-3 max-w-full sm:max-w-[60%]">
+                        <div className="flex items-center gap-3 min-w-0 max-w-full sm:max-w-[60%]">
                           <div className="flex h-8 w-8 items-center justify-center bg-foreground font-display text-xs font-bold text-background">
                             G{offer.condition_grade}
                           </div>

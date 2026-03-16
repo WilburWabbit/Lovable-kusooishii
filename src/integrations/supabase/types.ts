@@ -1152,14 +1152,9 @@ export type Database = {
       product: {
         Row: {
           age_range: string | null
-          brand: string | null
-          brickeconomy_id: string | null
-          bricklink_item_no: string | null
-          brickowl_boid: string | null
           call_to_action: string | null
           created_at: string
           description: string | null
-          field_overrides: Record<string, unknown> | null
           height_cm: number | null
           highlights: string | null
           id: string
@@ -1167,17 +1162,12 @@ export type Database = {
           include_catalog_img: boolean
           lego_catalog_id: string | null
           length_cm: number | null
-          minifigs_count: number | null
           mpn: string
           name: string | null
           piece_count: number | null
           product_hook: string | null
           product_type: string
-          rebrickable_id: string | null
           release_year: number | null
-          released_date: string | null
-          retail_price: number | null
-          retired_date: string | null
           retired_flag: boolean
           seo_description: string | null
           seo_title: string | null
@@ -1185,20 +1175,14 @@ export type Database = {
           subtheme_name: string | null
           theme_id: string | null
           updated_at: string
-          version_descriptor: string | null
           weight_kg: number | null
           width_cm: number | null
         }
         Insert: {
           age_range?: string | null
-          brand?: string | null
-          brickeconomy_id?: string | null
-          bricklink_item_no?: string | null
-          brickowl_boid?: string | null
           call_to_action?: string | null
           created_at?: string
           description?: string | null
-          field_overrides?: Record<string, unknown> | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
@@ -1206,17 +1190,12 @@ export type Database = {
           include_catalog_img?: boolean
           lego_catalog_id?: string | null
           length_cm?: number | null
-          minifigs_count?: number | null
           mpn: string
           name?: string | null
           piece_count?: number | null
           product_hook?: string | null
           product_type?: string
-          rebrickable_id?: string | null
           release_year?: number | null
-          released_date?: string | null
-          retail_price?: number | null
-          retired_date?: string | null
           retired_flag?: boolean
           seo_description?: string | null
           seo_title?: string | null
@@ -1224,20 +1203,14 @@ export type Database = {
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
-          version_descriptor?: string | null
           weight_kg?: number | null
           width_cm?: number | null
         }
         Update: {
           age_range?: string | null
-          brand?: string | null
-          brickeconomy_id?: string | null
-          bricklink_item_no?: string | null
-          brickowl_boid?: string | null
           call_to_action?: string | null
           created_at?: string
           description?: string | null
-          field_overrides?: Record<string, unknown> | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
@@ -1245,17 +1218,12 @@ export type Database = {
           include_catalog_img?: boolean
           lego_catalog_id?: string | null
           length_cm?: number | null
-          minifigs_count?: number | null
           mpn?: string
           name?: string | null
           piece_count?: number | null
           product_hook?: string | null
           product_type?: string
-          rebrickable_id?: string | null
           release_year?: number | null
-          released_date?: string | null
-          retail_price?: number | null
-          retired_date?: string | null
           retired_flag?: boolean
           seo_description?: string | null
           seo_title?: string | null
@@ -1263,7 +1231,6 @@ export type Database = {
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
-          version_descriptor?: string | null
           weight_kg?: number | null
           width_cm?: number | null
         }

@@ -1,34 +1,38 @@
 
 
-## Fix: Mobile Overflow on Product Detail + Build Errors
+## Fix: Pricing Calculation Edge Function Timeout
 
-### 1. Mobile horizontal overflow on `/sets/*` pages
+### Problem
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
 
-The `container` class has `padding: "2rem"` (32px each side). On a 390px viewport, the content area is ~326px. The image gallery's `aspect-square` div and the offer cards don't have `min-w-0` or `overflow-hidden` constraints, so long text or flex children can push beyond the container.
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
 
-**Fixes in `src/pages/ProductDetailPage.tsx`:**
-- Add `overflow-hidden` to the outer `bg-background` wrapper div
-- Add `min-w-0` to both grid columns (image gallery `div` and product info `div`) to prevent flex/grid blowout
-- Add `min-w-0 overflow-hidden` to the offer card text containers to prevent long grade descriptions from overflowing
+### Changes
 
-### 2. Build error: Spread types (ProductMediaCard.tsx line 338)
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
 
-`arrayMove` returns `(MediaItem | undefined)[]` because the query data type from `useQuery` could be `undefined` entries. Fix by typing `items` explicitly or casting the spread.
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
 
-**Fix in `src/components/admin/ProductMediaCard.tsx`:**
-- Add a type assertion on the `arrayMove` result: `arrayMove(items, oldIndex, newIndex) as MediaItem[]`
+```typescript
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
 
-### 3. Build error: boolean not assignable to input value (ProductDetailsTab.tsx line 206)
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
+```
 
-`FormValues` allows `boolean` values, but `<Input value={...}>` only accepts `string | number | readonly string[]`. The `String()` wrapper on line 363 handles this at runtime, but the TS type on line 206 (`form.retail_price`) flows through without `String()`.
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
 
-**Fix in `src/components/admin/product-detail/ProductDetailsTab.tsx`:**
-- In the `FieldWithOverride` component, the `value` prop already uses `String(form[field] ?? "")` which is correct. The error is actually on line 206 where `value={form.retail_price ?? ""}` is used directly in the retail price Input — wrap it with `String(form.retail_price ?? "")`.
-
-### 4. Build error: getClaims (qbo-sync-tax-rates)
-
-`getClaims` doesn't exist on the Supabase auth client. Replace with `getUser()` which is the standard method to verify the token.
-
-**Fix in `supabase/functions/qbo-sync-tax-rates/index.ts`:**
-- Replace `await userClient.auth.getClaims(token)` with `await userClient.auth.getUser()` and adjust the subsequent check accordingly.
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 
