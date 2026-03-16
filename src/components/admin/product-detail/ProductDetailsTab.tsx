@@ -30,29 +30,33 @@ interface ProductDetailsTabProps {
   onInvalidate: () => void;
 }
 
-type FormValues = Record<string, string | number | boolean | null>;
+type FormValues = Record<string, string | boolean>;
 
 function initForm(product: ProductDetail): FormValues {
+  const src = product.source_data;
   return {
-    name: product.name ?? "",
-    piece_count: product.piece_count ?? "",
-    minifigs_count: product.minifigs_count ?? "",
-    retail_price: product.retail_price ?? "",
-    product_type: product.product_type ?? "set",
-    brand: product.brand ?? "",
-    version_descriptor: product.version_descriptor ?? "",
-    release_year: product.release_year ?? "",
-    released_date: product.released_date ?? "",
+    name: String(product.name ?? ""),
+    theme_name: String(product.theme_name ?? ""),
+    subtheme_name: String(product.subtheme_name ?? ""),
+    age_range: String(product.age_range ?? ""),
+    piece_count: String(product.piece_count ?? ""),
+    minifigs_count: String(product.minifigs_count ?? ""),
+    retail_price: String(product.retail_price ?? ""),
+    product_type: String(product.product_type ?? "set"),
+    brand: String(product.brand ?? ""),
+    version_descriptor: String(product.version_descriptor ?? ""),
+    release_year: String(product.release_year ?? ""),
+    released_date: String(product.released_date ?? ""),
     retired_flag: product.retired_flag,
-    retired_date: product.retired_date ?? "",
-    length_cm: product.length_cm ?? "",
-    width_cm: product.width_cm ?? "",
-    height_cm: product.height_cm ?? "",
-    weight_kg: product.weight_kg ?? "",
-    brickeconomy_id: product.brickeconomy_id ?? "",
-    bricklink_item_no: product.bricklink_item_no ?? "",
-    brickowl_boid: product.brickowl_boid ?? "",
-    rebrickable_id: product.rebrickable_id ?? "",
+    retired_date: String(product.retired_date ?? ""),
+    length_cm: String(product.length_cm ?? ""),
+    width_cm: String(product.width_cm ?? ""),
+    height_cm: String(product.height_cm ?? ""),
+    weight_kg: String(product.weight_kg ?? ""),
+    brickeconomy_id: String(product.brickeconomy_id ?? src?.lego_catalog?.brickeconomy_id ?? ""),
+    bricklink_item_no: String(product.bricklink_item_no ?? src?.lego_catalog?.bricklink_item_no ?? ""),
+    brickowl_boid: String(product.brickowl_boid ?? src?.lego_catalog?.brickowl_boid ?? ""),
+    rebrickable_id: String(product.rebrickable_id ?? src?.lego_catalog?.rebrickable_id ?? ""),
   };
 }
 
@@ -73,7 +77,7 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
     setDirty(false);
   }, [product]);
 
-  const handleChange = useCallback((key: string, value: string | number | boolean | null) => {
+  const handleChange = useCallback((key: string, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
   }, []);
@@ -84,19 +88,21 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
       const updates: Record<string, unknown> = {};
       const initial = initForm(product);
 
+      const INT_FIELDS = ["piece_count", "minifigs_count", "release_year"];
+      const FLOAT_FIELDS = ["retail_price", "length_cm", "width_cm", "height_cm", "weight_kg"];
+
       for (const [key, value] of Object.entries(form)) {
-        if (value !== initial[key]) {
-          if (typeof value === "boolean") {
-            updates[key] = value;
-          } else if (value === "" || value === null) {
-            updates[key] = null;
-          } else if (["piece_count", "minifigs_count", "release_year"].includes(key)) {
-            updates[key] = parseInt(String(value), 10) || null;
-          } else if (["retail_price", "length_cm", "width_cm", "height_cm", "weight_kg"].includes(key)) {
-            updates[key] = parseFloat(String(value)) || null;
-          } else {
-            updates[key] = String(value).trim() || null;
-          }
+        if (value === initial[key]) continue;
+        if (typeof value === "boolean") {
+          updates[key] = value;
+        } else if (value === "") {
+          updates[key] = null;
+        } else if (INT_FIELDS.includes(key)) {
+          updates[key] = parseInt(String(value), 10) || null;
+        } else if (FLOAT_FIELDS.includes(key)) {
+          updates[key] = parseFloat(String(value)) || null;
+        } else {
+          updates[key] = String(value).trim() || null;
         }
       }
 
@@ -107,6 +113,7 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
 
       // Track overrides for fields with source data
       const overrides: Record<string, FieldOverride> = { ...(product.field_overrides ?? {}) };
+      let overridesChanged = false;
       for (const key of Object.keys(updates)) {
         const sourceVal = getSourceValue(key, product.source_data);
         if (sourceVal !== undefined && updates[key] !== sourceVal) {
@@ -114,11 +121,15 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
             overridden_at: new Date().toISOString(),
             source_value: sourceVal,
           };
-        } else if (sourceVal !== undefined && updates[key] === sourceVal) {
+          overridesChanged = true;
+        } else if (sourceVal !== undefined && updates[key] === sourceVal && overrides[key]) {
           delete overrides[key];
+          overridesChanged = true;
         }
       }
-      updates.field_overrides = overrides;
+      if (overridesChanged) {
+        updates.field_overrides = overrides;
+      }
 
       await invokeWithAuth("admin-data", {
         action: "update-product",
@@ -147,12 +158,12 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
   function revertToSource(field: string) {
     const sourceVal = getSourceValue(field, product.source_data);
     if (sourceVal !== undefined) {
-      handleChange(field, sourceVal as string | number | boolean | null);
+      handleChange(field, String(sourceVal));
     }
   }
 
-  const width = typeof form.width_cm === "number" ? form.width_cm : parseFloat(String(form.width_cm)) || 0;
-  const height = typeof form.height_cm === "number" ? form.height_cm : parseFloat(String(form.height_cm)) || 0;
+  const width = parseFloat(String(form.width_cm)) || 0;
+  const height = parseFloat(String(form.height_cm)) || 0;
   const girth = width > 0 && height > 0 ? (2 * (width + height)).toFixed(1) : null;
 
   return (
@@ -175,18 +186,8 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
             </div>
 
             <FieldWithOverride field="name" form={form} onChange={handleChange} hasStale={hasStaleOverride("name")} onRevert={() => revertToSource("name")} />
-
-            {/* Theme - read only */}
-            <div>
-              <Label className="text-xs text-muted-foreground">Theme</Label>
-              <Input value={product.theme_name ?? "—"} disabled className="mt-1" />
-            </div>
-
-            {/* Subtheme - read only */}
-            <div>
-              <Label className="text-xs text-muted-foreground">Subtheme</Label>
-              <Input value={product.subtheme_name ?? "—"} disabled className="mt-1" />
-            </div>
+            <FieldWithOverride field="theme_name" form={form} onChange={handleChange} hasStale={hasStaleOverride("theme_name")} onRevert={() => revertToSource("theme_name")} />
+            <FieldWithOverride field="subtheme_name" form={form} onChange={handleChange} hasStale={hasStaleOverride("subtheme_name")} onRevert={() => revertToSource("subtheme_name")} />
 
             <FieldWithOverride field="release_year" form={form} onChange={handleChange} type="number" hasStale={hasStaleOverride("release_year")} onRevert={() => revertToSource("release_year")} />
             <FieldWithOverride field="piece_count" form={form} onChange={handleChange} type="number" hasStale={hasStaleOverride("piece_count")} onRevert={() => revertToSource("piece_count")} />
@@ -231,11 +232,7 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
               <FieldWithOverride field="retired_date" form={form} onChange={handleChange} type="date" hasStale={hasStaleOverride("retired_date")} onRevert={() => revertToSource("retired_date")} />
             )}
 
-            {/* Age Range - read only, managed in Content & Media tab */}
-            <div>
-              <Label className="text-xs text-muted-foreground">Age Range</Label>
-              <Input value={product.age_range ?? "—"} disabled className="mt-1" />
-            </div>
+            <FieldWithOverride field="age_range" form={form} onChange={handleChange} hasStale={hasStaleOverride("age_range")} onRevert={() => revertToSource("age_range")} />
           </CardContent>
         </Card>
 

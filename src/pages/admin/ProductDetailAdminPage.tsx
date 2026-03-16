@@ -22,7 +22,7 @@ export default function ProductDetailAdminPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("content-media");
+  const [activeTab, setActiveTab] = useState("details");
 
   const { data: product, isLoading } = useQuery({
     queryKey: ["admin-product", id],
@@ -78,10 +78,14 @@ export default function ProductDetailAdminPage() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full grid grid-cols-3">
-            <TabsTrigger value="content-media">Content & Media</TabsTrigger>
             <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="content-media">Content & Media</TabsTrigger>
             <TabsTrigger value="channels">Channels</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="details" className="mt-4">
+            <ProductDetailsTab product={product} onInvalidate={handleInvalidate} />
+          </TabsContent>
 
           <TabsContent value="content-media" className="mt-4 space-y-4">
             <ProductContentTab product={product} onInvalidate={handleInvalidate} />
@@ -92,10 +96,6 @@ export default function ProductDetailAdminPage() {
               onSaved={handleInvalidate}
             />
             <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} includeCatalogImg={product.include_catalog_img} onInvalidate={handleInvalidate} />
-          </TabsContent>
-
-          <TabsContent value="details" className="mt-4">
-            <ProductDetailsTab product={product} onInvalidate={handleInvalidate} />
           </TabsContent>
 
           <TabsContent value="channels" className="mt-4">
