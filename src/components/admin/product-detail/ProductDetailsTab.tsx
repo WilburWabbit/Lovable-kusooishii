@@ -203,7 +203,7 @@ export function ProductDetailsTab({ product, onInvalidate }: ProductDetailsTabPr
                 <Input
                   type="number"
                   step="0.01"
-                  value={form.retail_price ?? ""}
+                  value={String(form.retail_price ?? "")}
                   onChange={(e) => handleChange("retail_price", e.target.value)}
                   className="pl-7"
                 />

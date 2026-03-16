@@ -371,7 +371,7 @@ export default function ProductDetailPage() {
                         key={offer.sku_id}
                         className="flex flex-wrap items-center justify-between gap-3 border border-border p-4 transition-colors hover:border-primary"
                       >
-                        <div className="flex items-center gap-3 max-w-full sm:max-w-[60%]">
+                        <div className="flex items-center gap-3 min-w-0 max-w-full sm:max-w-[60%]">
                           <div className="flex h-8 w-8 items-center justify-center bg-foreground font-display text-xs font-bold text-background">
                             G{offer.condition_grade}
                           </div>
