@@ -8,6 +8,16 @@ const corsHeaders = {
 
 const EBAY_API = "https://api.ebay.com";
 
+/**
+ * Normalise an eBay SKU to the canonical MPN.
+ *  - Strip dot-grade suffix:  75418-1.1  → 75418-1
+ *  - Strip legacy -G suffix:  31172-1-G1 → 31172-1
+ *  - Leave bare MPNs alone:   76273-1    → 76273-1
+ */
+function deriveMpn(sku: string): string {
+  return sku.replace(/-G\d+$/i, "").replace(/\.\d+$/, "");
+}
+
 /* ── OAuth token management (singleton) ── */
 async function getAccessToken(admin: any): Promise<string> {
   const { data: conn, error } = await admin
