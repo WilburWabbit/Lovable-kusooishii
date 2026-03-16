@@ -486,34 +486,57 @@ Deno.serve(async (req) => {
       let errors = 0;
       const processedProducts = new Set<string>();
 
+      const unmatchedListings: string[] = [];
+
       for (const item of items) {
         try {
           if (!item.sku) continue;
 
+          const normalizedMpn = deriveMpn(item.sku);
+
           // Match to local product via multiple strategies
           let productId: string | null = null;
+          let matchStrategy = "";
 
-          // 1. SKU code → product_id (items listed through this system)
+          // 1. Exact SKU code → product_id
           productId = skuToProduct.get(item.sku) || null;
+          if (productId) matchStrategy = "exact_sku";
 
-          // 2. eBay SKU as MPN directly (common for LEGO sellers: SKU = set number)
+          // 2. Derived MPN → product (strip grade/legacy suffixes)
           if (!productId) {
-            productId = mpnToProduct.get(item.sku) || null;
+            productId = mpnToProduct.get(normalizedMpn) || null;
+            if (productId) matchStrategy = "derived_mpn";
           }
 
-          // 3. MPN from eBay item aspects
+          // 3. Raw eBay SKU as MPN (already worked for bare MPNs)
+          if (!productId && normalizedMpn !== item.sku) {
+            productId = mpnToProduct.get(item.sku) || null;
+            if (productId) matchStrategy = "raw_sku_as_mpn";
+          }
+
+          // 4. MPN from eBay item aspects
           if (!productId) {
             const mpn = item.product?.aspects?.MPN?.[0];
-            if (mpn) productId = mpnToProduct.get(mpn) || null;
+            if (mpn) {
+              productId = mpnToProduct.get(mpn) || null;
+              if (productId) matchStrategy = "ebay_aspect_mpn";
+            }
           }
 
-          // 4. channel_listing (from sync_inventory) → sku_id → product_id
+          // 5. channel_listing (from sync_inventory) → sku_id → product_id
           if (!productId) {
             const skuId = listingSkuMap.get(item.sku);
-            if (skuId) productId = skuIdToProduct.get(skuId) || null;
+            if (skuId) {
+              productId = skuIdToProduct.get(skuId) || null;
+              if (productId) matchStrategy = "channel_listing_sku";
+            }
           }
 
-          if (!productId || processedProducts.has(productId)) continue;
+          if (!productId) {
+            unmatchedListings.push(item.sku);
+            continue;
+          }
+          if (processedProducts.has(productId)) continue;
           processedProducts.add(productId);
           productsMatched++;
 
