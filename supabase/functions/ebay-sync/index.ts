@@ -684,6 +684,11 @@ Deno.serve(async (req) => {
         }
       }
 
+      if (unmatchedListings.length > 0) {
+        console.warn(`sync_listings: ${unmatchedListings.length} unmatched eBay SKUs: ${unmatchedListings.slice(0, 20).join(", ")}${unmatchedListings.length > 20 ? "..." : ""}`);
+      }
+      console.log(`sync_listings complete: matched=${productsMatched}, updated=${productsUpdated}, attrs=${attributesFilled}, images=${imagesDownloaded}, errors=${errors}`);
+
       return new Response(
         JSON.stringify({
           products_matched: productsMatched,
