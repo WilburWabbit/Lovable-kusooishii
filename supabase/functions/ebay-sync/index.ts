@@ -750,8 +750,50 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       GET SUBSCRIPTIONS — list current notification subscriptions
+       REMOVE LISTING — withdraw offer and delete channel_listing
        ═══════════════════════════════════════════════ */
+    if (action === "remove_listing") {
+      const skuId = body.sku_id;
+      if (!skuId) throw new Error("sku_id is required");
+
+      // Find the eBay channel_listing for this SKU
+      const { data: listing, error: listErr } = await admin
+        .from("channel_listing")
+        .select("id, external_sku, external_listing_id, offer_status")
+        .eq("channel", "ebay")
+        .eq("sku_id", skuId)
+        .maybeSingle();
+
+      if (listErr) throw new Error(`Failed to look up listing: ${listErr.message}`);
+      if (!listing) throw new Error("No eBay listing found for this SKU");
+
+      // Try to withdraw the offer on eBay
+      if (listing.external_sku) {
+        try {
+          const existingOffers = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(listing.external_sku)}&limit=10`);
+          const offer = (existingOffers?.offers || [])[0];
+          if (offer?.offerId) {
+            // Withdraw the offer (ends the listing)
+            await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offer.offerId}/withdraw`, {
+              method: "POST",
+            });
+            console.log(`Offer ${offer.offerId} withdrawn`);
+          }
+        } catch (e: any) {
+          console.warn(`Could not withdraw eBay offer: ${e.message}`);
+        }
+      }
+
+      // Delete the channel_listing row
+      await admin.from("channel_listing").delete().eq("id", listing.id);
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+
     if (action === "get_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
       try {
