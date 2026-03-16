@@ -5,7 +5,7 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck, Stethoscope } from "lucide-react";
+import { Loader2, Link2, Unplug, RefreshCw, Package, ArrowUpDown, Bell, BellRing, ShieldCheck, Stethoscope, DatabaseBackup } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SubResult {
@@ -30,6 +30,7 @@ export function EbaySettingsPanel() {
   const [settingUpNotifs, setSettingUpNotifs] = useState(false);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [testingSubs, setTestingSubs] = useState(false);
+  const [syncingListings, setSyncingListings] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
   const [subscriptions, setSubscriptions] = useState<SubResult[] | null>(null);
   const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
@@ -145,6 +146,27 @@ export function EbaySettingsPanel() {
       });
     } finally {
       setPushingStock(false);
+    }
+  };
+
+  const syncListings = async () => {
+    setSyncingListings(true);
+    try {
+      const data = await invokeWithAuth("ebay-sync", { action: "sync_listings" });
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const d = data as any;
+      toast({
+        title: "Listings synced",
+        description: `Matched: ${d.products_matched ?? 0} | Updated: ${d.products_updated ?? 0} | Attributes: ${d.attributes_filled ?? 0} | Images: ${d.images_downloaded ?? 0}`,
+      });
+    } catch (err) {
+      toast({
+        title: "Listing sync failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingListings(false);
     }
   };
 
@@ -312,6 +334,10 @@ export function EbaySettingsPanel() {
               <Button size="sm" variant="outline" onClick={pushStock} disabled={pushingStock || !user}>
                 {pushingStock ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ArrowUpDown className="mr-2 h-3.5 w-3.5" />}
                 Push Stock
+              </Button>
+              <Button size="sm" variant="outline" onClick={syncListings} disabled={syncingListings || !user}>
+                {syncingListings ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <DatabaseBackup className="mr-2 h-3.5 w-3.5" />}
+                Sync Listings
               </Button>
               <Button size="sm" variant="outline" onClick={setupNotifications} disabled={settingUpNotifs || !user}>
                 {settingUpNotifs ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Bell className="mr-2 h-3.5 w-3.5" />}

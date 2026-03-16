@@ -412,6 +412,201 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
+       SYNC LISTINGS — backfill product attributes & images from eBay
+       ═══════════════════════════════════════════════ */
+    if (action === "sync_listings") {
+      console.log("Syncing eBay listings → product attributes & images...");
+      const items = await fetchInventoryItems(accessToken);
+      console.log(`Fetched ${items.length} eBay inventory items`);
+
+      // Pre-fetch SKU → product_id map
+      const { data: allSkus } = await admin.from("sku").select("id, sku_code, product_id").eq("active_flag", true);
+      const skuToProduct = new Map<string, string>();
+      for (const s of allSkus || []) {
+        if (s.product_id) skuToProduct.set(s.sku_code, s.product_id);
+      }
+
+      let productsMatched = 0;
+      let productsUpdated = 0;
+      let attributesFilled = 0;
+      let imagesDownloaded = 0;
+      let errors = 0;
+      const processedProducts = new Set<string>();
+
+      for (const item of items) {
+        try {
+          if (!item.sku) continue;
+
+          // Match to local product: SKU lookup first, then MPN fallback
+          let productId = skuToProduct.get(item.sku) || null;
+          if (!productId) {
+            const mpn = item.product?.aspects?.MPN?.[0];
+            if (mpn) {
+              const { data: prod } = await admin.from("product").select("id").eq("mpn", mpn).maybeSingle();
+              productId = prod?.id || null;
+            }
+          }
+          if (!productId || processedProducts.has(productId)) continue;
+          processedProducts.add(productId);
+          productsMatched++;
+
+          // Fetch current product to check which fields are null
+          const { data: product } = await admin
+            .from("product")
+            .select("id, name, description, weight_kg, length_cm, width_cm, height_cm, piece_count")
+            .eq("id", productId)
+            .single();
+          if (!product) continue;
+
+          // Build update for null fields only
+          const updates: Record<string, any> = {};
+          const ebayProduct = item.product || {};
+          const dims = item.packageWeightAndSize;
+
+          if (product.name === null && ebayProduct.title) {
+            updates.name = ebayProduct.title;
+          }
+          if (product.description === null && ebayProduct.description) {
+            updates.description = ebayProduct.description;
+          }
+          if (product.piece_count === null) {
+            const pcs = ebayProduct.aspects?.["Number of Pieces"]?.[0];
+            if (pcs) {
+              const parsed = parseInt(pcs, 10);
+              if (!isNaN(parsed)) updates.piece_count = parsed;
+            }
+          }
+
+          if (dims?.weight) {
+            if (product.weight_kg === null && dims.weight.value) {
+              let w = dims.weight.value;
+              if (dims.weight.unit === "POUND") w = w * 0.453592;
+              else if (dims.weight.unit === "GRAM") w = w / 1000;
+              else if (dims.weight.unit === "OUNCE") w = w * 0.0283495;
+              updates.weight_kg = Math.round(w * 1000) / 1000;
+            }
+          }
+
+          if (dims?.dimensions) {
+            const d = dims.dimensions;
+            const convert = (v: any) => {
+              if (!v?.value) return null;
+              let cm = v.value;
+              if (v.unit === "INCH") cm = cm * 2.54;
+              else if (v.unit === "METER") cm = cm * 100;
+              else if (v.unit === "FEET") cm = cm * 30.48;
+              return Math.round(cm * 10) / 10;
+            };
+            if (product.length_cm === null && d.length) {
+              const val = convert(d.length);
+              if (val !== null) updates.length_cm = val;
+            }
+            if (product.width_cm === null && d.width) {
+              const val = convert(d.width);
+              if (val !== null) updates.width_cm = val;
+            }
+            if (product.height_cm === null && d.height) {
+              const val = convert(d.height);
+              if (val !== null) updates.height_cm = val;
+            }
+          }
+
+          const fieldCount = Object.keys(updates).length;
+          if (fieldCount > 0) {
+            const { error: updateErr } = await admin.from("product").update(updates).eq("id", productId);
+            if (updateErr) {
+              console.error(`Update product ${productId}:`, updateErr.message);
+            } else {
+              productsUpdated++;
+              attributesFilled += fieldCount;
+            }
+          }
+
+          // Download images if product has none
+          const ebayImages: string[] = ebayProduct.imageUrls || [];
+          if (ebayImages.length > 0) {
+            const { count: mediaCount } = await admin
+              .from("product_media")
+              .select("id", { count: "exact", head: true })
+              .eq("product_id", productId);
+
+            if ((mediaCount ?? 0) === 0) {
+              for (let idx = 0; idx < ebayImages.length; idx++) {
+                try {
+                  const imgRes = await fetch(ebayImages[idx]);
+                  if (!imgRes.ok) continue;
+                  const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+                  const contentType = imgRes.headers.get("Content-Type") || "image/jpeg";
+                  const extMap: Record<string, string> = {
+                    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+                  };
+                  const ext = extMap[contentType] || "jpg";
+                  const storagePath = `products/${productId}/${crypto.randomUUID()}.${ext}`;
+
+                  const { error: uploadErr } = await admin.storage
+                    .from("media")
+                    .upload(storagePath, imgBytes, { contentType, upsert: false });
+                  if (uploadErr) {
+                    console.error(`Upload image ${idx} for ${productId}:`, uploadErr.message);
+                    continue;
+                  }
+
+                  const { data: urlData } = admin.storage.from("media").getPublicUrl(storagePath);
+
+                  const { data: asset, error: assetErr } = await admin
+                    .from("media_asset")
+                    .insert({
+                      original_url: urlData.publicUrl,
+                      mime_type: contentType,
+                      file_size_bytes: imgBytes.byteLength,
+                      provenance: "ebay-sync",
+                    })
+                    .select("id")
+                    .single();
+                  if (assetErr) {
+                    console.error(`Insert media_asset for ${productId}:`, assetErr.message);
+                    continue;
+                  }
+
+                  const { error: linkErr } = await admin
+                    .from("product_media")
+                    .insert({
+                      product_id: productId,
+                      media_asset_id: asset.id,
+                      sort_order: idx,
+                      is_primary: idx === 0,
+                    });
+                  if (linkErr) {
+                    console.error(`Insert product_media for ${productId}:`, linkErr.message);
+                    continue;
+                  }
+
+                  imagesDownloaded++;
+                } catch (imgErr: any) {
+                  console.error(`Image download ${idx} for ${productId}:`, imgErr.message);
+                }
+              }
+            }
+          }
+        } catch (itemErr: any) {
+          console.error(`sync_listings item ${item.sku}:`, itemErr.message);
+          errors++;
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          products_matched: productsMatched,
+          products_updated: productsUpdated,
+          attributes_filled: attributesFilled,
+          images_downloaded: imagesDownloaded,
+          errors,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    /* ═══════════════════════════════════════════════
        PUSH STOCK — count available stock_units → eBay
        ═══════════════════════════════════════════════ */
     if (action === "push_stock") {
