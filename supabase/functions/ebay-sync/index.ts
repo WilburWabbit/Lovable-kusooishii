@@ -658,6 +658,23 @@ Deno.serve(async (req) => {
       });
       console.log(`Inventory item created/updated: ${sku.sku_code}`);
 
+      // Step 1.5: Fetch business policies for listing
+      const [fulfillmentRes, paymentRes, returnRes] = await Promise.all([
+        ebayFetch(accessToken, `/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_GB`),
+        ebayFetch(accessToken, `/sell/account/v1/payment_policy?marketplace_id=EBAY_GB`),
+        ebayFetch(accessToken, `/sell/account/v1/return_policy?marketplace_id=EBAY_GB`),
+      ]);
+
+      const fulfillmentPolicyId = fulfillmentRes?.fulfillmentPolicies?.[0]?.fulfillmentPolicyId;
+      const paymentPolicyId = paymentRes?.paymentPolicies?.[0]?.paymentPolicyId;
+      const returnPolicyId = returnRes?.returnPolicies?.[0]?.returnPolicyId;
+
+      if (!fulfillmentPolicyId || !paymentPolicyId || !returnPolicyId) {
+        throw new Error(
+          `eBay business policies missing. Found: fulfillment=${!!fulfillmentPolicyId}, payment=${!!paymentPolicyId}, return=${!!returnPolicyId}. Configure policies in eBay Seller Hub first.`
+        );
+      }
+
       // Step 2: POST offer
       const offerBody = {
         sku: sku.sku_code,
@@ -670,6 +687,11 @@ Deno.serve(async (req) => {
         },
         merchantLocationKey: "brookville",
         categoryId: "19006", // LEGO sets category
+        listingPolicies: {
+          fulfillmentPolicyId,
+          paymentPolicyId,
+          returnPolicyId,
+        },
       };
 
       let offerId: string | null = null;
@@ -697,15 +719,11 @@ Deno.serve(async (req) => {
 
       // Step 3: Publish offer
       if (offerId && !listingId) {
-        try {
-          const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
-            method: "POST",
-          });
-          listingId = publishRes?.listingId ?? null;
-          console.log(`Offer published, listing: ${listingId}`);
-        } catch (e: any) {
-          console.warn(`Publish failed (offer may need review): ${e.message}`);
-        }
+        const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
+          method: "POST",
+        });
+        listingId = publishRes?.listingId ?? null;
+        console.log(`Offer published, listing: ${listingId}`);
       }
 
       // Upsert channel_listing
@@ -732,8 +750,50 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       GET SUBSCRIPTIONS — list current notification subscriptions
+       REMOVE LISTING — withdraw offer and delete channel_listing
        ═══════════════════════════════════════════════ */
+    if (action === "remove_listing") {
+      const skuId = body.sku_id;
+      if (!skuId) throw new Error("sku_id is required");
+
+      // Find the eBay channel_listing for this SKU
+      const { data: listing, error: listErr } = await admin
+        .from("channel_listing")
+        .select("id, external_sku, external_listing_id, offer_status")
+        .eq("channel", "ebay")
+        .eq("sku_id", skuId)
+        .maybeSingle();
+
+      if (listErr) throw new Error(`Failed to look up listing: ${listErr.message}`);
+      if (!listing) throw new Error("No eBay listing found for this SKU");
+
+      // Try to withdraw the offer on eBay
+      if (listing.external_sku) {
+        try {
+          const existingOffers = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(listing.external_sku)}&limit=10`);
+          const offer = (existingOffers?.offers || [])[0];
+          if (offer?.offerId) {
+            // Withdraw the offer (ends the listing)
+            await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offer.offerId}/withdraw`, {
+              method: "POST",
+            });
+            console.log(`Offer ${offer.offerId} withdrawn`);
+          }
+        } catch (e: any) {
+          console.warn(`Could not withdraw eBay offer: ${e.message}`);
+        }
+      }
+
+      // Delete the channel_listing row
+      await admin.from("channel_listing").delete().eq("id", listing.id);
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+
     if (action === "get_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
       try {
