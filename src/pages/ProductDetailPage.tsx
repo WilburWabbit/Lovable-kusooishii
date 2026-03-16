@@ -290,7 +290,7 @@ export default function ProductDetailPage() {
               </div>
 
               {/* Product info */}
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   {themeName && <span className="font-body text-xs text-muted-foreground">{themeName}</span>}
                   <span className="font-body text-xs text-muted-foreground">·</span>
