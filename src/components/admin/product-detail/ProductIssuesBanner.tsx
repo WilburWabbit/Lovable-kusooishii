@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/collapsible";
 import { AlertCircle, AlertTriangle, ChevronDown } from "lucide-react";
 import type { ProductDetail, ChannelListing } from "./types";
+import { getSourceValue, FIELD_LABELS } from "./types";
 
 interface Issue {
   severity: "error" | "warning";
@@ -43,6 +44,20 @@ function computeIssues(product: ProductDetail): Issue[] {
   }
   if (product.call_to_action && product.call_to_action.length > 80) {
     issues.push({ severity: "warning", message: `CTA exceeds 80 chars (${product.call_to_action.length})`, tab: "content-media" });
+  }
+
+  // Override alerts — source data changed since user override
+  if (product.field_overrides && product.source_data) {
+    for (const [field, override] of Object.entries(product.field_overrides)) {
+      const currentSource = getSourceValue(field, product.source_data);
+      if (currentSource !== undefined && currentSource !== override.source_value) {
+        issues.push({
+          severity: "warning",
+          message: `"${FIELD_LABELS[field] ?? field}" source data changed since your override`,
+          tab: "details",
+        });
+      }
+    }
   }
 
   // eBay title check across all listings
