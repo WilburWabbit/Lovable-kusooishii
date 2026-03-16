@@ -363,7 +363,7 @@ Deno.serve(async (req) => {
         "length_cm", "width_cm", "height_cm", "weight_kg", "include_catalog_img",
         "name", "piece_count", "minifigs_count", "retail_price", "product_type",
         "retired_flag", "retired_date", "released_date", "release_year",
-        "version_descriptor", "brand",
+        "version_descriptor", "brand", "subtheme_name",
         "brickeconomy_id", "bricklink_item_no", "brickowl_boid", "rebrickable_id",
         "field_overrides",
       ];
@@ -371,6 +371,33 @@ Deno.serve(async (req) => {
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
       }
+
+      // Handle theme_name: look up or create theme, then set theme_id
+      if ("theme_name" in fields) {
+        const themeName = fields.theme_name?.trim() || null;
+        if (themeName) {
+          // Try to find existing theme
+          let { data: theme } = await admin
+            .from("theme")
+            .select("id")
+            .eq("name", themeName)
+            .maybeSingle();
+          if (!theme) {
+            // Create new theme
+            const { data: newTheme, error: themeErr } = await admin
+              .from("theme")
+              .insert({ name: themeName })
+              .select("id")
+              .single();
+            if (themeErr) throw themeErr;
+            theme = newTheme;
+          }
+          updates.theme_id = theme.id;
+        } else {
+          updates.theme_id = null;
+        }
+      }
+
       if (Object.keys(updates).length === 0) throw new ValidationError("No valid fields to update");
       const { error } = await admin.from("product").update(updates).eq("id", product_id);
       if (error) throw error;

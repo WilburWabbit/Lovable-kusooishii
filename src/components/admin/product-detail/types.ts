@@ -146,6 +146,9 @@ export function getSourceValue(field: string, sourceData?: SourceData): unknown 
 
 export const FIELD_LABELS: Record<string, string> = {
   name: "Name",
+  theme_name: "Theme",
+  subtheme_name: "Subtheme",
+  age_range: "Age Range",
   piece_count: "Piece Count",
   minifigs_count: "Minifigs Count",
   retail_price: "Retail Price (RRP)",
