@@ -221,7 +221,7 @@ export default function ProductDetailPage() {
 
   return (
     <StorefrontLayout>
-      <div className="bg-background">
+      <div className="bg-background overflow-hidden">
         {/* Breadcrumb */}
         <div className="border-b border-border bg-kuso-paper">
           <div className="container flex items-center gap-2 py-3">
