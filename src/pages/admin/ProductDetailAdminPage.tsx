@@ -14,6 +14,7 @@ import { ProductContentTab } from "@/components/admin/product-detail/ProductCont
 import { AgeRangeExtractor } from "@/components/admin/product-detail/AgeRangeExtractor";
 import { ProductMediaCard } from "@/components/admin/ProductMediaCard";
 import { ProductChannelsTab } from "@/components/admin/product-detail/ProductChannelsTab";
+import { ProductDetailsTab } from "@/components/admin/product-detail/ProductDetailsTab";
 
 import type { ProductDetail, BrickEconomyValuation } from "@/components/admin/product-detail/types";
 
@@ -76,8 +77,9 @@ export default function ProductDetailAdminPage() {
         <ProductIssuesBanner product={product} onNavigateToTab={setActiveTab} />
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full grid grid-cols-2">
+          <TabsList className="w-full grid grid-cols-3">
             <TabsTrigger value="content-media">Content & Media</TabsTrigger>
+            <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="channels">Channels</TabsTrigger>
           </TabsList>
 
@@ -90,6 +92,10 @@ export default function ProductDetailAdminPage() {
               onSaved={handleInvalidate}
             />
             <ProductMediaCard productId={product.id} productName={product.name} mpn={product.mpn} includeCatalogImg={product.include_catalog_img} onInvalidate={handleInvalidate} />
+          </TabsContent>
+
+          <TabsContent value="details" className="mt-4">
+            <ProductDetailsTab product={product} onInvalidate={handleInvalidate} />
           </TabsContent>
 
           <TabsContent value="channels" className="mt-4">

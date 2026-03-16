@@ -23,6 +23,16 @@ export interface ProductSku {
   channel_listings: ChannelListing[];
 }
 
+export interface FieldOverride {
+  overridden_at: string;
+  source_value: unknown;
+}
+
+export interface SourceData {
+  lego_catalog?: Record<string, unknown>;
+  brickeconomy?: Record<string, unknown>;
+}
+
 export interface ProductDetail {
   id: string;
   mpn: string;
@@ -46,6 +56,21 @@ export interface ProductDetail {
   width_cm: number | null;
   height_cm: number | null;
   weight_kg: number | null;
+  // New details fields
+  minifigs_count: number | null;
+  retail_price: number | null;
+  version_descriptor: string | null;
+  brickeconomy_id: string | null;
+  bricklink_item_no: string | null;
+  brickowl_boid: string | null;
+  rebrickable_id: string | null;
+  released_date: string | null;
+  retired_date: string | null;
+  product_type: string;
+  brand: string | null;
+  field_overrides: Record<string, FieldOverride> | null;
+  source_data?: SourceData;
+  // Aggregates
   stock_available: number;
   carrying_value: number;
   units_sold: number;
@@ -99,3 +124,44 @@ export function fmt(v: number | null | undefined) {
   if (v == null) return "—";
   return `£${v.toFixed(2)}`;
 }
+
+/** Maps field names to their source table for override comparison */
+const SOURCE_FIELD_MAP: Record<string, "lego_catalog" | "brickeconomy"> = {
+  version_descriptor: "lego_catalog",
+  brickeconomy_id: "lego_catalog",
+  bricklink_item_no: "lego_catalog",
+  brickowl_boid: "lego_catalog",
+  rebrickable_id: "lego_catalog",
+  minifigs_count: "brickeconomy",
+  retail_price: "brickeconomy",
+  released_date: "brickeconomy",
+  retired_date: "brickeconomy",
+};
+
+export function getSourceValue(field: string, sourceData?: SourceData): unknown {
+  const table = SOURCE_FIELD_MAP[field];
+  if (!table || !sourceData?.[table]) return undefined;
+  return (sourceData[table] as Record<string, unknown>)[field];
+}
+
+export const FIELD_LABELS: Record<string, string> = {
+  name: "Name",
+  piece_count: "Piece Count",
+  minifigs_count: "Minifigs Count",
+  retail_price: "Retail Price (RRP)",
+  product_type: "Product Type",
+  brand: "Brand",
+  version_descriptor: "Version Descriptor",
+  release_year: "Release Year",
+  released_date: "Released Date",
+  retired_flag: "Retired",
+  retired_date: "Retired Date",
+  length_cm: "Length (cm)",
+  width_cm: "Width (cm)",
+  height_cm: "Height (cm)",
+  weight_kg: "Weight (kg)",
+  brickeconomy_id: "BrickEconomy ID",
+  bricklink_item_no: "BrickLink Item No",
+  brickowl_boid: "BrickOwl BOID",
+  rebrickable_id: "Rebrickable ID",
+};

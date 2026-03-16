@@ -321,6 +321,26 @@ Deno.serve(async (req) => {
         return { ...s, stock_available: stock.available, carrying_value: stock.value, channel_listings: cls };
       });
 
+      // Fetch source data for override comparison
+      const sourceData: Record<string, any> = {};
+      if (product.lego_catalog_id) {
+        const { data: lc } = await admin
+          .from("lego_catalog")
+          .select("version_descriptor, brickeconomy_id, bricklink_item_no, brickowl_boid, rebrickable_id")
+          .eq("id", product.lego_catalog_id)
+          .maybeSingle();
+        if (lc) sourceData.lego_catalog = lc;
+      }
+      const baseMpn = product.mpn.replace(/-\d+$/, "");
+      const { data: beRow } = await admin
+        .from("brickeconomy_collection")
+        .select("minifigs_count, retail_price, released_date, retired_date")
+        .in("item_number", [product.mpn, baseMpn])
+        .order("synced_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (beRow) sourceData.brickeconomy = beRow;
+
       result = {
         ...product,
         theme_name: product.theme?.name ?? null,
@@ -333,10 +353,20 @@ Deno.serve(async (req) => {
         revenue,
         skus: enrichedSkus,
         channel_listings: allChannelListings,
+        source_data: sourceData,
       };
     } else if (action === "update-product") {
       const { product_id, ...fields } = params;
-      const allowed = ["product_hook", "description", "highlights", "call_to_action", "seo_title", "seo_description", "age_range", "length_cm", "width_cm", "height_cm", "weight_kg", "include_catalog_img"];
+      const allowed = [
+        "product_hook", "description", "highlights", "call_to_action",
+        "seo_title", "seo_description", "age_range",
+        "length_cm", "width_cm", "height_cm", "weight_kg", "include_catalog_img",
+        "name", "piece_count", "minifigs_count", "retail_price", "product_type",
+        "retired_flag", "retired_date", "released_date", "release_year",
+        "version_descriptor", "brand",
+        "brickeconomy_id", "bricklink_item_no", "brickowl_boid", "rebrickable_id",
+        "field_overrides",
+      ];
       const updates: Record<string, any> = {};
       for (const k of allowed) {
         if (k in fields) updates[k] = fields[k];
