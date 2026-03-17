@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect } from "react";
 import { ThemesGrid } from "@/components/ThemesGrid";
 import { GRADE_OPTIONS, GRADE_LABELS } from "@/lib/grades";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
 
@@ -393,15 +394,23 @@ export default function BrowsePage() {
                         )}
                       </div>
 
+                      {/* Badges — grade first, then retired */}
                       <div className="absolute left-2 top-2 flex gap-1">
+                        {set.best_grade && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
+                                {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="text-xs">
+                              Condition Grade: {set.best_grade} — {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                         {set.retired_flag && (
                           <span className="bg-primary px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-primary-foreground">
                             Retired
-                          </span>
-                        )}
-                        {set.best_grade && (
-                          <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
-                            {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
                           </span>
                         )}
                       </div>

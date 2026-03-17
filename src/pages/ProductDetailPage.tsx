@@ -372,15 +372,19 @@ export default function ProductDetailPage() {
                         className="flex flex-wrap items-center justify-between gap-3 border border-border p-4 transition-colors hover:border-primary"
                       >
                         <div className="flex items-center gap-3 min-w-0 max-w-full sm:max-w-[60%]">
-                          <div className="flex h-8 w-8 items-center justify-center bg-foreground font-display text-xs font-bold text-background">
-                            G{offer.condition_grade}
-                          </div>
+                          <Link to="/grading" className="shrink-0">
+                            <img
+                              src={GRADE_DETAILS[offer.condition_grade]?.icon}
+                              alt={`Grade ${offer.condition_grade} — ${GRADE_DETAILS[offer.condition_grade]?.label}`}
+                              className="h-10 w-10 object-contain"
+                            />
+                          </Link>
                           <div>
                             <p className="font-display text-sm font-semibold text-foreground">
                               {GRADE_DETAILS[offer.condition_grade]?.label ?? `Grade ${offer.condition_grade}`}
                             </p>
                             <p className="font-body text-xs text-muted-foreground">
-                              {GRADE_DETAILS[offer.condition_grade]?.desc ?? ""}
+                              {GRADE_DETAILS[offer.condition_grade]?.shortDesc ?? ""}
                             </p>
                           </div>
                         </div>

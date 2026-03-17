@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { Heart, ShoppingBag, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Product, useStore } from '@/lib/store';
+import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { trackAddToCart } from '@/lib/gtm-ecommerce';
@@ -12,10 +14,6 @@ interface ProductCardProps {
   product: Product;
   onAddToCart?: (product: Product) => void;
 }
-
-const conditionLabels: Record<number, string> = {
-  1: 'Mint', 2: 'Excellent', 3: 'Good', 4: 'Acceptable', 5: 'Fair',
-};
 
 const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
   const addToWishlist = useStore(state => state.addToWishlist);
@@ -51,6 +49,7 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
 
   const savings = product.rrp - product.price;
   const savingsPercent = product.rrp > 0 ? Math.round((savings / product.rrp) * 100) : 0;
+  const gradeLabel = GRADE_LABELS_NUMERIC[product.conditionGrade];
 
   return (
     <div className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md">
@@ -63,7 +62,7 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
           {product.image ? (
             <motion.img
               src={product.image}
-              alt={`${product.name} — ${conditionLabels[product.conditionGrade] || 'Graded'} LEGO® set`}
+              alt={`${product.name} — ${gradeLabel || 'Graded'} LEGO® set`}
               className="w-full h-full object-cover"
               loading="lazy"
               width={400}
@@ -94,16 +93,23 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
             </Button>
           </div>
 
-          {/* Badges */}
+          {/* Badges — grade first, then retired */}
           <div className="absolute top-3 left-3 flex gap-1.5">
+            {product.conditionGrade && gradeLabel && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
+                    {gradeLabel}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Condition Grade: {product.conditionGrade} — {gradeLabel}
+                </TooltipContent>
+              </Tooltip>
+            )}
             {product.retired && (
               <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
                 Retired
-              </span>
-            )}
-            {product.conditionGrade && (
-              <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                {conditionLabels[product.conditionGrade] ?? `Grade ${product.conditionGrade}`}
               </span>
             )}
           </div>

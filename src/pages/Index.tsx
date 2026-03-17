@@ -7,6 +7,7 @@ import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { GRADE_LABELS, GRADE_LABELS_NUMERIC } from "@/lib/grades";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 export default function HomePage() {
   const { data: featuredSets, isLoading } = useQuery({
@@ -137,16 +138,23 @@ export default function HomePage() {
                       )}
                     </div>
 
-                    {/* Badges */}
+                    {/* Badges — grade first, then retired */}
                     <div className="absolute left-3 top-3 flex gap-1.5">
+                      {set.best_grade && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
+                              {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs">
+                            Condition Grade: {set.best_grade} — {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       {set.retired_flag && (
                         <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
                           Retired
-                        </span>
-                      )}
-                      {set.best_grade && (
-                        <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                          {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
                         </span>
                       )}
                     </div>

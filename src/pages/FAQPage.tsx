@@ -8,17 +8,19 @@ import { GRADE_DETAILS } from '@/lib/grades';
 export default function FAQPage() {
   usePageSeo({ title: 'Frequently Asked Questions', description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.', path: '/faq' });
 
+  const gradeItems = Object.entries(GRADE_DETAILS).map(([key, g]) => ({
+    id: `grade-${key}`,
+    q: `Grade ${key} — ${g.label}`,
+    shortDesc: g.shortDesc,
+    icon: g.icon,
+  }));
+
   const sections = [
     {
       title: 'Condition Grades',
       badge: 'Important',
       items: [
-        { id: 'grading-overview', q: 'How does your grading system work?', a: 'Every set is inspected and assigned a grade from 1 (Mint) to 5 (Fair) based on the condition of the box, contents, and completeness. See our full grading guide at /grading.' },
-        { id: 'grade-1', q: `Grade 1 — ${GRADE_DETAILS["1"].label}`, a: GRADE_DETAILS["1"].desc },
-        { id: 'grade-2', q: `Grade 2 — ${GRADE_DETAILS["2"].label}`, a: GRADE_DETAILS["2"].desc },
-        { id: 'grade-3', q: `Grade 3 — ${GRADE_DETAILS["3"].label}`, a: GRADE_DETAILS["3"].desc },
-        { id: 'grade-4', q: `Grade 4 — ${GRADE_DETAILS["4"].label}`, a: GRADE_DETAILS["4"].desc },
-        { id: 'grade-5', q: `Grade 5 — ${GRADE_DETAILS["5"].label}`, a: GRADE_DETAILS["5"].desc },
+        { id: 'grading-overview', q: 'How does your grading system work?', a: 'Every set is inspected and assigned a grade from 1 (Gold Standard) to 5 (Red Card) based on the condition of the box, contents, and completeness. See our full grading guide at /grading.' },
       ],
     },
     {
@@ -61,22 +63,62 @@ export default function FAQPage() {
           <p className="font-body text-muted-foreground">Straight answers. No waffle.</p>
         </div>
 
-        {sections.map(section => (
+        {sections.map((section, sIdx) => (
           <section key={section.title} className="mb-12">
             <h2 className="font-display text-2xl font-bold text-foreground mb-6 flex items-center gap-3">
               {section.title}
               {section.badge && <Badge variant="outline" className="font-body text-xs font-normal">{section.badge}</Badge>}
             </h2>
-            <Accordion type="single" collapsible className="space-y-2">
-              {section.items.map(item => (
-                <AccordionItem key={item.id} value={item.id} className="border rounded-sm px-4">
-                  <AccordionTrigger className="hover:no-underline">
-                    <span className="text-left font-display font-semibold text-sm">{item.q}</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="font-body text-muted-foreground text-sm">{item.a}</AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+
+            {/* Render the overview item for the first section */}
+            {sIdx === 0 && (
+              <Accordion type="single" collapsible className="space-y-2 mb-4">
+                {section.items.map(item => (
+                  <AccordionItem key={item.id} value={item.id} className="border rounded-sm px-4">
+                    <AccordionTrigger className="hover:no-underline">
+                      <span className="text-left font-display font-semibold text-sm">{item.q}</span>
+                    </AccordionTrigger>
+                    <AccordionContent className="font-body text-muted-foreground text-sm">{item.a}</AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            )}
+
+            {/* Render grade items with icons for the first section */}
+            {sIdx === 0 && (
+              <div className="space-y-2">
+                {gradeItems.map(item => (
+                  <div key={item.id} className="flex items-start gap-3 border rounded-sm p-4">
+                    <img
+                      src={item.icon}
+                      alt={item.q}
+                      className="h-10 w-10 shrink-0 object-contain"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-display font-semibold text-sm text-foreground">{item.q}</p>
+                      <p className="mt-1 font-body text-muted-foreground text-sm">{item.shortDesc}</p>
+                      <Link to="/grading" className="mt-1 inline-block font-body text-xs text-primary hover:underline">
+                        See full grading guide →
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Render normal accordion items for other sections */}
+            {sIdx > 0 && (
+              <Accordion type="single" collapsible className="space-y-2">
+                {section.items.map(item => (
+                  <AccordionItem key={item.id} value={item.id} className="border rounded-sm px-4">
+                    <AccordionTrigger className="hover:no-underline">
+                      <span className="text-left font-display font-semibold text-sm">{item.q}</span>
+                    </AccordionTrigger>
+                    <AccordionContent className="font-body text-muted-foreground text-sm">{item.a}</AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            )}
           </section>
         ))}
 
