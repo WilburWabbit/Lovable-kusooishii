@@ -27,6 +27,16 @@ LEGO resale commerce platform: public storefront + back-office for buying, gradi
 - Landed cost: purchase price + apportioned fees
 - Carrying value: landed cost − impairment
 
+## API Specs (`docs/specs/`)
+27 OpenAPI YAML specs. **Read the relevant spec before writing integration code.**
+- eBay (18): `sell_inventory_v1_oas3.yaml`, `sell_fulfillment_v1_oas3.yaml`, `sell_finances_v1_oas3.yaml`, `sell_marketing_v1_oas3.yaml`, plus account, feed, metadata, compliance, analytics, negotiation, recommendation, stores, logistics, edelivery, and 3 developer APIs. OAuth 2.0; 250 revisions/day per listing; Finances requires digital signatures (EU/UK).
+- Google (4): `ga-admin-openapi.yaml`, `ga4-data-openapi.yaml`, `google-tag-manager-openapi.yaml`, `google-merchant-api-openapi.yaml`. OAuth 2.0.
+- BrickEconomy: `brickeconomy-openapi.yaml`. API key. **100 req/day hard limit.**
+- BrickOwl: `brickowl-openapi.yaml`. API key. 600 req/min.
+- Brickset: `brickset-openapi.yaml`. API key.
+- QBO: `quickbooks_account_api_full.yaml`. OAuth 2.0.
+- Platform: `lego_resale_platform_api.yaml`. The app's own API contract.
+
 ## Code Conventions
 - TypeScript strict; prefer explicit types over `any`
 - TanStack Query for server state; Zustand for client state

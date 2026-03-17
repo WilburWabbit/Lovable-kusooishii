@@ -37,6 +37,18 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - `docs/design-specification.md` — **Full design specification (READ THIS)**
 - `docs/specs/` — **YAML spec files (READ THESE TOO)**
 
+## API Specifications (`docs/specs/`)
+
+27 OpenAPI YAML specs covering all external integrations and the platform's own API. **Read the relevant spec before writing or modifying any integration code.**
+
+- **eBay** (18 specs): `sell_inventory_v1_oas3.yaml`, `sell_fulfillment_v1_oas3.yaml`, `sell_finances_v1_oas3.yaml`, `sell_marketing_v1_oas3.yaml`, `sell_account_v1/v2_oas3.yaml`, `sell_feed_v1_oas3.yaml`, `sell_metadata_v1_oas3.yaml`, `sell_compliance_v1_oas3.yaml`, `sell_analytics_v1_oas3.yaml`, `sell_negotiation_v1_oas3.yaml`, `sell_recommendation_v1_oas3.yaml`, `sell_stores_v1_oas3.yaml`, `sell_logistics_v1_oas3.yaml`, `sell_edelivery_international_shipping_oas3.yaml`, plus 3 developer APIs. Auth: OAuth 2.0. Note: Inventory API has 250 revisions/day limit per listing; Finances API requires digital signatures for EU/UK.
+- **Google** (4 specs): `ga-admin-openapi.yaml`, `ga4-data-openapi.yaml`, `google-tag-manager-openapi.yaml`, `google-merchant-api-openapi.yaml`. Auth: OAuth 2.0.
+- **BrickEconomy**: `brickeconomy-openapi.yaml`. API key header. **100 req/day hard limit.**
+- **BrickOwl**: `brickowl-openapi.yaml`. API key. 600 req/min (100/min bulk).
+- **Brickset**: `brickset-openapi.yaml`. API key. ASMX/JSON interface.
+- **QuickBooks Online**: `quickbooks_account_api_full.yaml`. OAuth 2.0. Prod + sandbox.
+- **Platform**: `lego_resale_platform_api.yaml`. The app's own API contract.
+
 ## Constraints
 
 - Do NOT let external systems write directly to canonical tables

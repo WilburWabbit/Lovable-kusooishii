@@ -25,6 +25,16 @@ LEGO resale commerce platform: public storefront + back-office for buying, gradi
 - shadcn/ui only — no new UI libraries
 - Edge Functions: Deno imports, service-role for admin, anon for public
 
+## API Specs (`docs/specs/`)
+27 OpenAPI YAMLs. Read the relevant spec before integration work.
+- eBay (18): sell_inventory, sell_fulfillment, sell_finances, sell_marketing, sell_account v1/v2, sell_feed, sell_metadata, sell_compliance, sell_analytics, sell_negotiation, sell_recommendation, sell_stores, sell_logistics, sell_edelivery, 3 developer APIs. OAuth; 250 rev/day per listing.
+- Google (4): ga-admin, ga4-data, GTM, Merchant. OAuth.
+- BrickEconomy: 100 req/day hard limit. API key.
+- BrickOwl: 600 req/min. API key.
+- Brickset: API key.
+- QBO: OAuth 2.0.
+- Platform: `lego_resale_platform_api.yaml` — the app's own contract.
+
 ## Do NOT
 - Let external systems write directly to canonical tables
 - Use Rebrickable as a sales channel

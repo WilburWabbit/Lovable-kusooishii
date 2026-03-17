@@ -50,6 +50,22 @@ docs/
   specs/                    # YAML spec files — READ THESE TOO
 ```
 
+## API Specs (`docs/specs/`)
+
+The `docs/specs/` directory contains **27 OpenAPI specifications** for every external integration and the platform's own API. **Consult the relevant spec before building or modifying any integration code.**
+
+| Integration | Spec files | Key constraints |
+|---|---|---|
+| **eBay** (18 specs) | `sell_inventory_v1_oas3.yaml` (listings/offers), `sell_fulfillment_v1_oas3.yaml` (orders/shipping), `sell_finances_v1_oas3.yaml` (payouts — requires digital signatures for EU/UK), `sell_marketing_v1_oas3.yaml` (Promoted Listings), `sell_account_v1_oas3.yaml` / `v2` (seller config), `sell_feed_v1_oas3.yaml` (bulk uploads), `sell_metadata_v1_oas3.yaml` (marketplace policies), `sell_compliance_v1_oas3.yaml`, `sell_analytics_v1_oas3.yaml`, `sell_negotiation_v1_oas3.yaml`, `sell_recommendation_v1_oas3.yaml`, `sell_stores_v1_oas3.yaml`, `sell_logistics_v1_oas3.yaml`, `sell_edelivery_international_shipping_oas3.yaml`, `developer_analytics_v1_beta_oas3.yaml`, `developer_key_management_v1_oas3.yaml`, `developer_client_registration_v1_oas3.yaml` | OAuth 2.0; Inventory API: 250 revisions/day per listing |
+| **Google** (4 specs) | `ga-admin-openapi.yaml` (Analytics Admin), `ga4-data-openapi.yaml` (GA4 reporting), `google-tag-manager-openapi.yaml` (GTM), `google-merchant-api-openapi.yaml` (Merchant Center) | OAuth 2.0; standard GCP quotas |
+| **BrickEconomy** | `brickeconomy-openapi.yaml` | API key header; **100 req/day hard limit** |
+| **BrickOwl** | `brickowl-openapi.yaml` | API key; 600 req/min (100/min bulk) |
+| **Brickset** | `brickset-openapi.yaml` | API key; ASMX/JSON interface |
+| **QuickBooks Online** | `quickbooks_account_api_full.yaml` | OAuth 2.0; prod + sandbox environments |
+| **Platform API** | `lego_resale_platform_api.yaml` | The app's own API contract for inventory, orders, pricing, media, club collections |
+
+**When to read a spec**: Any time you are writing, modifying, or debugging code that calls an external API or implements an endpoint defined in the platform API spec, open the relevant YAML first.
+
 ## Key Conventions
 
 - Use TypeScript strict mode; prefer explicit types over `any`
