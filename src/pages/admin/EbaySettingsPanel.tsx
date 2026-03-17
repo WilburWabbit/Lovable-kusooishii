@@ -41,7 +41,7 @@ export function EbaySettingsPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const data = await invokeWithAuth<Record<string, any>>("ebay-auth", { action: "status" });
+      const data = await invokeWithAuth<{ connected: boolean; last_updated?: string }>("ebay-auth", { action: "status" });
       if ((data as any)?.error) throw new Error((data as any).error);
       setStatus(data);
     } catch {
