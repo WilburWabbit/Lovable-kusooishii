@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Link2, RefreshCw, Unplug, Square } from "lucide-react";
+import { Loader2, Link2, RefreshCw, Unplug, Square, Scale } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 /** Generate month labels from current month back to April 2023 */
@@ -37,6 +37,7 @@ export function QboSettingsPanel() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingItems, setSyncingItems] = useState(false);
+  const [reconcilingStock, setReconcilingStock] = useState(false);
   const [cancelSync, setCancelSync] = useState(false);
   const cancelRef = useRef(false);
 
@@ -225,6 +226,31 @@ export function QboSettingsPanel() {
     }
   };
 
+  const reconcileStock = async () => {
+    setReconcilingStock(true);
+    try {
+      const data = await invokeWithAuth<Record<string, any>>("admin-data", { action: "reconcile-stock" });
+      if (data?.error) throw new Error(data.error);
+      const parts: string[] = [];
+      parts.push(`${data.total_checked} SKUs checked`);
+      if (data.in_sync) parts.push(`${data.in_sync} in sync`);
+      if (data.written_off) parts.push(`${data.written_off} units written off`);
+      if (data.discrepancies) parts.push(`${data.discrepancies} discrepancies (QBO higher)`);
+      toast({
+        title: "Stock reconciliation complete",
+        description: parts.join(", ") + ".",
+      });
+    } catch (err) {
+      toast({
+        title: "Stock reconciliation failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setReconcilingStock(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -284,6 +310,10 @@ export function QboSettingsPanel() {
               <Button size="sm" onClick={syncItems} disabled={syncingItems || !user}>
                 {syncingItems ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Sync Items
+              </Button>
+              <Button size="sm" variant="secondary" onClick={reconcileStock} disabled={reconcilingStock || !user}>
+                {reconcilingStock ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Scale className="mr-2 h-3.5 w-3.5" />}
+                Reconcile Stock
               </Button>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}

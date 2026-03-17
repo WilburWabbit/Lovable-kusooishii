@@ -1257,6 +1257,195 @@ Deno.serve(async (req) => {
 
       result = { ...data, theme_name: (data as any).theme?.name ?? null, theme: undefined };
 
+    } else if (action === "reconcile-stock") {
+      // ── Reconcile app stock_unit counts against QBO QtyOnHand ──
+      // Fetches all Inventory items from QBO, compares with app's available
+      // stock_unit count per SKU, and writes off excess units where QBO is lower.
+      const clientId = Deno.env.get("QBO_CLIENT_ID");
+      const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
+      const realmId = Deno.env.get("QBO_REALM_ID");
+      if (!clientId || !clientSecret || !realmId) throw new Error("QBO credentials not configured");
+
+      // Refresh token if needed
+      const { data: conn, error: connErr } = await admin
+        .from("qbo_connection").select("*").eq("realm_id", realmId).single();
+      if (connErr || !conn) throw new Error("No QBO connection found");
+
+      let accessToken = conn.access_token;
+      if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
+        const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+        });
+        if (!tokenRes.ok) throw new Error(`Token refresh failed [${tokenRes.status}]`);
+        const tokens = await tokenRes.json();
+        const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+        await admin.from("qbo_connection").update({
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expires_at: expiresAt,
+        }).eq("realm_id", realmId);
+        accessToken = tokens.access_token;
+      }
+
+      const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+      const correlationId = crypto.randomUUID();
+
+      // Fetch all Inventory items from QBO (paginated)
+      const qboItems: any[] = [];
+      let startPos = 1;
+      const pageSize = 1000;
+      while (true) {
+        const q = encodeURIComponent(`SELECT * FROM Item WHERE Type = 'Inventory' STARTPOSITION ${startPos} MAXRESULTS ${pageSize}`);
+        const res = await fetch(`${baseUrl}/query?query=${q}`, {
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`QBO query failed [${res.status}]: ${await res.text()}`);
+        const data = await res.json();
+        const page = data?.QueryResponse?.Item ?? [];
+        qboItems.push(...page);
+        if (page.length < pageSize) break;
+        startPos += pageSize;
+      }
+
+      // Load all SKUs with qbo_item_id
+      const { data: allSkus } = await admin
+        .from("sku")
+        .select("id, qbo_item_id, sku_code");
+      const skuByQboId = new Map<string, { id: string; sku_code: string }>();
+      for (const s of (allSkus ?? [])) {
+        if (s.qbo_item_id) skuByQboId.set(s.qbo_item_id, { id: s.id, sku_code: s.sku_code });
+      }
+
+      let totalChecked = 0;
+      let inSync = 0;
+      let writtenOff = 0;
+      let discrepancies = 0;
+      const details: any[] = [];
+
+      for (const qboItem of qboItems) {
+        const qboItemId = String(qboItem.Id);
+        const sku = skuByQboId.get(qboItemId);
+        if (!sku) continue;
+
+        const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
+
+        const { count: appAvailable } = await admin
+          .from("stock_unit")
+          .select("id", { count: "exact", head: true })
+          .eq("sku_id", sku.id)
+          .eq("status", "available");
+        const available = appAvailable ?? 0;
+        totalChecked++;
+
+        if (available === qboQty) {
+          inSync++;
+          continue;
+        }
+
+        if (qboQty < available) {
+          // Write off excess units (oldest first)
+          const excess = available - qboQty;
+          const { data: unitsToWriteOff } = await admin
+            .from("stock_unit")
+            .select("id, status, carrying_value, landed_cost")
+            .eq("sku_id", sku.id)
+            .eq("status", "available")
+            .order("created_at", { ascending: true })
+            .limit(excess);
+
+          let unitWriteOffs = 0;
+          for (const unit of (unitsToWriteOff ?? [])) {
+            const { error: updateErr } = await admin
+              .from("stock_unit")
+              .update({
+                status: "written_off",
+                carrying_value: 0,
+                accumulated_impairment: unit.landed_cost ?? 0,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", unit.id);
+
+            if (updateErr) {
+              console.error(`Failed to write off unit ${unit.id}:`, updateErr.message);
+              continue;
+            }
+
+            await admin.from("audit_event").insert({
+              entity_type: "stock_unit",
+              entity_id: unit.id,
+              trigger_type: "qbo_stock_reconciliation",
+              actor_type: "user",
+              actor_id: userId,
+              source_system: "qbo",
+              correlation_id: correlationId,
+              before_json: { status: unit.status, carrying_value: unit.carrying_value },
+              after_json: { status: "written_off", carrying_value: 0 },
+              input_json: {
+                qbo_item_id: qboItemId,
+                sku_code: sku.sku_code,
+                qbo_qty_on_hand: qboQty,
+                app_available_before: available,
+              },
+            });
+
+            unitWriteOffs++;
+          }
+
+          writtenOff += unitWriteOffs;
+          details.push({
+            sku_code: sku.sku_code,
+            qbo_qty: qboQty,
+            app_available: available,
+            action: "written_off",
+            units_adjusted: unitWriteOffs,
+          });
+        } else {
+          // QBO has more — log discrepancy but don't auto-create
+          discrepancies++;
+          details.push({
+            sku_code: sku.sku_code,
+            qbo_qty: qboQty,
+            app_available: available,
+            action: "discrepancy_qbo_higher",
+            units_adjusted: 0,
+          });
+
+          await admin.from("audit_event").insert({
+            entity_type: "sku",
+            entity_id: sku.id,
+            trigger_type: "qbo_qty_discrepancy",
+            actor_type: "user",
+            actor_id: userId,
+            source_system: "qbo",
+            correlation_id: correlationId,
+            input_json: {
+              qbo_item_id: qboItemId,
+              sku_code: sku.sku_code,
+              qbo_qty_on_hand: qboQty,
+              app_available: available,
+              discrepancy: qboQty - available,
+            },
+          });
+        }
+      }
+
+      result = {
+        success: true,
+        correlation_id: correlationId,
+        total_qbo_items: qboItems.length,
+        total_checked: totalChecked,
+        in_sync: inSync,
+        written_off: writtenOff,
+        discrepancies,
+        details,
+      };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

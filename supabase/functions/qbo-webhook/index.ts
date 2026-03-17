@@ -931,6 +931,130 @@ async function handleCustomer(admin: any, baseUrl: string, accessToken: string, 
   return error ? `upsert error: ${error.message}` : "upserted";
 }
 
+// ────────────────────────────────────────────────────────────
+// QtyOnHand reconciliation — sync QBO inventory qty to app stock_units
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Compare QBO Item.QtyOnHand with the app's available stock_unit count for
+ * the corresponding SKU. If QBO qty is lower (write-off / shrinkage made in
+ * QBO), mark excess app units as written_off (FIFO — oldest first).
+ * If QBO qty is higher (e.g. stock received outside the app), log a warning
+ * but don't auto-create units (that should go through the receipt flow).
+ *
+ * Returns a human-readable summary, or null if no reconciliation was needed.
+ */
+async function reconcileQtyOnHand(
+  admin: any,
+  qboItemId: string,
+  skuCode: string,
+  qboItem: any,
+  mpn: string,
+): Promise<string | null> {
+  // Only Inventory-type items have QtyOnHand
+  if (qboItem.Type !== "Inventory") return null;
+  const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
+
+  // Find the SKU in the app
+  const { data: sku } = await admin
+    .from("sku")
+    .select("id")
+    .eq("qbo_item_id", qboItemId)
+    .maybeSingle();
+  if (!sku) return null;
+
+  // Count available stock units for this SKU
+  const { count: appAvailable } = await admin
+    .from("stock_unit")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", sku.id)
+    .eq("status", "available");
+
+  const available = appAvailable ?? 0;
+  if (available === qboQty) return null; // already in sync
+
+  const correlationId = crypto.randomUUID();
+
+  if (qboQty < available) {
+    // QBO has fewer — write off excess units (oldest first)
+    const excess = available - qboQty;
+    const { data: unitsToWriteOff } = await admin
+      .from("stock_unit")
+      .select("id, status, carrying_value, landed_cost")
+      .eq("sku_id", sku.id)
+      .eq("status", "available")
+      .order("created_at", { ascending: true })
+      .limit(excess);
+
+    let writtenOff = 0;
+    for (const unit of (unitsToWriteOff ?? [])) {
+      const { error: updateErr } = await admin
+        .from("stock_unit")
+        .update({
+          status: "written_off",
+          carrying_value: 0,
+          accumulated_impairment: unit.landed_cost ?? 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", unit.id);
+
+      if (updateErr) {
+        console.error(`Failed to write off stock unit ${unit.id}:`, updateErr.message);
+        continue;
+      }
+
+      // Audit event for each unit
+      await admin.from("audit_event").insert({
+        entity_type: "stock_unit",
+        entity_id: unit.id,
+        trigger_type: "qbo_inventory_adjustment",
+        actor_type: "system",
+        source_system: "qbo",
+        correlation_id: correlationId,
+        before_json: { status: unit.status, carrying_value: unit.carrying_value },
+        after_json: { status: "written_off", carrying_value: 0 },
+        input_json: {
+          qbo_item_id: qboItemId,
+          sku_code: skuCode,
+          qbo_qty_on_hand: qboQty,
+          app_available_before: available,
+        },
+      });
+
+      writtenOff++;
+    }
+
+    return `wrote off ${writtenOff}/${excess} units (QBO=${qboQty}, app was ${available})`;
+  }
+
+  // QBO has more than app — log warning, don't auto-create
+  // (new stock should come through the purchase/receipt flow)
+  console.warn(
+    `[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). ` +
+    `Difference of ${qboQty - available} units — check for missing receipts.`
+  );
+
+  // Record the discrepancy as an audit event for visibility
+  await admin.from("audit_event").insert({
+    entity_type: "sku",
+    entity_id: sku.id,
+    trigger_type: "qbo_qty_discrepancy",
+    actor_type: "system",
+    source_system: "qbo",
+    correlation_id: correlationId,
+    input_json: {
+      qbo_item_id: qboItemId,
+      sku_code: skuCode,
+      qbo_qty_on_hand: qboQty,
+      app_available: available,
+      discrepancy: qboQty - available,
+      direction: "qbo_higher",
+    },
+  });
+
+  return `discrepancy: QBO=${qboQty} vs app=${available} (logged, no auto-create)`;
+}
+
 async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {
   // QBO Items cannot be deleted, so we only handle Create/Update
   if (operation === "Delete") {
@@ -1074,6 +1198,15 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (error) return `item ${entityId} upsert error: ${error.message}`;
 
+  // ── QtyOnHand reconciliation ──
+  // When QBO's QtyOnHand changes (via InventoryAdjustment in QBO), reconcile
+  // the app's stock_unit count to match. This is the primary inbound path for
+  // write-offs, shrinkage, and other adjustments made in QBO.
+  const reconcileResult = await reconcileQtyOnHand(admin, qboItemId, skuCode, item, mpn);
+  if (reconcileResult) {
+    console.log(`[handleItem] QtyOnHand reconciliation for ${skuCode}: ${reconcileResult}`);
+  }
+
   // Post-creation enrichment: BrickEconomy lookup + AI copy generation
   // Only for new LEGO items (Set or Minifig) with a product record
   if (operation === "Create" && brand === "LEGO" && itemType && productId) {
@@ -1094,7 +1227,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     }
   }
 
-  return `item ${entityId} upserted as SKU ${skuCode}`;
+  return `item ${entityId} upserted as SKU ${skuCode}${reconcileResult ? ` | stock: ${reconcileResult}` : ""}`;
 }
 
 // ────────────────────────────────────────────────────────────
