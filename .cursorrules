@@ -1,0 +1,44 @@
+# Cursor Rules — LEGO Resale Commerce Platform
+
+## IMPORTANT: Read `docs/design-specification.md` for full context before making significant changes.
+
+## Project Overview
+LEGO resale commerce platform: public storefront + back-office for buying, grading, listing, selling, and reconciling LEGO sets across channels (website, eBay, BrickLink, BrickOwl). Built with React/TypeScript/Tailwind/Vite on Supabase.
+
+## Tech Stack
+- Frontend: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui (Radix), React Router 6, TanStack Query, Zustand
+- Backend: Supabase (PostgreSQL, Edge Functions in Deno/TypeScript, RLS, Auth, Storage)
+- Payments: Stripe | Integrations: QBO, eBay, BrickLink, BrickOwl, Rebrickable, BrickEconomy
+
+## Design Principles
+1. App-controlled truth — no external system writes directly to canonical tables
+2. Staged integration — all external data: land → stage → validate → promote
+3. QBO = financial master; app = operational master (stock, content, media, pricing, listings, audit)
+4. Master once, project many — content/media/pricing mastered centrally, projected to channels
+5. Audit first — every material event is traceable
+6. Version-aware LEGO modelling — MPN version suffixes (e.g., 75367-1) are always preserved
+7. Settings separate from operations
+
+## Domain Model
+- MPN: LEGO ID with version, e.g., `75367-1`
+- SKU: `MPN.grade`, e.g., `75367-1.3`
+- Grades: 1 (best) → 4 (lowest saleable), 5 (non-saleable)
+- Stock unit: individual physical item tracked at unit level
+- Landed cost: purchase price + apportioned fees
+- Carrying value: landed cost − impairment
+
+## Code Conventions
+- TypeScript strict; prefer explicit types over `any`
+- TanStack Query for server state; Zustand for client state
+- shadcn/ui components; don't add new UI libraries
+- Edge Functions: Deno imports, supabase-js service-role client for admin ops
+- Respect RLS: anon key for public, service role for admin
+- One concern per Edge Function where possible
+
+## Do NOT
+- Let external systems write directly to canonical tables
+- Use Rebrickable as a sales channel (data source only)
+- Scrape BrickEconomy beyond 100 req/day API limit
+- Remove MPN version suffixes
+- Embed integration config on operational pages
+- Collapse unit-level stock into SKU-only operations
