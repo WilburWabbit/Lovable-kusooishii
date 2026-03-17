@@ -44,10 +44,8 @@ export function QboSettingsPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("qbo-auth", {
-        body: { action: "status" },
-      });
-      if (error) throw error;
+      const data = await invokeWithAuth<{ connected: boolean; realm_id?: string; last_updated?: string }>("qbo-auth", { action: "status" });
+      if (data && 'error' in data) throw new Error(String((data as any).error));
       setStatus(data);
     } catch {
       setStatus({ connected: false });

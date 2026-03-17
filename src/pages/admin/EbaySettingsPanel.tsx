@@ -41,10 +41,8 @@ export function EbaySettingsPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("ebay-auth", {
-        body: { action: "status" },
-      });
-      if (error) throw error;
+      const data = await invokeWithAuth<{ connected: boolean; last_updated?: string }>("ebay-auth", { action: "status" });
+      if ((data as any)?.error) throw new Error((data as any).error);
       setStatus(data);
     } catch {
       setStatus({ connected: false });
