@@ -51,7 +51,7 @@ interface ListingRow {
   channel_listings: ChannelListing[];
 }
 
-const CHANNELS = ["ebay", "bricklink", "brickowl", "web"] as const;
+const CHANNELS = ["ebay", "bricklink", "brickowl", "web", "google_shopping"] as const;
 type Channel = typeof CHANNELS[number];
 
 const CHANNEL_LABELS: Record<Channel, string> = {
@@ -59,6 +59,7 @@ const CHANNEL_LABELS: Record<Channel, string> = {
   bricklink: "BrickLink",
   brickowl: "BrickOwl",
   web: "Web",
+  google_shopping: "Google Shopping",
 };
 
 const GRADE_LABELS: Record<string, string> = {
@@ -145,6 +146,7 @@ const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "ri
   { key: "bricklink", label: "BrickLink", align: "center" },
   { key: "brickowl", label: "BrickOwl", align: "center" },
   { key: "web", label: "Web", align: "center" },
+  { key: "google_shopping", label: "Google Shopping", align: "center" },
   { key: "last_sync", label: "Last Sync" },
 ];
 
@@ -162,6 +164,7 @@ function getSortValue(r: ListingRow, key: string): unknown {
     case "bricklink": return getChannelListing(r, "bricklink")?.offer_status ?? "";
     case "brickowl": return getChannelListing(r, "brickowl")?.offer_status ?? "";
     case "web": return getChannelListing(r, "web")?.offer_status ?? "";
+    case "google_shopping": return getChannelListing(r, "google_shopping")?.offer_status ?? "";
     case "last_sync": return latestSync(r) ?? "";
     default: return null;
   }
@@ -179,6 +182,7 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
     case "bricklink": return <ChannelCell listing={getChannelListing(r, "bricklink")} />;
     case "brickowl": return <ChannelCell listing={getChannelListing(r, "brickowl")} />;
     case "web": return <ChannelCell listing={getChannelListing(r, "web")} />;
+    case "google_shopping": return <ChannelCell listing={getChannelListing(r, "google_shopping")} />;
     case "last_sync": {
       const ls = latestSync(r);
       if (!ls) return <span className="text-muted-foreground/40">—</span>;

@@ -41,6 +41,7 @@ import { ProductsPage } from "./pages/admin/ProductsPage";
 import ProductDetailAdminPage from "./pages/admin/ProductDetailAdminPage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
+import GmcCallbackPage from "./pages/admin/GmcCallbackPage";
 import UsersSettingsPage from "./pages/admin/UsersSettingsPage";
 import VatRatesSettingsPage from "./pages/admin/VatRatesSettingsPage";
 import IntegrationsSettingsPage from "./pages/admin/IntegrationsSettingsPage";
@@ -112,6 +113,7 @@ const App = () => (
             <Route path="/admin/settings/vat-rates" element={<RequireAdmin><VatRatesSettingsPage /></RequireAdmin>} />
             <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
             <Route path="/admin/ebay-callback" element={<RequireAdmin><EbayCallbackPage /></RequireAdmin>} />
+            <Route path="/admin/gmc-callback" element={<RequireAdmin><GmcCallbackPage /></RequireAdmin>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
