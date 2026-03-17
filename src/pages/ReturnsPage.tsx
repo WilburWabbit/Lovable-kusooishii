@@ -52,7 +52,7 @@ export default function ReturnsPage() {
 
           <section>
             <h2 className="font-display text-2xl font-semibold mb-4 text-foreground">Missing Pieces?</h2>
-            <p className="font-body text-muted-foreground">If a set we described as complete turns out to be missing pieces, contact us immediately. We'll make it right — refund, replacement, or we'll source the missing parts.</p>
+            <p className="font-body text-muted-foreground">If we said it's complete and something's missing, that's on us. Get in touch and we'll make it right — replacement parts, partial refund, or full return. No arguments.</p>
           </section>
 
           <section>

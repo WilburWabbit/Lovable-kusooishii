@@ -43,14 +43,14 @@ export default function FAQPage() {
       title: 'Shipping & Delivery',
       items: [
         { id: 'options', q: 'What are the shipping options?', a: 'Standard (Free) via Evri, 3–5 working days. Express (Paid) via Royal Mail Tracked 24 or Parcelforce, 1–2 working days. Collection (Free) at the Blue Bell LEGO® Club.' },
-        { id: 'international', q: 'Do you ship internationally?', a: 'Not yet — UK mainland only for now. International shipping is something we\'re looking at for the future.' },
+        { id: 'international', q: 'Do you ship internationally?', a: 'Not yet — UK mainland only for now. It\'s on the list.' },
       ],
     },
     {
       title: 'Returns & Refunds',
       items: [
         { id: 'returns', q: 'What\'s the return policy?', a: 'Sealed sets: 14-day return in original condition. Open-box and damaged-box: sold as-described. If something arrives damaged in transit or doesn\'t match the listing, get in touch.' },
-        { id: 'missing', q: 'What if pieces are missing?', a: 'If we listed a set as complete and you find missing pieces, email us with photos. We\'ll source missing parts, offer a partial refund, or arrange a return.' },
+        { id: 'missing', q: 'What if pieces are missing?', a: 'If we said it\'s complete and it isn\'t, that\'s on us. Email us with photos and we\'ll make it right — replacement parts, partial refund, or full return. No hassle.' },
       ],
     },
   ];

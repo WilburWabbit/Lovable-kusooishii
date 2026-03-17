@@ -28,7 +28,7 @@ export default function ContactPage() {
       <div className="container py-12 max-w-4xl">
         <div className="text-center mb-12">
           <h1 className="font-display text-4xl font-bold text-foreground mb-4">Contact Us</h1>
-          <p className="font-body text-muted-foreground max-w-xl mx-auto">Got a question about an order, a set, or anything else? Drop us a message.</p>
+          <p className="font-body text-muted-foreground max-w-xl mx-auto">Question about an order, a set, or just want to talk LEGO®? Drop us a message.</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

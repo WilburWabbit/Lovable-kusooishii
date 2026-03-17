@@ -54,7 +54,7 @@ export default function LoginPage() {
           <div className="text-center">
             <h1 className="font-display text-2xl font-bold text-foreground">Sign in</h1>
             <p className="mt-2 font-body text-sm text-muted-foreground">
-              Welcome back to Kuso Oishii
+              Welcome back. Your bricks missed you.
             </p>
           </div>
 

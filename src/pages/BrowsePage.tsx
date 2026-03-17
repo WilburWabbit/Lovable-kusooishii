@@ -183,7 +183,7 @@ export default function BrowsePage() {
     ? "Newest arrivals, sorted by release year"
     : isDealsMode
     ? "Retired sets — collectible bargains"
-    : `${filteredProducts?.length ?? 0} sets available · condition graded · version tracked`;
+    : `${filteredProducts?.length ?? 0} sets · graded · priced · ready to ship`;
 
   const filterContent = (
     <div className="space-y-6">

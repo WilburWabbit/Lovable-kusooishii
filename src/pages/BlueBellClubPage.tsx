@@ -5,7 +5,7 @@ import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BlueBellClubPage() {
   usePageSeo({
-    title: "Blue Bell LEGO® Club | Kuso Oishii",
+    title: "Blue Bell LEGO® Club",
     description:
     "Join the Blue Bell LEGO® Club and enjoy 5% off every order, with a matching 5% donated to the club. Supporting your local LEGO® community.",
     path: "/bluebell"
@@ -80,12 +80,12 @@ It's magnificent.
             How it works
           </h2>
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[{ icon: Users, title: "Join the Club", desc: "Become a member of Blue Bell LEGO® Club through your local group." }, { icon: Percent, title: "Save 5%", desc: "Every order you place with us is automatically discounted at checkout."
+            {[{ icon: Users, title: "Join the Club", desc: "Create an account and pick Blue Bell at checkout. That's it." }, { icon: Percent, title: "Save 5%", desc: "Comes off automatically. Every order. No codes, no faff."
             },
             {
               icon: Heart,
               title: "Give 5%",
-              desc: "We donate a matching 5% of your order value directly to Blue Bell."
+              desc: "We match your discount and donate it straight to the Blue Bell."
             }].
             map(({ icon: Icon, title, desc }) =>
             <div key={title} className="flex flex-col items-start gap-3">

@@ -10,19 +10,19 @@ export const GRADE_DETAILS: Record<string, { label: string; shortDesc: string; l
   "1": {
     label: "Gold Standard",
     shortDesc: "Factory sealed. Flawless or near-flawless box. The real deal.",
-    longDesc: "This is the one collectors dream about. Factory sealed, untouched, box in mint or near-mint condition with only minor shelf wear. Loose minifigs at this grade are complete — every accessory present — and in excellent cosmetic condition. If LEGO® packed it yesterday, you wouldn't know the difference. We guarantee it.",
+    longDesc: "The one collectors dream about. Factory sealed, untouched, box in mint or near-mint condition. Minor shelf wear at most. Loose minifigs at this grade are complete — every accessory present — and in excellent nick. If LEGO® packed it yesterday, you wouldn't know the difference. We guarantee it.",
     icon: "/grade-1-gold.png",
   },
   "2": {
     label: "Silver Lining",
     shortDesc: "Sealed box, cosmetic damage. Complete inside.",
-    longDesc: "Still sealed, still complete — the box just took a knock somewhere along the way. Dented corners, minor scuffs, the kind of wear that happens between the factory and your shelf. Everything inside is untouched. Minifigs at this grade are in great condition but may be missing a utensil, weapon, or accessory. You're buying the set, not the packaging — and the set is spot on.",
+    longDesc: "Still sealed, still complete — the box just took a knock somewhere along the way. Dented corners, minor scuffs, the kind of wear that happens between the factory and your shelf. Everything inside is untouched. Minifigs may be missing a utensil or accessory but are otherwise in great shape. You're buying the set, not the packaging — and the set is spot on.",
     icon: "/grade-2-silver.png",
   },
   "3": {
     label: "Bronze Age",
     shortDesc: "Opened or heavily damaged box. Complete but lived-in.",
-    longDesc: "These sets have been out in the world. Either the box has been opened, or it's sealed but the packaging has taken a proper beating. The bricks are all there, but the minifigs have had a tough life and they look it — scuffs, wear, the telltale signs of a set that's been loved hard. Everything's accounted for. We guarantee completeness, and we photograph every blemish.",
+    longDesc: "These sets have been out in the world. The box has been opened or taken a proper beating (or both). Bricks are all there, but the minifigs have had a tough life and look it — scuffs, wear, the signs of a set that's been loved hard. Everything's accounted for. We guarantee completeness, and we photograph every blemish.",
     icon: "/grade-3-bronze.png",
   },
   "4": {

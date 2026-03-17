@@ -41,14 +41,14 @@ export default function HomePage() {
         <div className="container relative z-10 py-24 lg:py-36">
           <div className="max-w-xl">
             <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-              Curated Resale
+              LEGO® for F'king Grown-Ups
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold leading-tight text-primary-foreground lg:text-6xl">
               Sets worth<br />
-              collecting<span className="text-primary">.</span>
+              obsessing over<span className="text-primary">.</span>
             </h1>
             <p className="mt-6 font-body text-base leading-relaxed text-primary-foreground/70 lg:text-lg">
-              Graded, verified, and priced for adult collectors who know what they want. Every set condition-checked before it ships.
+              Handpicked sets, obsessive condition grading, and zero corporate bollocks. Every set inspected by hand before it ships. If it's in the shop, it's f'king delicious.
             </p>
             <div className="mt-8 flex gap-3">
               <Button asChild size="lg" className="font-display font-semibold">
@@ -70,9 +70,9 @@ export default function HomePage() {
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
-            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and rated 1–4", iconClass: "text-primary", to: "/grading" },
-            { icon: Truck, title: "Free UK Shipping", desc: "Express shipping also available", iconClass: "text-primary", to: "/shipping-policy" },
-            { icon: Bell, title: "Blue Bell LEGO® Club", desc: "5% off for you. and 5% donated to the Blue Bell", iconClass: "text-blue-500", to: "/bluebell" },
+            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and graded 1–4. No vague listings. No surprises.", iconClass: "text-primary", to: "/grading" },
+            { icon: Truck, title: "Free UK Shipping", desc: "Standard on every order. Express available if you can't wait.", iconClass: "text-primary", to: "/shipping-policy" },
+            { icon: Bell, title: "Blue Bell LEGO® Club", desc: "5% off for you. 5% donated to the Blue Bell.", iconClass: "text-blue-500", to: "/bluebell" },
           ].map(({ icon: Icon, title, desc, iconClass, to }) => (
             <Link key={title} to={to} className="flex items-center gap-4 px-6 py-6 transition-colors hover:bg-muted/50">
               <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} />
@@ -90,9 +90,9 @@ export default function HomePage() {
         <div className="container">
           <div className="flex items-end justify-between">
             <div>
-              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">Featured</p>
+              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">Just Landed</p>
               <h2 className="mt-2 font-display text-2xl font-bold text-foreground lg:text-3xl">
-                Latest arrivals
+                Fresh picks
               </h2>
             </div>
             <Link
@@ -192,10 +192,10 @@ export default function HomePage() {
       <section className="border-t border-border bg-kuso-paper py-16 lg:py-24">
         <div className="container text-center">
           <h2 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
-            Want something we don't have<span className="text-primary">?</span>
+            After something specific<span className="text-primary">?</span>
           </h2>
           <p className="mx-auto mt-4 max-w-md font-body text-sm text-muted-foreground">
-            Add it to your wishlist. We track demand and source accordingly. Members get stock alerts when sets land.
+            Add it to your wishlist and we'll go hunting. Members get stock alerts the moment a set lands. No spam. Just bricks.
           </p>
           <div className="mt-8">
             <Button asChild size="lg" className="font-display font-semibold">

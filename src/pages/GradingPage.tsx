@@ -24,15 +24,15 @@ export default function GradingPage() {
         <div className="border-b border-border bg-kuso-paper py-12 lg:py-16">
           <div className="container max-w-3xl text-center">
             <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-              Transparency
+              No Surprises
             </p>
             <h1 className="mt-3 font-display text-3xl font-bold text-foreground lg:text-4xl">
               How We Grade
             </h1>
             <p className="mx-auto mt-4 max-w-lg font-body text-sm leading-relaxed text-muted-foreground">
-              Every set is inspected by hand and assigned a grade from 1 (Gold Standard) to 5 (Red Card).
-              The grade reflects the condition of the box, contents, and completeness — not the
-              quality of the LEGO® bricks themselves, which are always genuine.
+              Every set is inspected by hand and assigned a grade from 1 to 5.
+              The grade covers the box, the contents, and whether everything's there — not the
+              bricks themselves, which are always genuine LEGO®.
             </p>
           </div>
         </div>
@@ -64,19 +64,19 @@ export default function GradingPage() {
 
           <div className="mt-12 rounded bg-kuso-paper p-6 text-center">
             <p className="font-body text-sm text-muted-foreground">
-              All LEGO® bricks are genuine and sourced from authorised UK retailers.
-              Grading applies to packaging and completeness only.
+              Every brick is genuine LEGO®, sourced from authorised UK retailers.
+              Grading covers packaging and completeness — the bricks are always the real deal.
             </p>
           </div>
 
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Button asChild size="lg" className="font-display font-semibold">
               <Link to="/browse">
-                Browse Graded Sets <ArrowRight className="ml-2 h-4 w-4" />
+                Browse Sets <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
             <Button asChild variant="outline" size="lg" className="font-display">
-              <Link to="/faq">Read Our FAQ</Link>
+              <Link to="/faq">Read the FAQ</Link>
             </Button>
           </div>
         </div>
