@@ -1,0 +1,1663 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Brick Owl API
+  version: v1-unofficial
+  summary: Unofficial OpenAPI translation of the public Brick Owl API documentation.
+  description: |
+    This OpenAPI document is an unofficial, best-effort transcription of the public Brick Owl API documentation.
+
+    Notes:
+    - GET requests send the API key (`key`) and other parameters in the query string.
+    - POST requests send the API key (`key`) and other parameters as `application/x-www-form-urlencoded`.
+    - The public docs describe endpoints and request arguments, but they do not publish complete response schemas. Response bodies in this document are therefore modelled permissively.
+    - The public docs state a rate limit of 600 requests per minute for most requests, or 100 requests per minute for bulk/batch requests.
+    - The public docs also mention storefront form helpers for add-to-cart and add-to-wishlist. Those are not under `https://api.brickowl.com/v1` and are intentionally not included here.
+servers:
+- url: https://api.brickowl.com/v1
+  description: Brick Owl API v1
+externalDocs:
+  description: Official Brick Owl API documentation
+  url: https://www.brickowl.com/api_docs
+tags:
+- name: Affiliate
+  description: Affiliate partner endpoints.
+- name: Bulk
+  description: Batch multiple API requests together.
+- name: Catalog
+  description: Catalog lookup and search endpoints. Brick Owl notes that catalog API access requires contacting them.
+- name: Catalog Edit
+  description: Submit change requests for catalog data.
+- name: Collection
+  description: Manage the authenticated user's collection.
+- name: Store Inventory
+  description: List and manage store inventory lots.
+- name: Invoice
+  description: Retrieve invoice transaction information.
+- name: Order
+  description: List, inspect, and update orders.
+- name: Token
+  description: Deprecated token metadata endpoints.
+- name: User
+  description: Information about the user account linked to the API key.
+- name: Wishlist
+  description: Manage wishlists and wishlist lots.
+components:
+  schemas:
+    ApiKey:
+      type: string
+      description: Brick Owl API key.
+    Boid:
+      type: string
+      description: Brick Owl item identifier (BOID).
+    CountryCode:
+      type: string
+      pattern: ^[A-Z]{2}$
+      description: ISO 3166-1 alpha-2 country code.
+    ItemType:
+      type: string
+      enum:
+      - Part
+      - Set
+      - Minifigure
+      - Gear
+      - Sticker
+      - Minibuild
+      - Instructions
+      - Packaging
+      description: Brick Owl item type.
+    ConditionId:
+      type: string
+      enum:
+      - new
+      - news
+      - newc
+      - newi
+      - usedc
+      - usedi
+      - usedn
+      - usedg
+      - useda
+      - other
+      description: Brick Owl lot condition identifier.
+    FieldOptionType:
+      type: string
+      enum:
+      - category_0
+      - eye_color
+      - eyebrow_color
+      - facial_expression
+      - facial_hair_color
+      - facial_hair_type
+      - gender
+      - material_type
+      - packaging_type
+      - remove_image
+      - sides_printed
+      - sticker_sheet_color
+      - theme_0
+      - type
+      description: Catalog field type whose options should be listed.
+    LanguageCode:
+      type: string
+      enum:
+      - en
+      - fr
+      - de
+      - es
+      - da
+      - nl
+      - it
+      - bg
+      - zh-hans
+      - cs
+      - fi
+      - ja
+      - ko
+      - nb
+      - pl
+      - sv
+      - uk
+      description: Language code for localised field option responses.
+    CatalogEditSubmissionType:
+      type: string
+      enum:
+      - base_name
+      - basic_decoration_description
+      - category_0
+      - cleaned_lego_name
+      - delete
+      - delete_scheduled
+      - description
+      - eye_color
+      - eyebrow_color
+      - facial_expression
+      - facial_hair_color
+      - facial_hair_type
+      - first_available
+      - gender
+      - height
+      - our_asin
+      - our_bl_item_no
+      - our_set_number
+      - our_design_id
+      - our_ean
+      - our_isbn
+      - our_ldraw
+      - our_cs_set_number
+      - our_item_no
+      - our_obsolete_design_id
+      - our_official_set_number
+      - our_other
+      - our_peeron_id
+      - our_rebrickable_id
+      - our_upc
+      - instructions_booklets
+      - instructions_pages
+      - length
+      - material_type
+      - packaging_type
+      - remove_image
+      - ship_height
+      - ship_length
+      - ship_width
+      - sides_printed
+      - sticker_sheet_color
+      - stud_height
+      - stud_length
+      - stud_width
+      - theme_0
+      - type
+      - variant_child_assembly_mask
+      - variant_child_decoration_mask
+      - variant_desc
+      - weight
+      - width
+      description: Catalog edit submission type.
+    InvoiceIdType:
+      type: string
+      enum:
+      - public_invoice_id
+      - stripe_charge_id
+      description: Type of invoice identifier supplied.
+    OrderListType:
+      type: string
+      enum:
+      - store
+      - customer
+      description: Whether to list store orders or orders you have placed.
+    OrderSortBy:
+      type: string
+      enum:
+      - created
+      - updated
+      description: Order list sort key.
+    OrderStatusId:
+      type: integer
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      description: Order status ID accepted by the set-status endpoint.
+    OrderStatusFilter:
+      description: Order status filter. Brick Owl accepts either the formatted status name or the numeric ID.
+      oneOf:
+      - type: integer
+        enum:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+      - type: string
+        enum:
+        - Pending
+        - Payment Submitted
+        - Payment Received
+        - Processing
+        - Processed
+        - Shipped
+        - Received
+        - On Hold
+        - Cancelled
+    FeedbackRating:
+      type: integer
+      enum:
+      - 1
+      - 0
+      - -1
+      description: 'Feedback rating: 1 positive, 0 neutral, -1 negative.'
+    ZeroOrOne:
+      type: integer
+      enum:
+      - 0
+      - 1
+      description: Integer flag accepted by Brick Owl.
+    BlankablePositiveNumber:
+      description: Either a positive number or an empty string.
+      anyOf:
+      - type: number
+        exclusiveMinimum: 0
+      - type: string
+        maxLength: 0
+    UndocumentedJson:
+      description: Arbitrary JSON value. The public Brick Owl docs do not publish a complete response schema for this operation.
+      anyOf:
+      - type: object
+        additionalProperties: true
+      - type: array
+        items: {}
+      - type: string
+      - type: number
+      - type: boolean
+      - type: 'null'
+    CatalogCartItemsJson:
+      type: string
+      description: JSON-serialised cart items payload, e.g. {"items":[{"design_id":"3034","color_id":21,"qty":"1"}]}.
+    BulkRequestsJson:
+      type: string
+      description: JSON-serialised batch payload. See the example for the exact Brick Owl format.
+    TierPriceString:
+      type: string
+      description: Tier pricing string in the format 'tier1quantity:tier1price,tier2quantity:tier2price,...' or 'remove' to clear it.
+  parameters:
+    ApiKeyQuery:
+      name: key
+      in: query
+      required: true
+      description: Brick Owl API key. The public docs require GET requests to send the key in the query string.
+      schema:
+        $ref: '#/components/schemas/ApiKey'
+  responses:
+    UndocumentedSuccess:
+      description: Success. The public Brick Owl docs do not publish a complete response schema for this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UndocumentedJson'
+    UndocumentedError:
+      description: Error response. Shape not documented in the public Brick Owl docs.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UndocumentedJson'
+paths:
+  /affiliate/stores:
+    get:
+      tags:
+      - Affiliate
+      summary: List affiliate stores
+      description: Get a list of all the stores that have opted in to your affiliate scheme.
+      operationId: getAffiliateStores
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /affiliate/lots:
+    get:
+      tags:
+      - Affiliate
+      summary: List affiliate store lots
+      description: Retrieve the lots for a store that has opted in to your affiliate scheme.
+      operationId: getAffiliateLots
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: store_id
+        in: query
+        required: true
+        schema:
+          type: integer
+        description: The store's unique ID.
+      - name: type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ItemType'
+        description: Optional item type filter.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /bulk/batch:
+    post:
+      tags:
+      - Bulk
+      summary: Batch requests
+      description: Batch up to 50 requests into one bulk request to reduce request overhead.
+      operationId: postBulkBatch
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                requests:
+                  $ref: '#/components/schemas/BulkRequestsJson'
+              required:
+              - key
+              - requests
+            examples:
+              catalogSearchBatch:
+                summary: Batch two catalog search requests
+                value:
+                  key: YOUR_API_KEY
+                  requests: '{"requests":[{"endpoint":"catalog/search","request_method":"GET","params":[{"query":"Vendor"}]},{"endpoint":"catalog/search","request_method":"GET","params":[{"query":"Laser"}]}]}'
+              inventoryUpdateBatch:
+                summary: Batch one inventory update request
+                value:
+                  key: YOUR_API_KEY
+                  requests: '{"requests":[{"endpoint":"inventory/update","request_method":"POST","params":[{"lot_id":"IDHERE","absolute_quantity":2}]}]}'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/list:
+    get:
+      tags:
+      - Catalog
+      summary: List catalog items
+      description: Get a list of all items in the Brick Owl catalog. Brick Owl notes that access to the catalog API requires contacting them.
+      operationId: getCatalogList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ItemType'
+        description: Optional item type filter.
+      - name: brand
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Optional brand filter.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/lookup:
+    get:
+      tags:
+      - Catalog
+      summary: Lookup catalog item by BOID
+      description: Retrieve details about a catalog item by BOID.
+      operationId: getCatalogLookup
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: boid
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/Boid'
+        description: A BOID.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/availability:
+    get:
+      tags:
+      - Catalog
+      summary: Get item availability
+      description: Retrieve pricing and availability information for a catalog item by BOID. Brick Owl notes that this is limited to 400 results.
+      operationId: getCatalogAvailability
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: boid
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/Boid'
+        description: A BOID.
+      - name: quantity
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: Optional minimum required quantity.
+      - name: country
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/CountryCode'
+        description: ISO2 shipping destination country code.
+      - name: store_country
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/CountryCode'
+        description: Optional ISO2 store country filter.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/id_lookup:
+    get:
+      tags:
+      - Catalog
+      summary: Lookup BOIDs by external ID
+      description: Retrieve possible BOIDs for another identifier such as a set number or design ID.
+      operationId: getCatalogIdLookup
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Identifier to look up.
+      - name: type
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/ItemType'
+        description: Item type filter.
+      - name: id_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Optional ID type filter, for example item_no, design_id, bl_item_no, or set_number.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/bulk:
+    get:
+      tags:
+      - Catalog
+      summary: Get catalog bulk metadata
+      description: Retrieve bulk catalog dumps. Brick Owl notes that this endpoint should only be used when instructed to do so.
+      operationId: getCatalogBulk
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: type
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Bulk type.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/bulk_lookup:
+    get:
+      tags:
+      - Catalog
+      summary: Bulk lookup catalog items
+      description: Retrieve details about multiple catalog items at once.
+      operationId: getCatalogBulkLookup
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: boids
+        in: query
+        required: true
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/Boid'
+          maxItems: 100
+        description: Comma-separated list of BOIDs. Maximum 100 values.
+        style: form
+        explode: false
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/search:
+    get:
+      tags:
+      - Catalog
+      summary: Search catalog
+      description: Search, browse, and filter the catalog. Use the query term 'All' to browse.
+      operationId: getCatalogSearch
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: query
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Search term. Use 'All' to browse.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: Optional page number.
+      - name: missing_data
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Optional missing-data filter value. Brick Owl says valid values can be discovered from the catalog search UI.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/inventory:
+    get:
+      tags:
+      - Catalog
+      summary: Get item inventory
+      description: Retrieve an item's inventory.
+      operationId: getCatalogInventory
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: boid
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/Boid'
+        description: A BOID.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/condition_list:
+    get:
+      tags:
+      - Catalog
+      summary: List lot conditions
+      description: Retrieve the list of conditions that a lot can have.
+      operationId: getCatalogConditionList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/field_option_list:
+    get:
+      tags:
+      - Catalog
+      summary: List field options
+      description: Retrieve the possible option values for a catalog field.
+      operationId: getCatalogFieldOptionList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: type
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/FieldOptionType'
+        description: Field type.
+      - name: language
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/LanguageCode'
+        description: Optional response language.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/cart_basic:
+    post:
+      tags:
+      - Catalog
+      summary: Create a basic catalog cart
+      description: Create a catalog cart from design IDs and LEGO colour IDs, and return pricing in the destination country's currency. The returned cart ID can be used with `/catalog_cart_load/ID` on the Brick Owl website.
+      operationId: postCatalogCartBasic
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                items:
+                  $ref: '#/components/schemas/CatalogCartItemsJson'
+                condition:
+                  $ref: '#/components/schemas/ConditionId'
+                country:
+                  $ref: '#/components/schemas/CountryCode'
+              required:
+              - key
+              - items
+              - condition
+              - country
+            examples:
+              basicCart:
+                summary: Two design IDs in one cart
+                value:
+                  key: YOUR_API_KEY
+                  items: '{"items":[{"design_id":"3034","color_id":21,"qty":"1"},{"design_id":"3004","color_id":23,"qty":"2"}]}'
+                  condition: new
+                  country: GB
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog/color_list:
+    get:
+      tags:
+      - Catalog
+      summary: List colours
+      description: Retrieve the list of Brick Owl colours.
+      operationId: getCatalogColorList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /catalog_edit/basic_edit:
+    post:
+      tags:
+      - Catalog Edit
+      summary: Submit a basic catalog edit
+      description: Submit a change request for a catalog item. Brick Owl notes that some fields are item-specific or user-specific and that all fields return appropriate error information.
+      operationId: postCatalogEditBasic
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                boid:
+                  $ref: '#/components/schemas/Boid'
+                type:
+                  $ref: '#/components/schemas/CatalogEditSubmissionType'
+                value:
+                  type: string
+                  description: Submission value. The actual form-encoded value depends on the selected submission type and may represent a string, number, option, or binary choice.
+              required:
+              - key
+              - boid
+              - type
+              - value
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /collection/lots:
+    get:
+      tags:
+      - Collection
+      summary: List collection lots
+      description: Get a list of collection lots with details.
+      operationId: getCollectionLots
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /collection/update:
+    post:
+      tags:
+      - Collection
+      summary: Update a collection lot
+      description: Update a collection lot. Brick Owl requires at least one update field.
+      operationId: postCollectionUpdate
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                lot_id:
+                  type: integer
+                  description: Collection lot ID.
+                quantity:
+                  type: integer
+                  minimum: 1
+                  description: Quantity, greater than 0.
+                price:
+                  $ref: '#/components/schemas/BlankablePositiveNumber'
+                note:
+                  type: string
+                  description: Lot note.
+                condition:
+                  $ref: '#/components/schemas/ConditionId'
+              required:
+              - key
+              - lot_id
+              anyOf:
+              - required:
+                - quantity
+              - required:
+                - price
+              - required:
+                - note
+              - required:
+                - condition
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /collection/delete_lot:
+    post:
+      tags:
+      - Collection
+      summary: Delete a collection lot
+      description: Delete a collection lot.
+      operationId: postCollectionDeleteLot
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                lot_id:
+                  type: integer
+                  description: Collection lot ID.
+              required:
+              - key
+              - lot_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /collection/create_lot:
+    post:
+      tags:
+      - Collection
+      summary: Create a collection lot
+      description: Create a new collection lot. You must pass an item identifier. Parts require a colour, Gear can optionally include a colour, and other item types must not include one.
+      operationId: postCollectionCreateLot
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                boid:
+                  $ref: '#/components/schemas/Boid'
+                color_id:
+                  type: integer
+                  description: Brick Owl colour ID. Required for Parts, optional for Gear, and not allowed for other item types.
+              required:
+              - key
+              - boid
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /inventory/list:
+    get:
+      tags:
+      - Store Inventory
+      summary: List inventory lots
+      description: Get a list of store inventory lots with details.
+      operationId: getInventoryList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ItemType'
+        description: Optional item type filter.
+      - name: active_only
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/ZeroOrOne'
+          default: 1
+        description: Include only items that are for sale and have quantity > 0. Default 1.
+      - name: external_id_1
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Optional external lot identifier to return one lot.
+      - name: lot_id
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: Optional Brick Owl lot ID to return one lot.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /inventory/update:
+    post:
+      tags:
+      - Store Inventory
+      summary: Update an inventory lot
+      description: Update a lot's data. Brick Owl requires exactly one identifier (`external_id` or `lot_id`) and at least one update field.
+      operationId: postInventoryUpdate
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                external_id:
+                  type: string
+                  description: External lot identifier.
+                lot_id:
+                  type: integer
+                  description: Brick Owl lot ID.
+                absolute_quantity:
+                  type: integer
+                  minimum: 0
+                  description: Absolute new quantity.
+                relative_quantity:
+                  type: integer
+                  description: Positive or negative amount to adjust the existing quantity by.
+                for_sale:
+                  $ref: '#/components/schemas/ZeroOrOne'
+                price:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Positive price, rounded by Brick Owl to 3 digits of precision.
+                sale_percent:
+                  type: integer
+                  minimum: -95
+                  maximum: 95
+                  description: Whole-number sale percentage between -95 and 95.
+                my_cost:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Your own cost, rounded by Brick Owl to 3 digits of precision.
+                lot_weight:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Custom lot weight in grams, rounded by Brick Owl to 3 digits of precision.
+                personal_note:
+                  type: string
+                  description: Personal note.
+                public_note:
+                  type: string
+                  description: Public note.
+                bulk_qty:
+                  type: integer
+                  minimum: 2
+                  description: Bulk quantity, greater than one.
+                tier_price:
+                  $ref: '#/components/schemas/TierPriceString'
+                condition:
+                  $ref: '#/components/schemas/ConditionId'
+                update_external_id_1:
+                  type: string
+                  description: Replace the first external ID associated with the lot.
+              required:
+              - key
+              oneOf:
+              - required:
+                - external_id
+              - required:
+                - lot_id
+              anyOf:
+              - required:
+                - absolute_quantity
+              - required:
+                - relative_quantity
+              - required:
+                - for_sale
+              - required:
+                - price
+              - required:
+                - sale_percent
+              - required:
+                - my_cost
+              - required:
+                - lot_weight
+              - required:
+                - personal_note
+              - required:
+                - public_note
+              - required:
+                - bulk_qty
+              - required:
+                - tier_price
+              - required:
+                - condition
+              - required:
+                - update_external_id_1
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /inventory/delete:
+    post:
+      tags:
+      - Store Inventory
+      summary: Delete an inventory lot
+      description: Delete a lot. Brick Owl notes that this removes the lot from customer carts and quotes. Exactly one identifier should be sent.
+      operationId: postInventoryDelete
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                external_id:
+                  type: string
+                  description: External lot identifier.
+                lot_id:
+                  type: integer
+                  description: Brick Owl lot ID.
+              required:
+              - key
+              oneOf:
+              - required:
+                - external_id
+              - required:
+                - lot_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /inventory/create:
+    post:
+      tags:
+      - Store Inventory
+      summary: Create an inventory lot
+      description: Create a new inventory lot. Parts require a colour, Gear and Minibuild can optionally include a colour, and other item types must not include one.
+      operationId: postInventoryCreate
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                boid:
+                  $ref: '#/components/schemas/Boid'
+                color_id:
+                  type: integer
+                  description: Brick Owl colour ID. Required for Parts, optional for Gear/Minibuild, and not allowed for other item types.
+                quantity:
+                  type: integer
+                  minimum: 1
+                  description: Whole-number quantity greater than zero.
+                price:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Positive price, rounded by Brick Owl to 3 digits of precision.
+                condition:
+                  $ref: '#/components/schemas/ConditionId'
+                external_id:
+                  type: string
+                  description: Optional external ID for reference.
+              required:
+              - key
+              - boid
+              - quantity
+              - price
+              - condition
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /invoice/transactions:
+    get:
+      tags:
+      - Invoice
+      summary: List invoice transactions
+      description: Retrieve a list of transactions for an invoice.
+      operationId: getInvoiceTransactions
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: invoice_id
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Invoice ID.
+      - name: id_type
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/InvoiceIdType'
+        description: Type of invoice ID supplied.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/list:
+    get:
+      tags:
+      - Order
+      summary: List orders
+      description: Get a list of your orders.
+      operationId: getOrderList
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/OrderStatusFilter'
+        description: Optional order status filter. Brick Owl accepts the formatted name or the numeric ID.
+      - name: order_time
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: Optional Unix timestamp lower bound for order creation time.
+      - name: update_time
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: Optional Unix timestamp lower bound for order update time.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          default: 500
+        description: Optional result limit. Brick Owl documents a default of 500 and a maximum of 5000.
+      - name: list_type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/OrderListType'
+        description: Optional order list type.
+      - name: sort_by
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/OrderSortBy'
+          default: created
+        description: Optional sort key.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/view:
+    get:
+      tags:
+      - Order
+      summary: View an order
+      description: Retrieve full order details.
+      operationId: getOrderView
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: order_id
+        in: query
+        required: true
+        schema:
+          type: integer
+        description: Order ID.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/items:
+    get:
+      tags:
+      - Order
+      summary: List order items
+      description: Retrieve the items for an order.
+      operationId: getOrderItems
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: order_id
+        in: query
+        required: true
+        schema:
+          type: integer
+        description: Order ID.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/tracking:
+    post:
+      tags:
+      - Order
+      summary: Attach tracking to an order
+      description: Attach shipping tracking information to an order.
+      operationId: postOrderTracking
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                order_id:
+                  type: integer
+                  description: Order ID.
+                tracking_id:
+                  type: string
+                  description: Tracking ID or tracking URL.
+              required:
+              - key
+              - order_id
+              - tracking_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/note:
+    post:
+      tags:
+      - Order
+      summary: Update order note
+      description: Edit the seller note on an order.
+      operationId: postOrderNote
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                order_id:
+                  type: integer
+                  description: Order ID.
+                note:
+                  type: string
+                  description: Seller note.
+              required:
+              - key
+              - order_id
+              - note
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/tax_schemes:
+    get:
+      tags:
+      - Order
+      summary: List order tax schemes
+      description: Get the list of tax schemes that can be applied to orders.
+      operationId: getOrderTaxSchemes
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/notify:
+    post:
+      tags:
+      - Order
+      summary: Configure order notifications
+      description: Set the IP address that Brick Owl should notify instantly when an order is placed. Brick Owl states that it sends an HTTP request to `http://IP_ADDR:42500/brick_owl_order_notify` with GET parameters `order_id` and `store_id`. This notification service is not guaranteed, so clients should also poll periodically. Send an empty string to remove the notification.
+      operationId: postOrderNotify
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                ip:
+                  type: string
+                  description: IPv4 address to notify. Send an empty string to remove the notification.
+              required:
+              - key
+              - ip
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/feedback:
+    post:
+      tags:
+      - Order
+      summary: Leave order feedback
+      description: Leave feedback for an order.
+      operationId: postOrderFeedback
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                order_id:
+                  type: integer
+                  description: Order ID.
+                comment:
+                  type: string
+                  maxLength: 120
+                  description: Optional feedback comment. Maximum 120 characters.
+                rating:
+                  $ref: '#/components/schemas/FeedbackRating'
+              required:
+              - key
+              - order_id
+              - rating
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /order/set_status:
+    post:
+      tags:
+      - Order
+      summary: Set order status
+      description: Change the status of an order.
+      operationId: postOrderSetStatus
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                order_id:
+                  type: integer
+                  description: Order ID.
+                status_id:
+                  $ref: '#/components/schemas/OrderStatusId'
+              required:
+              - key
+              - order_id
+              - status_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /token/details:
+    get:
+      tags:
+      - Token
+      summary: Get token details
+      description: Retrieve details about the user associated with the API key. Brick Owl marks the token section as deprecated.
+      operationId: getTokenDetails
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      deprecated: true
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /user/details:
+    get:
+      tags:
+      - User
+      summary: Get user details
+      description: Retrieve details about the user associated with the API key. This includes store details if the user has one.
+      operationId: getUserDetails
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /user/addresses:
+    get:
+      tags:
+      - User
+      summary: List user addresses
+      description: Retrieve the addresses associated with the user account.
+      operationId: getUserAddresses
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/lists:
+    get:
+      tags:
+      - Wishlist
+      summary: List wishlists
+      description: Get a list of your wishlists.
+      operationId: getWishlistLists
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/lots:
+    get:
+      tags:
+      - Wishlist
+      summary: List wishlist lots
+      description: Get a list of lots with details for a specific wishlist.
+      operationId: getWishlistLots
+      parameters:
+      - $ref: '#/components/parameters/ApiKeyQuery'
+      - name: wishlist_id
+        in: query
+        required: true
+        schema:
+          type: integer
+        description: Wishlist ID.
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/update:
+    post:
+      tags:
+      - Wishlist
+      summary: Update a wishlist lot
+      description: Update a wishlist lot. Brick Owl requires at least one update field.
+      operationId: postWishlistUpdate
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                wishlist_id:
+                  type: integer
+                  description: Wishlist ID.
+                lot_id:
+                  type: integer
+                  description: Wishlist lot ID.
+                minimum_quantity:
+                  type: integer
+                  minimum: 1
+                  description: Minimum quantity required, greater than 0.
+                maximum_price:
+                  $ref: '#/components/schemas/BlankablePositiveNumber'
+                note:
+                  type: string
+                  description: Lot note.
+                minimum_condition:
+                  $ref: '#/components/schemas/ConditionId'
+              required:
+              - key
+              - wishlist_id
+              - lot_id
+              anyOf:
+              - required:
+                - minimum_quantity
+              - required:
+                - maximum_price
+              - required:
+                - note
+              - required:
+                - minimum_condition
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/delete_lot:
+    post:
+      tags:
+      - Wishlist
+      summary: Delete a wishlist lot
+      description: Delete a wishlist lot.
+      operationId: postWishlistDeleteLot
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                wishlist_id:
+                  type: integer
+                  description: Wishlist ID.
+                lot_id:
+                  type: integer
+                  description: Wishlist lot ID.
+              required:
+              - key
+              - wishlist_id
+              - lot_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/create_list:
+    post:
+      tags:
+      - Wishlist
+      summary: Create a wishlist
+      description: Create a new wishlist.
+      operationId: postWishlistCreateList
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                name:
+                  type: string
+                  description: Unique wishlist name.
+                description:
+                  type: string
+                  description: Optional wishlist description.
+              required:
+              - key
+              - name
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/update_list:
+    post:
+      tags:
+      - Wishlist
+      summary: Update a wishlist
+      description: Update a wishlist.
+      operationId: postWishlistUpdateList
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                wishlist_id:
+                  type: integer
+                  description: Wishlist ID.
+                name:
+                  type: string
+                  description: Unique wishlist name.
+              required:
+              - key
+              - wishlist_id
+              - name
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/delete_list:
+    post:
+      tags:
+      - Wishlist
+      summary: Delete a wishlist
+      description: Delete a wishlist.
+      operationId: postWishlistDeleteList
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                wishlist_id:
+                  type: integer
+                  description: Wishlist ID.
+              required:
+              - key
+              - wishlist_id
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+  /wishlist/create_lot:
+    post:
+      tags:
+      - Wishlist
+      summary: Create a wishlist lot
+      description: Create a new wishlist lot. You must pass an item identifier. Parts require a colour, Gear can optionally include a colour, and other item types must not include one.
+      operationId: postWishlistCreateLot
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key:
+                  $ref: '#/components/schemas/ApiKey'
+                wishlist_id:
+                  type: integer
+                  description: Wishlist ID.
+                boid:
+                  $ref: '#/components/schemas/Boid'
+                color_id:
+                  type: integer
+                  description: Brick Owl colour ID. Required for Parts, optional for Gear, and not allowed for other item types.
+              required:
+              - key
+              - wishlist_id
+              - boid
+      responses:
+        '200':
+          $ref: '#/components/responses/UndocumentedSuccess'
+        default:
+          $ref: '#/components/responses/UndocumentedError'
+webhooks:
+  /brick_owl_order_notify:
+    get:
+      summary: Brick Owl order notification callback
+      description: When enabled via `POST /order/notify`, Brick Owl sends an HTTP GET request to `http://{ip}:42500/brick_owl_order_notify` with query parameters `order_id` and `store_id`. Brick Owl notes that this service is not guaranteed, so consumers should also poll order endpoints.
+      operationId: brickOwlOrderNotify
+      parameters:
+      - name: order_id
+        in: query
+        required: true
+        description: Order ID.
+        schema:
+          type: integer
+      - name: store_id
+        in: query
+        required: true
+        description: Store ID.
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Notification accepted.
+        default:
+          description: Any other receiver-specific response.

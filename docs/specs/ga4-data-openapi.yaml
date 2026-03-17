@@ -1,0 +1,787 @@
+# OpenAPI 3.1 stub generated from ga4-data-api.md
+#
+# Notes:
+# - This file captures the path inventory, HTTP methods, descriptions, service endpoint,
+#   and resource organisation present in the source markdown.
+# - The source markdown does not include field-level request/response schemas, query
+#   parameters, or authentication flows, so this spec uses placeholder object schemas.
+# - Google-style resource-name templates were expanded into segment-level path parameters
+#   for OpenAPI compatibility.
+
+openapi: 3.1.0
+info:
+  title: Google Analytics Data API
+  version: v1alpha-v1beta-markdown-derived
+  description: |-
+    OpenAPI conversion derived from the uploaded Google Analytics Data API markdown index.
+
+    The source markdown enumerates resources, HTTP methods, relative paths, service endpoint, and short operation descriptions, but it does not provide full request schemas, response schemas, query parameters, or authentication flow details. This document therefore captures all listed operations and expands Google-style resource path templates into OpenAPI-friendly segment parameters, while using conservative placeholder schemas where the source is silent.
+
+    Source warning: Accesses report data in Google Analytics. Warning: Creating multiple Customer Applications, Accounts, or Projects to simulate or act as a single Customer Application, Account, or Project (respectively) or to circumvent Service-specific usage limits or quotas is a direct violation of Google Cloud Platform Terms of Service as well as Google APIs Terms of Service. These actions can result in immediate termination of your GCP project(s) without any warning.
+servers:
+- url: https://analyticsdata.googleapis.com
+externalDocs:
+  url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
+tags:
+- name: v1beta.properties
+  description: Operations for `v1beta.properties`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties
+- name: v1beta.properties.audienceExports
+  description: Operations for `v1beta.properties.audienceExports`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports
+- name: v1alpha.properties
+  description: Operations for `v1alpha.properties`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties
+- name: v1alpha.properties.audienceLists
+  description: Operations for `v1alpha.properties.audienceLists`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.audienceLists
+- name: v1alpha.properties.recurringAudienceLists
+  description: Operations for `v1alpha.properties.recurringAudienceLists`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.recurringAudienceLists
+- name: v1alpha.properties.reportTasks
+  description: Operations for `v1alpha.properties.reportTasks`.
+  externalDocs:
+    url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.reportTasks
+paths:
+  /v1beta/properties/{propertyId}:batchRunPivotReports:
+    post:
+      tags:
+      - v1beta.properties
+      summary: Returns multiple pivot reports in a batch.
+      description: |-
+        Returns multiple pivot reports in a batch.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:batchRunPivotReports`
+      operationId: v1betaPropertiesBatchRunPivotReports
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunPivotReports
+      x-google-path-template: /v1beta/{property=properties/*}:batchRunPivotReports
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}:batchRunReports:
+    post:
+      tags:
+      - v1beta.properties
+      summary: Returns multiple reports in a batch.
+      description: |-
+        Returns multiple reports in a batch.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:batchRunReports`
+      operationId: v1betaPropertiesBatchRunReports
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunReports
+      x-google-path-template: /v1beta/{property=properties/*}:batchRunReports
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}:checkCompatibility:
+    post:
+      tags:
+      - v1beta.properties
+      summary: This compatibility method lists dimensions and metrics that can be added to a report request and maintain compatibility.
+      description: |-
+        This compatibility method lists dimensions and metrics that can be added to a report request and maintain compatibility.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:checkCompatibility`
+      operationId: v1betaPropertiesCheckCompatibility
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/checkCompatibility
+      x-google-path-template: /v1beta/{property=properties/*}:checkCompatibility
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}/metadata:
+    get:
+      tags:
+      - v1beta.properties
+      summary: Returns metadata for dimensions and metrics available in reporting methods.
+      description: |-
+        Returns metadata for dimensions and metrics available in reporting methods.
+
+        Original Google API path template: `/v1beta/{name=properties/*/metadata}`
+      operationId: v1betaPropertiesGetMetadata
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata
+      x-google-path-template: /v1beta/{name=properties/*/metadata}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1beta/properties/{propertyId}:runPivotReport:
+    post:
+      tags:
+      - v1beta.properties
+      summary: Returns a customized pivot report of your Google Analytics event data.
+      description: |-
+        Returns a customized pivot report of your Google Analytics event data.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:runPivotReport`
+      operationId: v1betaPropertiesRunPivotReport
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runPivotReport
+      x-google-path-template: /v1beta/{property=properties/*}:runPivotReport
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}:runRealtimeReport:
+    post:
+      tags:
+      - v1beta.properties
+      summary: Returns a customized report of realtime event data for your property.
+      description: |-
+        Returns a customized report of realtime event data for your property.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:runRealtimeReport`
+      operationId: v1betaPropertiesRunRealtimeReport
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runRealtimeReport
+      x-google-path-template: /v1beta/{property=properties/*}:runRealtimeReport
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}:runReport:
+    post:
+      tags:
+      - v1beta.properties
+      summary: Returns a customized report of your Google Analytics event data.
+      description: |-
+        Returns a customized report of your Google Analytics event data.
+
+        Original Google API path template: `/v1beta/{property=properties/*}:runReport`
+      operationId: v1betaPropertiesRunReport
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
+      x-google-path-template: /v1beta/{property=properties/*}:runReport
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1beta/properties/{propertyId}/audienceExports:
+    post:
+      tags:
+      - v1beta.properties.audienceExports
+      summary: Creates an audience export for later retrieval.
+      description: |-
+        Creates an audience export for later retrieval.
+
+        Original Google API path template: `/v1beta/{parent=properties/*}/audienceExports`
+      operationId: v1betaPropertiesAudienceExportsCreate
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports/create
+      x-google-path-template: /v1beta/{parent=properties/*}/audienceExports
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+    get:
+      tags:
+      - v1beta.properties.audienceExports
+      summary: Lists all audience exports for a property.
+      description: |-
+        Lists all audience exports for a property.
+
+        Original Google API path template: `/v1beta/{parent=properties/*}/audienceExports`
+      operationId: v1betaPropertiesAudienceExportsList
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports/list
+      x-google-path-template: /v1beta/{parent=properties/*}/audienceExports
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1beta/properties/{propertyId}/audienceExports/{audienceExportId}:
+    get:
+      tags:
+      - v1beta.properties.audienceExports
+      summary: Gets configuration metadata about a specific audience export.
+      description: |-
+        Gets configuration metadata about a specific audience export.
+
+        Original Google API path template: `/v1beta/{name=properties/*/audienceExports/*}`
+      operationId: v1betaPropertiesAudienceExportsGet
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports/get
+      x-google-path-template: /v1beta/{name=properties/*/audienceExports/*}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/audienceExportId'
+  /v1beta/properties/{propertyId}/audienceExports/{audienceExportId}:query:
+    post:
+      tags:
+      - v1beta.properties.audienceExports
+      summary: Retrieves an audience export of users.
+      description: |-
+        Retrieves an audience export of users.
+
+        Original Google API path template: `/v1beta/{name=properties/*/audienceExports/*}:query`
+      operationId: v1betaPropertiesAudienceExportsQuery
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports/query
+      x-google-path-template: /v1beta/{name=properties/*/audienceExports/*}:query
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/audienceExportId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1alpha/properties/{propertyId}/propertyQuotasSnapshot:
+    get:
+      tags:
+      - v1alpha.properties
+      summary: Get all property quotas organized by quota category for a given property.
+      description: |-
+        Get all property quotas organized by quota category for a given property.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/propertyQuotasSnapshot}`
+      operationId: v1alphaPropertiesGetPropertyQuotasSnapshot
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties/getPropertyQuotasSnapshot
+      x-google-path-template: /v1alpha/{name=properties/*/propertyQuotasSnapshot}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1alpha/properties/{propertyId}:runFunnelReport:
+    post:
+      tags:
+      - v1alpha.properties
+      summary: Returns a customized funnel report of your Google Analytics event data.
+      description: |-
+        Returns a customized funnel report of your Google Analytics event data.
+
+        Original Google API path template: `/v1alpha/{property=properties/*}:runFunnelReport`
+      operationId: v1alphaPropertiesRunFunnelReport
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties/runFunnelReport
+      x-google-path-template: /v1alpha/{property=properties/*}:runFunnelReport
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1alpha/properties/{propertyId}/audienceLists:
+    post:
+      tags:
+      - v1alpha.properties.audienceLists
+      summary: Creates an audience list for later retrieval.
+      description: |-
+        Creates an audience list for later retrieval.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/audienceLists`
+      operationId: v1alphaPropertiesAudienceListsCreate
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.audienceLists/create
+      x-google-path-template: /v1alpha/{parent=properties/*}/audienceLists
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+    get:
+      tags:
+      - v1alpha.properties.audienceLists
+      summary: Lists all audience lists for a property.
+      description: |-
+        Lists all audience lists for a property.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/audienceLists`
+      operationId: v1alphaPropertiesAudienceListsList
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.audienceLists/list
+      x-google-path-template: /v1alpha/{parent=properties/*}/audienceLists
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1alpha/properties/{propertyId}/audienceLists/{audienceListId}:
+    get:
+      tags:
+      - v1alpha.properties.audienceLists
+      summary: Gets configuration metadata about a specific audience list.
+      description: |-
+        Gets configuration metadata about a specific audience list.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/audienceLists/*}`
+      operationId: v1alphaPropertiesAudienceListsGet
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.audienceLists/get
+      x-google-path-template: /v1alpha/{name=properties/*/audienceLists/*}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/audienceListId'
+  /v1alpha/properties/{propertyId}/audienceLists/{audienceListId}:query:
+    post:
+      tags:
+      - v1alpha.properties.audienceLists
+      summary: Retrieves an audience list of users.
+      description: |-
+        Retrieves an audience list of users.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/audienceLists/*}:query`
+      operationId: v1alphaPropertiesAudienceListsQuery
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.audienceLists/query
+      x-google-path-template: /v1alpha/{name=properties/*/audienceLists/*}:query
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/audienceListId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+  /v1alpha/properties/{propertyId}/recurringAudienceLists:
+    post:
+      tags:
+      - v1alpha.properties.recurringAudienceLists
+      summary: Creates a recurring audience list.
+      description: |-
+        Creates a recurring audience list.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/recurringAudienceLists`
+      operationId: v1alphaPropertiesRecurringAudienceListsCreate
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.recurringAudienceLists/create
+      x-google-path-template: /v1alpha/{parent=properties/*}/recurringAudienceLists
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+    get:
+      tags:
+      - v1alpha.properties.recurringAudienceLists
+      summary: Lists all recurring audience lists for a property.
+      description: |-
+        Lists all recurring audience lists for a property.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/recurringAudienceLists`
+      operationId: v1alphaPropertiesRecurringAudienceListsList
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.recurringAudienceLists/list
+      x-google-path-template: /v1alpha/{parent=properties/*}/recurringAudienceLists
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1alpha/properties/{propertyId}/recurringAudienceLists/{recurringAudienceListId}:
+    get:
+      tags:
+      - v1alpha.properties.recurringAudienceLists
+      summary: Gets configuration metadata about a specific recurring audience list.
+      description: |-
+        Gets configuration metadata about a specific recurring audience list.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/recurringAudienceLists/*}`
+      operationId: v1alphaPropertiesRecurringAudienceListsGet
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.recurringAudienceLists/get
+      x-google-path-template: /v1alpha/{name=properties/*/recurringAudienceLists/*}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/recurringAudienceListId'
+  /v1alpha/properties/{propertyId}/reportTasks:
+    post:
+      tags:
+      - v1alpha.properties.reportTasks
+      summary: Initiates the creation of a report task.
+      description: |-
+        Initiates the creation of a report task.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/reportTasks`
+      operationId: v1alphaPropertiesReportTasksCreate
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.reportTasks/create
+      x-google-path-template: /v1alpha/{parent=properties/*}/reportTasks
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+    get:
+      tags:
+      - v1alpha.properties.reportTasks
+      summary: Lists all report tasks for a property.
+      description: |-
+        Lists all report tasks for a property.
+
+        Original Google API path template: `/v1alpha/{parent=properties/*}/reportTasks`
+      operationId: v1alphaPropertiesReportTasksList
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.reportTasks/list
+      x-google-path-template: /v1alpha/{parent=properties/*}/reportTasks
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+  /v1alpha/properties/{propertyId}/reportTasks/{reportTaskId}:
+    get:
+      tags:
+      - v1alpha.properties.reportTasks
+      summary: Gets report metadata about a specific report task.
+      description: |-
+        Gets report metadata about a specific report task.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/reportTasks/*}`
+      operationId: v1alphaPropertiesReportTasksGet
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.reportTasks/get
+      x-google-path-template: /v1alpha/{name=properties/*/reportTasks/*}
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/reportTaskId'
+  /v1alpha/properties/{propertyId}/reportTasks/{reportTaskId}:query:
+    post:
+      tags:
+      - v1alpha.properties.reportTasks
+      summary: Retrieves a report task's content.
+      description: |-
+        Retrieves a report task's content.
+
+        Original Google API path template: `/v1alpha/{name=properties/*/reportTasks/*}:query`
+      operationId: v1alphaPropertiesReportTasksQuery
+      externalDocs:
+        url: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties.reportTasks/query
+      x-google-path-template: /v1alpha/{name=properties/*/reportTasks/*}:query
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      parameters:
+      - $ref: '#/components/parameters/propertyId'
+      - $ref: '#/components/parameters/reportTaskId'
+      requestBody:
+        required: false
+        description: Placeholder request body schema. The source markdown does not include field-level request body definitions.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+components:
+  parameters:
+    audienceExportId:
+      name: audienceExportId
+      in: path
+      required: true
+      description: Audience export identifier.
+      schema:
+        type: string
+    audienceListId:
+      name: audienceListId
+      in: path
+      required: true
+      description: Audience list identifier.
+      schema:
+        type: string
+    propertyId:
+      name: propertyId
+      in: path
+      required: true
+      description: Property identifier.
+      schema:
+        type: string
+    recurringAudienceListId:
+      name: recurringAudienceListId
+      in: path
+      required: true
+      description: Recurring audience list identifier.
+      schema:
+        type: string
+    reportTaskId:
+      name: reportTaskId
+      in: path
+      required: true
+      description: Report task identifier.
+      schema:
+        type: string
+  schemas:
+    GenericObject:
+      type: object
+      description: Placeholder schema. The source markdown does not include field-level JSON schema definitions.
+      additionalProperties: true
+    ErrorObject:
+      type: object
+      description: Generic error placeholder.
+      additionalProperties: true
+  responses:
+    ErrorResponse:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorObject'
+x-derived-from:
+  source_file: ga4-data-api.md
+  resource_count: 6
+  operation_count: 24
+  discovery_documents:
+  - https://analyticsdata.googleapis.com/$discovery/rest?version=v1beta
+  - https://analyticsdata.googleapis.com/$discovery/rest?version=v1alpha
