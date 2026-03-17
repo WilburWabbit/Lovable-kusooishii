@@ -52,7 +52,26 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
-    // --- Status check (no auth required) ---
+    // --- All actions require admin auth ---
+    if (!clientId || !clientSecret) {
+      throw new Error("EBAY_CLIENT_ID or EBAY_CLIENT_SECRET not configured");
+    }
+
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError || !user) throw new Error("Unauthorized");
+
+    const { data: roles } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id);
+    const isAdmin = (roles ?? []).some((r: { role: string }) => r.role === "admin");
+    if (!isAdmin) throw new Error("Forbidden: admin only");
+
+    // --- Status check ---
     if (action === "status") {
       const { data: conn } = await supabaseAdmin
         .from("ebay_connection")
@@ -72,24 +91,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // --- All other actions require admin auth ---
-    if (!clientId || !clientSecret) {
-      throw new Error("EBAY_CLIENT_ID or EBAY_CLIENT_SECRET not configured");
-    }
-
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) throw new Error("Unauthorized");
-
-    const { data: roles } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id);
-    const isAdmin = (roles ?? []).some((r: { role: string }) => r.role === "admin");
-    if (!isAdmin) throw new Error("Forbidden: admin only");
 
     // --- Generate consent URL ---
     if (action === "authorize_url") {
