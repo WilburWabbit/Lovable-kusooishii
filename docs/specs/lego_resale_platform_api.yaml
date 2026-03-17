@@ -1,0 +1,318 @@
+
+openapi: 3.1.0
+info:
+  title: LEGO Resale Platform API
+  version: 1.0.0
+  description: API specification for the LEGO resale platform, including inventory, orders, pricing, media, and club collections.
+
+servers:
+  - url: https://api.lego-resale.example.com/v1
+    description: Production server
+
+paths:
+  /skus:
+    get:
+      summary: List all SKUs
+      tags: [SKU]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of SKUs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SKU'
+    post:
+      summary: Create a new SKU
+      tags: [SKU]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SKU'
+      responses:
+        '201':
+          description: SKU created
+  /stock-units:
+    get:
+      summary: List stock units
+      tags: [Inventory]
+      parameters:
+        - name: sku_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stock units list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockUnit'
+    post:
+      summary: Create a new stock unit (from purchase receipt)
+      tags: [Inventory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockUnit'
+      responses:
+        '201':
+          description: Stock unit created
+  /orders:
+    get:
+      summary: List orders
+      tags: [Orders]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    post:
+      summary: Create a new order
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Order'
+      responses:
+        '201':
+          description: Order created
+  /listings:
+    get:
+      summary: List all channel listings
+      tags: [Listings]
+      responses:
+        '200':
+          description: List of listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Listing'
+    post:
+      summary: Create a new channel listing
+      tags: [Listings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Listing'
+      responses:
+        '201':
+          description: Listing created
+  /pricing:
+    get:
+      summary: Get pricing data for SKU
+      tags: [Pricing]
+      parameters:
+        - name: sku_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pricing info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pricing'
+  /wishlists:
+    get:
+      summary: List wishlists
+      tags: [Wishlist]
+      responses:
+        '200':
+          description: List of wishlists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Wishlist'
+    post:
+      summary: Add a SKU to wishlist
+      tags: [Wishlist]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WishlistItem'
+      responses:
+        '201':
+          description: Wishlist item added
+  /media-assets:
+    get:
+      summary: List media assets
+      tags: [Media]
+      responses:
+        '200':
+          description: List of media assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaAsset'
+    post:
+      summary: Upload a new media asset
+      tags: [Media]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                sku_id:
+                  type: string
+      responses:
+        '201':
+          description: Media asset created
+
+components:
+  schemas:
+    SKU:
+      type: object
+      properties:
+        id:
+          type: string
+        mpn:
+          type: string
+        grade:
+          type: integer
+        condition_saleable:
+          type: boolean
+        qbo_item_id:
+          type: string
+    StockUnit:
+      type: object
+      properties:
+        id:
+          type: string
+        sku_id:
+          type: string
+        status:
+          type: string
+        location:
+          type: string
+        landed_cost:
+          type: number
+          format: float
+        carrying_value:
+          type: number
+          format: float
+        reservation_id:
+          type: string
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        origin:
+          type: string
+        status:
+          type: string
+        total_amount:
+          type: number
+          format: float
+    Listing:
+      type: object
+      properties:
+        id:
+          type: string
+        sku_id:
+          type: string
+        channel:
+          type: string
+        status:
+          type: string
+        price:
+          type: number
+          format: float
+    Pricing:
+      type: object
+      properties:
+        sku_id:
+          type: string
+        floor:
+          type: number
+          format: float
+        target:
+          type: number
+          format: float
+        ceiling:
+          type: number
+          format: float
+        confidence:
+          type: number
+          format: float
+    Wishlist:
+      type: object
+      properties:
+        id:
+          type: string
+        member_id:
+          type: string
+        name:
+          type: string
+    WishlistItem:
+      type: object
+      properties:
+        wishlist_id:
+          type: string
+        sku_id:
+          type: string
+    MediaAsset:
+      type: object
+      properties:
+        id:
+          type: string
+        sku_id:
+          type: string
+        url:
+          type: string
+        slot:
+          type: integer
+        is_primary:
+          type: boolean

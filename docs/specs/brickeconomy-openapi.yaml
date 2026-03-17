@@ -1,0 +1,1074 @@
+openapi: 3.0.3
+info:
+  title: BrickEconomy API
+  version: v1
+  description: 'OpenAPI description derived from the public BrickEconomy API reference.
+    The current reference documents five GET endpoints under `/api/v1`: `/set/{setNumber}`,
+    `/minifig/{minifigNumber}`, `/collection/sets`, `/collection/minifigs`, and `/salesledger`.
+    All requests require an `x-apikey` header and the docs also state that clients
+    must send `User-Agent` and `Accept: application/json`. Successful responses are
+    generally wrapped as `{ "data": ... }`. The docs explicitly warn that some response
+    fields may be omitted depending on object state, so this specification keeps most
+    schema properties optional. Where the docs and payload examples disagree, this
+    spec prefers a permissive schema and notes the discrepancy.'
+servers:
+- url: https://www.brickeconomy.com/api/v1
+  description: BrickEconomy API v1 base URL
+externalDocs:
+  description: Original BrickEconomy API reference
+  url: https://www.brickeconomy.com/api-reference
+tags:
+- name: Sets
+  description: Set lookup endpoints
+- name: Minifigs
+  description: Minifigure lookup endpoints
+- name: Collection
+  description: Authenticated collection endpoints
+- name: Sales Ledger
+  description: Authenticated sales ledger endpoint
+security:
+- ApiKeyAuth: []
+paths:
+  /set/{setNumber}:
+    get:
+      tags:
+      - Sets
+      summary: Get a set
+      description: Returns a LEGO set object. The reference says some response fields
+        may be omitted depending on the set state.
+      operationId: getSet
+      parameters:
+      - $ref: '#/components/parameters/SetNumber'
+      - $ref: '#/components/parameters/Currency'
+      - $ref: '#/components/parameters/UserAgent'
+      responses:
+        '200':
+          description: Set lookup result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetResponse'
+              examples:
+                set:
+                  $ref: '#/components/examples/SetResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /minifig/{minifigNumber}:
+    get:
+      tags:
+      - Minifigs
+      summary: Get a minifig
+      description: Returns a LEGO minifigure object. The reference says some response
+        fields may be omitted depending on the minifig state.
+      operationId: getMinifig
+      parameters:
+      - $ref: '#/components/parameters/MinifigNumber'
+      - $ref: '#/components/parameters/Currency'
+      - $ref: '#/components/parameters/UserAgent'
+      responses:
+        '200':
+          description: Minifig lookup result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinifigResponse'
+              examples:
+                minifig:
+                  $ref: '#/components/examples/MinifigResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /collection/sets:
+    get:
+      tags:
+      - Collection
+      summary: Get my sets
+      description: Returns the authenticated user's entire set collection. The reference
+        says identical set numbers are returned as separate objects when they represent
+        distinct inventory instances.
+      operationId: getMySets
+      parameters:
+      - $ref: '#/components/parameters/Currency'
+      - $ref: '#/components/parameters/UserAgent'
+      responses:
+        '200':
+          description: Full set collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetCollectionResponse'
+              examples:
+                collection:
+                  $ref: '#/components/examples/SetCollectionResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /collection/minifigs:
+    get:
+      tags:
+      - Collection
+      summary: Get my minifigs
+      description: Returns the authenticated user's entire minifigure collection.
+        The reference says identical minifig numbers are returned as separate objects
+        when they represent distinct inventory instances.
+      operationId: getMyMinifigs
+      parameters:
+      - $ref: '#/components/parameters/Currency'
+      - $ref: '#/components/parameters/UserAgent'
+      responses:
+        '200':
+          description: Full minifigure collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinifigCollectionResponse'
+              examples:
+                collection:
+                  $ref: '#/components/examples/MinifigCollectionResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /salesledger:
+    get:
+      tags:
+      - Sales Ledger
+      summary: Get my sales ledger
+      description: Returns the authenticated user's sales ledger. The docs say sale
+        values use the currency of record for each entry, rather than a request-wide
+        conversion currency.
+      operationId: getMySalesLedger
+      parameters:
+      - $ref: '#/components/parameters/UserAgent'
+      responses:
+        '200':
+          description: Sales ledger data set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesLedgerResponse'
+              examples:
+                ledger:
+                  $ref: '#/components/examples/SalesLedgerResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-apikey
+      description: Personal BrickEconomy API key.
+  parameters:
+    UserAgent:
+      name: User-Agent
+      in: header
+      required: true
+      description: BrickEconomy docs state that `User-Agent` is required on all requests.
+      schema:
+        type: string
+        example: Mozilla/5.0
+    Currency:
+      name: currency
+      in: query
+      required: false
+      description: Optional ISO 4217 currency code. Defaults to `USD` when omitted.
+      schema:
+        type: string
+        enum:
+        - USD
+        - GBP
+        - CAD
+        - AUD
+        - CNY
+        - KRW
+        - EUR
+        - JPY
+        - CHF
+        - INR
+        - BRL
+        - RUB
+        - ZAR
+        - MXN
+        - SGD
+        - HKD
+        - SEK
+        - NZD
+        - NOK
+        - TRY
+        - DKK
+        - PLN
+        default: USD
+    SetNumber:
+      name: setNumber
+      in: path
+      required: true
+      description: Set number to look up. Examples include `10236` and `10236-1`.
+        If a set has multiple variations, include the variation suffix such as `-1`.
+      schema:
+        type: string
+        example: 10236-1
+    MinifigNumber:
+      name: minifigNumber
+      in: path
+      required: true
+      description: Minifigure number to look up, for example `sw0509`.
+      schema:
+        type: string
+        example: sw0509
+  responses:
+    BadRequest:
+      description: Invalid or malformed request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            badRequest:
+              $ref: '#/components/examples/BadRequestErrorExample'
+            invalidArgument:
+              $ref: '#/components/examples/InvalidArgumentErrorExample'
+            unknownObject:
+              $ref: '#/components/examples/UnknownObjectErrorExample'
+    Unauthorized:
+      description: Authentication failed or is missing.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            authenticationRequired:
+              $ref: '#/components/examples/AuthenticationRequiredErrorExample'
+            wrongCredentials:
+              $ref: '#/components/examples/WrongCredentialsErrorExample'
+            userNotActive:
+              $ref: '#/components/examples/UserNotActiveErrorExample'
+    Forbidden:
+      description: The authenticated user is not allowed to perform the requested
+        operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            forbidden:
+              $ref: '#/components/examples/ForbiddenErrorExample'
+    NotFound:
+      description: Requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              $ref: '#/components/examples/NotFoundErrorExample'
+    TooManyRequests:
+      description: Daily quota exceeded or too many requests.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            quotaExceeded:
+              $ref: '#/components/examples/QuotaExceededErrorExample'
+            tooManyRequests:
+              $ref: '#/components/examples/TooManyRequestsErrorExample'
+    ServerError:
+      description: Unexpected server-side error. The source docs say 5xx errors should
+        be rare.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    CurrencyCode:
+      type: string
+      description: Supported ISO 4217 currency code.
+      enum:
+      - USD
+      - GBP
+      - CAD
+      - AUD
+      - CNY
+      - KRW
+      - EUR
+      - JPY
+      - CHF
+      - INR
+      - BRL
+      - RUB
+      - ZAR
+      - MXN
+      - SGD
+      - HKD
+      - SEK
+      - NZD
+      - NOK
+      - TRY
+      - DKK
+      - PLN
+      default: USD
+    ItemCondition:
+      type: string
+      description: Documented inventory or sale condition.
+      enum:
+      - new
+      - used_as_new
+      - used_complete
+      - used_incomplete
+    PriceEvent:
+      type: object
+      description: A dated value point in the price history.
+      properties:
+        date:
+          type: string
+          format: date
+          description: Event date.
+        value:
+          type: number
+          format: double
+          description: Value in the response currency.
+      required:
+      - date
+      - value
+    ErrorResponse:
+      type: object
+      description: 'Standard BrickEconomy error response. The docs show an `{ "error":
+        <code> }` shape. Known documented codes include `BadRequestError`, `InvalidArgumentError`,
+        `UnknownObject`, `AuthenticationRequiredError`, `WrongCredentialsError`, `UserNotActiveError`,
+        `ForbiddenError`, `NotFoundError`, `QuotaExceededError`, and `TooManyRequestsError`.'
+      properties:
+        error:
+          type: string
+          description: BrickEconomy error code string.
+      required:
+      - error
+    Set:
+      type: object
+      description: LEGO set object returned by the set lookup endpoint. The source
+        docs warn that some fields may be omitted depending on set state, such as
+        `retired_date` for non-retired sets.
+      properties:
+        retired:
+          type: boolean
+          description: Whether the set has retired from first-party retail sales.
+        set_number:
+          type: string
+          description: Set number corresponding to the requested path parameter.
+        name:
+          type: string
+          description: Set name.
+        theme:
+          type: string
+          description: Top-level theme.
+        subtheme:
+          type: string
+          description: Second-level theme or subtheme.
+        year:
+          type: integer
+          description: Initial release year.
+        pieces_count:
+          type: integer
+          description: Number of pieces in the set.
+        minifigs_count:
+          type: integer
+          description: Number of minifigures in the set, when available.
+        minifigs:
+          type: array
+          description: Minifigure numbers included in the set.
+          items:
+            type: string
+        availability:
+          type: string
+          description: 'General sales availability. The docs list the following values
+            verbatim: `retail`, `relaillimited`, `exclusive`, `exclusivelegoland`,
+            `promotion`, `notforretail`.'
+        retail_price_us:
+          type: number
+          format: double
+          description: Original US retail price in USD.
+        retail_price_uk:
+          type: number
+          format: double
+          description: Original UK retail price in GBP.
+        retail_price_ca:
+          type: number
+          format: double
+          description: Original Canadian retail price in CAD.
+        retail_price_eu:
+          type: number
+          format: double
+          description: Original EU retail price in EUR.
+        retail_price_au:
+          type: number
+          format: double
+          description: Original Australian retail price in AUD.
+        ean:
+          type: string
+          description: EAN barcode number.
+        upc:
+          type: string
+          description: UPC barcode number.
+        released_date:
+          type: string
+          format: date
+          description: Release date.
+        retired_date:
+          type: string
+          format: date
+          description: Retirement date, when applicable.
+        current_value_new:
+          type: number
+          format: double
+          description: Estimated value of a new sealed set in the response currency.
+        current_value_used:
+          type: number
+          format: double
+          description: Estimated value of a used complete set in the response currency.
+        current_value_used_low:
+          type: number
+          format: double
+          description: Low end of the used value range in the response currency.
+        current_value_used_high:
+          type: number
+          format: double
+          description: High end of the used value range in the response currency.
+        forecast_value_new_2_years:
+          type: number
+          format: double
+          description: Forecast new-set value two years from now in the response currency.
+        forecast_value_new_5_years:
+          type: number
+          format: double
+          description: Forecast new-set value five years from now in the response
+            currency.
+        rolling_growth_lastyear:
+          type: number
+          format: double
+          description: Average rolling growth percentage over the previous full year.
+        rolling_growth_12months:
+          type: number
+          format: double
+          description: Average rolling growth percentage over the last 12 months.
+        price_events_new:
+          type: array
+          description: Recent notable price events for new sets.
+          items:
+            $ref: '#/components/schemas/PriceEvent'
+        price_events_used:
+          type: array
+          description: Recent notable price events for used sets. Present in the example
+            response.
+          items:
+            $ref: '#/components/schemas/PriceEvent'
+        currency:
+          $ref: '#/components/schemas/CurrencyCode'
+    Minifig:
+      type: object
+      description: LEGO minifigure object returned by the minifig lookup endpoint.
+        The docs note that some fields may be omitted depending on the minifig state.
+        The reference example also shows fields that are not listed in the attribute
+        table, such as `description`, `set_count`, and `sets`.
+      properties:
+        minifig_number:
+          type: string
+          description: Minifigure number corresponding to the requested path parameter.
+        name:
+          type: string
+          description: Minifigure name.
+        description:
+          type: string
+          description: Free-text minifigure description. Present in the example response.
+        set_count:
+          type: integer
+          description: Number of sets the minifigure appears in. Present in the example
+            response.
+        sets:
+          type: array
+          description: Set numbers that include this minifigure. Present in the example
+            response.
+          items:
+            type: string
+        theme:
+          type: string
+          description: Top-level theme.
+        subtheme:
+          type: string
+          description: Second-level theme or subtheme.
+        year:
+          type: integer
+          description: Initial release year.
+        released_date:
+          type: string
+          description: Release date. The attribute table describes this as `YYYY-MM-DD`,
+            but the published example uses a month-year string (`December 2012`),
+            so no stricter date format is enforced here.
+        current_value_new:
+          type: number
+          format: double
+          description: Estimated value of a new minifigure in the response currency.
+        price_events_new:
+          type: array
+          description: Recent notable price events for the minifigure.
+          items:
+            $ref: '#/components/schemas/PriceEvent'
+        currency:
+          $ref: '#/components/schemas/CurrencyCode'
+    CollectionSetItem:
+      type: object
+      description: A single set instance in the authenticated user's collection.
+      properties:
+        retired:
+          type: boolean
+          description: Present in the example response.
+        set_number:
+          type: string
+        name:
+          type: string
+        theme:
+          type: string
+        subtheme:
+          type: string
+        year:
+          type: integer
+        pieces_count:
+          type: integer
+        minifigs_count:
+          type: integer
+        retail_price:
+          type: number
+          format: double
+          description: Original retail price in the requested currency.
+        released_date:
+          type: string
+          format: date
+        retired_date:
+          type: string
+          format: date
+        aquired_date:
+          type: string
+          format: date
+          description: Original acquisition date. Field name follows the API's documented
+            spelling.
+        collection:
+          type: string
+          description: User-defined collection name, when set.
+        condition:
+          $ref: '#/components/schemas/ItemCondition'
+        paid_price:
+          type: number
+          format: double
+          description: Price paid by the user.
+        current_value:
+          type: number
+          format: double
+          description: Current estimated value of this collection item in the requested
+            currency.
+        growth:
+          type: number
+          format: double
+          description: Percentage growth from paid price to current value.
+    CollectionSetPeriod:
+      type: object
+      description: Historical snapshot of the user's set collection value.
+      properties:
+        value:
+          type: number
+          format: double
+        date:
+          type: string
+          format: date
+        sets_count:
+          type: integer
+        sets_count_new:
+          type: integer
+        sets_count_used:
+          type: integer
+    SetCollection:
+      type: object
+      description: Authenticated user's full set collection, including summary counts,
+        per-item details, and historical value periods. The reference says identical
+        sets are returned as distinct items when they represent separate inventory
+        instances.
+      properties:
+        sets_count:
+          type: integer
+          description: Total number of sets in the collection.
+        sets_unique_count:
+          type: integer
+          description: Number of unique set numbers in the collection.
+        sets_new_count:
+          type: integer
+          description: Number of new or factory-sealed sets.
+        sets_used_count:
+          type: integer
+          description: Number of used sets.
+        sets_pieces_count:
+          type: integer
+          description: Total pieces across all sets.
+        sets_minifigs_count:
+          type: integer
+          description: Total minifigures across all sets.
+        current_value:
+          type: number
+          format: double
+          description: Current estimated total collection value in the requested currency.
+        currency:
+          $ref: '#/components/schemas/CurrencyCode'
+        sets:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionSetItem'
+          description: Set instances in the collection.
+        periods:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionSetPeriod'
+          description: Historical snapshots sorted by descending date. The docs say
+            up to 48 periods are returned.
+    CollectionMinifigItem:
+      type: object
+      description: A single minifigure instance in the authenticated user's collection.
+      properties:
+        minifig_number:
+          type: string
+        name:
+          type: string
+        collection:
+          type: string
+          description: User-defined collection name, when set.
+        aquired_date:
+          type: string
+          format: date
+          description: Original acquisition date. Field name follows the API's documented
+            spelling.
+        paid_price:
+          type: number
+          format: double
+        current_value:
+          type: number
+          format: double
+        growth:
+          type: number
+          format: double
+    CollectionMinifigPeriod:
+      type: object
+      description: Historical snapshot of the user's minifigure collection value.
+        The example response uses `minifigs_count`, while the attribute list labels
+        this counter as `sets_count`; both are modelled here to remain permissive.
+      properties:
+        value:
+          type: number
+          format: double
+        date:
+          type: string
+          format: date
+        minifigs_count:
+          type: integer
+          description: Counter name used in the example response.
+        sets_count:
+          type: integer
+          description: Counter name used in the attribute table; likely a documentation
+            typo.
+    MinifigCollection:
+      type: object
+      description: Authenticated user's full minifigure collection, including summary
+        counts, per-item details, and historical value periods. The reference says
+        identical minifigs are returned as distinct items when they represent separate
+        inventory instances.
+      properties:
+        minifigs_count:
+          type: integer
+          description: Total number of minifigures in the collection.
+        minifigs_unique_count:
+          type: integer
+          description: Number of unique minifig numbers in the collection.
+        current_value:
+          type: number
+          format: double
+          description: Current estimated total collection value in the requested currency.
+        currency:
+          $ref: '#/components/schemas/CurrencyCode'
+        minifigs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionMinifigItem'
+          description: Minifigure instances in the collection.
+        periods:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionMinifigPeriod'
+          description: Historical snapshots sorted by descending date. The docs say
+            up to 48 periods are returned.
+    SetSale:
+      type: object
+      description: A single set sale record in the user's sales ledger.
+      properties:
+        set_number:
+          type: string
+        name:
+          type: string
+        theme:
+          type: string
+        subtheme:
+          type: string
+        year:
+          type: integer
+        pieces_count:
+          type: integer
+        minifigs_count:
+          type: integer
+          description: Present in the example response.
+        currency:
+          type: string
+          description: Currency of record for the sale and buy values.
+        sale_price_total:
+          type: number
+          format: double
+        sale_price_unit:
+          type: number
+          format: double
+        sale_price_shipping:
+          type: number
+          format: double
+        sale_price_fees:
+          type: number
+          format: double
+        sale_quantity:
+          type: integer
+        sale_condition:
+          $ref: '#/components/schemas/ItemCondition'
+        sale_date:
+          type: string
+          format: date
+        sale_notes:
+          type: string
+        buy_date:
+          type: string
+          format: date
+        buy_notes:
+          type: string
+        buy_condition:
+          $ref: '#/components/schemas/ItemCondition'
+        buy_price:
+          type: number
+          format: double
+    MinifigSale:
+      type: object
+      description: A single minifigure sale record in the user's sales ledger.
+      properties:
+        minifig_number:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+          description: Currency of record for the sale and buy values.
+        sale_price_total:
+          type: number
+          format: double
+        sale_price_unit:
+          type: number
+          format: double
+        sale_price_shipping:
+          type: number
+          format: double
+        sale_price_fees:
+          type: number
+          format: double
+        sale_quantity:
+          type: integer
+        sale_condition:
+          $ref: '#/components/schemas/ItemCondition'
+        sale_date:
+          type: string
+          format: date
+        sale_notes:
+          type: string
+        buy_date:
+          type: string
+          format: date
+        buy_notes:
+          type: string
+        buy_condition:
+          $ref: '#/components/schemas/ItemCondition'
+        buy_price:
+          type: number
+          format: double
+    SalesLedger:
+      type: object
+      description: Authenticated user's sales ledger. The BrickEconomy docs state
+        that ledger values use each record's original currency rather than a requested
+        conversion currency.
+      properties:
+        set_sales_count:
+          type: integer
+        minifig_sales_count:
+          type: integer
+        set_sales:
+          type: array
+          items:
+            $ref: '#/components/schemas/SetSale'
+        minifig_sales:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinifigSale'
+    SetResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Set'
+      required:
+      - data
+    MinifigResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Minifig'
+      required:
+      - data
+    SetCollectionResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SetCollection'
+      required:
+      - data
+    MinifigCollectionResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/MinifigCollection'
+      required:
+      - data
+    SalesLedgerResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SalesLedger'
+      required:
+      - data
+  examples:
+    SetResponseExample:
+      summary: Example set response
+      value:
+        data:
+          retired: true
+          set_number: 10236-1
+          name: Ewok Village
+          theme: Star Wars
+          subtheme: Ultimate Collector Series
+          year: 2013
+          pieces_count: 1990
+          minifigs_count: 17
+          availability: exclusive
+          released_date: '2013-09-01'
+          retired_date: '2016-11-29'
+          current_value_new: 604.61
+          current_value_used: 519.99
+          currency: USD
+          price_events_new:
+          - date: '2024-01-14'
+            value: 604.61
+          - date: '2023-12-31'
+            value: 627.74
+    MinifigResponseExample:
+      summary: Example minifig response
+      value:
+        data:
+          minifig_number: sw0451
+          name: Han Solo
+          description: Han Solo, reddish brown legs with holster pattern, vest with
+            pockets
+          set_count: 2
+          sets:
+          - 10236-1
+          - 75003-1
+          theme: Star Wars
+          year: 2013
+          released_date: December 2012
+          current_value_new: 7.27
+          currency: USD
+          price_events_new:
+          - date: '2024-01-14'
+            value: 7.26
+          - date: '2023-12-31'
+            value: 7.2
+    SetCollectionResponseExample:
+      summary: Example set collection response
+      value:
+        data:
+          sets_count: 828
+          sets_unique_count: 625
+          sets_new_count: 726
+          sets_used_count: 102
+          sets_pieces_count: 581548
+          sets_minifigs_count: 2591
+          current_value: 101124.68
+          currency: USD
+          sets:
+          - retired: true
+            set_number: 75144-1
+            name: Snowspeeder
+            theme: Star Wars
+            subtheme: Ultimate Collector Series
+            year: 2017
+            pieces_count: 1703
+            minifigs_count: 2
+            retail_price: 199.99
+            released_date: '2017-01-01'
+            retired_date: '2019-01-01'
+            aquired_date: '2018-11-01'
+            collection: Investments
+            condition: new
+            paid_price: 199.99
+            current_value: 382.0
+            growth: 91.01
+          periods:
+          - value: 102554.69
+            date: '2024-01-25'
+            sets_count: 828
+            sets_count_new: 740
+            sets_count_used: 88
+    MinifigCollectionResponseExample:
+      summary: Example minifig collection response
+      value:
+        data:
+          minifigs_count: 23
+          minifigs_unique_count: 22
+          current_value: 554.04
+          currency: USD
+          minifigs:
+          - minifig_number: scd003
+            name: Shaggy Rogers
+            aquired_date: '2023-12-29'
+            collection: Investments
+            paid_price: 4.91
+            current_value: 7.67
+            growth: 156.52
+          periods:
+          - value: 587.28
+            date: '2024-01-01'
+            minifigs_count: 23
+    SalesLedgerResponseExample:
+      summary: Example sales ledger response
+      value:
+        data:
+          set_sales_count: 6
+          minifig_sales_count: 1
+          set_sales:
+          - set_number: 10292-1
+            name: The Friends Apartments
+            theme: Icons
+            year: 2021
+            pieces_count: 2048
+            minifigs_count: 7
+            currency: USD
+            sale_price_total: 84.0
+            sale_price_unit: 78.0
+            sale_price_shipping: 5.0
+            sale_price_fees: 5.0
+            sale_quantity: 1
+            sale_condition: new
+            sale_date: '2021-03-03'
+            buy_date: '2020-01-01'
+            buy_condition: new
+            buy_price: 78.0
+          minifig_sales:
+          - minifig_number: sw0451
+            name: Han Solo
+            currency: USD
+            sale_price_total: 64.0
+            sale_price_unit: 58.0
+            sale_price_shipping: 5.0
+            sale_price_fees: 5.0
+            sale_quantity: 10
+            sale_date: '2021-03-03'
+            buy_date: '2020-01-01'
+            buy_price: 38.0
+    BadRequestErrorExample:
+      summary: BadRequestError
+      value:
+        error: BadRequestError
+    InvalidArgumentErrorExample:
+      summary: InvalidArgumentError
+      value:
+        error: InvalidArgumentError
+    UnknownObjectErrorExample:
+      summary: UnknownObject
+      value:
+        error: UnknownObject
+    AuthenticationRequiredErrorExample:
+      summary: AuthenticationRequiredError
+      value:
+        error: AuthenticationRequiredError
+    WrongCredentialsErrorExample:
+      summary: WrongCredentialsError
+      value:
+        error: WrongCredentialsError
+    UserNotActiveErrorExample:
+      summary: UserNotActiveError
+      value:
+        error: UserNotActiveError
+    ForbiddenErrorExample:
+      summary: ForbiddenError
+      value:
+        error: ForbiddenError
+    NotFoundErrorExample:
+      summary: NotFoundError
+      value:
+        error: NotFoundError
+    QuotaExceededErrorExample:
+      summary: QuotaExceededError
+      value:
+        error: QuotaExceededError
+    TooManyRequestsErrorExample:
+      summary: TooManyRequestsError
+      value:
+        error: TooManyRequestsError

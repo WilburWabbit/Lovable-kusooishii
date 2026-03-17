@@ -1,0 +1,2090 @@
+openapi: 3.0.3
+info:
+  title: Brickset API v3 (OpenAPI conversion)
+  version: '1.07'
+  description: 'OpenAPI description of the Brickset API v3 ASMX HTTP interface.
+
+
+    This specification models the documented HTTP GET and `application/x-www-form-urlencoded` POST forms exposed at `/api/v3.asmx/{method}`.
+    The underlying ASMX service also publishes SOAP 1.1 and SOAP 1.2 bindings in WSDL; each operation here carries its original
+    SOAP action in an `x-soapAction` vendor extension.
+
+
+    Parameters named `params` or `Params` are JSON-encoded strings. Companion schemas under `components.schemas` describe
+    the expected JSON object shapes that should be stringified and sent in those fields.'
+servers:
+- url: https://brickset.com
+  description: Brickset production
+externalDocs:
+  description: Brickset API v3 documentation
+  url: https://brickset.com/article/52664/api-version-3-documentation
+x-origin-wsdl: https://brickset.com/api/v3.asmx?WSDL
+tags:
+- name: General
+  description: General authentication and API usage methods.
+- name: Sets
+  description: Set search and lookup methods.
+- name: Collection
+  description: User set collection methods.
+- name: Minifigs
+  description: User minifigure collection methods.
+paths:
+  /api/v3.asmx/checkKey:
+    get:
+      tags:
+      - General
+      summary: Check whether an API key is valid.
+      description: Returns success when the supplied `apiKey` is valid.
+      operationId: api_v3_asmx_checkKey_get
+      x-soapAction: https://brickset.com/api/checkKey
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - General
+      summary: Check whether an API key is valid.
+      description: Returns success when the supplied `apiKey` is valid.
+      operationId: api_v3_asmx_checkKey_post
+      x-soapAction: https://brickset.com/api/checkKey
+      requestBody:
+        $ref: '#/components/requestBodies/CheckKeyForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/login:
+    get:
+      tags:
+      - General
+      summary: Log in and obtain a user hash.
+      description: 'Logs in with a Brickset username and password and returns a `hash` token for subsequent user-specific
+        calls.
+
+
+        GET is documented by the ASMX service, but POST is preferable because GET places credentials on the URL.'
+      operationId: api_v3_asmx_login_get
+      x-soapAction: https://brickset.com/api/login
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/Username'
+      - $ref: '#/components/parameters/Password'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/LoginSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - General
+      summary: Log in and obtain a user hash.
+      description: Logs in with a Brickset username and password and returns a `hash` token for subsequent user-specific calls.
+      operationId: api_v3_asmx_login_post
+      x-soapAction: https://brickset.com/api/login
+      requestBody:
+        $ref: '#/components/requestBodies/LoginForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/LoginSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/checkUserHash:
+    get:
+      tags:
+      - General
+      summary: Check whether a user hash is valid.
+      description: Verifies a `userHash` previously returned by `login`.
+      operationId: api_v3_asmx_checkUserHash_get
+      x-soapAction: https://brickset.com/api/checkUserHash
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - General
+      summary: Check whether a user hash is valid.
+      description: Verifies a `userHash` previously returned by `login`.
+      operationId: api_v3_asmx_checkUserHash_post
+      x-soapAction: https://brickset.com/api/checkUserHash
+      requestBody:
+        $ref: '#/components/requestBodies/CheckUserHashForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getKeyUsageStats:
+    get:
+      tags:
+      - General
+      summary: Get key usage stats for the last 30 days.
+      description: Brickset notes that only calls to `getSets` count against key usage.
+      operationId: api_v3_asmx_getKeyUsageStats_get
+      x-soapAction: https://brickset.com/api/getKeyUsageStats
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/KeyUsageStatsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - General
+      summary: Get key usage stats for the last 30 days.
+      description: Brickset notes that only calls to `getSets` count against key usage.
+      operationId: api_v3_asmx_getKeyUsageStats_post
+      x-soapAction: https://brickset.com/api/getKeyUsageStats
+      requestBody:
+        $ref: '#/components/requestBodies/GetKeyUsageStatsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/KeyUsageStatsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getSets:
+    get:
+      tags:
+      - Sets
+      summary: Retrieve sets matching search criteria.
+      description: Retrieves a list of sets, or more information about a particular one. `params` must be a JSON string shaped
+        like `GetSetsParamsObject`. `userHash` is optional and is only used with user-specific filters such as owned or wanted.
+      operationId: api_v3_asmx_getSets_get
+      x-soapAction: https://brickset.com/api/getSets
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHashOptional'
+      - $ref: '#/components/parameters/params'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/GetSetsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Retrieve sets matching search criteria.
+      description: Retrieves a list of sets, or more information about a particular one. `params` must be a JSON string shaped
+        like `GetSetsParamsObject`. `userHash` is optional and is only used with user-specific filters such as owned or wanted.
+      operationId: api_v3_asmx_getSets_post
+      x-soapAction: https://brickset.com/api/getSets
+      requestBody:
+        $ref: '#/components/requestBodies/GetSetsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/GetSetsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getAdditionalImages:
+    get:
+      tags:
+      - Sets
+      summary: Get additional images for a set.
+      description: Returns additional image URLs for the specified set.
+      operationId: api_v3_asmx_getAdditionalImages_get
+      x-soapAction: https://brickset.com/api/getAdditionalImages
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/SetID'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/AdditionalImagesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get additional images for a set.
+      description: Returns additional image URLs for the specified set.
+      operationId: api_v3_asmx_getAdditionalImages_post
+      x-soapAction: https://brickset.com/api/getAdditionalImages
+      requestBody:
+        $ref: '#/components/requestBodies/GetAdditionalImagesForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/AdditionalImagesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getInstructions:
+    get:
+      tags:
+      - Sets
+      summary: Get instructions for a set by set ID.
+      description: Returns instruction URLs for the specified set ID.
+      operationId: api_v3_asmx_getInstructions_get
+      x-soapAction: https://brickset.com/api/getInstructions
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/SetID'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/InstructionsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get instructions for a set by set ID.
+      description: Returns instruction URLs for the specified set ID.
+      operationId: api_v3_asmx_getInstructions_post
+      x-soapAction: https://brickset.com/api/getInstructions
+      requestBody:
+        $ref: '#/components/requestBodies/GetInstructionsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/InstructionsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getInstructions2:
+    get:
+      tags:
+      - Sets
+      summary: Get instructions for a set by set number.
+      description: Returns instruction URLs for the specified `setNumber`, without first looking up the internal set ID.
+      operationId: api_v3_asmx_getInstructions2_get
+      x-soapAction: https://brickset.com/api/getInstructions2
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/SetNumber'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/InstructionsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get instructions for a set by set number.
+      description: Returns instruction URLs for the specified `setNumber`, without first looking up the internal set ID.
+      operationId: api_v3_asmx_getInstructions2_post
+      x-soapAction: https://brickset.com/api/getInstructions2
+      requestBody:
+        $ref: '#/components/requestBodies/GetInstructions2Form'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/InstructionsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getReviews:
+    get:
+      tags:
+      - Sets
+      summary: Get user reviews for a set.
+      description: Returns user reviews for the specified set ID.
+      operationId: api_v3_asmx_getReviews_get
+      x-soapAction: https://brickset.com/api/getReviews
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/SetID'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ReviewsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get user reviews for a set.
+      description: Returns user reviews for the specified set ID.
+      operationId: api_v3_asmx_getReviews_post
+      x-soapAction: https://brickset.com/api/getReviews
+      requestBody:
+        $ref: '#/components/requestBodies/GetReviewsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ReviewsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getThemes:
+    get:
+      tags:
+      - Sets
+      summary: Get theme summaries.
+      description: Returns themes with their total number of sets and active years.
+      operationId: api_v3_asmx_getThemes_get
+      x-soapAction: https://brickset.com/api/getThemes
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ThemesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get theme summaries.
+      description: Returns themes with their total number of sets and active years.
+      operationId: api_v3_asmx_getThemes_post
+      x-soapAction: https://brickset.com/api/getThemes
+      requestBody:
+        $ref: '#/components/requestBodies/GetThemesForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ThemesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getSubthemes:
+    get:
+      tags:
+      - Sets
+      summary: Get subthemes for a theme.
+      description: Returns subthemes for a given theme, with counts and active years.
+      operationId: api_v3_asmx_getSubthemes_get
+      x-soapAction: https://brickset.com/api/getSubthemes
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/Theme'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/SubthemesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get subthemes for a theme.
+      description: Returns subthemes for a given theme, with counts and active years.
+      operationId: api_v3_asmx_getSubthemes_post
+      x-soapAction: https://brickset.com/api/getSubthemes
+      requestBody:
+        $ref: '#/components/requestBodies/GetSubthemesForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/SubthemesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getYears:
+    get:
+      tags:
+      - Sets
+      summary: Get year summaries for a theme.
+      description: Returns years for a given theme, with counts. Brickset documents that `theme` may be left blank to return
+        totals for all sets.
+      operationId: api_v3_asmx_getYears_get
+      x-soapAction: https://brickset.com/api/getYears
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/ThemeOptional'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/YearsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Sets
+      summary: Get year summaries for a theme.
+      description: Returns years for a given theme, with counts. Brickset documents that `theme` may be left blank to return
+        totals for all sets.
+      operationId: api_v3_asmx_getYears_post
+      x-soapAction: https://brickset.com/api/getYears
+      requestBody:
+        $ref: '#/components/requestBodies/GetYearsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/YearsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getCollection:
+    get:
+      tags:
+      - Collection
+      summary: Get a user's collection.
+      description: Returns a user's entire collection as quickly and efficiently as possible.
+      operationId: api_v3_asmx_getCollection_get
+      x-soapAction: https://brickset.com/api/getCollection
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/GetCollectionSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Collection
+      summary: Get a user's collection.
+      description: Returns a user's entire collection as quickly and efficiently as possible.
+      operationId: api_v3_asmx_getCollection_post
+      x-soapAction: https://brickset.com/api/getCollection
+      requestBody:
+        $ref: '#/components/requestBodies/GetCollectionForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/GetCollectionSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/setCollection:
+    get:
+      tags:
+      - Collection
+      summary: Update a user's set collection details.
+      description: Updates collection data for a specific set. `params` must be a JSON string shaped like `SetCollectionParamsObject`.
+      operationId: api_v3_asmx_setCollection_get
+      x-soapAction: https://brickset.com/api/setCollection
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      - $ref: '#/components/parameters/SetIDCapitalised'
+      - $ref: '#/components/parameters/CollectionParams'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Collection
+      summary: Update a user's set collection details.
+      description: Updates collection data for a specific set. `params` must be a JSON string shaped like `SetCollectionParamsObject`.
+      operationId: api_v3_asmx_setCollection_post
+      x-soapAction: https://brickset.com/api/setCollection
+      requestBody:
+        $ref: '#/components/requestBodies/SetCollectionForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getUserNotes:
+    get:
+      tags:
+      - Collection
+      summary: Get a user's set notes.
+      description: Returns all notes stored against a user's sets.
+      operationId: api_v3_asmx_getUserNotes_get
+      x-soapAction: https://brickset.com/api/getUserNotes
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserNotesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Collection
+      summary: Get a user's set notes.
+      description: Returns all notes stored against a user's sets.
+      operationId: api_v3_asmx_getUserNotes_post
+      x-soapAction: https://brickset.com/api/getUserNotes
+      requestBody:
+        $ref: '#/components/requestBodies/GetUserNotesForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserNotesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/setUserFlagLabels:
+    get:
+      tags:
+      - Collection
+      summary: Set labels for collection flags.
+      description: Updates labels for the additional collection management flags `flag1` through `flag8`. `params` must be
+        a JSON string shaped like `SetUserFlagLabelsParamsObject`.
+      operationId: api_v3_asmx_setUserFlagLabels_get
+      x-soapAction: https://brickset.com/api/setUserFlagLabels
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      - $ref: '#/components/parameters/SetUserFlagLabelsParams'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Collection
+      summary: Set labels for collection flags.
+      description: Updates labels for the additional collection management flags `flag1` through `flag8`. `params` must be
+        a JSON string shaped like `SetUserFlagLabelsParamsObject`.
+      operationId: api_v3_asmx_setUserFlagLabels_post
+      x-soapAction: https://brickset.com/api/setUserFlagLabels
+      requestBody:
+        $ref: '#/components/requestBodies/SetUserFlagLabelsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getUserFlagLabels:
+    get:
+      tags:
+      - Collection
+      summary: Get labels for collection flags.
+      description: Returns labels for the additional collection management flags `flag1` through `flag8`.
+      operationId: api_v3_asmx_getUserFlagLabels_get
+      x-soapAction: https://brickset.com/api/getUserFlagLabels
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserFlagLabelsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Collection
+      summary: Get labels for collection flags.
+      description: Returns labels for the additional collection management flags `flag1` through `flag8`.
+      operationId: api_v3_asmx_getUserFlagLabels_post
+      x-soapAction: https://brickset.com/api/getUserFlagLabels
+      requestBody:
+        $ref: '#/components/requestBodies/GetUserFlagLabelsForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserFlagLabelsSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getMinifigCollection:
+    get:
+      tags:
+      - Minifigs
+      summary: Get a user's minifigure collection.
+      description: Returns minifigs owned or wanted by a user. `Params` must be a JSON string shaped like `GetMinifigCollectionParamsObject`.
+      operationId: api_v3_asmx_getMinifigCollection_get
+      x-soapAction: https://brickset.com/api/getMinifigCollection
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      - $ref: '#/components/parameters/Params'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/MinifigCollectionSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Minifigs
+      summary: Get a user's minifigure collection.
+      description: Returns minifigs owned or wanted by a user. `Params` must be a JSON string shaped like `GetMinifigCollectionParamsObject`.
+      operationId: api_v3_asmx_getMinifigCollection_post
+      x-soapAction: https://brickset.com/api/getMinifigCollection
+      requestBody:
+        $ref: '#/components/requestBodies/GetMinifigCollectionForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/MinifigCollectionSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/setMinifigCollection:
+    get:
+      tags:
+      - Minifigs
+      summary: Update a user's loose minifigure collection.
+      description: Adds or changes a user's loose minifigure collection. `params` must be a JSON string shaped like `SetMinifigCollectionParamsObject`.
+      operationId: api_v3_asmx_setMinifigCollection_get
+      x-soapAction: https://brickset.com/api/setMinifigCollection
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      - $ref: '#/components/parameters/MinifigNumber'
+      - $ref: '#/components/parameters/SetMinifigParams'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Minifigs
+      summary: Update a user's loose minifigure collection.
+      description: Adds or changes a user's loose minifigure collection. `params` must be a JSON string shaped like `SetMinifigCollectionParamsObject`.
+      operationId: api_v3_asmx_setMinifigCollection_post
+      x-soapAction: https://brickset.com/api/setMinifigCollection
+      requestBody:
+        $ref: '#/components/requestBodies/SetMinifigCollectionForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/StatusSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+  /api/v3.asmx/getUserMinifigNotes:
+    get:
+      tags:
+      - Minifigs
+      summary: Get a user's minifigure notes.
+      description: Returns all notes stored against a user's minifigures.
+      operationId: api_v3_asmx_getUserMinifigNotes_get
+      x-soapAction: https://brickset.com/api/getUserMinifigNotes
+      parameters:
+      - $ref: '#/components/parameters/ApiKey'
+      - $ref: '#/components/parameters/UserHash'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserMinifigNotesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Minifigs
+      summary: Get a user's minifigure notes.
+      description: Returns all notes stored against a user's minifigures.
+      operationId: api_v3_asmx_getUserMinifigNotes_post
+      x-soapAction: https://brickset.com/api/getUserMinifigNotes
+      requestBody:
+        $ref: '#/components/requestBodies/GetUserMinifigNotesForm'
+      responses:
+        '200':
+          description: JSON success or error payload.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/UserMinifigNotesSuccess'
+                - $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    StatusSuccess:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - success
+    MatchedSuccess:
+      allOf:
+      - $ref: '#/components/schemas/StatusSuccess'
+      - type: object
+        required:
+        - matches
+        properties:
+          matches:
+            type: integer
+            minimum: 0
+    ErrorResponse:
+      type: object
+      required:
+      - status
+      - message
+      properties:
+        status:
+          type: string
+          enum:
+          - error
+        message:
+          type: string
+    LoginSuccess:
+      allOf:
+      - $ref: '#/components/schemas/StatusSuccess'
+      - type: object
+        required:
+        - hash
+        properties:
+          hash:
+            type: string
+            description: User hash token for subsequent calls.
+    Image:
+      type: object
+      properties:
+        thumbnailURL:
+          type: string
+          format: uri
+        imageURL:
+          type: string
+          format: uri
+    Flag:
+      type: object
+      properties:
+        flagNo:
+          type: integer
+        value:
+          type: boolean
+    FlagLabel:
+      type: object
+      properties:
+        flagNo:
+          type: integer
+        label:
+          type: string
+    Collection:
+      type: object
+      properties:
+        setID:
+          type: integer
+        owned:
+          type: boolean
+          nullable: true
+        wanted:
+          type: boolean
+          nullable: true
+        qtyOwned:
+          type: integer
+        qtyWanted:
+          type: integer
+        rating:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+    Collections:
+      type: object
+      properties:
+        ownedBy:
+          type: integer
+          nullable: true
+        wantedBy:
+          type: integer
+          nullable: true
+    LEGOComDetails:
+      type: object
+      properties:
+        retailPrice:
+          type: number
+          nullable: true
+        dateFirstAvailable:
+          type: string
+          format: date-time
+          nullable: true
+        dateLastAvailable:
+          type: string
+          format: date-time
+          nullable: true
+    LEGOCom:
+      type: object
+      properties:
+        US:
+          $ref: '#/components/schemas/LEGOComDetails'
+        UK:
+          $ref: '#/components/schemas/LEGOComDetails'
+        CA:
+          $ref: '#/components/schemas/LEGOComDetails'
+        DE:
+          $ref: '#/components/schemas/LEGOComDetails'
+    Dimensions:
+      type: object
+      properties:
+        height:
+          type: number
+          nullable: true
+        width:
+          type: number
+          nullable: true
+        depth:
+          type: number
+          nullable: true
+        weight:
+          type: number
+          nullable: true
+    ModelDimensions:
+      type: object
+      properties:
+        dimension1:
+          type: number
+          nullable: true
+        dimension2:
+          type: number
+          nullable: true
+        dimension3:
+          type: number
+          nullable: true
+    ExtendedData:
+      type: object
+      properties:
+        notes:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+    Barcodes:
+      type: object
+      properties:
+        EAN:
+          type: string
+        UPC:
+          type: string
+    ItemNumbers:
+      type: object
+      properties:
+        NA:
+          type: string
+        EU:
+          type: string
+    AgeRange:
+      type: object
+      properties:
+        min:
+          type: integer
+          nullable: true
+        max:
+          type: integer
+          nullable: true
+    Set:
+      type: object
+      properties:
+        setID:
+          type: integer
+        number:
+          type: string
+        numberVariant:
+          type: integer
+        name:
+          type: string
+        year:
+          type: integer
+        theme:
+          type: string
+        themeGroup:
+          type: string
+        subtheme:
+          type: string
+        category:
+          type: string
+        released:
+          type: boolean
+        pieces:
+          type: integer
+          nullable: true
+        minifigs:
+          type: integer
+          nullable: true
+        image:
+          $ref: '#/components/schemas/Image'
+        bricksetURL:
+          type: string
+          format: uri
+        collection:
+          $ref: '#/components/schemas/Collection'
+        collections:
+          $ref: '#/components/schemas/Collections'
+        LEGOCom:
+          $ref: '#/components/schemas/LEGOCom'
+        rating:
+          type: number
+        reviewCount:
+          type: integer
+        launchDate:
+          type: string
+          format: date-time
+          nullable: true
+        exitDate:
+          type: string
+          format: date-time
+          nullable: true
+        packagingType:
+          type: string
+        availability:
+          type: string
+        instructionsCount:
+          type: integer
+        additionalImageCount:
+          type: integer
+        ageRange:
+          $ref: '#/components/schemas/AgeRange'
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        modelDimensions:
+          $ref: '#/components/schemas/ModelDimensions'
+        barcode:
+          $ref: '#/components/schemas/Barcodes'
+        itemNumber:
+          $ref: '#/components/schemas/ItemNumbers'
+        extendedData:
+          $ref: '#/components/schemas/ExtendedData'
+        lastUpdated:
+          type: string
+          format: date-time
+    RatingBreakdown:
+      type: object
+      properties:
+        overall:
+          type: integer
+        parts:
+          type: integer
+        buildingExperience:
+          type: integer
+        playability:
+          type: integer
+        valueForMoney:
+          type: integer
+    Review:
+      type: object
+      properties:
+        author:
+          type: string
+        datePosted:
+          type: string
+          format: date
+        rating:
+          $ref: '#/components/schemas/RatingBreakdown'
+        title:
+          type: string
+        review:
+          type: string
+        HTML:
+          type: boolean
+    MinifigCollectionEntry:
+      type: object
+      properties:
+        minifigNumber:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        ownedInSets:
+          type: integer
+        ownedLoose:
+          type: integer
+        ownedTotal:
+          type: integer
+        wanted:
+          type: boolean
+    ThemeSummary:
+      type: object
+      properties:
+        theme:
+          type: string
+        setCount:
+          type: integer
+        subthemeCount:
+          type: integer
+        yearFrom:
+          type: integer
+        yearTo:
+          type: integer
+    SubthemeSummary:
+      type: object
+      properties:
+        theme:
+          type: string
+        subtheme:
+          type: string
+        setCount:
+          type: integer
+        yearFrom:
+          type: integer
+        yearTo:
+          type: integer
+    YearSummary:
+      type: object
+      properties:
+        theme:
+          type: string
+        year:
+          type: string
+        setCount:
+          type: integer
+    Instruction:
+      type: object
+      properties:
+        URL:
+          type: string
+          format: uri
+        description:
+          type: string
+    UserNote:
+      type: object
+      properties:
+        setID:
+          type: integer
+        notes:
+          type: string
+    UserMinifigNote:
+      type: object
+      properties:
+        minifigNumber:
+          type: string
+        notes:
+          type: string
+    ApiKeyUsage:
+      type: object
+      properties:
+        dateStamp:
+          type: string
+          format: date-time
+        count:
+          type: integer
+    KeyUsageStatsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - apiKeyUsage
+        properties:
+          apiKeyUsage:
+            type: array
+            items:
+              $ref: '#/components/schemas/ApiKeyUsage'
+    GetSetsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - sets
+        properties:
+          sets:
+            type: array
+            items:
+              $ref: '#/components/schemas/Set'
+    AdditionalImagesSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - additionalImages
+        properties:
+          additionalImages:
+            type: array
+            items:
+              $ref: '#/components/schemas/Image'
+    InstructionsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - instructions
+        properties:
+          instructions:
+            type: array
+            items:
+              $ref: '#/components/schemas/Instruction'
+    ReviewsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - reviews
+        properties:
+          reviews:
+            type: array
+            items:
+              $ref: '#/components/schemas/Review'
+    ThemesSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - themes
+        properties:
+          themes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ThemeSummary'
+    SubthemesSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - subthemes
+        properties:
+          subthemes:
+            type: array
+            items:
+              $ref: '#/components/schemas/SubthemeSummary'
+    YearsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - years
+        properties:
+          years:
+            type: array
+            items:
+              $ref: '#/components/schemas/YearSummary'
+    GetCollectionSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - sets
+        properties:
+          sets:
+            type: array
+            items:
+              $ref: '#/components/schemas/Collection'
+      description: Brickset documents the response key as `sets`; items follow the `collection` class definition.
+    UserNotesSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - userNotes
+        properties:
+          userNotes:
+            type: array
+            items:
+              $ref: '#/components/schemas/UserNote'
+    UserFlagLabelsSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - flags
+        properties:
+          flags:
+            type: array
+            items:
+              $ref: '#/components/schemas/FlagLabel'
+      description: Brickset documents the response key as `flags`; items are modelled with the `flagLabel` class.
+    MinifigCollectionSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - minifigs
+        properties:
+          minifigs:
+            type: array
+            items:
+              $ref: '#/components/schemas/MinifigCollectionEntry'
+    UserMinifigNotesSuccess:
+      allOf:
+      - $ref: '#/components/schemas/MatchedSuccess'
+      - type: object
+        required:
+        - userMinifigNotes
+        properties:
+          userMinifigNotes:
+            type: array
+            items:
+              $ref: '#/components/schemas/UserMinifigNote'
+    GetSetsParamsObject:
+      type: object
+      additionalProperties: false
+      properties:
+        setID:
+          oneOf:
+          - type: integer
+          - type: string
+          description: Internal SetID.
+        query:
+          type: string
+          description: Search term; searches set number, name, theme, and subtheme.
+        theme:
+          type: string
+          description: Single value or comma-delimited list.
+        subtheme:
+          type: string
+          description: Single value or comma-delimited list.
+        setNumber:
+          type: string
+          description: Single value or comma-delimited list; full set number, e.g. 6876-1.
+        year:
+          type: string
+          description: Single value or comma-delimited list.
+        tag:
+          type: string
+        owned:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+          - type: string
+            enum:
+            - '1'
+          description: Set to 1 to retrieve a user's owned sets.
+        wanted:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+          - type: string
+            enum:
+            - '1'
+          description: Set to 1 to retrieve a user's wanted sets.
+        updatedSince:
+          type: string
+          format: date
+          description: yyyy-mm-dd
+        orderBy:
+          type: string
+          description: 'Sort order. Valid values: Number, YearFrom, Pieces, Minifigs, Rating, [UK|US|CA|DE]RetailPrice, [UK|US|CA|DE]PricePerPiece,
+            Theme, Subtheme, Name, Random, QtyOwned, OwnCount, WantCount, UserRating, CollectionID, Rank. Append DESC to numerical
+            fields to sort descending, e.g. PiecesDESC. Default: Number.'
+        pageSize:
+          oneOf:
+          - type: integer
+            minimum: 1
+            maximum: 500
+          - type: string
+            pattern: ^[0-9]+$
+          description: How many records to retrieve. Default 20, max 500.
+        pageNumber:
+          oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            pattern: ^[0-9]+$
+          description: Page number to retrieve. Default 1.
+        extendedData:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+          - type: string
+            enum:
+            - '1'
+          description: Set to 1 to retrieve tags, description, and notes.
+      example:
+        theme: Space
+        year: 1978,1979
+    SetCollectionParamsObject:
+      type: object
+      additionalProperties: false
+      properties:
+        own:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 1 or 0. If 0 then qtyOwned is automatically set to 0.
+        want:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 1 or 0.
+        qtyOwned:
+          oneOf:
+          - type: integer
+            minimum: 0
+            maximum: 999
+          - type: string
+            pattern: ^[0-9]{1,3}$
+          description: 0-999. If > 0 then own is automatically set to 1.
+        qtyWanted:
+          oneOf:
+          - type: integer
+            minimum: 0
+            maximum: 999
+          - type: string
+            pattern: ^[0-9]{1,3}$
+          description: 0-999. If > 0 then want is automatically set to 1.
+        notes:
+          type: string
+          maxLength: 1000
+        rating:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          - type: string
+            enum:
+            - '1'
+            - '2'
+            - '3'
+            - '4'
+            - '5'
+          description: User rating 1-5.
+        flag1:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag2:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag3:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag4:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag5:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag6:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag7:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+        flag8:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 0 or 1.
+      example:
+        own: '1'
+        qtyOwned: '6'
+    GetMinifigCollectionParamsObject:
+      type: object
+      additionalProperties: false
+      properties:
+        owned:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+          - type: string
+            enum:
+            - '1'
+          description: Set to 1 to retrieve minifigs owned.
+        wanted:
+          oneOf:
+          - type: integer
+            enum:
+            - 1
+          - type: string
+            enum:
+            - '1'
+          description: Set to 1 to retrieve minifigs wanted.
+        query:
+          type: string
+          description: Minifig number or name. Wildcards are added before and after.
+      example:
+        owned: 1
+    SetMinifigCollectionParamsObject:
+      type: object
+      additionalProperties: false
+      properties:
+        own:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 1 or 0. If 0 then qtyOwned is automatically set to 0.
+        want:
+          oneOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: string
+            enum:
+            - '0'
+            - '1'
+          description: 1 or 0.
+        qtyOwned:
+          oneOf:
+          - type: integer
+            minimum: 0
+            maximum: 999
+          - type: string
+            pattern: ^[0-9]{1,3}$
+          description: 0-999. If > 0 then own is automatically set to 1.
+        notes:
+          type: string
+          maxLength: 1000
+      example:
+        want: '1'
+    SetUserFlagLabelsParamsObject:
+      type: object
+      additionalProperties: false
+      properties:
+        '1':
+          type: string
+          maxLength: 20
+          description: New label for flag 1.
+        '2':
+          type: string
+          maxLength: 20
+          description: New label for flag 2.
+        '3':
+          type: string
+          maxLength: 20
+          description: New label for flag 3.
+        '4':
+          type: string
+          maxLength: 20
+          description: New label for flag 4.
+        '5':
+          type: string
+          maxLength: 20
+          description: New label for flag 5.
+        '6':
+          type: string
+          maxLength: 20
+          description: New label for flag 6.
+        '7':
+          type: string
+          maxLength: 20
+          description: New label for flag 7.
+        '8':
+          type: string
+          maxLength: 20
+          description: New label for flag 8.
+      example:
+        '2': To sell
+        '4': Built
+        '7': MISB
+  parameters:
+    ApiKey:
+      name: apiKey
+      in: query
+      required: true
+      description: Brickset API key.
+      schema:
+        type: string
+    UserHash:
+      name: userHash
+      in: query
+      required: true
+      description: User hash returned by `login`.
+      schema:
+        type: string
+    UserHashOptional:
+      name: userHash
+      in: query
+      required: false
+      description: Optional user hash; used with user-specific filters such as owned or wanted.
+      schema:
+        type: string
+    SetID:
+      name: setID
+      in: query
+      required: true
+      description: Internal set ID.
+      schema:
+        type: integer
+      example: 12345
+    SetIDCapitalised:
+      name: SetID
+      in: query
+      required: true
+      description: Internal set ID.
+      schema:
+        type: integer
+      example: 12345
+    SetNumber:
+      name: setNumber
+      in: query
+      required: true
+      description: Set number, e.g. 6876-1.
+      schema:
+        type: string
+    Theme:
+      name: theme
+      in: query
+      required: true
+      description: Theme.
+      schema:
+        type: string
+    ThemeOptional:
+      name: theme
+      in: query
+      required: false
+      description: Theme. Leave blank to get totals for all sets.
+      schema:
+        type: string
+      allowEmptyValue: true
+    Username:
+      name: username
+      in: query
+      required: true
+      description: Brickset username.
+      schema:
+        type: string
+    Password:
+      name: password
+      in: query
+      required: true
+      description: Brickset password. POST is recommended to avoid credentials in the URL.
+      schema:
+        type: string
+        format: password
+    params:
+      name: params
+      in: query
+      required: true
+      description: JSON-encoded parameter object. Stringify an object shaped like `GetSetsParamsObject`.
+      schema:
+        type: string
+      example: '{"theme":"Space","year":"1978,1979"}'
+    Params:
+      name: Params
+      in: query
+      required: true
+      description: JSON-encoded parameter object. Stringify an object shaped like `GetMinifigCollectionParamsObject`.
+      schema:
+        type: string
+      example: '{"owned":1}'
+    CollectionParams:
+      name: params
+      in: query
+      required: true
+      description: JSON-encoded parameter object. Stringify an object shaped like `SetCollectionParamsObject`.
+      schema:
+        type: string
+      example: '{"own":"1","qtyOwned":"6"}'
+    SetUserFlagLabelsParams:
+      name: params
+      in: query
+      required: true
+      description: JSON-encoded parameter object. Stringify an object shaped like `SetUserFlagLabelsParamsObject`.
+      schema:
+        type: string
+      example: '{"2":"To sell","4":"Built","7":"MISB"}'
+    SetMinifigParams:
+      name: params
+      in: query
+      required: true
+      description: JSON-encoded parameter object. Stringify an object shaped like `SetMinifigCollectionParamsObject`.
+      schema:
+        type: string
+      example: '{"want":"1"}'
+    MinifigNumber:
+      name: minifigNumber
+      in: query
+      required: true
+      description: BrickLink minifig number.
+      schema:
+        type: string
+  requestBodies:
+    CheckKeyForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            properties:
+              apiKey:
+                type: string
+    CheckUserHashForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+    LoginForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - username
+            - password
+            properties:
+              apiKey:
+                type: string
+              username:
+                type: string
+              password:
+                type: string
+                format: password
+    GetKeyUsageStatsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            properties:
+              apiKey:
+                type: string
+    GetSetsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - params
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+                description: Optional; used with owned/wanted filters.
+              params:
+                type: string
+                description: JSON-encoded parameter object. Stringify `GetSetsParamsObject`.
+                example: '{"theme":"Space","year":"1978,1979"}'
+    GetAdditionalImagesForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - setID
+            properties:
+              apiKey:
+                type: string
+              setID:
+                type: integer
+    GetInstructionsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - setID
+            properties:
+              apiKey:
+                type: string
+              setID:
+                type: integer
+    GetInstructions2Form:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - setNumber
+            properties:
+              apiKey:
+                type: string
+              setNumber:
+                type: string
+    GetReviewsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - setID
+            properties:
+              apiKey:
+                type: string
+              setID:
+                type: integer
+    GetThemesForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            properties:
+              apiKey:
+                type: string
+    GetSubthemesForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - theme
+            properties:
+              apiKey:
+                type: string
+              theme:
+                type: string
+    GetYearsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            properties:
+              apiKey:
+                type: string
+              theme:
+                type: string
+                description: Leave blank to get totals for all sets.
+    GetCollectionForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+    SetCollectionForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            - SetID
+            - params
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+              SetID:
+                type: integer
+              params:
+                type: string
+                description: JSON-encoded parameter object. Stringify `SetCollectionParamsObject`.
+                example: '{"own":"1","qtyOwned":"6"}'
+    GetUserNotesForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+    SetUserFlagLabelsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            - params
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+              params:
+                type: string
+                description: JSON-encoded parameter object. Stringify `SetUserFlagLabelsParamsObject`.
+                example: '{"2":"To sell","4":"Built","7":"MISB"}'
+    GetUserFlagLabelsForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+    GetMinifigCollectionForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            - Params
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+              Params:
+                type: string
+                description: JSON-encoded parameter object. Stringify `GetMinifigCollectionParamsObject`.
+                example: '{"owned":1}'
+    SetMinifigCollectionForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            - minifigNumber
+            - params
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string
+              minifigNumber:
+                type: string
+              params:
+                type: string
+                description: JSON-encoded parameter object. Stringify `SetMinifigCollectionParamsObject`.
+                example: '{"want":"1"}'
+    GetUserMinifigNotesForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+            - apiKey
+            - userHash
+            properties:
+              apiKey:
+                type: string
+              userHash:
+                type: string

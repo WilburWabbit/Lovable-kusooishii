@@ -1,0 +1,454 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Account
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Account entity.
+    Includes create, update, read, soft delete, and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit Account documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/account
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Account
+    description: Chart of accounts resource operations
+
+paths:
+  /v3/company/{realmId}/account:
+    post:
+      tags:
+        - Account
+      summary: Create or update an account
+      operationId: createOrUpdateAccount
+      description: |
+        Create a new Account or update an existing one.
+        Soft delete is done by updating Active=false.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/AccountCreateRequest'
+                - $ref: '#/components/schemas/AccountUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/AccountOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/account/{accountId}:
+    get:
+      tags:
+        - Account
+      summary: Read an account by ID
+      operationId: getAccountById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/AccountOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Account
+      summary: Query accounts using GET
+      operationId: queryAccountsGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/AccountQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/AccountQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Account
+      summary: Query accounts using POST
+      operationId: queryAccountsPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/AccountQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/AccountQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "94"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    AccountQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/AccountQueryStatement'
+
+  responses:
+    AccountOrFault:
+      description: Account response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/AccountEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    AccountQueryOrFault:
+      description: Account query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/AccountQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    AccountQueryStatement:
+      type: string
+      example: SELECT * FROM Account STARTPOSITION 1 MAXRESULTS 5
+
+    ReferenceType:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    AccountWrite:
+      type: object
+      properties:
+        Id:
+          type: string
+        SyncToken:
+          type: string
+        sparse:
+          type: boolean
+        Name:
+          type: string
+        AccountType:
+          type: string
+        AccountSubType:
+          type: string
+        Active:
+          type: boolean
+          default: true
+        Description:
+          type: string
+        ParentRef:
+          $ref: '#/components/schemas/ReferenceType'
+        SubAccount:
+          type: boolean
+        AcctNum:
+          type: string
+        OpeningBalance:
+          type: number
+          format: double
+        OpeningBalanceDate:
+          type: string
+          format: date
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+
+    AccountCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/AccountWrite'
+      required:
+        - Name
+        - AccountType
+
+    AccountUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/AccountWrite'
+      required:
+        - Id
+        - SyncToken
+
+    Account:
+      allOf:
+        - $ref: '#/components/schemas/AccountWrite'
+      properties:
+        FullyQualifiedName:
+          type: string
+        CurrentBalance:
+          type: number
+          format: double
+        CurrentBalanceWithSubAccounts:
+          type: number
+          format: double
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+        domain:
+          type: string
+          example: QBO
+
+    AccountEnvelope:
+      type: object
+      required:
+        - Account
+        - time
+      properties:
+        Account:
+          $ref: '#/components/schemas/Account'
+        time:
+          type: string
+          format: date-time
+
+    AccountQueryResponse:
+      type: object
+      properties:
+        Account:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    AccountQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/AccountQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
