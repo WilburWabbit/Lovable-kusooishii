@@ -1,6 +1,6 @@
 # Cline Rules — LEGO Resale Commerce Platform
 
-## FIRST: Read `docs/design-specification.md` — it is the canonical design document.
+## FIRST: Read `docs/design-specification.md` and the YAML specs in `docs/specs/` — together they are the canonical design documents.
 
 ## Project
 LEGO resale commerce platform: public storefront + back-office for buying, grading, listing, selling, and reconciling LEGO sets. React/TypeScript/Vite/Tailwind/shadcn-ui on Supabase. Integrations: QBO, eBay, BrickLink, BrickOwl, Rebrickable, BrickEconomy, Stripe.

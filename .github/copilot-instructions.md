@@ -1,7 +1,7 @@
 # GitHub Copilot Instructions — LEGO Resale Commerce Platform
 
 ## Context
-Read `docs/design-specification.md` for full project context, architecture, and domain rules.
+Read `docs/design-specification.md` and the YAML specs in `docs/specs/` for full project context, architecture, and domain rules.
 
 This is a LEGO resale commerce platform (public storefront + back-office) built with React/TypeScript/Vite/Tailwind/shadcn-ui on Supabase. It integrates with QBO, eBay, BrickLink, BrickOwl, Rebrickable, BrickEconomy, and Stripe.
 

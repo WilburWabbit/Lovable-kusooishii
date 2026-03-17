@@ -1,6 +1,6 @@
 # Cursor Rules — LEGO Resale Commerce Platform
 
-## IMPORTANT: Read `docs/design-specification.md` for full context before making significant changes.
+## IMPORTANT: Read `docs/design-specification.md` and the YAML specs in `docs/specs/` for full context before making significant changes.
 
 ## Project Overview
 LEGO resale commerce platform: public storefront + back-office for buying, grading, listing, selling, and reconciling LEGO sets across channels (website, eBay, BrickLink, BrickOwl). Built with React/TypeScript/Tailwind/Vite on Supabase.

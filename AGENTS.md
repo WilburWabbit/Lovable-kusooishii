@@ -1,6 +1,6 @@
 # AGENTS.md — AI Agent Instructions
 
-> **All AI agents working on this repository must read `docs/design-specification.md` before making significant changes.** It is the canonical design document covering product design, architecture, domain rules, integration patterns, and operational requirements.
+> **All AI agents working on this repository must read `docs/design-specification.md` and the YAML specs in `docs/specs/` before making significant changes.** Together they are the canonical design documents covering product design, architecture, domain rules, integration patterns, and operational requirements.
 
 ## Project Summary
 
@@ -35,6 +35,7 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - `supabase/functions/` — Supabase Edge Functions (Deno/TypeScript)
 - `supabase/migrations/` — SQL database migrations
 - `docs/design-specification.md` — **Full design specification (READ THIS)**
+- `docs/specs/` — **YAML spec files (READ THESE TOO)**
 
 ## Constraints
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Agent Context for LEGO Resale Commerce Platform
 
-> **Read `docs/design-specification.md` before making any significant changes.** It is the single source of truth for product design, architecture, domain rules, and integration patterns.
+> **Read `docs/design-specification.md` and the YAML specs in `docs/specs/` before making any significant changes.** Together they are the single source of truth for product design, architecture, domain rules, and integration patterns.
 
 ## What This Project Is
 
@@ -47,6 +47,7 @@ supabase/
   migrations/           # SQL migrations
 docs/
   design-specification.md   # FULL design spec — READ THIS
+  specs/                    # YAML spec files — READ THESE TOO
 ```
 
 ## Key Conventions
