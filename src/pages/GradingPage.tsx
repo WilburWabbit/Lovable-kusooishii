@@ -30,7 +30,7 @@ export default function GradingPage() {
               How We Grade
             </h1>
             <p className="mx-auto mt-4 max-w-lg font-body text-sm leading-relaxed text-muted-foreground">
-              Every set is inspected by hand and assigned a grade from 1 (Mint) to 5 (Fair).
+              Every set is inspected by hand and assigned a grade from 1 (Gold Standard) to 5 (Red Card).
               The grade reflects the condition of the box, contents, and completeness — not the
               quality of the LEGO® bricks themselves, which are always genuine.
             </p>
@@ -45,15 +45,17 @@ export default function GradingPage() {
                 key={g.grade}
                 className="flex items-start gap-4 border border-border p-5 transition-colors hover:border-primary"
               >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center bg-foreground font-display text-sm font-bold text-background">
-                  G{g.grade}
-                </div>
+                <img
+                  src={g.icon}
+                  alt={`Grade ${g.grade} — ${g.label}`}
+                  className="h-10 w-10 shrink-0 object-contain"
+                />
                 <div>
                   <h2 className="font-display text-base font-bold text-foreground">
                     Grade {g.grade} — {g.label}
                   </h2>
                   <p className="mt-1 font-body text-sm leading-relaxed text-muted-foreground">
-                    {g.desc}
+                    {g.longDesc}
                   </p>
                 </div>
               </div>

@@ -69,6 +69,7 @@ export function StorefrontFooter() {
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Customer Service</h4>
             <nav className="flex flex-col gap-2">
               <Link to="/faq" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">FAQ</Link>
+              <Link to="/grading" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Grading Guide</Link>
               <Link to="/contact" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Contact Us</Link>
               <Link to="/order-tracking" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Track Your Order</Link>
               <Link to="/returns-exchanges" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Returns & Exchanges</Link>
