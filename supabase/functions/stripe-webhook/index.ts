@@ -116,7 +116,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       }
     }
 
-    // Create the sales_order
+    // Create the sales_order (qbo_sync_status = 'pending' — QBO sync happens via retry function)
+    const orderNumber_txnDate = new Date().toISOString().split("T")[0];
     const { data: order, error: orderError } = await supabase
       .from("sales_order")
       .insert({
@@ -124,7 +125,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         origin_reference: session.id,
         payment_reference: session.payment_intent as string,
         status: "paid",
-        txn_date: new Date().toISOString().split("T")[0],
+        txn_date: orderNumber_txnDate,
         merchandise_subtotal: merchandiseSubtotal,
         shipping_total: shippingTotal,
         discount_total: discountTotal,
@@ -141,6 +142,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         shipping_county: address?.state || null,
         shipping_postcode: address?.postal_code || (isCollection ? "N/A" : ""),
         shipping_country: address?.country || "GB",
+        qbo_sync_status: "pending",
         ...(isCollection
           ? {
               club_discount_amount: discountTotal,
@@ -265,26 +267,34 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       },
     });
 
-    // ── Trigger QBO sync (fire-and-forget) ──
+    // ── Set DocNumber on the order for QBO cross-channel dedup ──
+    if (order.order_number) {
+      await supabase.from("sales_order").update({
+        doc_number: order.order_number,
+      }).eq("id", order.id);
+    }
+
+    // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
+    // The order has qbo_sync_status='pending'. The retry function will
+    // create the QBO Customer + SalesReceipt and store confirmation IDs.
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
       const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
       if (supabaseUrl && serviceRoleKey) {
-        fetch(`${supabaseUrl}/functions/v1/qbo-sync-sales`, {
+        fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${serviceRoleKey}`,
             "Content-Type": "application/json",
-            "x-webhook-trigger": "true",
           },
           body: JSON.stringify({}),
         }).catch((err) => {
-          console.warn("QBO sync trigger failed (non-blocking):", err);
+          console.warn("qbo-retry-sync trigger failed (non-blocking):", err);
         });
-        console.log("Triggered QBO sync for new web order");
+        console.log("Triggered qbo-retry-sync for new web order");
       }
     } catch (qboErr) {
-      console.warn("Failed to trigger QBO sync (non-blocking):", qboErr);
+      console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
     }
   } catch (err) {
     console.error("Error handling checkout.session.completed:", err);

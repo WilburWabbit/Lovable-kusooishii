@@ -695,7 +695,50 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
   const receipt = data?.SalesReceipt;
   if (!receipt) return "could not fetch SalesReceipt from QBO";
 
-  // Check idempotency
+  const docNumber = receipt.DocNumber ?? null;
+
+  // ── Cross-channel dedup: check if this SalesReceipt was created by
+  // our app for a web or eBay sale. If so, this webhook is round-trip
+  // confirmation — enrich the existing order, don't duplicate it.
+  if (docNumber) {
+    const { data: appOrder } = await admin
+      .from("sales_order")
+      .select("id, origin_channel, qbo_sync_status, qbo_sales_receipt_id")
+      .in("origin_channel", ["web", "ebay"])
+      .eq("doc_number", docNumber)
+      .maybeSingle();
+
+    if (appOrder) {
+      // Round-trip confirmation — update QBO IDs if not already set
+      const enrichFields: Record<string, any> = {};
+      if (!appOrder.qbo_sales_receipt_id) enrichFields.qbo_sales_receipt_id = String(receipt.Id);
+      if (appOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
+
+      if (Object.keys(enrichFields).length > 0) {
+        await admin.from("sales_order").update(enrichFields).eq("id", appOrder.id);
+      }
+
+      // Audit the round-trip confirmation
+      await admin.from("audit_event").insert({
+        entity_type: "sales_order",
+        entity_id: appOrder.id,
+        trigger_type: "qbo_webhook_confirmation",
+        actor_type: "system",
+        source_system: "qbo-webhook",
+        after_json: {
+          qbo_receipt_id: String(receipt.Id),
+          doc_number: docNumber,
+          origin_channel: appOrder.origin_channel,
+          message: "QBO webhook confirmed SalesReceipt matches app-originated order",
+        },
+      });
+
+      console.log(`Cross-channel dedup: QBO SalesReceipt ${receipt.Id} confirmed for ${appOrder.origin_channel} order ${appOrder.id} (DocNumber ${docNumber})`);
+      return `round-trip confirmed for ${appOrder.origin_channel} order ${appOrder.id}`;
+    }
+  }
+
+  // ── Same-channel dedup: already imported as QBO-originated? ──
   const { data: existing } = await admin.from("sales_order").select("id").eq("origin_channel", originChannel).eq("origin_reference", String(receipt.Id)).maybeSingle();
   if (existing) {
     // Update: delete old and re-create
@@ -705,6 +748,26 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
     }
     await admin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
     await admin.from("sales_order").delete().eq("id", existing.id);
+  }
+
+  // ── Also check eBay cross-channel dedup by origin_reference matching DocNumber ──
+  if (docNumber) {
+    const { data: ebayOrder } = await admin
+      .from("sales_order")
+      .select("id")
+      .eq("origin_channel", "ebay")
+      .eq("origin_reference", docNumber)
+      .maybeSingle();
+
+    if (ebayOrder) {
+      // Enrich the existing eBay order with QBO metadata
+      await admin.from("sales_order").update({
+        qbo_sales_receipt_id: String(receipt.Id),
+        qbo_sync_status: "synced",
+      }).eq("id", ebayOrder.id);
+      console.log(`Cross-channel dedup: enriched eBay order ${ebayOrder.id} with QBO SalesReceipt ${receipt.Id}`);
+      return `enriched eBay order ${ebayOrder.id}`;
+    }
   }
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
@@ -735,6 +798,7 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
 
   const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
 
+  // QBO-originated orders are already in QBO — mark synced with QBO IDs
   const { data: order, error: orderErr } = await admin.from("sales_order").insert({
     origin_channel: originChannel,
     origin_reference: String(receipt.Id),
@@ -749,8 +813,11 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
     currency,
     customer_id: customerId,
     txn_date: txnDate,
-    doc_number: receipt.DocNumber ?? null,
-    notes: `Imported from QBO SalesReceipt #${receipt.DocNumber ?? receipt.Id}`,
+    doc_number: docNumber,
+    notes: `Imported from QBO SalesReceipt #${docNumber ?? receipt.Id}`,
+    qbo_sync_status: "synced",
+    qbo_sales_receipt_id: String(receipt.Id),
+    qbo_customer_id: customerRefValue,
   }).select("id").single();
 
   if (orderErr) return `order insert error: ${orderErr.message}`;
@@ -864,6 +931,9 @@ async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: str
     txn_date: txnDate,
     doc_number: receipt.DocNumber ?? null,
     notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? receipt.Id}`,
+    qbo_sync_status: "synced",
+    qbo_sales_receipt_id: String(receipt.Id),
+    qbo_customer_id: customerRefValue,
   }).select("id").single();
 
   if (orderErr) return `refund order insert error: ${orderErr.message}`;

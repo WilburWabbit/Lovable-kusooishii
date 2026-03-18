@@ -301,34 +301,34 @@ async function processSalesReceipt(
 
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
-  // ── Cross-channel dedup: already imported via eBay with same DocNumber? ──
+  // ── Cross-channel dedup: check if this SalesReceipt was created by
+  // our app for an eBay or web sale. If so, enrich the existing order
+  // with QBO IDs instead of duplicating it.
   const docNumber = receipt.DocNumber ?? null;
   if (docNumber) {
+    // Check eBay orders (DocNumber = eBay order ID = origin_reference)
     const { data: ebayOrder } = await supabaseAdmin
       .from("sales_order")
-      .select("id")
+      .select("id, qbo_sync_status")
       .eq("origin_channel", "ebay")
       .eq("origin_reference", docNumber)
       .maybeSingle();
 
     if (ebayOrder) {
-      // Enrich the existing eBay order with QBO metadata instead of creating a duplicate
       const enrichFields: Record<string, any> = {
         doc_number: docNumber,
         global_tax_calculation: globalTaxCalc,
+        qbo_sales_receipt_id: qboId,
+        qbo_customer_id: customerRefValue,
       };
+      if (ebayOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
       if (customerId) enrichFields.customer_id = customerId;
       if (taxTotal) enrichFields.tax_total = taxTotal;
 
-      await supabaseAdmin
-        .from("sales_order")
-        .update(enrichFields)
-        .eq("id", ebayOrder.id);
+      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", ebayOrder.id);
 
-      // Also backfill VAT on the eBay order's lines if we have it
       if (vatRateId) {
-        await supabaseAdmin
-          .from("sales_order_line")
+        await supabaseAdmin.from("sales_order_line")
           .update({ vat_rate_id: vatRateId })
           .eq("sales_order_id", ebayOrder.id)
           .is("vat_rate_id", null);
@@ -337,8 +337,39 @@ async function processSalesReceipt(
       console.log(`Cross-channel dedup: enriched eBay order ${ebayOrder.id} with QBO data (DocNumber ${docNumber})`);
       return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
     }
+
+    // Check web orders (DocNumber = order_number e.g. KO-0000123)
+    const { data: webOrder } = await supabaseAdmin
+      .from("sales_order")
+      .select("id, qbo_sync_status")
+      .eq("origin_channel", "web")
+      .eq("doc_number", docNumber)
+      .maybeSingle();
+
+    if (webOrder) {
+      const enrichFields: Record<string, any> = {
+        global_tax_calculation: globalTaxCalc,
+        qbo_sales_receipt_id: qboId,
+        qbo_customer_id: customerRefValue,
+      };
+      if (webOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
+      if (customerId) enrichFields.customer_id = customerId;
+
+      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", webOrder.id);
+
+      if (vatRateId) {
+        await supabaseAdmin.from("sales_order_line")
+          .update({ vat_rate_id: vatRateId })
+          .eq("sales_order_id", webOrder.id)
+          .is("vat_rate_id", null);
+      }
+
+      console.log(`Cross-channel dedup: enriched web order ${webOrder.id} with QBO data (DocNumber ${docNumber})`);
+      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+    }
   }
 
+  // QBO-originated order — already in QBO, mark synced with IDs
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
     .insert({
@@ -357,6 +388,9 @@ async function processSalesReceipt(
       txn_date: txnDate ?? null,
       doc_number: docNumber,
       notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
+      qbo_sync_status: "synced",
+      qbo_sales_receipt_id: qboId,
+      qbo_customer_id: customerRefValue,
     })
     .select("id")
     .single();
@@ -532,6 +566,9 @@ async function processRefundReceipt(
       txn_date: txnDate ?? null,
       doc_number: receipt.DocNumber ?? null,
       notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
+      qbo_sync_status: "synced",
+      qbo_sales_receipt_id: qboId,
+      qbo_customer_id: customerRefValue,
     })
     .select("id")
     .single();
