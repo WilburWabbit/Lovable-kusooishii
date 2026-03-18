@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,14 +29,24 @@ interface ProductInput {
   };
 }
 
+interface GmcConnection {
+  id: string;
+  access_token: string;
+  refresh_token: string;
+  token_expires_at: string;
+  updated_at: string;
+  merchant_id: string;
+  data_source: string | null;
+}
+
 /** Refresh GMC access token if expired */
 async function ensureToken(
-  supabaseAdmin: ReturnType<typeof createClient>,
-  conn: Record<string, unknown>,
+  supabaseAdmin: SupabaseClient,
+  conn: GmcConnection,
 ): Promise<string> {
-  const expiresAt = new Date(conn.token_expires_at as string);
+  const expiresAt = new Date(conn.token_expires_at);
   if (expiresAt > new Date(Date.now() + 60_000)) {
-    return conn.access_token as string;
+    return conn.access_token;
   }
 
   const clientId = Deno.env.get("GMC_CLIENT_ID")!;
@@ -47,7 +57,7 @@ async function ensureToken(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: conn.refresh_token as string,
+      refresh_token: conn.refresh_token,
       client_id: clientId,
       client_secret: clientSecret,
     }),
@@ -158,19 +168,29 @@ Deno.serve(async (req) => {
     if (!isAdmin) throw new Error("Forbidden: admin only");
 
     // --- Get GMC connection ---
-    const { data: conn, error: connErr } = await supabaseAdmin
+    const { data: connRaw, error: connErr } = await supabaseAdmin
       .from("google_merchant_connection")
       .select("*")
       .limit(1)
       .maybeSingle();
 
-    if (connErr || !conn) {
+    if (connErr || !connRaw) {
       throw new Error("No Google Merchant Centre connection found");
     }
 
+    const conn: GmcConnection = {
+      id: String(connRaw.id),
+      access_token: String(connRaw.access_token),
+      refresh_token: String(connRaw.refresh_token),
+      token_expires_at: String(connRaw.token_expires_at),
+      updated_at: String(connRaw.updated_at),
+      merchant_id: String(connRaw.merchant_id),
+      data_source: connRaw.data_source ? String(connRaw.data_source) : null,
+    };
+
     const accessToken = await ensureToken(supabaseAdmin, conn);
-    const merchantId = conn.merchant_id as string;
-    const dataSource = conn.data_source as string | null;
+    const merchantId = conn.merchant_id;
+    const dataSource = conn.data_source;
 
     // --- Publish all eligible SKUs ---
     if (action === "publish_all") {
@@ -225,7 +245,13 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const product = sku.product as Record<string, unknown> | null;
+        const productRelation = sku.product as
+          | Record<string, unknown>
+          | Record<string, unknown>[]
+          | null;
+        const product = Array.isArray(productRelation)
+          ? productRelation[0] ?? null
+          : productRelation;
         if (!product) {
           skipped++;
           continue;

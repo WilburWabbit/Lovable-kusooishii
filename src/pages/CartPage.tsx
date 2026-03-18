@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { useStore } from '@/lib/store';
-import { useAuth } from '@/hooks/useAuth';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
@@ -23,11 +22,10 @@ const shippingOptions = [
 
 export default function CartPage() {
   const { cart, updateQuantity, removeFromCart, cartTotal } = useStore();
-  const { user } = useAuth();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [selectedShipping, setSelectedShipping] = useState('standard');
 
-  const availableOptions = shippingOptions.filter((o) => o.id !== 'collection' || user);
+  const availableOptions = shippingOptions;
   const selectedOption = availableOptions.find((o) => o.id === selectedShipping) ?? availableOptions[0];
   const shippingPrice = selectedOption?.price ?? 0;
   const isCollection = selectedShipping === 'collection';
@@ -170,7 +168,6 @@ export default function CartPage() {
                         </div>
                       )}
                     </RadioGroup>
-                    {!user && <p className="font-body text-[11px] text-muted-foreground"><Link to="/login" className="text-primary underline">Sign in</Link> to collect at the <Link to="/bluebell" className="text-primary underline">Blue Bell LEGO® Club</Link></p>}
                   </div>
 
                   {isCollection &&
