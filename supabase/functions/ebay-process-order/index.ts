@@ -1064,9 +1064,10 @@ Deno.serve(async (req) => {
       totalNet = Math.round(totalNet * 100) / 100;
       totalTax = Math.round(totalTax * 100) / 100;
 
-      // Rounding adjustment — ensure net + tax matches eBay's gross
+      // Rounding adjustment — ensure net + tax matches the local gross
+      // (NOT ebayGrossTotal, which includes skipped/unmatched lines)
       const computedGross = totalNet + totalTax;
-      const diff = Math.round((ebayGrossTotal - computedGross) * 100) / 100;
+      const diff = Math.round((grossTotal - computedGross) * 100) / 100;
       if (diff !== 0 && qboLines.length > 0) {
         const lastLine = qboLines[qboLines.length - 1];
         lastLine.Amount = Math.round((lastLine.Amount + diff) * 100) / 100;
