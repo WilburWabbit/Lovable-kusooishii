@@ -1,76 +1,55 @@
 project_id = "gcgrwujfyurgetvqlmbf"
 
-[functions.sync-media-from-hub]
-verify_jwt = false
-
-[functions.qbo-auth]
-verify_jwt = false
-
-[functions.qbo-sync-purchases]
-verify_jwt = false
-
-[functions.process-receipt]
-verify_jwt = false
-
-[functions.admin-data]
-verify_jwt = false
-
-[functions.brickeconomy-sync]
-verify_jwt = false
-
-[functions.qbo-sync-tax-rates]
-verify_jwt = false
-
-[functions.qbo-sync-sales]
-verify_jwt = false
-
-[functions.qbo-sync-customers]
-verify_jwt = false
-
-[functions.qbo-sync-items]
-verify_jwt = false
-
-[functions.qbo-webhook]
-verify_jwt = false
-
-[functions.ebay-notifications]
-verify_jwt = false
-
-[functions.ebay-process-order]
-verify_jwt = false
-
-[functions.create-checkout]
-verify_jwt = false
-
-[functions.stripe-webhook]
-verify_jwt = false
-
-[functions.chatgpt]
-verify_jwt = false
-
-[functions.ebay-auth]
-verify_jwt = false
-
-[functions.ebay-sync]
-verify_jwt = false
-
-[functions.generate-product-copy]
-verify_jwt = false
-
-[functions.gmc-auth]
-verify_jwt = false
-
-[functions.gmc-sync]
-verify_jwt = false
-
-[functions.import-product-data]
-verify_jwt = false
-
-[functions.import-sets]
-verify_jwt = false
-
-[functions.qbo-upsert-customer]
-verify_jwt = false
-
-[functions.process-email-queue]
-verify_jwt = true
+[functions]
+  [functions.admin-data]
+    verify_jwt = false
+  [functions.auth-email-hook]
+    verify_jwt = false
+  [functions.brickeconomy-sync]
+    verify_jwt = false
+  [functions.chatgpt]
+    verify_jwt = false
+  [functions.create-checkout]
+    verify_jwt = false
+  [functions.ebay-auth]
+    verify_jwt = false
+  [functions.ebay-notifications]
+    verify_jwt = false
+  [functions.ebay-process-order]
+    verify_jwt = false
+  [functions.ebay-sync]
+    verify_jwt = false
+  [functions.generate-product-copy]
+    verify_jwt = false
+  [functions.gmc-auth]
+    verify_jwt = false
+  [functions.gmc-sync]
+    verify_jwt = false
+  [functions.import-product-data]
+    verify_jwt = false
+  [functions.import-sets]
+    verify_jwt = false
+  [functions.process-email-queue]
+    verify_jwt = true
+  [functions.process-receipt]
+    verify_jwt = false
+  [functions.qbo-auth]
+    verify_jwt = false
+  [functions.qbo-sync-customers]
+    verify_jwt = false
+  [functions.qbo-sync-items]
+    verify_jwt = false
+  [functions.qbo-sync-purchases]
+    verify_jwt = false
+  [functions.qbo-sync-sales]
+    verify_jwt = false
+  [functions.qbo-sync-tax-rates]
+    verify_jwt = false
+  [functions.qbo-upsert-customer]
+    verify_jwt = false
+  [functions.qbo-webhook]
+    verify_jwt = false
+  [functions.stripe-webhook]
+    verify_jwt = false
+  [functions.sync-media-from-hub]
+    verify_jwt = false
