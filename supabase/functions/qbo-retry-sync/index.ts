@@ -292,8 +292,8 @@ async function syncOrderToQbo(
     .select("id, sku_id, quantity, unit_price, line_total, tax_code:tax_code_id(qbo_tax_code_id, sales_tax_rate:sales_tax_rate_id(qbo_tax_rate_id, rate_percent)), sku:sku_id(sku_code, qbo_item_id)")
     .eq("sales_order_id", order.id);
 
-  // Determine if line_total is already NET (eBay orders with TaxExcluded)
-  // or needs gross-to-net conversion (web orders without per-line tax codes)
+  // Determine if line_total is already NET (eBay + web orders set TaxExcluded)
+  // or needs gross-to-net conversion (QBO-imported TaxInclusive orders, legacy data)
   const isNetPricing = order.global_tax_calculation === "TaxExcluded";
 
   // Build QBO SalesReceipt lines
@@ -310,7 +310,7 @@ async function syncOrderToQbo(
     const lineTotal = Number(ol.line_total) || 0;
     const qty = ol.quantity || 1;
 
-    // Get the per-line VAT rate if available (eBay orders set this)
+    // Get the per-line VAT rate if available (eBay + web orders set this)
     const olRate = ol.tax_code?.sales_tax_rate?.rate_percent;
     const olRatePercent = olRate != null ? Number(olRate) : null;
     const olQboTaxCodeId = ol.tax_code?.qbo_tax_code_id ?? null;
