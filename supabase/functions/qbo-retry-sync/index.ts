@@ -206,27 +206,62 @@ async function syncOrderToQbo(
     }).eq("id", order.customer_id).is("qbo_customer_id", null);
   }
 
-  // Resolve tax info
+  // Resolve QBO tax info (used for TaxCodeRef fallback and TaxRateRef)
   const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
-  const multiplier = 1 + taxInfo.ratePercent / 100;
+  const defaultMultiplier = 1 + taxInfo.ratePercent / 100;
 
-  // Fetch order lines with SKU codes
+  // Fetch order lines with SKU codes and per-line tax info
   const { data: orderLines } = await admin
     .from("sales_order_line")
-    .select("id, sku_id, quantity, unit_price, line_total, sku:sku_id(sku_code, qbo_item_id)")
+    .select("id, sku_id, quantity, unit_price, line_total, tax_code:tax_code_id(qbo_tax_code_id, sales_tax_rate:sales_tax_rate_id(qbo_tax_rate_id, rate_percent)), sku:sku_id(sku_code, qbo_item_id)")
     .eq("sales_order_id", order.id);
+
+  // Determine if line_total is already NET (eBay orders with TaxExcluded)
+  // or needs gross-to-net conversion (web orders without per-line tax codes)
+  const isNetPricing = order.global_tax_calculation === "TaxExcluded";
 
   // Build QBO SalesReceipt lines
   const qboLines: any[] = [];
   let totalNet = 0;
   let totalTax = 0;
+  // Track the per-line tax rate/code for correct QBO references
+  let lineQboTaxCodeId: string | null = null;
+  let lineQboTaxRateId: string | null = null;
+  let lineRatePercent: number | null = null;
 
   for (const ol of (orderLines || [])) {
     const skuCode = ol.sku?.sku_code;
-    const grossLineTotal = Number(ol.line_total) || 0;
+    const lineTotal = Number(ol.line_total) || 0;
     const qty = ol.quantity || 1;
-    const netLine = Math.round((grossLineTotal / multiplier) * 100) / 100;
-    const lineTax = Math.round((grossLineTotal - netLine) * 100) / 100;
+
+    // Get the per-line VAT rate if available (eBay orders set this)
+    const olRate = ol.tax_code?.sales_tax_rate?.rate_percent;
+    const olRatePercent = olRate != null ? Number(olRate) : null;
+    const olQboTaxCodeId = ol.tax_code?.qbo_tax_code_id ?? null;
+    const olQboTaxRateId = ol.tax_code?.sales_tax_rate?.qbo_tax_rate_id ?? null;
+
+    // Track for TxnTaxDetail (use first line's rate — all lines in one order share the same rate)
+    if (lineRatePercent == null && olRatePercent != null) {
+      lineRatePercent = olRatePercent;
+      lineQboTaxCodeId = olQboTaxCodeId;
+      lineQboTaxRateId = olQboTaxRateId;
+    }
+
+    let netLine: number;
+    let lineTax: number;
+
+    if (isNetPricing) {
+      // line_total is already NET — use directly
+      netLine = lineTotal;
+      const rate = olRatePercent ?? taxInfo.ratePercent;
+      lineTax = Math.round(netLine * (rate / 100) * 100) / 100;
+    } else {
+      // line_total is GROSS — back-calculate NET
+      const multiplier = olRatePercent != null ? (1 + olRatePercent / 100) : defaultMultiplier;
+      netLine = Math.round((lineTotal / multiplier) * 100) / 100;
+      lineTax = Math.round((lineTotal - netLine) * 100) / 100;
+    }
+
     const netUnit = Math.round((netLine / qty) * 100) / 100;
     totalNet += netLine;
     totalTax += lineTax;
@@ -247,13 +282,16 @@ async function syncOrderToQbo(
       SalesItemLineDetail: {
         Qty: qty,
         UnitPrice: netUnit,
-        TaxCodeRef: { value: taxInfo.taxCodeId },
+        TaxCodeRef: { value: olQboTaxCodeId || taxInfo.taxCodeId },
         ...(itemRef ? { ItemRef: itemRef } : {}),
       },
     });
   }
 
-  // Rounding adjustment
+  totalNet = Math.round(totalNet * 100) / 100;
+  totalTax = Math.round(totalTax * 100) / 100;
+
+  // Rounding adjustment — ensure net + tax matches the order gross
   const grossTotal = Number(order.gross_total) || 0;
   const computedGross = totalNet + totalTax;
   const diff = Math.round((grossTotal - computedGross) * 100) / 100;
@@ -261,19 +299,22 @@ async function syncOrderToQbo(
     const lastLine = qboLines[qboLines.length - 1];
     lastLine.Amount = Math.round((lastLine.Amount + diff) * 100) / 100;
     lastLine.SalesItemLineDetail.UnitPrice = Math.round((lastLine.Amount / lastLine.SalesItemLineDetail.Qty) * 100) / 100;
-    totalNet += diff;
+    totalNet = Math.round((totalNet + diff) * 100) / 100;
   }
-  totalNet = Math.round(totalNet * 100) / 100;
-  totalTax = Math.round(totalTax * 100) / 100;
+
+  // Use per-line rate if available, otherwise fall back to default
+  const effectiveRatePercent = lineRatePercent ?? taxInfo.ratePercent;
+  const effectiveTaxRateId = lineQboTaxRateId || taxInfo.taxRateId;
 
   if (!qboLines.length) {
-    // Fallback line
-    const fallbackNet = Math.round((grossTotal / multiplier) * 100) / 100;
+    // Fallback line — no SKUs matched
+    const fallbackMultiplier = 1 + effectiveRatePercent / 100;
+    const fallbackNet = Math.round((grossTotal / fallbackMultiplier) * 100) / 100;
     qboLines.push({
       DetailType: "SalesItemLineDetail",
       Amount: fallbackNet,
       Description: `Order ${order.order_number || order.id}`,
-      SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: taxInfo.taxCodeId } },
+      SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: lineQboTaxCodeId || taxInfo.taxCodeId } },
     });
     totalNet = fallbackNet;
     totalTax = Math.round((grossTotal - fallbackNet) * 100) / 100;
@@ -311,9 +352,9 @@ async function syncOrderToQbo(
         Amount: totalTax,
         DetailType: "TaxLineDetail",
         TaxLineDetail: {
-          TaxRateRef: { value: taxInfo.taxRateId },
+          TaxRateRef: { value: effectiveTaxRateId },
           PercentBased: true,
-          TaxPercent: taxInfo.ratePercent,
+          TaxPercent: effectiveRatePercent,
           NetAmountTaxable: totalNet,
         },
       }],
@@ -371,7 +412,7 @@ Deno.serve(async (req) => {
     // Find orders needing QBO sync, respecting backoff
     const { data: pendingOrders, error: queryErr } = await admin
       .from("sales_order")
-      .select("id, order_number, origin_channel, origin_reference, doc_number, guest_name, guest_email, shipping_name, shipping_line_1, shipping_line_2, shipping_city, shipping_county, shipping_postcode, shipping_country, customer_id, gross_total, tax_total, currency, txn_date, qbo_sync_status, qbo_retry_count, qbo_last_attempt_at")
+      .select("id, order_number, origin_channel, origin_reference, doc_number, guest_name, guest_email, shipping_name, shipping_line_1, shipping_line_2, shipping_city, shipping_county, shipping_postcode, shipping_country, customer_id, gross_total, tax_total, currency, txn_date, global_tax_calculation, qbo_sync_status, qbo_retry_count, qbo_last_attempt_at")
       .in("qbo_sync_status", ["pending", "retrying"])
       .order("qbo_last_attempt_at", { ascending: true, nullsFirst: true })
       .limit(10);
