@@ -198,8 +198,54 @@ Deno.serve(async (req) => {
             `Processed order ${ebayOrderId} from ${topic}:`,
             JSON.stringify(processData).substring(0, 300)
           );
-        } catch (e) {
+
+          // If ebay-process-order returned an error, ensure a landing row exists for retry
+          if (!processRes.ok || processData.error) {
+            console.warn(`ebay-process-order returned error for ${ebayOrderId}, ensuring landing row for retry`);
+            await supabaseAdmin
+              .from("landing_raw_ebay_order")
+              .upsert(
+                {
+                  external_id: ebayOrderId,
+                  raw_payload: payload,
+                  status: "error",
+                  error_message: `Webhook processing failed: ${processData.error || `HTTP ${processRes.status}`}`.substring(0, 500),
+                  received_at: new Date().toISOString(),
+                },
+                { onConflict: "external_id", ignoreDuplicates: false }
+              );
+          }
+        } catch (e: any) {
           console.error(`Failed to process order ${ebayOrderId}:`, e);
+          // Ensure a landing row exists so the retry sweep can pick this up
+          try {
+            await supabaseAdmin
+              .from("landing_raw_ebay_order")
+              .upsert(
+                {
+                  external_id: ebayOrderId,
+                  raw_payload: payload,
+                  status: "error",
+                  error_message: `Webhook call failed: ${e.message || String(e)}`.substring(0, 500),
+                  received_at: new Date().toISOString(),
+                },
+                { onConflict: "external_id", ignoreDuplicates: false }
+              );
+          } catch (landingErr) {
+            console.error(`Failed to create landing row for retry:`, landingErr);
+          }
+
+          // Best-effort: trigger the retry function immediately
+          try {
+            fetch(`${supabaseUrl}/functions/v1/ebay-retry-order`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${serviceKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({}),
+            }).catch(() => {});
+          } catch { /* fire and forget */ }
         }
       } else {
         // Fallback: trigger bulk sync if we can't extract the order ID

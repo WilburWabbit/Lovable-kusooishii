@@ -995,7 +995,7 @@ Deno.serve(async (req) => {
           status: "error",
           error_message: (e.message || "Unknown error").substring(0, 500),
           processed_at: new Date().toISOString(),
-        }).eq("external_id", body2.order_id).eq("status", "pending");
+        }).eq("external_id", body2.order_id).in("status", ["pending", "retrying"]);
       }
     } catch { /* best effort */ }
     return new Response(
