@@ -162,13 +162,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     // ── Create order lines and update FIFO inventory ──
     const skuItemsStr = session.metadata?.sku_items || "";
     if (skuItemsStr) {
-      const skuItems = skuItemsStr.split(",").map((entry) => {
+      const skuItems = skuItemsStr.split(",").map((entry: string) => {
         const [skuId, qtyStr] = entry.split(":");
         return { skuId, quantity: parseInt(qtyStr, 10) || 1 };
       });
 
       // Look up SKU prices from the database
-      const skuIds = skuItems.map((i) => i.skuId);
+      const skuIds = skuItems.map((i: { skuId: string; quantity: number }) => i.skuId);
       const { data: skuRows } = await supabase
         .from("sku")
         .select("id, sku_code, price")
