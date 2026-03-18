@@ -683,32 +683,37 @@ Deno.serve(async (req) => {
     const qboTaxCodeRef = defaultTaxCode?.qbo_tax_code_id ?? null;
 
     // ── Step 7b: Audit skipped line items (SKU mismatches) ──
+    // Wrapped in try/catch so a failed audit/alert insert doesn't cause the
+    // function to return 500 when the sales_order was already created.
     if (skippedLines.length > 0) {
-      await admin.from("audit_event").insert({
-        entity_type: "sales_order",
-        entity_id: newOrder.id,
-        trigger_type: "ebay_notification",
-        actor_type: "system",
-        source_system: "ebay-process-order",
-        correlation_id: correlationId,
-        after_json: {
-          warning: "sku_mismatch",
-          skipped_lines: skippedLines,
-          order_id: orderId,
-          total_line_items: lineItems.length,
-          matched_line_items: processedLines.length,
-        },
-      });
+      try {
+        await admin.from("audit_event").insert({
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+          trigger_type: "ebay_notification",
+          actor_type: "system",
+          source_system: "ebay-process-order",
+          correlation_id: correlationId,
+          after_json: {
+            warning: "sku_mismatch",
+            skipped_lines: skippedLines,
+            order_id: orderId,
+            total_line_items: lineItems.length,
+            matched_line_items: processedLines.length,
+          },
+        });
 
-      // Create admin alert for visibility
-      await admin.from("admin_alert").insert({
-        severity: "warning",
-        category: "ebay_sku_mismatch",
-        title: `eBay order ${orderId}: ${skippedLines.length} line(s) skipped — SKU not found`,
-        detail: `SKUs not matched: ${skippedLines.map(s => s.ebaySku || "(empty)").join(", ")}. Order created with ${processedLines.length}/${lineItems.length} lines.`,
-        entity_type: "sales_order",
-        entity_id: newOrder.id,
-      });
+        await admin.from("admin_alert").insert({
+          severity: "warning",
+          category: "ebay_sku_mismatch",
+          title: `eBay order ${orderId}: ${skippedLines.length} line(s) skipped — SKU not found`,
+          detail: `SKUs not matched: ${skippedLines.map(s => s.ebaySku || "(empty)").join(", ")}. Order created with ${processedLines.length}/${lineItems.length} lines.`,
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+        });
+      } catch (auditErr: any) {
+        console.error(`Failed to create SKU mismatch audit/alert for order ${orderId}:`, auditErr.message);
+      }
 
       console.warn(`Order ${orderId}: ${skippedLines.length} line(s) skipped due to SKU mismatch`);
     }
