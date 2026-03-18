@@ -24,7 +24,7 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
     <Body style={main}>
       <Container style={container}>
         <Img
-          src="https://gcgrwujfyurgetvqlmbf.supabase.co/storage/v1/object/public/media/email-assets%2Fkuso-logo.png"
+          src="https://www.kusooishii.com/lovable-uploads/bd7eeb10-aa45-4885-9059-16107ecc9a19.png"
           alt="KUSO OISHII"
           width="120"
           style={logo}
