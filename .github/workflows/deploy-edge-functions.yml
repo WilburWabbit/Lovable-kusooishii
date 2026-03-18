@@ -20,9 +20,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate secrets
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN secret is not set. Configure it in GitHub → Settings → Secrets and variables → Actions. Generate a token at https://supabase.com/dashboard/account/tokens"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_PROJECT_ID" ]; then
+            echo "::error::SUPABASE_PROJECT_ID secret is not set. Configure it in GitHub → Settings → Secrets and variables → Actions. The value is your Supabase project reference ID."
+            exit 1
+          fi
+          echo "All required secrets are configured."
+
       - uses: supabase/setup-cli@v1
         with:
           version: latest
 
+      - name: Show CLI version
+        run: supabase --version
+
       - name: Deploy all edge functions
-        run: supabase functions deploy --project-ref $SUPABASE_PROJECT_ID
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID"
