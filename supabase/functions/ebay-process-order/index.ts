@@ -793,10 +793,14 @@ Deno.serve(async (req) => {
     }
 
     // ── Step 6: Insert local sales_order (qbo_sync_status = 'pending') ──
-    // Compute order-level totals from resolved VAT rate (not eBay's unreliable tax field)
+    // gross_total = the exact amount eBay charged the buyer. This is the
+    // accounting-authoritative figure and what QBO must reflect.
+    // merchandise_subtotal and tax_total are computed from matched lines only
+    // (if lines were skipped due to SKU mismatch, they won't sum to gross_total;
+    // the discrepancy is already flagged by the admin alert in step 7b).
     const merchandiseSubtotal = processedLines.reduce((s, pl) => s + pl.lineTotal, 0);
     const taxTotal = processedLines.reduce((s, pl) => s + pl.lineTax, 0);
-    const grossTotal = Math.round((merchandiseSubtotal + taxTotal) * 100) / 100;
+    const grossTotal = ebayGrossTotal;
 
     const { data: newOrder, error: orderErr } = await admin
       .from("sales_order")
