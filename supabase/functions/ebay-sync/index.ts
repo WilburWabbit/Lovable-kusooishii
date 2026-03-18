@@ -7,6 +7,14 @@ const corsHeaders = {
 };
 
 const EBAY_API = "https://api.ebay.com";
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 /**
  * Normalise an eBay SKU to the canonical MPN.
@@ -35,7 +43,7 @@ async function getAccessToken(admin: any): Promise<string> {
   const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
   const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
 
-  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+  const res = await fetchWithTimeout(`${EBAY_API}/identity/v1/oauth2/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -73,7 +81,7 @@ async function getAccessToken(admin: any): Promise<string> {
 /* ── Generic eBay API fetch ── */
 async function ebayFetch(token: string, path: string, options: RequestInit = {}) {
   const url = path.startsWith("http") ? path : `${EBAY_API}${path}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -139,14 +147,21 @@ async function fetchOffers(token: string, skus?: string[]): Promise<any[]> {
       if (batch.length < limit || offers.length >= (data?.total || 0)) break;
       offset += limit;
     }
-  } catch {
-    console.warn("Bulk offer fetch failed, trying per-SKU fallback");
+  } catch (bulkErr) {
+    console.warn("Bulk offer fetch failed, trying per-SKU fallback with backoff:", bulkErr);
     if (skus?.length) {
+      let backoffMs = 1000;
       for (const sku of skus) {
         try {
           const data = await ebayFetch(token, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&limit=25`);
           offers.push(...(data?.offers || []));
-        } catch { /* skip */ }
+          backoffMs = 1000; // Reset on success
+        } catch (perSkuErr: any) {
+          console.warn(`Per-SKU offer fetch failed for ${sku}: ${perSkuErr.message}`);
+          // Exponential backoff between failures (1s, 2s, 4s, max 8s)
+          await new Promise(r => setTimeout(r, backoffMs));
+          backoffMs = Math.min(backoffMs * 2, 8000);
+        }
       }
     }
   }

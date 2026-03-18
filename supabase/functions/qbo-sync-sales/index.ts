@@ -6,6 +6,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await supabaseAdmin
     .from("qbo_connection")
@@ -16,7 +25,7 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
   if (error || !conn) throw new Error("No QBO connection found. Please connect to QBO first.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -59,7 +68,7 @@ async function fetchQboItem(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(`${baseUrl}/item/${itemId}`, {
+      const res = await fetchWithTimeout(`${baseUrl}/item/${itemId}`, {
         headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
       });
       if (res.status === 429) {
@@ -112,7 +121,7 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
 
 async function queryQbo(baseUrl: string, accessToken: string, entity: string): Promise<any[]> {
   const query = encodeURIComponent(`SELECT * FROM ${entity} MAXRESULTS 1000`);
-  const res = await fetch(`${baseUrl}/query?query=${query}`, {
+  const res = await fetchWithTimeout(`${baseUrl}/query?query=${query}`, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
   if (!res.ok) {
@@ -841,7 +850,7 @@ Deno.serve(async (req) => {
 
           const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
           try {
-            const res = await fetch(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
+            const res = await fetchWithTimeout(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
               headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
             });
             if (res.status === 429) {

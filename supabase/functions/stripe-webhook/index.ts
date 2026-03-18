@@ -50,10 +50,40 @@ serve(async (req) => {
     console.error("Failed to land Stripe event:", landErr);
   }
 
+  // ── Idempotency: skip if already committed ──
+  {
+    const { data: existingLanding } = await supabase
+      .from("landing_raw_stripe_event")
+      .select("status")
+      .eq("external_id", event.id)
+      .maybeSingle();
+
+    if (existingLanding?.status === "committed") {
+      console.log(`Stripe event ${event.id} already committed, skipping`);
+      return new Response(JSON.stringify({ received: true, skipped: true }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+  }
+
   // ── Process event ──
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    await handleCheckoutCompleted(session);
+
+    // Guard against duplicate order creation: check if origin_reference already exists
+    const { data: existingOrder } = await supabase
+      .from("sales_order")
+      .select("id")
+      .eq("origin_channel", "web")
+      .eq("origin_reference", session.id)
+      .maybeSingle();
+
+    if (existingOrder) {
+      console.log(`Order for Stripe session ${session.id} already exists (${existingOrder.id}), skipping`);
+    } else {
+      await handleCheckoutCompleted(session);
+    }
   }
 
   // Mark landing as committed
@@ -83,8 +113,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     });
 
     // Separate product lines from shipping lines
+    // Use price metadata or product type rather than description matching,
+    // which could misclassify products with "shipping" in their name
     const productLines = lineItems.data.filter(
-      (li: any) => !li.description?.toLowerCase().includes("shipping")
+      (li: any) => {
+        // If Stripe provides a price object with product metadata, check it
+        const isShipping = li.price?.metadata?.type === "shipping"
+          || li.price?.product?.metadata?.type === "shipping";
+        if (isShipping) return false;
+        // Fallback: only match exact "Shipping" or "Express shipping" patterns
+        const desc = li.description?.trim() || "";
+        const shippingPatterns = /^(standard |express |next[- ]day )?shipping$/i;
+        return !shippingPatterns.test(desc);
+      }
     );
 
     const merchandiseSubtotal = productLines.reduce(

@@ -7,6 +7,14 @@ const corsHeaders = {
 };
 
 const BE_BASE = "https://www.brickeconomy.com/api/v1";
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,16 +68,42 @@ Deno.serve(async (req) => {
       );
     }
 
+    // --- Daily quota enforcement (100 req/day hard limit) ---
+    // Each sync makes 2 API calls (sets + minifigs), so check we have budget
+    const DAILY_QUOTA = 100;
+    const API_CALLS_PER_SYNC = 2;
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const { count: todayCount } = await admin
+      .from("landing_raw_brickeconomy")
+      .select("id", { count: "exact", head: true })
+      .gte("received_at", todayStart.toISOString());
+
+    // Each landing row represents one sync (2 API calls), so multiply
+    const estimatedCallsToday = (todayCount || 0) * API_CALLS_PER_SYNC;
+    if (estimatedCallsToday + API_CALLS_PER_SYNC > DAILY_QUOTA) {
+      console.warn(`BrickEconomy daily quota approaching: ${estimatedCallsToday}/${DAILY_QUOTA} calls used today`);
+      return new Response(
+        JSON.stringify({
+          error: "Daily API quota limit reached",
+          calls_today: estimatedCallsToday,
+          quota: DAILY_QUOTA,
+        }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const headers = {
       "x-apikey": apiKey,
       "User-Agent": "BrickKeeperSync/1.0",
       Accept: "application/json",
     };
 
-    // Fetch sets and minifigs in parallel
+    // Fetch sets and minifigs in parallel (with timeout)
     const [setsRes, minifigsRes] = await Promise.all([
-      fetch(`${BE_BASE}/collection/sets?currency=GBP`, { headers }),
-      fetch(`${BE_BASE}/collection/minifigs?currency=GBP`, { headers }),
+      fetchWithTimeout(`${BE_BASE}/collection/sets?currency=GBP`, { headers }),
+      fetchWithTimeout(`${BE_BASE}/collection/minifigs?currency=GBP`, { headers }),
     ]);
 
     if (!setsRes.ok) {

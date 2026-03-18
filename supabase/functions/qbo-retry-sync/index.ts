@@ -25,6 +25,14 @@ const corsHeaders = {
 };
 
 const QBO_API_BASE = "https://quickbooks.api.intuit.com/v3/company";
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 // Backoff thresholds in milliseconds — minimum wait before next attempt
 const BACKOFF_MS = [
@@ -44,7 +52,7 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
   if (error || !conn) throw new Error("No QBO connection found.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -68,7 +76,7 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
 
 async function qboRequest(accessToken: string, realmId: string, path: string, options: RequestInit = {}) {
   const url = `${QBO_API_BASE}/${realmId}${path}${path.includes("?") ? "&" : "?"}minorversion=65`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -86,7 +94,7 @@ async function findOrCreateCustomer(
   accessToken: string, realmId: string, customerName: string,
   details?: { email?: string | null; shippingAddress?: { line1?: string; line2?: string; city?: string; stateOrProvince?: string; postalCode?: string; country?: string } | null }
 ): Promise<{ id: string; name: string }> {
-  const escaped = customerName.replace(/'/g, "\\'");
+  const escaped = customerName.replace(/'/g, "''");
   const queryResult = await qboRequest(accessToken, realmId,
     `/query?query=${encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${escaped}'`)}`);
   const existing = queryResult?.QueryResponse?.Customer;
@@ -128,7 +136,7 @@ async function findOrCreateCustomer(
 
 async function findQboItemBySku(accessToken: string, realmId: string, sku: string): Promise<{ id: string; name: string } | null> {
   try {
-    const escaped = sku.replace(/'/g, "\\'");
+    const escaped = sku.replace(/'/g, "''");
     const result = await qboRequest(accessToken, realmId,
       `/query?query=${encodeURIComponent(`SELECT * FROM Item WHERE Sku = '${escaped}'`)}`);
     const items = result?.QueryResponse?.Item;
@@ -278,7 +286,7 @@ async function syncOrderToQbo(
   let existingReceiptId: string | null = null;
   if (docNumber) {
     try {
-      const escaped = docNumber.replace(/'/g, "\\'");
+      const escaped = docNumber.replace(/'/g, "''");
       const result = await qboRequest(qboToken, realmId,
         `/query?query=${encodeURIComponent(`SELECT Id FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`);
       existingReceiptId = result?.QueryResponse?.SalesReceipt?.[0]?.Id || null;
