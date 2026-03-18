@@ -122,31 +122,12 @@ serve(async (req) => {
       }
     }
 
-    // --- Validate collection discount eligibility ---
+    // --- Collection discount eligibility ---
     const isCollection = shippingMethod === "collection";
     let collectionDiscount = 0;
 
-    if (isCollection) {
-      if (!userId) {
-        throw new Error(
-          "You must be signed in to use collection shipping"
-        );
-      }
-
-      // Verify user is an approved club member
-      const { data: clubLink } = await adminClient
-        .from("member_club_link")
-        .select("id")
-        .eq("user_id", userId)
-        .limit(1)
-        .maybeSingle();
-
-      if (!clubLink) {
-        throw new Error(
-          "Collection is only available for club members"
-        );
-      }
-    }
+    // Collection shipping/discount is intentionally available without
+    // sign-in or membership approval checks.
 
     // --- Build line items with server-side prices ---
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
