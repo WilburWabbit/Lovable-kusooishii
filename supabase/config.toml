@@ -44,3 +44,30 @@ verify_jwt = false
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+[functions.chatgpt]
+verify_jwt = false
+
+[functions.ebay-auth]
+verify_jwt = false
+
+[functions.ebay-sync]
+verify_jwt = false
+
+[functions.generate-product-copy]
+verify_jwt = false
+
+[functions.gmc-auth]
+verify_jwt = false
+
+[functions.gmc-sync]
+verify_jwt = false
+
+[functions.import-product-data]
+verify_jwt = false
+
+[functions.import-sets]
+verify_jwt = false
+
+[functions.qbo-upsert-customer]
+verify_jwt = false
