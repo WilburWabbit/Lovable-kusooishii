@@ -34,16 +34,15 @@ export const RecoveryEmail = ({
           width="120"
           style={logo}
         />
-        <Heading style={h1}>Reset your password</Heading>
+        <Heading style={h1}>Forgot your password? Happens to the best of us.</Heading>
         <Text style={text}>
-          Someone requested a password reset for your {siteName} account.
-          Hit the button below to choose a new one.
+          Hit the button below to pick a new one for your {siteName} account.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Reset Password
         </Button>
         <Text style={footer}>
-          Didn't request this? No worries — your password stays the same.
+          Didn't request this? No worries — your password stays exactly as it is.
         </Text>
       </Container>
     </Body>

@@ -37,13 +37,13 @@ export const InviteEmail = ({
           width="120"
           style={logo}
         />
-        <Heading style={h1}>You're invited.</Heading>
+        <Heading style={h1}>Someone thinks you'd like it here.</Heading>
         <Text style={text}>
           You've been invited to{' '}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>
-          . Accept below to create your account and get started.
+          {' '}— LEGO® for grown-ups who give a shit about quality. Accept below to create your account and start browsing.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Accept Invitation

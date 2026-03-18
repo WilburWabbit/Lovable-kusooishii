@@ -34,9 +34,9 @@ export const MagicLinkEmail = ({
           width="120"
           style={logo}
         />
-        <Heading style={h1}>Your login link</Heading>
+        <Heading style={h1}>Your login link.</Heading>
         <Text style={text}>
-          Tap below to log in to {siteName}. This link expires shortly.
+          Tap below to get back to your bricks. This link won't hang around forever.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Log In

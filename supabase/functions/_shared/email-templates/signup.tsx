@@ -30,7 +30,7 @@ export const SignupEmail = ({
 }: SignupEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
-    <Preview>Confirm your email for {siteName}</Preview>
+    <Preview>Welcome to the obsession</Preview>
     <Body style={main}>
       <Container style={container}>
         <Img
@@ -39,23 +39,23 @@ export const SignupEmail = ({
           width="120"
           style={logo}
         />
-        <Heading style={h1}>Welcome aboard.</Heading>
+        <Heading style={h1}>Welcome to the obsession.</Heading>
         <Text style={text}>
-          You've signed up for{' '}
+          You signed up for{' '}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>
-          . Confirm your email (
+          . Nice one. Confirm your email (
           <Link href={`mailto:${recipient}`} style={link}>
             {recipient}
           </Link>
-          ) and let's get started.
+          ) and you're in — wishlists, stock alerts, and club perks are all waiting.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Verify Email
         </Button>
         <Text style={footer}>
-          Didn't sign up? Ignore this — nothing will change.
+          Didn't sign up? Ignore this — nothing happens.
         </Text>
       </Container>
     </Body>

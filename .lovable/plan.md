@@ -1,53 +1,38 @@
 
 
-## Plan: Update auth email templates with new brand copy
+## Fix: Pricing Calculation Edge Function Timeout
 
-The templates already have the correct styling (Torii red buttons, Space Grotesk font, logo). The changes are purely copy updates and a configuration rename in the hook.
+### Problem
+The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
 
-### Changes needed
+### Solution
+Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
 
-**1. Update `auth-email-hook/index.ts`**
-- Change `SITE_NAME` from `"workspace-charm-market"` to `"Kuso Oishii"` (line 39)
-- Update `EMAIL_SUBJECTS` to match the new subject lines (lines 19-26):
-  - signup: "Welcome to the obsession"
-  - invite: "You've been invited" (unchanged)
-  - magiclink: "Your login link" (unchanged)
-  - recovery: "Reset your password" (unchanged)
-  - email_change: "Confirm your new email" (unchanged)
-  - reauthentication: "Your verification code" (unchanged)
+### Changes
 
-**2. Update `signup.tsx`**
-- Preview: "Welcome to the obsession"
-- Heading: "Welcome to the obsession."
-- Body: "You signed up for Kuso Oishii. Nice one. Confirm your email and you're in -- wishlists, stock alerts, and club perks are all waiting."
-- Footer: "Didn't sign up? Ignore this -- nothing happens."
+**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
 
-**3. Update `recovery.tsx`**
-- Heading: "Forgot your password? Happens to the best of us."
-- Body: "Hit the button below to pick a new one for your Kuso Oishii account."
-- Footer: "Didn't request this? No worries -- your password stays exactly as it is."
+Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
 
-**4. Update `magic-link.tsx`**
-- Heading: "Your login link."
-- Body: "Tap below to get back to your bricks. This link won't hang around forever."
-- Footer unchanged.
+```typescript
+// 1. Get SKU + product info (needs to run first — others depend on its results)
+const { data: skuData } = await admin.from("sku")...
 
-**5. Update `invite.tsx`**
-- Heading: "Someone thinks you'd like it here."
-- Body: "You've been invited to Kuso Oishii -- LEGO for grown-ups who give a shit about quality. Accept below to create your account and start browsing."
-- Footer unchanged.
+// 2-6. Run remaining queries in parallel
+const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
+  admin.from("selling_cost_defaults").select("key, value"),
+  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
+  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
+  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
+  // BrickEconomy lookup (conditional on mpn)
+  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+]);
+```
 
-**6. Update `email-change.tsx`**
-- Heading: "New email? Confirm it."
-- Body: "You asked to change your Kuso Oishii email. Tap below to make it official."
-- Footer unchanged.
+This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
 
-**7. Update `reauthentication.tsx`**
-- Heading: "Here's your code."
-- Body: "Pop this in and you're sorted:"
-- Footer: "Expires shortly. Didn't request it? Just ignore this."
-
-**8. Deploy `auth-email-hook`** to activate the changes.
-
-All template variables, styling, and logo remain untouched. No hero screenshot image exists to remove (templates only have the logo).
+### Impact
+- No schema changes needed
+- No frontend changes needed
+- Same inputs/outputs — purely an internal optimization
 

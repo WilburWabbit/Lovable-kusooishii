@@ -29,11 +29,11 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
           width="120"
           style={logo}
         />
-        <Heading style={h1}>Verification code</Heading>
-        <Text style={text}>Use this code to confirm your identity:</Text>
+        <Heading style={h1}>Here's your code.</Heading>
+        <Text style={text}>Pop this in and you're sorted:</Text>
         <Text style={codeStyle}>{token}</Text>
         <Text style={footer}>
-          This code expires shortly. Didn't request it? Ignore this.
+          Expires shortly. Didn't request it? Just ignore this.
         </Text>
       </Container>
     </Body>
