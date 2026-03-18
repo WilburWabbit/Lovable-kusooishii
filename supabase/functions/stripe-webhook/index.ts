@@ -116,7 +116,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       }
     }
 
-    // Create the sales_order
+    // Create the sales_order (qbo_sync_status = 'pending' — QBO sync happens via retry function)
+    const orderNumber_txnDate = new Date().toISOString().split("T")[0];
     const { data: order, error: orderError } = await supabase
       .from("sales_order")
       .insert({
@@ -124,7 +125,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         origin_reference: session.id,
         payment_reference: session.payment_intent as string,
         status: "paid",
-        txn_date: new Date().toISOString().split("T")[0],
+        txn_date: orderNumber_txnDate,
         merchandise_subtotal: merchandiseSubtotal,
         shipping_total: shippingTotal,
         discount_total: discountTotal,
@@ -141,6 +142,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         shipping_county: address?.state || null,
         shipping_postcode: address?.postal_code || (isCollection ? "N/A" : ""),
         shipping_country: address?.country || "GB",
+        qbo_sync_status: "pending",
         ...(isCollection
           ? {
               club_discount_amount: discountTotal,
@@ -157,7 +159,100 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
     console.log(`Created order ${order.order_number} (${order.id})`);
 
-    // Audit event
+    // ── Create order lines and update FIFO inventory ──
+    const skuItemsStr = session.metadata?.sku_items || "";
+    if (skuItemsStr) {
+      const skuItems = skuItemsStr.split(",").map((entry) => {
+        const [skuId, qtyStr] = entry.split(":");
+        return { skuId, quantity: parseInt(qtyStr, 10) || 1 };
+      });
+
+      // Look up SKU prices from the database
+      const skuIds = skuItems.map((i) => i.skuId);
+      const { data: skuRows } = await supabase
+        .from("sku")
+        .select("id, sku_code, price")
+        .in("id", skuIds);
+
+      const skuMap = new Map<string, { id: string; sku_code: string; price: number }>();
+      for (const row of skuRows ?? []) {
+        skuMap.set(row.id, row);
+      }
+
+      for (const item of skuItems) {
+        const sku = skuMap.get(item.skuId);
+        if (!sku) {
+          console.warn(`SKU ${item.skuId} not found, skipping order line`);
+          continue;
+        }
+
+        // Create one order line per unit (FIFO stock allocation)
+        for (let i = 0; i < item.quantity; i++) {
+          // FIFO: pick the oldest available stock unit for this SKU
+          const { data: stockUnit } = await supabase
+            .from("stock_unit")
+            .select("id")
+            .eq("sku_id", sku.id)
+            .eq("status", "available")
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .single();
+
+          const unitPrice = Number(sku.price) || 0;
+
+          const { error: lineError } = await supabase
+            .from("sales_order_line")
+            .insert({
+              sales_order_id: order.id,
+              sku_id: sku.id,
+              quantity: 1,
+              unit_price: unitPrice,
+              line_total: unitPrice,
+              stock_unit_id: stockUnit?.id ?? null,
+            });
+
+          if (lineError) {
+            console.error(`Failed to create order line for SKU ${sku.sku_code}:`, lineError);
+            continue;
+          }
+
+          // Mark stock unit as closed (sold)
+          if (stockUnit) {
+            const { error: stockError } = await supabase
+              .from("stock_unit")
+              .update({ status: "closed" })
+              .eq("id", stockUnit.id);
+
+            if (stockError) {
+              console.error(`Failed to close stock unit ${stockUnit.id}:`, stockError);
+            } else {
+              // Audit the inventory change
+              await supabase.from("audit_event").insert({
+                entity_type: "stock_unit",
+                entity_id: stockUnit.id,
+                trigger_type: "stripe_webhook",
+                actor_type: "system",
+                source_system: "stripe",
+                after_json: {
+                  status: "closed",
+                  reason: "sold",
+                  order_id: order.id,
+                  order_number: order.order_number,
+                },
+              });
+            }
+          } else {
+            console.warn(`No available stock unit for SKU ${sku.sku_code}, order line created without stock`);
+          }
+        }
+      }
+
+      console.log(`Created order lines for ${skuItems.length} SKU(s)`);
+    } else {
+      console.warn(`No sku_items metadata on session ${session.id}, order lines not created`);
+    }
+
+    // Audit event for order creation
     await supabase.from("audit_event").insert({
       entity_type: "sales_order",
       entity_id: order.id,
@@ -171,6 +266,36 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         status: "paid",
       },
     });
+
+    // ── Set DocNumber on the order for QBO cross-channel dedup ──
+    if (order.order_number) {
+      await supabase.from("sales_order").update({
+        doc_number: order.order_number,
+      }).eq("id", order.id);
+    }
+
+    // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
+    // The order has qbo_sync_status='pending'. The retry function will
+    // create the QBO Customer + SalesReceipt and store confirmation IDs.
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+      if (supabaseUrl && serviceRoleKey) {
+        fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        }).catch((err) => {
+          console.warn("qbo-retry-sync trigger failed (non-blocking):", err);
+        });
+        console.log("Triggered qbo-retry-sync for new web order");
+      }
+    } catch (qboErr) {
+      console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
+    }
   } catch (err) {
     console.error("Error handling checkout.session.completed:", err);
   }

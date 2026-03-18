@@ -178,6 +178,13 @@ serve(async (req) => {
       "https://workspace-charm-market.lovable.app";
 
     // --- Build session params ---
+    // Encode SKU items into metadata so the webhook can create order lines.
+    // Stripe metadata values are limited to 500 chars, so we use a compact format.
+    // Format: "skuId:qty,skuId:qty,..."
+    const skuItemsStr = validatedItems
+      .map((i) => `${i.skuId}:${i.quantity}`)
+      .join(",");
+
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
       line_items: lineItems,
@@ -186,6 +193,7 @@ serve(async (req) => {
       metadata: {
         shipping_method: shippingMethod,
         origin_channel: "web",
+        sku_items: skuItemsStr,
       },
       ...(customerId
         ? { customer: customerId }
