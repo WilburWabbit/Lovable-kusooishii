@@ -496,6 +496,39 @@ export type Database = {
         }
         Relationships: []
       }
+      google_merchant_connection: {
+        Row: {
+          access_token: string
+          created_at: string
+          data_source: string | null
+          id: string
+          merchant_id: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          data_source?: string | null
+          id?: string
+          merchant_id: string
+          refresh_token: string
+          token_expires_at: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          data_source?: string | null
+          id?: string
+          merchant_id?: string
+          refresh_token?: string
+          token_expires_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       inbound_receipt: {
         Row: {
           created_at: string

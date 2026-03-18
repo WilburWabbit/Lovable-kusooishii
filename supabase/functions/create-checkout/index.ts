@@ -138,13 +138,12 @@ serve(async (req) => {
         .from("member_club_link")
         .select("id")
         .eq("user_id", userId)
-        .eq("approved", true)
         .limit(1)
         .maybeSingle();
 
       if (!clubLink) {
         throw new Error(
-          "Collection is only available for approved club members"
+          "Collection is only available for club members"
         );
       }
     }
