@@ -1,9 +1,20 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Bell, Heart, Users, Percent } from "lucide-react";
 import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BlueBellClubPage() {
+  useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) return;
+    const original = link.href;
+    link.href = "/bluebell-favicon.ico";
+    return () => {
+      link.href = original;
+    };
+  }, []);
+
   usePageSeo({
     title: "Blue Bell LEGO® Club",
     description:
