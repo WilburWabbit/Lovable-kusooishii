@@ -30,8 +30,25 @@ serve(async (req) => {
     return new Response(`Webhook Error: ${(err as Error).message}`, { status: 400 });
   }
 
-  // ── Land raw Stripe event ──
+  // ── Idempotency: check landing status BEFORE upserting ──
   const landingCorrelation = crypto.randomUUID();
+  {
+    const { data: existingLanding } = await supabase
+      .from("landing_raw_stripe_event")
+      .select("status")
+      .eq("external_id", event.id)
+      .maybeSingle();
+
+    if (existingLanding?.status === "committed") {
+      console.log(`Stripe event ${event.id} already committed, skipping`);
+      return new Response(JSON.stringify({ received: true, skipped: true }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+  }
+
+  // ── Land raw Stripe event (only if not already committed) ──
   try {
     await supabase
       .from("landing_raw_stripe_event")
@@ -48,23 +65,6 @@ serve(async (req) => {
       );
   } catch (landErr) {
     console.error("Failed to land Stripe event:", landErr);
-  }
-
-  // ── Idempotency: skip if already committed ──
-  {
-    const { data: existingLanding } = await supabase
-      .from("landing_raw_stripe_event")
-      .select("status")
-      .eq("external_id", event.id)
-      .maybeSingle();
-
-    if (existingLanding?.status === "committed") {
-      console.log(`Stripe event ${event.id} already committed, skipping`);
-      return new Response(JSON.stringify({ received: true, skipped: true }), {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
-    }
   }
 
   // ── Process event ──
@@ -112,19 +112,14 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       limit: 100,
     });
 
-    // Separate product lines from shipping lines
-    // Use price metadata or product type rather than description matching,
-    // which could misclassify products with "shipping" in their name
+    // Separate product lines from shipping lines.
+    // Match only exact shipping-like descriptions to avoid misclassifying
+    // products with "shipping" in their name (e.g. "LEGO Shipping Container").
     const productLines = lineItems.data.filter(
       (li: any) => {
-        // If Stripe provides a price object with product metadata, check it
-        const isShipping = li.price?.metadata?.type === "shipping"
-          || li.price?.product?.metadata?.type === "shipping";
-        if (isShipping) return false;
-        // Fallback: only match exact "Shipping" or "Express shipping" patterns
         const desc = li.description?.trim() || "";
-        const shippingPatterns = /^(standard |express |next[- ]day )?shipping$/i;
-        return !shippingPatterns.test(desc);
+        const shippingPattern = /^(standard |express |next[- ]day )?shipping$/i;
+        return !shippingPattern.test(desc);
       }
     );
 

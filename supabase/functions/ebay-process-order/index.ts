@@ -797,31 +797,36 @@ Deno.serve(async (req) => {
             console.log(`Pushed stock ${listing.external_sku} → ${qty} on eBay`);
           } catch (e: any) {
             console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
-            // Audit the stock sync failure — local stock is closed but eBay still shows old quantity
-            await admin.from("audit_event").insert({
-              entity_type: "channel_listing",
-              entity_id: listing.id,
-              trigger_type: "ebay_stock_push_failed",
-              actor_type: "system",
-              source_system: "ebay-process-order",
-              correlation_id: correlationId,
-              after_json: {
-                error: e.message,
-                external_sku: listing.external_sku,
-                intended_quantity: qty,
-                order_id: orderId,
-                sales_order_id: newOrder.id,
-              },
-            });
-            // Create admin alert for stock desync
-            await admin.from("admin_alert").insert({
-              severity: "critical",
-              category: "ebay_stock_desync",
-              title: `eBay stock out of sync: ${listing.external_sku}`,
-              detail: `Failed to update eBay quantity to ${qty} after order ${orderId}. Local stock is depleted but eBay listing may still show available inventory. Error: ${e.message}`,
-              entity_type: "channel_listing",
-              entity_id: listing.id,
-            });
+            // Audit the stock sync failure — local stock is closed but eBay still shows old quantity.
+            // Wrapped in try/catch so a failed audit insert doesn't break the loop
+            // and prevent remaining listings from being updated.
+            try {
+              await admin.from("audit_event").insert({
+                entity_type: "channel_listing",
+                entity_id: listing.id,
+                trigger_type: "ebay_stock_push_failed",
+                actor_type: "system",
+                source_system: "ebay-process-order",
+                correlation_id: correlationId,
+                after_json: {
+                  error: e.message,
+                  external_sku: listing.external_sku,
+                  intended_quantity: qty,
+                  order_id: orderId,
+                  sales_order_id: newOrder.id,
+                },
+              });
+              await admin.from("admin_alert").insert({
+                severity: "critical",
+                category: "ebay_stock_desync",
+                title: `eBay stock out of sync: ${listing.external_sku}`,
+                detail: `Failed to update eBay quantity to ${qty} after order ${orderId}. Local stock is depleted but eBay listing may still show available inventory. Error: ${e.message}`,
+                entity_type: "channel_listing",
+                entity_id: listing.id,
+              });
+            } catch (alertErr: any) {
+              console.error(`Failed to create stock desync audit/alert for ${listing.external_sku}:`, alertErr.message);
+            }
           }
         }
       }

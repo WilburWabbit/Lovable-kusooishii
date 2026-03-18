@@ -69,25 +69,30 @@ Deno.serve(async (req) => {
     }
 
     // --- Daily quota enforcement (100 req/day hard limit) ---
-    // Each sync makes 2 API calls (sets + minifigs), so check we have budget
+    // Each sync makes 2 API calls (sets + minifigs).
+    // The landing table uses upsert with fixed external_ids so row count can't
+    // track syncs. Instead, count audit_events for today's BrickEconomy syncs.
     const DAILY_QUOTA = 100;
     const API_CALLS_PER_SYNC = 2;
+    const MAX_SYNCS_PER_DAY = Math.floor(DAILY_QUOTA / API_CALLS_PER_SYNC);
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
-    const { count: todayCount } = await admin
-      .from("landing_raw_brickeconomy")
+    const { count: syncsToday } = await admin
+      .from("audit_event")
       .select("id", { count: "exact", head: true })
-      .gte("received_at", todayStart.toISOString());
+      .eq("entity_type", "brickeconomy_sync")
+      .eq("trigger_type", "brickeconomy_sync")
+      .gte("created_at", todayStart.toISOString());
 
-    // Each landing row represents one sync (2 API calls), so multiply
-    const estimatedCallsToday = (todayCount || 0) * API_CALLS_PER_SYNC;
-    if (estimatedCallsToday + API_CALLS_PER_SYNC > DAILY_QUOTA) {
-      console.warn(`BrickEconomy daily quota approaching: ${estimatedCallsToday}/${DAILY_QUOTA} calls used today`);
+    const callsToday = (syncsToday || 0) * API_CALLS_PER_SYNC;
+    if ((syncsToday || 0) >= MAX_SYNCS_PER_DAY) {
+      console.warn(`BrickEconomy daily quota exhausted: ${callsToday}/${DAILY_QUOTA} API calls (${syncsToday} syncs today)`);
       return new Response(
         JSON.stringify({
           error: "Daily API quota limit reached",
-          calls_today: estimatedCallsToday,
+          syncs_today: syncsToday,
+          calls_today: callsToday,
           quota: DAILY_QUOTA,
         }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -285,6 +290,22 @@ Deno.serve(async (req) => {
         processed_at: new Date().toISOString(),
       }).in("id", landingIds);
     }
+
+    // --- Step 4: Record sync for daily quota tracking ---
+    await admin.from("audit_event").insert({
+      entity_type: "brickeconomy_sync",
+      entity_id: correlationId,
+      trigger_type: "brickeconomy_sync",
+      actor_type: "system",
+      source_system: "brickeconomy-sync",
+      correlation_id: correlationId,
+      after_json: {
+        sets_synced: setItems.length,
+        minifigs_synced: minifigItems.length,
+        catalog_matches: catalogMatches,
+        api_calls: API_CALLS_PER_SYNC,
+      },
+    });
 
     return new Response(
       JSON.stringify({
