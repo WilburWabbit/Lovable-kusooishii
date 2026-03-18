@@ -8,6 +8,14 @@ const corsHeaders = {
 
 const EBAY_API = "https://api.ebay.com";
 const QBO_API_BASE = "https://quickbooks.api.intuit.com/v3/company";
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 // ─── eBay helpers ───────────────────────────────────────────
 
@@ -25,7 +33,7 @@ async function getEbayAccessToken(admin: any): Promise<string> {
 
   const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
   const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
-  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+  const res = await fetchWithTimeout(`${EBAY_API}/identity/v1/oauth2/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -56,7 +64,7 @@ async function getEbayAccessToken(admin: any): Promise<string> {
 
 async function ebayFetch(token: string, path: string, options: RequestInit = {}) {
   const url = path.startsWith("http") ? path : `${EBAY_API}${path}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -93,7 +101,7 @@ async function getQboAccessToken(admin: any): Promise<{ accessToken: string; rea
   if (error || !conn) throw new Error("No QBO connection found.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -117,7 +125,7 @@ async function getQboAccessToken(admin: any): Promise<{ accessToken: string; rea
 
 async function qboRequest(accessToken: string, realmId: string, path: string, options: RequestInit = {}) {
   const url = `${QBO_API_BASE}/${realmId}${path}${path.includes("?") ? "&" : "?"}minorversion=65`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -145,7 +153,7 @@ async function findOrCreateCustomer(
     } | null;
   }
 ): Promise<{ id: string; name: string }> {
-  const escaped = customerName.replace(/'/g, "\\'");
+  const escaped = customerName.replace(/'/g, "''");
   const queryResult = await qboRequest(
     accessToken, realmId,
     `/query?query=${encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${escaped}'`)}`
@@ -210,7 +218,7 @@ async function findQboItemBySku(
   accessToken: string, realmId: string, sku: string
 ): Promise<{ id: string; name: string } | null> {
   try {
-    const escaped = sku.replace(/'/g, "\\'");
+    const escaped = sku.replace(/'/g, "''");
     const result = await qboRequest(
       accessToken, realmId,
       `/query?query=${encodeURIComponent(`SELECT * FROM Item WHERE Sku = '${escaped}'`)}`
@@ -415,7 +423,7 @@ Deno.serve(async (req) => {
 
         // Find the existing SalesReceipt by DocNumber
         const docNumber = localOrder.doc_number || (orderId.length <= 21 ? orderId : orderId.substring(0, 21));
-        const escaped = docNumber.replace(/'/g, "\\'");
+        const escaped = docNumber.replace(/'/g, "''");
         const queryResult = await qboRequest(
           qboToken, realmId,
           `/query?query=${encodeURIComponent(`SELECT * FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`
@@ -575,11 +583,14 @@ Deno.serve(async (req) => {
     }
     const processedLines: ProcessedLine[] = [];
 
+    const skippedLines: Array<{ ebaySku: string; title: string; reason: string }> = [];
+
     for (const li of lineItems) {
       const ebaySku = li.sku || "";
       const matchedSku = skuMap.get(ebaySku);
       if (!matchedSku) {
         console.warn(`No SKU match for eBay SKU "${ebaySku}" in order ${orderId}`);
+        skippedLines.push({ ebaySku, title: li.title || "unknown", reason: "no_local_sku_match" });
         continue;
       }
       const qty = li.quantity || 1;
@@ -671,6 +682,42 @@ Deno.serve(async (req) => {
     const taxCodeId = defaultTaxCode?.id ?? null;
     const qboTaxCodeRef = defaultTaxCode?.qbo_tax_code_id ?? null;
 
+    // ── Step 7b: Audit skipped line items (SKU mismatches) ──
+    // Wrapped in try/catch so a failed audit/alert insert doesn't cause the
+    // function to return 500 when the sales_order was already created.
+    if (skippedLines.length > 0) {
+      try {
+        await admin.from("audit_event").insert({
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+          trigger_type: "ebay_notification",
+          actor_type: "system",
+          source_system: "ebay-process-order",
+          correlation_id: correlationId,
+          after_json: {
+            warning: "sku_mismatch",
+            skipped_lines: skippedLines,
+            order_id: orderId,
+            total_line_items: lineItems.length,
+            matched_line_items: processedLines.length,
+          },
+        });
+
+        await admin.from("admin_alert").insert({
+          severity: "warning",
+          category: "ebay_sku_mismatch",
+          title: `eBay order ${orderId}: ${skippedLines.length} line(s) skipped — SKU not found`,
+          detail: `SKUs not matched: ${skippedLines.map(s => s.ebaySku || "(empty)").join(", ")}. Order created with ${processedLines.length}/${lineItems.length} lines.`,
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+        });
+      } catch (auditErr: any) {
+        console.error(`Failed to create SKU mismatch audit/alert for order ${orderId}:`, auditErr.message);
+      }
+
+      console.warn(`Order ${orderId}: ${skippedLines.length} line(s) skipped due to SKU mismatch`);
+    }
+
     // ── Step 8: Insert sales_order_lines ──
     const affectedSkuIds = new Set<string>();
 
@@ -755,6 +802,36 @@ Deno.serve(async (req) => {
             console.log(`Pushed stock ${listing.external_sku} → ${qty} on eBay`);
           } catch (e: any) {
             console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
+            // Audit the stock sync failure — local stock is closed but eBay still shows old quantity.
+            // Wrapped in try/catch so a failed audit insert doesn't break the loop
+            // and prevent remaining listings from being updated.
+            try {
+              await admin.from("audit_event").insert({
+                entity_type: "channel_listing",
+                entity_id: listing.id,
+                trigger_type: "ebay_stock_push_failed",
+                actor_type: "system",
+                source_system: "ebay-process-order",
+                correlation_id: correlationId,
+                after_json: {
+                  error: e.message,
+                  external_sku: listing.external_sku,
+                  intended_quantity: qty,
+                  order_id: orderId,
+                  sales_order_id: newOrder.id,
+                },
+              });
+              await admin.from("admin_alert").insert({
+                severity: "critical",
+                category: "ebay_stock_desync",
+                title: `eBay stock out of sync: ${listing.external_sku}`,
+                detail: `Failed to update eBay quantity to ${qty} after order ${orderId}. Local stock is depleted but eBay listing may still show available inventory. Error: ${e.message}`,
+                entity_type: "channel_listing",
+                entity_id: listing.id,
+              });
+            } catch (alertErr: any) {
+              console.error(`Failed to create stock desync audit/alert for ${listing.external_sku}:`, alertErr.message);
+            }
           }
         }
       }
@@ -891,7 +968,7 @@ Deno.serve(async (req) => {
       // Check if SalesReceipt already exists in QBO (by DocNumber)
       let existingReceiptId: string | null = null;
       try {
-        const escaped = docNumber.replace(/'/g, "\\'");
+        const escaped = docNumber.replace(/'/g, "''");
         const result = await qboRequest(
           qboToken, realmId,
           `/query?query=${encodeURIComponent(`SELECT Id FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`

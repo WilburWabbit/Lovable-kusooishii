@@ -6,6 +6,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await supabaseAdmin
     .from("qbo_connection")
@@ -16,7 +25,7 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
   if (error || !conn) throw new Error("No QBO connection found. Please connect to QBO first.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -57,7 +66,7 @@ async function fetchQboItem(
 ): Promise<any | null> {
   if (cache.has(itemId)) return cache.get(itemId);
   try {
-    const res = await fetch(`${baseUrl}/item/${itemId}`, {
+    const res = await fetchWithTimeout(`${baseUrl}/item/${itemId}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
     if (!res.ok) {
@@ -472,7 +481,7 @@ Deno.serve(async (req) => {
       `SELECT * FROM Purchase WHERE TxnDate >= '${monthStart}' AND TxnDate <= '${monthEnd}' MAXRESULTS 1000`
     );
     console.log(`[${monthLabel}] Querying QBO purchases...`);
-    const purchaseRes = await fetch(`${baseUrl}/query?query=${query}`, {
+    const purchaseRes = await fetchWithTimeout(`${baseUrl}/query?query=${query}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
 

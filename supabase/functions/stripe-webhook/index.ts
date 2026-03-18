@@ -30,8 +30,25 @@ serve(async (req) => {
     return new Response(`Webhook Error: ${(err as Error).message}`, { status: 400 });
   }
 
-  // ── Land raw Stripe event ──
+  // ── Idempotency: check landing status BEFORE upserting ──
   const landingCorrelation = crypto.randomUUID();
+  {
+    const { data: existingLanding } = await supabase
+      .from("landing_raw_stripe_event")
+      .select("status")
+      .eq("external_id", event.id)
+      .maybeSingle();
+
+    if (existingLanding?.status === "committed") {
+      console.log(`Stripe event ${event.id} already committed, skipping`);
+      return new Response(JSON.stringify({ received: true, skipped: true }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+  }
+
+  // ── Land raw Stripe event (only if not already committed) ──
   try {
     await supabase
       .from("landing_raw_stripe_event")
@@ -53,7 +70,20 @@ serve(async (req) => {
   // ── Process event ──
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    await handleCheckoutCompleted(session);
+
+    // Guard against duplicate order creation: check if origin_reference already exists
+    const { data: existingOrder } = await supabase
+      .from("sales_order")
+      .select("id")
+      .eq("origin_channel", "web")
+      .eq("origin_reference", session.id)
+      .maybeSingle();
+
+    if (existingOrder) {
+      console.log(`Order for Stripe session ${session.id} already exists (${existingOrder.id}), skipping`);
+    } else {
+      await handleCheckoutCompleted(session);
+    }
   }
 
   // Mark landing as committed
@@ -82,9 +112,15 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       limit: 100,
     });
 
-    // Separate product lines from shipping lines
+    // Separate product lines from shipping lines.
+    // Match only exact shipping-like descriptions to avoid misclassifying
+    // products with "shipping" in their name (e.g. "LEGO Shipping Container").
     const productLines = lineItems.data.filter(
-      (li: any) => !li.description?.toLowerCase().includes("shipping")
+      (li: any) => {
+        const desc = li.description?.trim() || "";
+        const shippingPattern = /^(standard |express |next[- ]day )?shipping$/i;
+        return !shippingPattern.test(desc);
+      }
     );
 
     const merchandiseSubtotal = productLines.reduce(

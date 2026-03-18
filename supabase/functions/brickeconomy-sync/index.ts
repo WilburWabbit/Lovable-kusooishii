@@ -7,6 +7,14 @@ const corsHeaders = {
 };
 
 const BE_BASE = "https://www.brickeconomy.com/api/v1";
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Fetch with timeout to prevent indefinite hangs on external APIs */
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,16 +68,47 @@ Deno.serve(async (req) => {
       );
     }
 
+    // --- Daily quota enforcement (100 req/day hard limit) ---
+    // Each sync makes 2 API calls (sets + minifigs).
+    // The landing table uses upsert with fixed external_ids so row count can't
+    // track syncs. Instead, count audit_events for today's BrickEconomy syncs.
+    const DAILY_QUOTA = 100;
+    const API_CALLS_PER_SYNC = 2;
+    const MAX_SYNCS_PER_DAY = Math.floor(DAILY_QUOTA / API_CALLS_PER_SYNC);
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const { count: syncsToday } = await admin
+      .from("audit_event")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_type", "brickeconomy_sync")
+      .eq("trigger_type", "brickeconomy_sync")
+      .gte("created_at", todayStart.toISOString());
+
+    const callsToday = (syncsToday || 0) * API_CALLS_PER_SYNC;
+    if ((syncsToday || 0) >= MAX_SYNCS_PER_DAY) {
+      console.warn(`BrickEconomy daily quota exhausted: ${callsToday}/${DAILY_QUOTA} API calls (${syncsToday} syncs today)`);
+      return new Response(
+        JSON.stringify({
+          error: "Daily API quota limit reached",
+          syncs_today: syncsToday,
+          calls_today: callsToday,
+          quota: DAILY_QUOTA,
+        }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const headers = {
       "x-apikey": apiKey,
       "User-Agent": "BrickKeeperSync/1.0",
       Accept: "application/json",
     };
 
-    // Fetch sets and minifigs in parallel
+    // Fetch sets and minifigs in parallel (with timeout)
     const [setsRes, minifigsRes] = await Promise.all([
-      fetch(`${BE_BASE}/collection/sets?currency=GBP`, { headers }),
-      fetch(`${BE_BASE}/collection/minifigs?currency=GBP`, { headers }),
+      fetchWithTimeout(`${BE_BASE}/collection/sets?currency=GBP`, { headers }),
+      fetchWithTimeout(`${BE_BASE}/collection/minifigs?currency=GBP`, { headers }),
     ]);
 
     if (!setsRes.ok) {
@@ -251,6 +290,22 @@ Deno.serve(async (req) => {
         processed_at: new Date().toISOString(),
       }).in("id", landingIds);
     }
+
+    // --- Step 4: Record sync for daily quota tracking ---
+    await admin.from("audit_event").insert({
+      entity_type: "brickeconomy_sync",
+      entity_id: correlationId,
+      trigger_type: "brickeconomy_sync",
+      actor_type: "system",
+      source_system: "brickeconomy-sync",
+      correlation_id: correlationId,
+      after_json: {
+        sets_synced: setItems.length,
+        minifigs_synced: minifigItems.length,
+        catalog_matches: catalogMatches,
+        api_calls: API_CALLS_PER_SYNC,
+      },
+    });
 
     return new Response(
       JSON.stringify({
