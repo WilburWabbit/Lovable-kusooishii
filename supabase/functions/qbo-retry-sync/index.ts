@@ -145,7 +145,75 @@ async function findQboItemBySku(accessToken: string, realmId: string, sku: strin
   return null;
 }
 
-async function resolveSalesTaxInfo(
+// ─── VAT destination classification (mirrors ebay-process-order) ──
+
+const EU_COUNTRY_CODES = new Set([
+  "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU",
+  "IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE",
+]);
+const UK_VAT_CODES = new Set(["GB", "IM"]);
+type VatDestination = "uk" | "eu" | "row";
+
+function classifyShippingCountry(countryCode: string): VatDestination {
+  const code = countryCode.toUpperCase();
+  if (UK_VAT_CODES.has(code)) return "uk";
+  if (EU_COUNTRY_CODES.has(code)) return "eu";
+  return "row";
+}
+
+/**
+ * Resolve VAT tax code for QBO by shipping country.
+ * Three treatments: UK → 20.0% S, EU → ECG 0%, RoW → 0.0% Z.
+ * Matches by name pattern against the local tax_code table.
+ */
+async function resolveVatForShippingCountry(
+  admin: any, shippingCountry: string,
+): Promise<{ destination: VatDestination; qboTaxCodeId: string; qboTaxRateId: string; ratePercent: number }> {
+  const destination = classifyShippingCountry(shippingCountry);
+
+  const { data: taxCodes } = await admin
+    .from("tax_code")
+    .select("id, qbo_tax_code_id, name, sales_tax_rate_id, vat_rate:sales_tax_rate_id(id, qbo_tax_rate_id, rate_percent)")
+    .eq("active", true)
+    .not("sales_tax_rate_id", "is", null);
+
+  if (!taxCodes?.length) {
+    throw new Error("No active tax codes found. Run qbo-sync-tax-rates first.");
+  }
+
+  let match: any = null;
+  switch (destination) {
+    case "uk":
+      match = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
+      break;
+    case "eu":
+      match = taxCodes.find((tc: any) => /^ECG/i.test(tc.name || ""));
+      break;
+    case "row":
+      match = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 0 && !/^ECG/i.test(tc.name || ""));
+      break;
+  }
+
+  if (!match?.vat_rate) {
+    const available = taxCodes.map((tc: any) => `"${tc.name}" (${tc.vat_rate?.rate_percent ?? "?"}%)`).join(", ");
+    throw new Error(
+      `No matching tax code for ${destination.toUpperCase()} (${shippingCountry}). Available: [${available}]`
+    );
+  }
+
+  return {
+    destination,
+    qboTaxCodeId: match.qbo_tax_code_id,
+    qboTaxRateId: match.vat_rate.qbo_tax_rate_id,
+    ratePercent: Number(match.vat_rate.rate_percent),
+  };
+}
+
+/**
+ * Fallback: resolve the UK standard-rate (20%) tax info.
+ * Used when per-line tax codes are missing (e.g. web orders).
+ */
+async function resolveDefaultSalesTaxInfo(
   admin: any, qboAccessToken: string, realmId: string
 ): Promise<{ taxCodeId: string; taxRateId: string; ratePercent: number }> {
   const { data: taxCodes } = await admin
@@ -155,7 +223,7 @@ async function resolveSalesTaxInfo(
     .not("sales_tax_rate_id", "is", null);
 
   if (taxCodes?.length) {
-    const standard = taxCodes.find((tc: any) => tc.vat_rate?.rate_percent === 20);
+    const standard = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
     const pick = standard || taxCodes[0];
     if (pick?.vat_rate) {
       return { taxCodeId: pick.qbo_tax_code_id, taxRateId: pick.vat_rate.qbo_tax_rate_id, ratePercent: Number(pick.vat_rate.rate_percent) };
@@ -206,9 +274,17 @@ async function syncOrderToQbo(
     }).eq("id", order.customer_id).is("qbo_customer_id", null);
   }
 
-  // Resolve QBO tax info (used for TaxCodeRef fallback and TaxRateRef)
-  const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
-  const defaultMultiplier = 1 + taxInfo.ratePercent / 100;
+  // Resolve VAT by shipping country if available, otherwise use default
+  const shippingCountry = order.shipping_country || "GB";
+  let countryVat: { destination: VatDestination; qboTaxCodeId: string; qboTaxRateId: string; ratePercent: number } | null = null;
+  try {
+    countryVat = await resolveVatForShippingCountry(admin, shippingCountry);
+  } catch (vatErr: any) {
+    console.warn(`Country-based VAT resolution failed for ${shippingCountry}: ${vatErr.message}`);
+  }
+
+  // Fallback: UK standard rate (used for web orders or when country resolution fails)
+  const defaultTaxInfo = await resolveDefaultSalesTaxInfo(admin, qboToken, realmId);
 
   // Fetch order lines with SKU codes and per-line tax info
   const { data: orderLines } = await admin
@@ -253,11 +329,12 @@ async function syncOrderToQbo(
     if (isNetPricing) {
       // line_total is already NET — use directly
       netLine = lineTotal;
-      const rate = olRatePercent ?? taxInfo.ratePercent;
+      const rate = olRatePercent ?? countryVat?.ratePercent ?? defaultTaxInfo.ratePercent;
       lineTax = Math.round(netLine * (rate / 100) * 100) / 100;
     } else {
       // line_total is GROSS — back-calculate NET
-      const multiplier = olRatePercent != null ? (1 + olRatePercent / 100) : defaultMultiplier;
+      const fallbackRate = countryVat?.ratePercent ?? defaultTaxInfo.ratePercent;
+      const multiplier = olRatePercent != null ? (1 + olRatePercent / 100) : (1 + fallbackRate / 100);
       netLine = Math.round((lineTotal / multiplier) * 100) / 100;
       lineTax = Math.round((lineTotal - netLine) * 100) / 100;
     }
@@ -282,7 +359,7 @@ async function syncOrderToQbo(
       SalesItemLineDetail: {
         Qty: qty,
         UnitPrice: netUnit,
-        TaxCodeRef: { value: olQboTaxCodeId || taxInfo.taxCodeId },
+        TaxCodeRef: { value: olQboTaxCodeId || countryVat?.qboTaxCodeId || defaultTaxInfo.taxCodeId },
         ...(itemRef ? { ItemRef: itemRef } : {}),
       },
     });
@@ -303,8 +380,8 @@ async function syncOrderToQbo(
   }
 
   // Use per-line rate if available, otherwise fall back to default
-  const effectiveRatePercent = lineRatePercent ?? taxInfo.ratePercent;
-  const effectiveTaxRateId = lineQboTaxRateId || taxInfo.taxRateId;
+  const effectiveRatePercent = lineRatePercent ?? countryVat?.ratePercent ?? defaultTaxInfo.ratePercent;
+  const effectiveTaxRateId = lineQboTaxRateId || countryVat?.qboTaxRateId || defaultTaxInfo.taxRateId;
 
   if (!qboLines.length) {
     // Fallback line — no SKUs matched
@@ -314,7 +391,7 @@ async function syncOrderToQbo(
       DetailType: "SalesItemLineDetail",
       Amount: fallbackNet,
       Description: `Order ${order.order_number || order.id}`,
-      SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: lineQboTaxCodeId || taxInfo.taxCodeId } },
+      SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: lineQboTaxCodeId || countryVat?.qboTaxCodeId || defaultTaxInfo.taxCodeId } },
     });
     totalNet = fallbackNet;
     totalTax = Math.round((grossTotal - fallbackNet) * 100) / 100;

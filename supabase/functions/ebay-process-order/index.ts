@@ -231,72 +231,119 @@ async function findQboItemBySku(
 
 // ─── Tax resolution ─────────────────────────────────────────
 
-// EU member states (post-Brexit, UK ships to these as zero-rated exports)
+// EU 27 member states — zero-rated EC dispatch (QBO code "ECG 0%")
 const EU_COUNTRY_CODES = new Set([
   "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU",
   "IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE",
 ]);
 
+// UK VAT area: GB (England, Scotland, Wales, NI) + IM (Isle of Man).
+// Crown Dependencies GG (Guernsey) and JE (Jersey) are NOT in the UK VAT area.
+const UK_VAT_CODES = new Set(["GB", "IM"]);
+
+type VatDestination = "uk" | "eu" | "row";
+
+function classifyShippingCountry(countryCode: string): VatDestination {
+  const code = countryCode.toUpperCase();
+  if (UK_VAT_CODES.has(code)) return "uk";
+  if (EU_COUNTRY_CODES.has(code)) return "eu";
+  return "row";
+}
+
+interface VatResolution {
+  destination: VatDestination;
+  taxCodeId: string;
+  vatRateId: string;
+  qboTaxCodeId: string;
+  qboTaxRateId: string;
+  ratePercent: number;
+}
+
 /**
- * Resolve the correct VAT tax code based on shipping destination.
+ * Resolve the correct QBO VAT tax code based on shipping destination.
  *
- * Rules (UK-based seller, post-Brexit):
- *   GB                → Standard rate (20% S)
- *   EU / International → Zero-rated export (0% Z)
+ * Three treatments (UK-based seller, post-Brexit, standard-rated goods only):
+ *   UK (GB, IM)         → 20.0% S   — Standard-rated domestic sale
+ *   EU (27 members)     → ECG 0%    — Zero-rated EC goods dispatch
+ *   Rest of World       → 0.0% Z    — Zero-rated export
  *
- * Looks up the local tax_code + vat_rate tables (synced from QBO).
- * Returns the tax_code.id, vat_rate.id, qbo references, and the rate %.
+ * Matches against the local tax_code + vat_rate tables (synced from QBO)
+ * by name pattern, NOT by hardcoded IDs.
+ *
+ * Throws if the required tax code is missing from the local table.
  */
 async function resolveVatForShippingCountry(
   admin: any,
   shippingCountry: string,
-): Promise<{
-  taxCodeId: string | null;
-  vatRateId: string | null;
-  qboTaxCodeId: string | null;
-  qboTaxRateId: string | null;
-  ratePercent: number;
-}> {
-  const isUk = shippingCountry.toUpperCase() === "GB";
-  const targetRate = isUk ? 20 : 0;
+): Promise<VatResolution> {
+  const destination = classifyShippingCountry(shippingCountry);
 
   // Fetch all active tax codes with their linked sales vat_rate
-  const { data: taxCodes } = await admin
+  const { data: taxCodes, error: tcErr } = await admin
     .from("tax_code")
     .select("id, qbo_tax_code_id, name, sales_tax_rate_id, vat_rate:sales_tax_rate_id(id, qbo_tax_rate_id, rate_percent)")
     .eq("active", true)
     .not("sales_tax_rate_id", "is", null);
 
+  if (tcErr) throw new Error(`Failed to query tax_code table: ${tcErr.message}`);
   if (!taxCodes?.length) {
-    console.warn(`No active tax codes found — defaulting to ${targetRate}% with no DB references`);
-    return { taxCodeId: null, vatRateId: null, qboTaxCodeId: null, qboTaxRateId: null, ratePercent: targetRate };
+    throw new Error("No active tax codes with linked VAT rates found in the local database. Run a QBO tax rate sync first.");
   }
 
-  // Find the tax code whose linked rate matches the target
-  const match = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === targetRate);
-  if (match?.vat_rate) {
-    return {
-      taxCodeId: match.id,
-      vatRateId: match.vat_rate.id,
-      qboTaxCodeId: match.qbo_tax_code_id,
-      qboTaxRateId: match.vat_rate.qbo_tax_rate_id,
-      ratePercent: Number(match.vat_rate.rate_percent),
-    };
+  // Match strategy by name pattern:
+  //   UK  → rate_percent = 20 (the standard rate, name like "20.0% S")
+  //   EU  → name starts with "ECG" (e.g. "ECG 0%")
+  //   RoW → rate_percent = 0 AND name does NOT start with "ECG" (e.g. "0.0% Z")
+  let match: any = null;
+  let expectedDesc = "";
+
+  switch (destination) {
+    case "uk": {
+      match = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
+      expectedDesc = 'a standard-rate tax code (rate_percent = 20, e.g. "20.0% S")';
+      break;
+    }
+    case "eu": {
+      match = taxCodes.find((tc: any) => /^ECG/i.test(tc.name || ""));
+      expectedDesc = 'an EC goods tax code (name starting with "ECG", e.g. "ECG 0%")';
+      break;
+    }
+    case "row": {
+      match = taxCodes.find(
+        (tc: any) => Number(tc.vat_rate?.rate_percent) === 0 && !/^ECG/i.test(tc.name || "")
+      );
+      expectedDesc = 'a zero-rate export tax code (rate_percent = 0, name like "0.0% Z")';
+      break;
+    }
   }
 
-  // Exact match not found — fall back to closest match or first code
-  console.warn(`No tax code with rate ${targetRate}% found — falling back`);
-  const fallback = taxCodes[0];
+  if (!match?.vat_rate) {
+    const available = taxCodes.map((tc: any) => `"${tc.name}" (${tc.vat_rate?.rate_percent ?? "?"}%)`).join(", ");
+    throw new Error(
+      `No matching tax code for ${destination.toUpperCase()} destination (${shippingCountry}). ` +
+      `Expected ${expectedDesc}. ` +
+      `Available tax codes: [${available}]. ` +
+      `Ensure the required QBO tax codes are synced via qbo-sync-tax-rates.`
+    );
+  }
+
   return {
-    taxCodeId: fallback.id,
-    vatRateId: fallback.vat_rate?.id ?? null,
-    qboTaxCodeId: fallback.qbo_tax_code_id,
-    qboTaxRateId: fallback.vat_rate?.qbo_tax_rate_id ?? null,
-    ratePercent: Number(fallback.vat_rate?.rate_percent ?? targetRate),
+    destination,
+    taxCodeId: match.id,
+    vatRateId: match.vat_rate.id,
+    qboTaxCodeId: match.qbo_tax_code_id,
+    qboTaxRateId: match.vat_rate.qbo_tax_rate_id,
+    ratePercent: Number(match.vat_rate.rate_percent),
   };
 }
 
-async function resolveSalesTaxInfo(
+/**
+ * Resolve the UK standard-rate (20%) tax info for QBO TaxRateRef.
+ * Used as a fallback when the inline QBO sync needs a default TaxRateRef
+ * (e.g. for the TxnTaxDetail block). Per-line TaxCodeRef comes from
+ * the already-resolved vatResolution.
+ */
+async function resolveDefaultSalesTaxInfo(
   admin: any, qboAccessToken: string, realmId: string
 ): Promise<{ taxCodeId: string; taxRateId: string; ratePercent: number }> {
   // Try local tax_code + vat_rate tables first
@@ -307,8 +354,7 @@ async function resolveSalesTaxInfo(
     .not("sales_tax_rate_id", "is", null);
 
   if (taxCodes?.length) {
-    // Find the 20% standard rate
-    const standard = taxCodes.find((tc: any) => tc.vat_rate?.rate_percent === 20);
+    const standard = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
     const pick = standard || taxCodes[0];
     if (pick?.vat_rate) {
       return {
@@ -981,7 +1027,7 @@ Deno.serve(async (req) => {
       }
 
       // Resolve QBO-specific tax info for TaxCodeRef and TaxRateRef
-      const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
+      const taxInfo = await resolveDefaultSalesTaxInfo(admin, qboToken, realmId);
 
       // Build QBO SalesReceipt lines — processedLines already contain NET amounts
       const qboLines: any[] = [];
