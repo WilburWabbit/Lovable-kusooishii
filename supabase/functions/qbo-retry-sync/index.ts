@@ -294,7 +294,12 @@ async function syncOrderToQbo(
 
   // Determine if line_total is already NET (eBay + web orders set TaxExcluded)
   // or needs gross-to-net conversion (QBO-imported TaxInclusive orders, legacy data)
-  const isNetPricing = order.global_tax_calculation === "TaxExcluded";
+  // Guard: if global_tax_calculation is NULL (web orders pre-migration), default to TaxExcluded
+  // and log a warning — this is safer than TaxInclusive which would double-count tax
+  if (!order.global_tax_calculation) {
+    console.warn(`Order ${order.id} has NULL global_tax_calculation — defaulting to TaxExcluded`);
+  }
+  const isNetPricing = order.global_tax_calculation !== "TaxInclusive";
 
   // Build QBO SalesReceipt lines
   const qboLines: any[] = [];

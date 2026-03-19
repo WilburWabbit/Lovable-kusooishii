@@ -6,6 +6,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Canonical version: keep in sync with qbo-auth/index.ts
+const FETCH_TIMEOUT_MS = 30_000;
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await supabaseAdmin
     .from("qbo_connection")
@@ -16,7 +24,7 @@ async function ensureValidToken(supabaseAdmin: any, realmId: string, clientId: s
   if (error || !conn) throw new Error("No QBO connection found. Please connect to QBO first.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -199,6 +207,14 @@ Deno.serve(async (req) => {
 
       const salesTaxRateId = salesQboRateId ? (vatRateMap.get(salesQboRateId) ?? null) : null;
       const purchaseTaxRateId = purchaseQboRateId ? (vatRateMap.get(purchaseQboRateId) ?? null) : null;
+
+      // Warn if VAT rate references couldn't be resolved — downstream tax calculations will be incomplete
+      if (salesQboRateId && !salesTaxRateId) {
+        console.warn(`TaxCode ${qboTaxCodeId} (${tc.Name}): sales_tax_rate_id unresolved for qbo_tax_rate_id=${salesQboRateId}`);
+      }
+      if (purchaseQboRateId && !purchaseTaxRateId) {
+        console.warn(`TaxCode ${qboTaxCodeId} (${tc.Name}): purchase_tax_rate_id unresolved for qbo_tax_rate_id=${purchaseQboRateId}`);
+      }
 
       const { error: tcErr } = await supabaseAdmin
         .from("tax_code")

@@ -18,7 +18,28 @@ const corsHeaders = {
 
 // ────────────────────────────────────────────────────────────
 // Shared helpers (inlined — edge functions can't share files)
+// Canonical version: keep in sync with qbo-auth/index.ts
 // ────────────────────────────────────────────────────────────
+
+const FETCH_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// Structured JSON logger — all QBO functions should use this pattern
+function makeLogger(correlationId: string) {
+  return {
+    info: (msg: string, data?: Record<string, unknown>) =>
+      console.log(JSON.stringify({ correlation_id: correlationId, level: "info", msg, ...data, ts: new Date().toISOString() })),
+    warn: (msg: string, data?: Record<string, unknown>) =>
+      console.warn(JSON.stringify({ correlation_id: correlationId, level: "warn", msg, ...data, ts: new Date().toISOString() })),
+    error: (msg: string, data?: Record<string, unknown>) =>
+      console.error(JSON.stringify({ correlation_id: correlationId, level: "error", msg, ...data, ts: new Date().toISOString() })),
+  };
+}
 
 async function ensureValidToken(admin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await admin
@@ -26,7 +47,7 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
   if (error || !conn) throw new Error("No QBO connection found.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -397,9 +418,18 @@ async function generateAndSaveCopy(admin: any, productId: string): Promise<boole
 async function resolveVatRateId(admin: any, txnTaxDetail: any): Promise<string | null> {
   const taxLines = txnTaxDetail?.TaxLine ?? [];
   if (taxLines.length === 0) return null;
+
+  // Log warning if multiple tax rates present — only first is used
+  if (taxLines.length > 1) {
+    console.warn(`Multiple TaxLine entries (${taxLines.length}) — only first TaxRateRef used`);
+  }
+
   const taxRateRef = taxLines[0]?.TaxLineDetail?.TaxRateRef?.value;
   if (!taxRateRef) return null;
   const { data: vr } = await admin.from("vat_rate").select("id").eq("qbo_tax_rate_id", String(taxRateRef)).maybeSingle();
+  if (!vr) {
+    console.warn(`VAT rate not found for qbo_tax_rate_id=${taxRateRef} — tax_code linkage will be incomplete`);
+  }
   return vr?.id ?? null;
 }
 
@@ -623,7 +653,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
-    const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
+    // Round at the end only — avoid accumulating rounding error across lines
+    const landedCostRaw = Number(line.unit_cost) + overheadPerUnit;
+    const landedCost = Math.round(landedCostRaw * 100) / 100;
+    // Log warning if rounding residual exceeds 1p per unit
+    if (Math.abs(landedCostRaw - landedCost) > 0.005 * line.quantity) {
+      console.warn(`Landed cost rounding residual for ${line.mpn}: raw=${landedCostRaw}, rounded=${landedCost}`);
+    }
 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
@@ -839,8 +875,15 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
       lineTaxCodeId = tc?.id ?? null;
     }
 
+    // Use atomic stock allocation to prevent race conditions
+    const { data: allocatedIds } = await admin.rpc("allocate_stock_units", {
+      p_sku_id: skuId,
+      p_quantity: qty,
+    });
+    const unitIds: string[] = allocatedIds ?? [];
+
     for (let i = 0; i < qty; i++) {
-      const { data: stockUnit } = await admin.from("stock_unit").select("id").eq("sku_id", skuId).eq("status", "available").order("created_at", { ascending: true }).limit(1).maybeSingle();
+      const stockUnitId = unitIds[i] ?? null;
 
       await admin.from("sales_order_line").insert({
         sales_order_id: order.id,
@@ -848,16 +891,17 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
         quantity: 1,
         unit_price: unitPrice,
         line_total: unitPrice,
-        stock_unit_id: stockUnit?.id ?? null,
+        stock_unit_id: stockUnitId,
         qbo_tax_code_ref: taxCodeRef,
         vat_rate_id: vatRateId,
         tax_code_id: lineTaxCodeId,
       });
       linesCreated++;
 
-      if (stockUnit) {
-        await admin.from("stock_unit").update({ status: "closed" }).eq("id", stockUnit.id);
+      if (stockUnitId) {
         stockMatched++;
+      } else {
+        console.warn(`No available stock for SKU ${skuId}, order line created without stock unit`);
       }
     }
   }
@@ -1146,8 +1190,9 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const qboItemId = String(item.Id);
 
   // Parse SKU field (MPN.Grade convention), fall back to Name
+  // Default grade "1" matches parseSku() convention; "3" was misleading
   let mpn: string | null = null;
-  let conditionGrade = "3";
+  let conditionGrade = "1";
   const skuField = item.Sku;
   if (skuField && String(skuField).trim()) {
     const parsed = parseSku(String(skuField));
@@ -1366,10 +1411,14 @@ Deno.serve(async (req) => {
     const realmId = Deno.env.get("QBO_REALM_ID")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
+    const correlationId = crypto.randomUUID();
+    const log = makeLogger(correlationId);
+
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
     const results: Array<{ entity: string; id: string; operation: string; result: string }> = [];
+    let errorCount = 0;
 
     for (const notification of notifications) {
       const entities = notification.dataChangeEvent?.entities ?? [];
@@ -1379,18 +1428,19 @@ Deno.serve(async (req) => {
         const operation = entity.operation ?? "Create";
 
         if (!handler) {
-          console.log(`Ignoring entity type: ${entity.name}`);
+          log.info(`Ignoring entity type: ${entity.name}`, { entityId });
           results.push({ entity: entity.name, id: entityId, operation, result: "ignored — unknown type" });
           continue;
         }
 
-        console.log(`Processing: ${entity.name} ${operation} ${entityId}`);
+        log.info(`Processing: ${entity.name} ${operation} ${entityId}`);
         try {
           const result = await handler(admin, baseUrl, accessToken, entityId, operation);
-          console.log(`  → ${result}`);
+          log.info(`Result: ${result}`, { entity: entity.name, entityId, operation });
           results.push({ entity: entity.name, id: entityId, operation, result });
         } catch (err: any) {
-          console.error(`  → FAILED: ${err.message}`);
+          errorCount++;
+          log.error(`FAILED: ${err.message}`, { entity: entity.name, entityId, operation });
           results.push({ entity: entity.name, id: entityId, operation, result: `error: ${err.message}` });
         }
       }
@@ -1404,11 +1454,24 @@ Deno.serve(async (req) => {
         trigger_type: "webhook",
         actor_type: "system",
         source_system: "qbo",
-        input_json: { notifications_count: notifications.length },
+        correlation_id: correlationId,
+        input_json: { notifications_count: notifications.length, correlation_id: correlationId },
         output_json: { results },
       });
     } catch (e: any) {
-      console.error("Audit log failed:", e.message);
+      log.error("Audit log failed", { error: e.message });
+    }
+
+    // Create admin_alert if any entities failed processing
+    if (errorCount > 0) {
+      try {
+        await admin.from("admin_alert").insert({
+          severity: "warning",
+          category: "qbo_webhook_errors",
+          title: `QBO webhook: ${errorCount} entity processing error(s)`,
+          detail: `Correlation: ${correlationId}. ${results.filter(r => r.result.startsWith("error:")).map(r => `${r.entity} ${r.id}: ${r.result}`).join("; ")}`,
+        });
+      } catch { /* best effort */ }
     }
   };
 

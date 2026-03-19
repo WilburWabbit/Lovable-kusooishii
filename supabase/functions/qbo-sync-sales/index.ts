@@ -141,6 +141,10 @@ async function resolveVatRateId(
   const taxLines = txnTaxDetail?.TaxLine ?? [];
   if (taxLines.length === 0) return null;
 
+  if (taxLines.length > 1) {
+    console.warn(`Multiple TaxLine entries (${taxLines.length}) — only first TaxRateRef used`);
+  }
+
   const taxRateRef = taxLines[0]?.TaxLineDetail?.TaxRateRef?.value;
   if (!taxRateRef) return null;
 
@@ -149,6 +153,10 @@ async function resolveVatRateId(
     .select("id")
     .eq("qbo_tax_rate_id", String(taxRateRef))
     .maybeSingle();
+
+  if (!vatRate) {
+    console.warn(`VAT rate not found for qbo_tax_rate_id=${taxRateRef} — tax linkage incomplete`);
+  }
 
   return vatRate?.id ?? null;
 }
@@ -537,16 +545,15 @@ async function processSalesReceipt(
       lineTaxCodeId = tc?.id ?? null;
     }
 
+    // Use atomic stock allocation to prevent race conditions with concurrent webhooks
+    const { data: allocatedIds } = await supabaseAdmin.rpc("allocate_stock_units", {
+      p_sku_id: skuId,
+      p_quantity: qty,
+    });
+    const unitIds: string[] = allocatedIds ?? [];
+
     for (let i = 0; i < qty; i++) {
-      // Match stock in any pre-sale status (sale already happened in QBO)
-      const { data: stockUnit } = await supabaseAdmin
-        .from("stock_unit")
-        .select("id, status")
-        .eq("sku_id", skuId)
-        .in("status", STOCK_MATCHABLE)
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      const stockUnitId = unitIds[i] ?? null;
 
       const { error: lineErr } = await supabaseAdmin
         .from("sales_order_line")
@@ -556,7 +563,7 @@ async function processSalesReceipt(
           quantity: 1,
           unit_price: unitPrice,
           line_total: unitPrice,
-          stock_unit_id: stockUnit?.id ?? null,
+          stock_unit_id: stockUnitId,
           qbo_tax_code_ref: taxCodeRef,
           vat_rate_id: vatRateId,
           tax_code_id: lineTaxCodeId,
@@ -569,22 +576,18 @@ async function processSalesReceipt(
 
       linesCreated++;
 
-      if (stockUnit) {
-        const { error: closeErr } = await supabaseAdmin
-          .from("stock_unit")
-          .update({ status: "closed" })
-          .eq("id", stockUnit.id);
-        if (closeErr) {
-          console.error(`Failed to close stock unit ${stockUnit.id}:`, closeErr);
-        } else {
-          stockMatched++;
-          // Track affected SKU for channel updates
-          affectedSkuIds.add(skuId);
-        }
+      if (stockUnitId) {
+        stockMatched++;
+        affectedSkuIds.add(skuId);
       } else {
         console.warn(`No available stock for SKU ${skuCode}, order line created without stock unit`);
         stockMissing++;
       }
+    }
+
+    // Warn if partial allocation occurred
+    if (unitIds.length > 0 && unitIds.length < qty) {
+      console.warn(`Partial stock allocation for SKU ${skuCode}: requested ${qty}, allocated ${unitIds.length}`);
     }
   }
 

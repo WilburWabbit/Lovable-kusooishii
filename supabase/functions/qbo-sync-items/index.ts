@@ -7,6 +7,14 @@ const corsHeaders = {
 };
 
 // ── Shared helpers (inlined — edge functions can't share files) ──
+// Canonical version: keep in sync with qbo-auth/index.ts
+
+const FETCH_TIMEOUT_MS = 30_000;
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 async function ensureValidToken(admin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await admin
@@ -14,7 +22,7 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
   if (error || !conn) throw new Error("No QBO connection found.");
 
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -91,6 +99,70 @@ async function resolveParentCategory(
   return { parentItemId, brand, itemType };
 }
 
+/**
+ * Compare QBO Item.QtyOnHand with the app's available stock_unit count for
+ * the corresponding SKU. If QBO qty is lower, mark excess app units as written_off.
+ * If QBO qty is higher, log a warning (new stock should come through purchase flow).
+ */
+async function reconcileQtyOnHand(
+  admin: any, qboItemId: string, skuCode: string, qboItem: any, mpn: string,
+): Promise<string | null> {
+  if (qboItem.Type !== "Inventory") return null;
+  const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
+
+  const { data: sku } = await admin
+    .from("sku").select("id").eq("qbo_item_id", qboItemId).maybeSingle();
+  if (!sku) return null;
+
+  const { count: appAvailable } = await admin
+    .from("stock_unit").select("id", { count: "exact", head: true })
+    .eq("sku_id", sku.id).eq("status", "available");
+
+  const available = appAvailable ?? 0;
+  if (available === qboQty) return null;
+
+  const reconcileCorrelationId = crypto.randomUUID();
+
+  if (qboQty < available) {
+    const excess = available - qboQty;
+    const { data: unitsToWriteOff } = await admin
+      .from("stock_unit")
+      .select("id, status, carrying_value, landed_cost")
+      .eq("sku_id", sku.id).eq("status", "available")
+      .order("created_at", { ascending: true }).limit(excess);
+
+    let writtenOff = 0;
+    for (const unit of (unitsToWriteOff ?? [])) {
+      const { error: updateErr } = await admin
+        .from("stock_unit")
+        .update({ status: "written_off", carrying_value: 0, accumulated_impairment: unit.landed_cost ?? 0, updated_at: new Date().toISOString() })
+        .eq("id", unit.id);
+      if (updateErr) { console.error(`Failed to write off stock unit ${unit.id}:`, updateErr.message); continue; }
+
+      await admin.from("audit_event").insert({
+        entity_type: "stock_unit", entity_id: unit.id,
+        trigger_type: "qbo_inventory_adjustment", actor_type: "system",
+        source_system: "qbo-sync-items", correlation_id: reconcileCorrelationId,
+        before_json: { status: unit.status, carrying_value: unit.carrying_value },
+        after_json: { status: "written_off", carrying_value: 0 },
+        input_json: { qbo_item_id: qboItemId, sku_code: skuCode, qbo_qty_on_hand: qboQty, app_available_before: available },
+      });
+      writtenOff++;
+    }
+    return `wrote off ${writtenOff}/${excess} units (QBO=${qboQty}, app was ${available})`;
+  }
+
+  // QBO has more — log warning
+  console.warn(`[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). Difference of ${qboQty - available} units.`);
+  await admin.from("audit_event").insert({
+    entity_type: "sku", entity_id: sku.id,
+    trigger_type: "qbo_qty_discrepancy", actor_type: "system",
+    source_system: "qbo-sync-items", correlation_id: reconcileCorrelationId,
+    input_json: { qbo_item_id: qboItemId, sku_code: skuCode, qbo_qty_on_hand: qboQty, app_available: available, discrepancy: qboQty - available, direction: "qbo_higher" },
+  });
+  return `discrepancy: QBO=${qboQty} vs app=${available} (logged, no auto-create)`;
+}
+
 async function queryQboAll(baseUrl: string, accessToken: string, query: string, entityKey: string): Promise<any[]> {
   const all: any[] = [];
   let startPos = 1;
@@ -143,6 +215,9 @@ Deno.serve(async (req) => {
       "Item",
     );
     console.log(`Fetched ${qboItems.length} QBO items (correlation: ${correlationId})`);
+    if (qboItems.length >= 10000) {
+      console.warn(`QBO items query hit 10k cap — product cache may be incomplete. Consider narrowing the query.`);
+    }
 
     // Pre-fetch all products with pagination (avoids 1000-row default limit)
     const productByMpn = new Map<string, string>();
@@ -182,8 +257,9 @@ Deno.serve(async (req) => {
       }
 
       // Parse SKU field
+      // Default grade "1" matches parseSku() convention; "3" was misleading
       let mpn: string | null = null;
-      let conditionGrade = "3";
+      let conditionGrade = "1";
       const skuField = item.Sku;
       if (skuField && String(skuField).trim()) {
         const parsed = parseSku(String(skuField));
@@ -320,6 +396,16 @@ Deno.serve(async (req) => {
         errors++;
       } else {
         upserted++;
+
+        // QtyOnHand reconciliation — sync inventory qty from QBO to app stock_units
+        try {
+          const reconcileResult = await reconcileQtyOnHand(admin, qboItemId, skuCode, item, mpn);
+          if (reconcileResult) {
+            console.log(`[sync-items] QtyOnHand reconciliation for ${skuCode}: ${reconcileResult}`);
+          }
+        } catch (reconcileErr: any) {
+          console.error(`QtyOnHand reconciliation error for ${skuCode}:`, reconcileErr.message);
+        }
       }
 
       await admin.from("landing_raw_qbo_item").update({

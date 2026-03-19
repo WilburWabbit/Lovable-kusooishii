@@ -6,6 +6,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Canonical version: keep in sync with qbo-auth/index.ts
+const FETCH_TIMEOUT_MS = 30_000;
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function ensureValidToken(
   admin: any,
   realmId: string,
@@ -23,7 +31,7 @@ async function ensureValidToken(
     new Date(conn.token_expires_at).getTime() - Date.now() <
     5 * 60 * 1000
   ) {
-    const tokenRes = await fetch(
+    const tokenRes = await fetchWithTimeout(
       "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
       {
         method: "POST",
@@ -228,12 +236,17 @@ Deno.serve(async (req) => {
         qboPayload.Id = qboCustomerId;
         qboPayload.SyncToken = syncToken;
         qboPayload.sparse = true;
-      } else {
-        // Customer might have been deleted in QBO, create a new one
+      } else if (getRes.status === 404 || getRes.status === 400) {
+        // Customer was deleted or doesn't exist in QBO — create a new one
         console.warn(
-          `QBO customer ${qboCustomerId} not found, creating new`
+          `QBO customer ${qboCustomerId} not found (${getRes.status}), creating new`
         );
         qboCustomerId = null;
+      } else {
+        // Server error (5xx) or rate limit (429) — don't fall back to create
+        // as it would produce a duplicate. Throw to let the caller handle retry.
+        const errText = await getRes.text();
+        throw new Error(`QBO customer fetch failed [${getRes.status}]: ${errText}. Will not create duplicate.`);
       }
     }
 
