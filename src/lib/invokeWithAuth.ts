@@ -1,5 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
 export async function invokeWithAuth<T = unknown>(
   fnName: string,
   body?: Record<string, unknown>,
@@ -9,40 +12,46 @@ export async function invokeWithAuth<T = unknown>(
     throw new Error("Not authenticated – please log in again.");
   }
 
-  const { data, error } = await supabase.functions.invoke(fnName, {
-    body,
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
+  // Use raw fetch instead of supabase.functions.invoke to get actionable
+  // error messages (the Supabase client wraps fetch errors in a generic
+  // "Failed to send a request to the Edge Function" that hides the cause).
+  const url = `${SUPABASE_URL}/functions/v1/${fnName}`;
 
-  if (error) {
-    // Extract the actual error message from the response body
-    const context = (error as any).context;
-    if (context instanceof Response) {
-      try {
-        const body = await context.json();
-        if (body?.error) throw new Error(body.error);
-      } catch (e) {
-        // Only rethrow if it's our extracted error (from body.error above),
-        // not a JSON parse failure from context.json()
-        if (e instanceof SyntaxError) {
-          // JSON parse failed — fall through to throw original error
-        } else if (e instanceof Error) {
-          throw e;
-        }
-      }
-    } else if (context && typeof context === 'object' && 'error' in context) {
-      // Newer Supabase client versions may pass parsed data directly
-      throw new Error(String(context.error) || error.message);
-    }
-
-    // FunctionsFetchError: the fetch itself failed (timeout, network, function crash).
-    // Surface the underlying cause instead of the generic wrapper message.
-    if (context instanceof Error) {
-      const cause = context.message || "Network error";
-      throw new Error(`Edge Function unreachable: ${cause}`);
-    }
-
-    throw error;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (fetchErr) {
+    // Network-level failure — surface the actual cause
+    const msg = fetchErr instanceof Error ? fetchErr.message : "Network error";
+    throw new Error(`Edge Function '${fnName}' unreachable: ${msg}`);
   }
-  return data as T;
+
+  if (!res.ok) {
+    // Try to extract a structured error from the response body
+    let detail = `HTTP ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload?.error) detail = payload.error;
+      else if (payload?.message) detail = payload.message;
+      else if (payload?.msg) detail = payload.msg;
+    } catch {
+      // Response wasn't JSON — use status text
+      detail = `${res.status} ${res.statusText}`;
+    }
+    throw new Error(detail);
+  }
+
+  const contentType = (res.headers.get("Content-Type") ?? "").split(";")[0].trim();
+  if (contentType === "application/json") {
+    return (await res.json()) as T;
+  }
+  return (await res.text()) as unknown as T;
 }
