@@ -231,7 +231,119 @@ async function findQboItemBySku(
 
 // ─── Tax resolution ─────────────────────────────────────────
 
-async function resolveSalesTaxInfo(
+// EU 27 member states — zero-rated EC dispatch (QBO code "ECG 0%")
+const EU_COUNTRY_CODES = new Set([
+  "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU",
+  "IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE",
+]);
+
+// UK VAT area: GB (England, Scotland, Wales, NI) + IM (Isle of Man).
+// Crown Dependencies GG (Guernsey) and JE (Jersey) are NOT in the UK VAT area.
+const UK_VAT_CODES = new Set(["GB", "IM"]);
+
+type VatDestination = "uk" | "eu" | "row";
+
+function classifyShippingCountry(countryCode: string): VatDestination {
+  const code = countryCode.toUpperCase();
+  if (UK_VAT_CODES.has(code)) return "uk";
+  if (EU_COUNTRY_CODES.has(code)) return "eu";
+  return "row";
+}
+
+interface VatResolution {
+  destination: VatDestination;
+  taxCodeId: string;
+  vatRateId: string;
+  qboTaxCodeId: string;
+  qboTaxRateId: string;
+  ratePercent: number;
+}
+
+/**
+ * Resolve the correct QBO VAT tax code based on shipping destination.
+ *
+ * Three treatments (UK-based seller, post-Brexit, standard-rated goods only):
+ *   UK (GB, IM)         → 20.0% S   — Standard-rated domestic sale
+ *   EU (27 members)     → ECG 0%    — Zero-rated EC goods dispatch
+ *   Rest of World       → 0.0% Z    — Zero-rated export
+ *
+ * Matches against the local tax_code + vat_rate tables (synced from QBO)
+ * by name pattern, NOT by hardcoded IDs.
+ *
+ * Throws if the required tax code is missing from the local table.
+ */
+async function resolveVatForShippingCountry(
+  admin: any,
+  shippingCountry: string,
+): Promise<VatResolution> {
+  const destination = classifyShippingCountry(shippingCountry);
+
+  // Fetch all active tax codes with their linked sales vat_rate
+  const { data: taxCodes, error: tcErr } = await admin
+    .from("tax_code")
+    .select("id, qbo_tax_code_id, name, sales_tax_rate_id, vat_rate:sales_tax_rate_id(id, qbo_tax_rate_id, rate_percent)")
+    .eq("active", true)
+    .not("sales_tax_rate_id", "is", null);
+
+  if (tcErr) throw new Error(`Failed to query tax_code table: ${tcErr.message}`);
+  if (!taxCodes?.length) {
+    throw new Error("No active tax codes with linked VAT rates found in the local database. Run a QBO tax rate sync first.");
+  }
+
+  // Match strategy by name pattern:
+  //   UK  → rate_percent = 20 (the standard rate, name like "20.0% S")
+  //   EU  → name starts with "ECG" (e.g. "ECG 0%")
+  //   RoW → rate_percent = 0 AND name does NOT start with "ECG" (e.g. "0.0% Z")
+  let match: any = null;
+  let expectedDesc = "";
+
+  switch (destination) {
+    case "uk": {
+      match = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
+      expectedDesc = 'a standard-rate tax code (rate_percent = 20, e.g. "20.0% S")';
+      break;
+    }
+    case "eu": {
+      match = taxCodes.find((tc: any) => /^ECG/i.test(tc.name || ""));
+      expectedDesc = 'an EC goods tax code (name starting with "ECG", e.g. "ECG 0%")';
+      break;
+    }
+    case "row": {
+      match = taxCodes.find(
+        (tc: any) => Number(tc.vat_rate?.rate_percent) === 0 && !/^ECG/i.test(tc.name || "")
+      );
+      expectedDesc = 'a zero-rate export tax code (rate_percent = 0, name like "0.0% Z")';
+      break;
+    }
+  }
+
+  if (!match?.vat_rate) {
+    const available = taxCodes.map((tc: any) => `"${tc.name}" (${tc.vat_rate?.rate_percent ?? "?"}%)`).join(", ");
+    throw new Error(
+      `No matching tax code for ${destination.toUpperCase()} destination (${shippingCountry}). ` +
+      `Expected ${expectedDesc}. ` +
+      `Available tax codes: [${available}]. ` +
+      `Ensure the required QBO tax codes are synced via qbo-sync-tax-rates.`
+    );
+  }
+
+  return {
+    destination,
+    taxCodeId: match.id,
+    vatRateId: match.vat_rate.id,
+    qboTaxCodeId: match.qbo_tax_code_id,
+    qboTaxRateId: match.vat_rate.qbo_tax_rate_id,
+    ratePercent: Number(match.vat_rate.rate_percent),
+  };
+}
+
+/**
+ * Resolve the UK standard-rate (20%) tax info for QBO TaxRateRef.
+ * Used as a fallback when the inline QBO sync needs a default TaxRateRef
+ * (e.g. for the TxnTaxDetail block). Per-line TaxCodeRef comes from
+ * the already-resolved vatResolution.
+ */
+async function resolveDefaultSalesTaxInfo(
   admin: any, qboAccessToken: string, realmId: string
 ): Promise<{ taxCodeId: string; taxRateId: string; ratePercent: number }> {
   // Try local tax_code + vat_rate tables first
@@ -242,8 +354,7 @@ async function resolveSalesTaxInfo(
     .not("sales_tax_rate_id", "is", null);
 
   if (taxCodes?.length) {
-    // Find the 20% standard rate
-    const standard = taxCodes.find((tc: any) => tc.vat_rate?.rate_percent === 20);
+    const standard = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
     const pick = standard || taxCodes[0];
     if (pick?.vat_rate) {
       return {
@@ -555,15 +666,53 @@ Deno.serve(async (req) => {
     const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
     const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
     const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
-    const totalAmount = parseFloat(order.pricingSummary?.total?.value || "0");
-    const taxAmount = parseFloat(order.pricingSummary?.tax?.value || "0");
+    const ebayGrossTotal = parseFloat(order.pricingSummary?.total?.value || "0");
     const currency = order.pricingSummary?.total?.currency || "GBP";
     const creationDate = order.creationDate?.split("T")[0] || new Date().toISOString().split("T")[0];
     const lineItems = order.lineItems || [];
     const shippingAddr = shipTo?.contactAddress;
     const docNumber = orderId.length <= 21 ? orderId : orderId.substring(0, 21);
+    const shippingCountry = (shippingAddr?.countryCode || "GB").toUpperCase();
 
-    console.log(`eBay order ${orderId}: buyer=${buyerName}, total=${totalAmount}, lines=${lineItems.length}`);
+    console.log(`eBay order ${orderId}: buyer=${buyerName}, gross=${ebayGrossTotal}, country=${shippingCountry}, lines=${lineItems.length}`);
+
+    // ── Step 3b: Resolve correct VAT rate from shipping country ──
+    // eBay does NOT reliably send the VAT rate — we determine it from the
+    // buyer's shipping country using our local tax_code / vat_rate tables
+    // (synced from QBO).
+    //
+    // If the required tax code is missing (e.g. ECG not synced yet), fall back
+    // to UK standard rate (20%) and alert admin. The order must still be created;
+    // the tax code can be corrected in QBO and synced back via webhook.
+    let vatResolution: VatResolution;
+    let vatResolutionFallback = false;
+    try {
+      vatResolution = await resolveVatForShippingCountry(admin, shippingCountry);
+    } catch (vatErr: any) {
+      console.warn(`VAT resolution failed for ${shippingCountry}, falling back to UK 20%: ${vatErr.message}`);
+      vatResolutionFallback = true;
+      // Build a fallback using the UK standard rate tax code
+      const { data: fallbackCodes } = await admin
+        .from("tax_code")
+        .select("id, qbo_tax_code_id, name, sales_tax_rate_id, vat_rate:sales_tax_rate_id(id, qbo_tax_rate_id, rate_percent)")
+        .eq("active", true)
+        .not("sales_tax_rate_id", "is", null);
+      const ukStandard = fallbackCodes?.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
+      if (!ukStandard?.vat_rate) {
+        // No tax codes at all — cannot process. This is a hard prerequisite.
+        throw new Error(`VAT resolution failed and no fallback tax code available. Original error: ${vatErr.message}`);
+      }
+      vatResolution = {
+        destination: "uk",
+        taxCodeId: ukStandard.id,
+        vatRateId: ukStandard.vat_rate.id,
+        qboTaxCodeId: ukStandard.qbo_tax_code_id,
+        qboTaxRateId: ukStandard.vat_rate.qbo_tax_rate_id,
+        ratePercent: Number(ukStandard.vat_rate.rate_percent),
+      };
+    }
+    const vatMultiplier = 1 + vatResolution.ratePercent / 100; // e.g. 1.20 for 20%
+    console.log(`VAT resolution: country=${shippingCountry}, destination=${vatResolution.destination}, rate=${vatResolution.ratePercent}%, fallback=${vatResolutionFallback}`);
 
     // ── Step 4: Resolve SKUs from local data (no QBO needed) ──
     const { data: allSkus } = await admin.from("sku").select("id, sku_code, qbo_item_id").eq("active_flag", true);
@@ -576,8 +725,9 @@ Deno.serve(async (req) => {
       skuId: string;
       skuCode: string;
       qty: number;
-      unitPrice: number;
-      lineTotal: number;
+      unitPrice: number;  // NET per unit
+      lineTotal: number;  // NET line total
+      lineTax: number;    // VAT amount for this line
       ebaySku: string;
       title: string;
     }
@@ -594,13 +744,18 @@ Deno.serve(async (req) => {
         continue;
       }
       const qty = li.quantity || 1;
+      // eBay sends GROSS (VAT-inclusive) amounts — convert to NET
       const grossLineTotal = parseFloat(li.lineItemCost?.value || "0");
+      const netLineTotal = Math.round((grossLineTotal / vatMultiplier) * 100) / 100;
+      const lineTax = Math.round((grossLineTotal - netLineTotal) * 100) / 100;
+      const netUnitPrice = Math.round((netLineTotal / qty) * 100) / 100;
       processedLines.push({
         skuId: matchedSku.id,
         skuCode: matchedSku.sku_code,
         qty,
-        unitPrice: grossLineTotal / qty,
-        lineTotal: grossLineTotal,
+        unitPrice: netUnitPrice,
+        lineTotal: netLineTotal,
+        lineTax,
         ebaySku,
         title: li.title || matchedSku.sku_code,
       });
@@ -638,7 +793,15 @@ Deno.serve(async (req) => {
     }
 
     // ── Step 6: Insert local sales_order (qbo_sync_status = 'pending') ──
-    const merchandiseSubtotal = totalAmount - taxAmount;
+    // gross_total = the exact amount eBay charged the buyer. This is the
+    // accounting-authoritative figure and what QBO must reflect.
+    // merchandise_subtotal and tax_total are computed from matched lines only
+    // (if lines were skipped due to SKU mismatch, they won't sum to gross_total;
+    // the discrepancy is already flagged by the admin alert in step 7b).
+    const merchandiseSubtotal = processedLines.reduce((s, pl) => s + pl.lineTotal, 0);
+    const taxTotal = processedLines.reduce((s, pl) => s + pl.lineTax, 0);
+    const grossTotal = ebayGrossTotal;
+
     const { data: newOrder, error: orderErr } = await admin
       .from("sales_order")
       .insert({
@@ -654,15 +817,15 @@ Deno.serve(async (req) => {
         shipping_line_2: shippingAddr?.addressLine2 || null,
         shipping_city: shippingAddr?.city || "",
         shipping_postcode: shippingAddr?.postalCode || "",
-        shipping_country: shippingAddr?.countryCode || "GB",
+        shipping_country: shippingCountry,
         shipping_county: shippingAddr?.stateOrProvince || null,
-        merchandise_subtotal: merchandiseSubtotal,
-        tax_total: taxAmount,
-        gross_total: totalAmount,
+        merchandise_subtotal: Math.round(merchandiseSubtotal * 100) / 100,
+        tax_total: Math.round(taxTotal * 100) / 100,
+        gross_total: grossTotal,
         global_tax_calculation: "TaxExcluded",
         currency,
         txn_date: creationDate,
-        notes: `eBay order ${orderId} | Buyer: ${order.buyer?.username || "unknown"}`,
+        notes: `eBay order ${orderId} | Buyer: ${order.buyer?.username || "unknown"} | VAT ${vatResolution.ratePercent}%`,
         qbo_sync_status: "pending",
       })
       .select("id, order_number")
@@ -671,16 +834,10 @@ Deno.serve(async (req) => {
     if (orderErr) throw new Error(`Failed to insert sales_order: ${orderErr.message}`);
     console.log(`Local sales_order created: ${newOrder.id} (${newOrder.order_number})`);
 
-    // ── Step 7: Look up default sales tax code ──
-    const { data: defaultTaxCode } = await admin
-      .from("tax_code")
-      .select("id, qbo_tax_code_id")
-      .eq("name", "20.0% S")
-      .eq("active", true)
-      .single();
-
-    const taxCodeId = defaultTaxCode?.id ?? null;
-    const qboTaxCodeRef = defaultTaxCode?.qbo_tax_code_id ?? null;
+    // ── Step 7: Use resolved tax code from country-based VAT resolution ──
+    const taxCodeId = vatResolution.taxCodeId;
+    const vatRateId = vatResolution.vatRateId;
+    const qboTaxCodeRef = vatResolution.qboTaxCodeId;
 
     // ── Step 7b: Audit skipped line items (SKU mismatches) ──
     // Wrapped in try/catch so a failed audit/alert insert doesn't cause the
@@ -718,6 +875,40 @@ Deno.serve(async (req) => {
       console.warn(`Order ${orderId}: ${skippedLines.length} line(s) skipped due to SKU mismatch`);
     }
 
+    // ── Step 7c: Alert admin if VAT resolution fell back to default ──
+    if (vatResolutionFallback) {
+      try {
+        await admin.from("audit_event").insert({
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+          trigger_type: "vat_resolution_fallback",
+          actor_type: "system",
+          source_system: "ebay-process-order",
+          correlation_id: correlationId,
+          after_json: {
+            shipping_country: shippingCountry,
+            expected_destination: classifyShippingCountry(shippingCountry),
+            applied_destination: vatResolution.destination,
+            applied_rate_percent: vatResolution.ratePercent,
+            fallback: true,
+          },
+        });
+        await admin.from("admin_alert").insert({
+          severity: "critical",
+          category: "vat_resolution_fallback",
+          title: `VAT fallback: eBay order ${orderId} (${shippingCountry}) used UK 20% default`,
+          detail: `No matching tax code for ${classifyShippingCountry(shippingCountry).toUpperCase()} destination (${shippingCountry}). ` +
+            `Order created with UK standard rate (20%) as fallback. ` +
+            `Correct the tax code in QBO and ensure qbo-sync-tax-rates has been run. ` +
+            `The app will pick up corrections via QBO webhook.`,
+          entity_type: "sales_order",
+          entity_id: newOrder.id,
+        });
+      } catch (alertErr: any) {
+        console.error(`Failed to create VAT fallback alert for order ${orderId}:`, alertErr.message);
+      }
+    }
+
     // ── Step 8: Insert sales_order_lines ──
     const affectedSkuIds = new Set<string>();
 
@@ -727,9 +918,10 @@ Deno.serve(async (req) => {
         sales_order_id: newOrder.id,
         sku_id: pl.skuId,
         quantity: pl.qty,
-        unit_price: pl.unitPrice,
-        line_total: pl.lineTotal,
+        unit_price: pl.unitPrice,   // NET per unit
+        line_total: pl.lineTotal,   // NET line total
         tax_code_id: taxCodeId,
+        vat_rate_id: vatRateId,
         qbo_tax_code_ref: qboTaxCodeRef,
       });
     }
@@ -902,22 +1094,17 @@ Deno.serve(async (req) => {
         }).eq("id", localCustomerId);
       }
 
-      // Resolve tax info for QBO line building
-      const taxInfo = await resolveSalesTaxInfo(admin, qboToken, realmId);
-      const multiplier = 1 + taxInfo.ratePercent / 100;
+      // Resolve QBO-specific tax info for TaxCodeRef and TaxRateRef
+      const taxInfo = await resolveDefaultSalesTaxInfo(admin, qboToken, realmId);
 
-      // Build QBO SalesReceipt lines
+      // Build QBO SalesReceipt lines — processedLines already contain NET amounts
       const qboLines: any[] = [];
       let totalNet = 0;
       let totalTax = 0;
 
       for (const pl of processedLines) {
-        const grossLineTotal = pl.lineTotal;
-        const netLine = Math.round((grossLineTotal / multiplier) * 100) / 100;
-        const lineTax = Math.round((grossLineTotal - netLine) * 100) / 100;
-        const netUnit = Math.round((netLine / pl.qty) * 100) / 100;
-        totalNet += netLine;
-        totalTax += lineTax;
+        totalNet += pl.lineTotal;   // already NET
+        totalTax += pl.lineTax;     // already computed from resolved rate
 
         // Resolve QBO ItemRef
         let itemRef: any = null;
@@ -931,38 +1118,42 @@ Deno.serve(async (req) => {
 
         qboLines.push({
           DetailType: "SalesItemLineDetail",
-          Amount: netLine,
+          Amount: pl.lineTotal,
           Description: pl.title,
           SalesItemLineDetail: {
             Qty: pl.qty,
-            UnitPrice: netUnit,
-            TaxCodeRef: { value: taxInfo.taxCodeId },
+            UnitPrice: pl.unitPrice,
+            TaxCodeRef: { value: vatResolution.qboTaxCodeId || taxInfo.taxCodeId },
             ...(itemRef ? { ItemRef: itemRef } : {}),
           },
         });
       }
 
-      // Rounding adjustment
+      totalNet = Math.round(totalNet * 100) / 100;
+      totalTax = Math.round(totalTax * 100) / 100;
+
+      // Rounding adjustment — QBO must reflect the exact eBay order total
       const computedGross = totalNet + totalTax;
-      const diff = Math.round((totalAmount - computedGross) * 100) / 100;
+      const diff = Math.round((ebayGrossTotal - computedGross) * 100) / 100;
       if (diff !== 0 && qboLines.length > 0) {
         const lastLine = qboLines[qboLines.length - 1];
         lastLine.Amount = Math.round((lastLine.Amount + diff) * 100) / 100;
         lastLine.SalesItemLineDetail.UnitPrice = Math.round((lastLine.Amount / lastLine.SalesItemLineDetail.Qty) * 100) / 100;
-        totalNet += diff;
+        totalNet = Math.round((totalNet + diff) * 100) / 100;
       }
-      totalNet = Math.round(totalNet * 100) / 100;
-      totalTax = Math.round(totalTax * 100) / 100;
 
       if (!qboLines.length) {
+        // Fallback: single line if no SKUs matched
+        const fallbackNet = Math.round((ebayGrossTotal / vatMultiplier) * 100) / 100;
+        const fallbackTax = Math.round((ebayGrossTotal - fallbackNet) * 100) / 100;
         qboLines.push({
           DetailType: "SalesItemLineDetail",
-          Amount: Math.round((totalAmount / multiplier) * 100) / 100,
+          Amount: fallbackNet,
           Description: `eBay order ${orderId}`,
-          SalesItemLineDetail: { Qty: 1, UnitPrice: Math.round((totalAmount / multiplier) * 100) / 100, TaxCodeRef: { value: taxInfo.taxCodeId } },
+          SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: vatResolution.qboTaxCodeId || taxInfo.taxCodeId } },
         });
-        totalNet = Math.round((totalAmount / multiplier) * 100) / 100;
-        totalTax = Math.round((totalAmount - totalNet) * 100) / 100;
+        totalNet = fallbackNet;
+        totalTax = fallbackTax;
       }
 
       // Check if SalesReceipt already exists in QBO (by DocNumber)
@@ -993,9 +1184,9 @@ Deno.serve(async (req) => {
               Amount: totalTax,
               DetailType: "TaxLineDetail",
               TaxLineDetail: {
-                TaxRateRef: { value: taxInfo.taxRateId },
+                TaxRateRef: { value: vatResolution.qboTaxRateId || taxInfo.taxRateId },
                 PercentBased: true,
-                TaxPercent: taxInfo.ratePercent,
+                TaxPercent: vatResolution.ratePercent,
                 NetAmountTaxable: totalNet,
               },
             }],
