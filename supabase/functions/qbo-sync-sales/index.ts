@@ -866,7 +866,9 @@ Deno.serve(async (req) => {
           totalStockMatched += result.stockMatched;
           totalStockMissing += result.stockMissing;
           await markLandingStatus(supabaseAdmin, table, landingId, "committed");
-        } else if (result.linesCreated === 0 && !result.created) {
+        } else if (!result.created) {
+          // Cross-channel dedup or no-item skip — still count any reconciled stock
+          totalStockMatched += result.stockMatched;
           const hasItems = (sr.Line ?? []).some((l: any) => l.DetailType === "SalesItemLineDetail");
           if (hasItems) {
             salesSkipped++;
