@@ -114,9 +114,11 @@ async function reconcileQtyOnHand(
     .from("sku").select("id").eq("qbo_item_id", qboItemId).maybeSingle();
   if (!sku) return null;
 
+  // Count all allocatable stock units (available + received + graded)
+  // Units in 'received' or 'graded' status are real stock that hasn't transitioned yet
   const { count: appAvailable } = await admin
     .from("stock_unit").select("id", { count: "exact", head: true })
-    .eq("sku_id", sku.id).eq("status", "available");
+    .eq("sku_id", sku.id).in("status", ["available", "received", "graded"]);
 
   const available = appAvailable ?? 0;
   if (available === qboQty) return null;
@@ -128,7 +130,7 @@ async function reconcileQtyOnHand(
     const { data: unitsToWriteOff } = await admin
       .from("stock_unit")
       .select("id, status, carrying_value, landed_cost")
-      .eq("sku_id", sku.id).eq("status", "available")
+      .eq("sku_id", sku.id).in("status", ["available", "received", "graded"])
       .order("created_at", { ascending: true }).limit(excess);
 
     let writtenOff = 0;

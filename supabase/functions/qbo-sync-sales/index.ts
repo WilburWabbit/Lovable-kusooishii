@@ -767,16 +767,31 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const clientId = Deno.env.get("QBO_CLIENT_ID")!;
-    const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
+    const clientId = Deno.env.get("QBO_CLIENT_ID");
+    const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
     const realmId = Deno.env.get("QBO_REALM_ID");
 
-    if (!clientId || !clientSecret || !realmId) {
-      throw new Error("QBO credentials not configured");
+    // Pre-flight validation with actionable error messages
+    if (!clientId || !clientSecret) {
+      return new Response(
+        JSON.stringify({ error: "QBO_CLIENT_ID and QBO_CLIENT_SECRET must be set in Supabase Edge Function secrets." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (!realmId) {
+      return new Response(
+        JSON.stringify({ error: "QBO_REALM_ID not configured. Complete the OAuth connection first via Settings → QBO → Connect." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized — missing Bearer token." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
@@ -800,7 +815,12 @@ Deno.serve(async (req) => {
 
     if (!isWebhook) {
       const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-      if (userError || !user) throw new Error("Unauthorized");
+      if (userError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized — invalid or expired session token." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
 
       const { data: roles } = await supabaseAdmin
         .from("user_roles")
@@ -809,12 +829,26 @@ Deno.serve(async (req) => {
       const hasAccess = (roles ?? []).some(
         (r: { role: string }) => r.role === "admin" || r.role === "staff"
       );
-      if (!hasAccess) throw new Error("Forbidden");
+      if (!hasAccess) {
+        return new Response(
+          JSON.stringify({ error: "Forbidden — admin or staff role required." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     } else {
       console.log("Webhook-triggered sync (service role auth)");
     }
 
-    const accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
+    let accessToken: string;
+    try {
+      accessToken = await ensureValidToken(supabaseAdmin, realmId, clientId, clientSecret);
+    } catch (tokenErr) {
+      const msg = tokenErr instanceof Error ? tokenErr.message : "Unknown token error";
+      return new Response(
+        JSON.stringify({ error: `QBO authentication failed: ${msg}. Try reconnecting via Settings → QBO → Connect.` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
     const correlationId = crypto.randomUUID();
 

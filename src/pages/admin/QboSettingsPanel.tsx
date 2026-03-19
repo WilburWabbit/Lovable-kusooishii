@@ -59,6 +59,14 @@ export function QboSettingsPanel() {
   useEffect(() => { fetchStatus(); }, []);
 
   const syncPurchases = async () => {
+    if (!status?.connected) {
+      toast({
+        title: "QBO not connected",
+        description: "Connect to QuickBooks Online first before syncing purchases.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSyncing(true);
     cancelPurchasesRef.current = false;
     const months = generateMonthList();
@@ -149,6 +157,10 @@ export function QboSettingsPanel() {
   };
 
   const syncCustomers = async () => {
+    if (!status?.connected) {
+      toast({ title: "QBO not connected", description: "Connect to QuickBooks Online first.", variant: "destructive" });
+      return;
+    }
     setSyncingCustomers(true);
     try {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-customers");
@@ -173,6 +185,10 @@ export function QboSettingsPanel() {
   };
 
   const syncItems = async () => {
+    if (!status?.connected) {
+      toast({ title: "QBO not connected", description: "Connect to QuickBooks Online first.", variant: "destructive" });
+      return;
+    }
     setSyncingItems(true);
     try {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-items");
@@ -199,6 +215,14 @@ export function QboSettingsPanel() {
   };
 
   const syncSales = async () => {
+    if (!status?.connected) {
+      toast({
+        title: "QBO not connected",
+        description: "Connect to QuickBooks Online first before syncing sales.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSyncingSales(true);
     cancelSalesRef.current = false;
     const months = generateMonthList();
