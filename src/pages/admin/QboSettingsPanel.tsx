@@ -34,6 +34,7 @@ export function QboSettingsPanel() {
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; month: string } | null>(null);
   const [syncingSales, setSyncingSales] = useState(false);
+  const [salesSyncProgress, setSalesSyncProgress] = useState<{ current: number; total: number; month: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingItems, setSyncingItems] = useState(false);
@@ -198,21 +199,42 @@ export function QboSettingsPanel() {
 
   const syncSales = async () => {
     setSyncingSales(true);
+    cancelRef.current = false;
+    const months = generateMonthList();
+    const totals = {
+      sales_created: 0, sales_skipped: 0, stock_matched: 0,
+      stock_missing: 0, refunds_created: 0, refunds_skipped: 0,
+      channel_listings_updated: 0,
+    };
+
     try {
-      const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales");
-      if (data?.error) throw new Error(data.error);
+      for (let i = 0; i < months.length; i++) {
+        if (cancelRef.current) break;
+        const month = months[i];
+        setSalesSyncProgress({ current: i + 1, total: months.length, month });
+
+        const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", { month });
+        if (data?.error) throw new Error(data.error);
+
+        totals.sales_created += data.sales_created ?? 0;
+        totals.sales_skipped += data.sales_skipped ?? 0;
+        totals.stock_matched += data.stock_matched ?? 0;
+        totals.stock_missing += data.stock_missing ?? 0;
+        totals.refunds_created += data.refunds_created ?? 0;
+        totals.refunds_skipped += data.refunds_skipped ?? 0;
+        totals.channel_listings_updated += data.channel_listings_updated ?? 0;
+      }
+
       const parts: string[] = [];
-      if (data.sales_created) parts.push(`${data.sales_created} sales imported`);
-      if (data.sales_skipped) parts.push(`${data.sales_skipped} sales unchanged`);
-      if (data.stock_matched) parts.push(`${data.stock_matched} stock matched`);
-      if (data.stock_reconciled) parts.push(`${data.stock_reconciled} stock reconciled`);
-      if (data.stock_missing) parts.push(`${data.stock_missing} stock missing`);
-      if (data.refunds_created) parts.push(`${data.refunds_created} refunds imported`);
-      if (data.refunds_skipped) parts.push(`${data.refunds_skipped} refunds unchanged`);
-      if (data.vat_backfilled) parts.push(`${data.vat_backfilled} VAT codes backfilled`);
-      if (data.channel_listings_updated) parts.push(`${data.channel_listings_updated} channel listings updated`);
+      if (totals.sales_created) parts.push(`${totals.sales_created} sales imported`);
+      if (totals.sales_skipped) parts.push(`${totals.sales_skipped} sales unchanged`);
+      if (totals.stock_matched) parts.push(`${totals.stock_matched} stock matched`);
+      if (totals.stock_missing) parts.push(`${totals.stock_missing} stock missing`);
+      if (totals.refunds_created) parts.push(`${totals.refunds_created} refunds imported`);
+      if (totals.refunds_skipped) parts.push(`${totals.refunds_skipped} refunds unchanged`);
+      if (totals.channel_listings_updated) parts.push(`${totals.channel_listings_updated} channel listings updated`);
       toast({
-        title: "Sales sync complete",
+        title: cancelRef.current ? "Sales sync stopped" : "Sales sync complete",
         description: parts.length > 0 ? parts.join(", ") + "." : "No new records.",
       });
       fetchStatus();
@@ -224,6 +246,7 @@ export function QboSettingsPanel() {
       });
     } finally {
       setSyncingSales(false);
+      setSalesSyncProgress(null);
     }
   };
 
@@ -290,7 +313,7 @@ export function QboSettingsPanel() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <p className="font-body text-xs text-muted-foreground">
-                    Syncing {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
+                    Syncing purchases {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
                   </p>
                   <Button size="sm" variant="ghost" onClick={stopSync} className="h-6 px-2 text-xs">
                     <Square className="mr-1 h-3 w-3" />
@@ -298,6 +321,22 @@ export function QboSettingsPanel() {
                   </Button>
                 </div>
                 <Progress value={(syncProgress.current / syncProgress.total) * 100} className="h-2" />
+              </div>
+            )}
+
+            {/* Progress indicator for sales sync */}
+            {salesSyncProgress && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="font-body text-xs text-muted-foreground">
+                    Syncing sales {salesSyncProgress.month}… ({salesSyncProgress.current} of {salesSyncProgress.total})
+                  </p>
+                  <Button size="sm" variant="ghost" onClick={stopSync} className="h-6 px-2 text-xs">
+                    <Square className="mr-1 h-3 w-3" />
+                    Stop
+                  </Button>
+                </div>
+                <Progress value={(salesSyncProgress.current / salesSyncProgress.total) * 100} className="h-2" />
               </div>
             )}
 
