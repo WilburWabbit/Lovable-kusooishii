@@ -99,25 +99,8 @@ async function fetchQboItem(
   return null;
 }
 
-function parseSku(sku: string): { mpn: string; conditionGrade: string } {
-  const dotIndex = sku.indexOf(".");
-  let mpn: string;
-  let conditionGrade: string;
-
-  if (dotIndex > 0) {
-    mpn = sku.substring(0, dotIndex);
-    conditionGrade = sku.substring(dotIndex + 1) || "1";
-  } else {
-    mpn = sku;
-    conditionGrade = "1";
-  }
-
-  if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) {
-    conditionGrade = "1";
-  }
-
-  return { mpn, conditionGrade };
-}
+// Status constants to avoid stringly-typed repetition
+const STOCK_MATCHABLE = ["available", "received", "graded"];
 
 async function queryQbo(baseUrl: string, accessToken: string, entity: string, dateFilter?: string): Promise<any[]> {
   const PAGE_SIZE = 1000;
@@ -291,7 +274,7 @@ async function reconcileStockForOrder(
         .from("stock_unit")
         .select("id")
         .eq("sku_id", line.sku_id)
-        .in("status", ["available", "received", "graded"])
+        .in("status", STOCK_MATCHABLE)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -539,7 +522,7 @@ async function processSalesReceipt(
         .from("stock_unit")
         .select("id, status")
         .eq("sku_id", skuId)
-        .in("status", ["available", "received", "graded"])
+        .in("status", STOCK_MATCHABLE)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -849,12 +832,12 @@ Deno.serve(async (req) => {
 
     const itemCache = new Map<string, any>();
     const itemIdArray = Array.from(uniqueItemIds);
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 5;
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
       if (i + BATCH_SIZE < itemIdArray.length) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 300));
       }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);

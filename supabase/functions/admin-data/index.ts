@@ -4,6 +4,9 @@ class ValidationError extends Error {
   constructor(message: string) { super(message); this.name = "ValidationError"; }
 }
 
+const STOCK_MATCHABLE = ["available", "received", "graded"];
+const VALID_SALE_STATUSES = VALID_SALE_STATUSES;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -1327,7 +1330,7 @@ Deno.serve(async (req) => {
           .maybeSingle();
 
         const orderStatus = (lineOrder as any)?.sales_order?.status;
-        const validStatuses = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
+        const validStatuses = VALID_SALE_STATUSES;
         if (orderStatus && !validStatuses.includes(orderStatus)) {
           // This stock was closed for an invalid order — reopen it
           const { error: reopenErr } = await admin
@@ -1356,7 +1359,7 @@ Deno.serve(async (req) => {
       const { data: validOrders } = await admin
         .from("sales_order")
         .select("id")
-        .in("status", ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"]);
+        .in("status", VALID_SALE_STATUSES);
 
       const validOrderIds = (validOrders ?? []).map((o: any) => o.id);
 
@@ -1377,7 +1380,7 @@ Deno.serve(async (req) => {
                 .from("stock_unit")
                 .select("id")
                 .eq("sku_id", line.sku_id)
-                .in("status", ["available", "received", "graded"])
+                .in("status", STOCK_MATCHABLE)
                 .order("created_at", { ascending: true })
                 .limit(1)
                 .maybeSingle();
@@ -1483,7 +1486,7 @@ Deno.serve(async (req) => {
           .from("stock_unit")
           .select("id", { count: "exact", head: true })
           .eq("sku_id", sku.id)
-          .in("status", ["available", "received", "graded"]);
+          .in("status", STOCK_MATCHABLE);
         const available = appCount ?? 0;
         totalChecked++;
 

@@ -40,8 +40,8 @@ export function QboSettingsPanel() {
   const [syncingItems, setSyncingItems] = useState(false);
   const [reconcilingStock, setReconcilingStock] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<any[] | null>(null);
-  const [cancelSync, setCancelSync] = useState(false);
-  const cancelRef = useRef(false);
+  const cancelPurchasesRef = useRef(false);
+  const cancelSalesRef = useRef(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -60,7 +60,7 @@ export function QboSettingsPanel() {
 
   const syncPurchases = async () => {
     setSyncing(true);
-    cancelRef.current = false;
+    cancelPurchasesRef.current = false;
     const months = generateMonthList();
     const totals = {
       total: 0, auto_processed: 0, left_pending: 0,
@@ -70,7 +70,7 @@ export function QboSettingsPanel() {
 
     try {
       for (let i = 0; i < months.length; i++) {
-        if (cancelRef.current) break;
+        if (cancelPurchasesRef.current) break;
         const month = months[i];
         setSyncProgress({ current: i + 1, total: months.length, month });
 
@@ -96,7 +96,7 @@ export function QboSettingsPanel() {
       if (totals.backfilled_stock_links) parts.push(`${totals.backfilled_stock_links} stock units linked`);
 
       toast({
-        title: cancelRef.current ? "Sync stopped" : "Sync complete",
+        title: cancelPurchasesRef.current ? "Sync stopped" : "Sync complete",
         description: `${totals.total} purchases: ${parts.join(", ")}.`,
       });
       fetchStatus();
@@ -112,7 +112,8 @@ export function QboSettingsPanel() {
     }
   };
 
-  const stopSync = () => { cancelRef.current = true; };
+  const stopPurchaseSync = () => { cancelPurchasesRef.current = true; };
+  const stopSalesSync = () => { cancelSalesRef.current = true; };
 
   const connectQbo = async () => {
     try {
@@ -199,7 +200,7 @@ export function QboSettingsPanel() {
 
   const syncSales = async () => {
     setSyncingSales(true);
-    cancelRef.current = false;
+    cancelSalesRef.current = false;
     const months = generateMonthList();
     const totals = {
       sales_created: 0, sales_skipped: 0, stock_matched: 0,
@@ -209,7 +210,7 @@ export function QboSettingsPanel() {
 
     try {
       for (let i = 0; i < months.length; i++) {
-        if (cancelRef.current) break;
+        if (cancelSalesRef.current) break;
         const month = months[i];
         setSalesSyncProgress({ current: i + 1, total: months.length, month });
 
@@ -234,7 +235,7 @@ export function QboSettingsPanel() {
       if (totals.refunds_skipped) parts.push(`${totals.refunds_skipped} refunds unchanged`);
       if (totals.channel_listings_updated) parts.push(`${totals.channel_listings_updated} channel listings updated`);
       toast({
-        title: cancelRef.current ? "Sales sync stopped" : "Sales sync complete",
+        title: cancelSalesRef.current ? "Sales sync stopped" : "Sales sync complete",
         description: parts.length > 0 ? parts.join(", ") + "." : "No new records.",
       });
       fetchStatus();
@@ -315,7 +316,7 @@ export function QboSettingsPanel() {
                   <p className="font-body text-xs text-muted-foreground">
                     Syncing purchases {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
                   </p>
-                  <Button size="sm" variant="ghost" onClick={stopSync} className="h-6 px-2 text-xs">
+                  <Button size="sm" variant="ghost" onClick={stopPurchaseSync} className="h-6 px-2 text-xs">
                     <Square className="mr-1 h-3 w-3" />
                     Stop
                   </Button>
@@ -331,7 +332,7 @@ export function QboSettingsPanel() {
                   <p className="font-body text-xs text-muted-foreground">
                     Syncing sales {salesSyncProgress.month}… ({salesSyncProgress.current} of {salesSyncProgress.total})
                   </p>
-                  <Button size="sm" variant="ghost" onClick={stopSync} className="h-6 px-2 text-xs">
+                  <Button size="sm" variant="ghost" onClick={stopSalesSync} className="h-6 px-2 text-xs">
                     <Square className="mr-1 h-3 w-3" />
                     Stop
                   </Button>
