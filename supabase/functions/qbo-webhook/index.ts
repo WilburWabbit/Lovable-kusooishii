@@ -1294,14 +1294,20 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (existingByCode && existingByCode.qbo_item_id !== qboItemId) {
     // Link the existing SKU to this QBO item ID
-    await admin.from("sku").update({
+    const linkPayload: Record<string, any> = {
       qbo_item_id: qboItemId,
       qbo_parent_item_id: parentItemId,
       name: cleanQboName(item.Name ?? mpn),
       product_id: productId ?? existingByCode.product_id,
       active_flag: item.Active !== false,
       price: item.UnitPrice != null ? Number(item.UnitPrice) : existingByCode.price,
-    }).eq("id", existingByCode.id);
+    };
+    let linkResult = await admin.from("sku").update(linkPayload).eq("id", existingByCode.id);
+    // Fallback: retry without qbo_parent_item_id if schema cache is stale
+    if (linkResult.error && /qbo_parent_item_id|PGRST204/.test(linkResult.error.message ?? "")) {
+      delete linkPayload.qbo_parent_item_id;
+      linkResult = await admin.from("sku").update(linkPayload).eq("id", existingByCode.id);
+    }
     return `item ${entityId} linked to existing SKU ${skuCode}`;
   }
 
