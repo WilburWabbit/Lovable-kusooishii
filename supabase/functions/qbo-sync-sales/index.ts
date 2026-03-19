@@ -99,34 +99,18 @@ async function fetchQboItem(
   return null;
 }
 
-function parseSku(sku: string): { mpn: string; conditionGrade: string } {
-  const dotIndex = sku.indexOf(".");
-  let mpn: string;
-  let conditionGrade: string;
+// Status constants to avoid stringly-typed repetition
+const STOCK_MATCHABLE = ["available", "received", "graded"];
 
-  if (dotIndex > 0) {
-    mpn = sku.substring(0, dotIndex);
-    conditionGrade = sku.substring(dotIndex + 1) || "1";
-  } else {
-    mpn = sku;
-    conditionGrade = "1";
-  }
-
-  if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) {
-    conditionGrade = "1";
-  }
-
-  return { mpn, conditionGrade };
-}
-
-async function queryQbo(baseUrl: string, accessToken: string, entity: string): Promise<any[]> {
+async function queryQbo(baseUrl: string, accessToken: string, entity: string, dateFilter?: string): Promise<any[]> {
   const PAGE_SIZE = 1000;
   let startPosition = 1;
   const allResults: any[] = [];
 
   while (true) {
+    const where = dateFilter ? ` WHERE ${dateFilter}` : "";
     const query = encodeURIComponent(
-      `SELECT * FROM ${entity} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`
+      `SELECT * FROM ${entity}${where} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`
     );
     const res = await fetchWithTimeout(`${baseUrl}/query?query=${query}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
@@ -142,7 +126,6 @@ async function queryQbo(baseUrl: string, accessToken: string, entity: string): P
     if (page.length < PAGE_SIZE) break; // last page
     startPosition += PAGE_SIZE;
 
-    // Safety: avoid infinite loops (cap at 10k records)
     if (allResults.length >= 10_000) {
       console.warn(`QBO ${entity} query capped at ${allResults.length} records`);
       break;
@@ -291,7 +274,7 @@ async function reconcileStockForOrder(
         .from("stock_unit")
         .select("id")
         .eq("sku_id", line.sku_id)
-        .in("status", ["available", "received", "graded"])
+        .in("status", STOCK_MATCHABLE)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -539,7 +522,7 @@ async function processSalesReceipt(
         .from("stock_unit")
         .select("id, status")
         .eq("sku_id", skuId)
-        .in("status", ["available", "received", "graded"])
+        .in("status", STOCK_MATCHABLE)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -762,6 +745,22 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
+    // Parse request body for month parameter
+    let targetMonth: string | null = null;
+    try {
+      const body = await req.json();
+      if (body?.month && typeof body.month === "string") {
+        targetMonth = body.month; // e.g. "2025-06"
+      }
+    } catch {
+      // No body or invalid JSON — default to current month
+    }
+
+    if (!targetMonth) {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+
     if (!isWebhook) {
       const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
       if (userError || !user) throw new Error("Unauthorized");
@@ -782,10 +781,18 @@ Deno.serve(async (req) => {
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
     const correlationId = crypto.randomUUID();
 
-    // Fetch both entity types from QBO
+    // Build date range for this month
+    const [y, m] = targetMonth.split("-").map(Number);
+    const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    const dateFilter = `TxnDate >= '${monthStart}' AND TxnDate <= '${monthEnd}'`;
+    console.log(`Processing sales for ${targetMonth} (${monthStart} → ${monthEnd})`);
+
+    // Fetch both entity types from QBO for this month
     const [salesReceipts, refundReceipts] = await Promise.all([
-      queryQbo(baseUrl, accessToken, "SalesReceipt"),
-      queryQbo(baseUrl, accessToken, "RefundReceipt"),
+      queryQbo(baseUrl, accessToken, "SalesReceipt", dateFilter),
+      queryQbo(baseUrl, accessToken, "RefundReceipt", dateFilter),
     ]);
 
     // ── Phase 1: Land all raw payloads ──
@@ -825,12 +832,12 @@ Deno.serve(async (req) => {
 
     const itemCache = new Map<string, any>();
     const itemIdArray = Array.from(uniqueItemIds);
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 5;
     for (let i = 0; i < itemIdArray.length; i += BATCH_SIZE) {
       const batch = itemIdArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(id => fetchQboItem(id, itemCache, baseUrl, accessToken)));
       if (i + BATCH_SIZE < itemIdArray.length) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 300));
       }
     }
     console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);
@@ -909,182 +916,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Phase 4: Backfill VAT codes on existing order lines ──
-    let vatBackfilled = 0;
-    const backfillStart = Date.now();
-    const BACKFILL_TIME_BUDGET_MS = 45_000;
-    try {
-      const { data: ordersToFix } = await supabaseAdmin
-        .from("sales_order")
-        .select("id, origin_channel, origin_reference")
-        .in("origin_channel", ["qbo", "qbo_refund"])
-        .not("origin_reference", "is", null);
-
-      if (ordersToFix && ordersToFix.length > 0) {
-        for (const order of ordersToFix) {
-          if (Date.now() - backfillStart > BACKFILL_TIME_BUDGET_MS) {
-            console.warn("Backfill time budget exceeded, stopping");
-            break;
-          }
-
-          const { data: nullLines } = await supabaseAdmin
-            .from("sales_order_line")
-            .select("id")
-            .eq("sales_order_id", order.id)
-            .is("tax_code_id", null)
-            .limit(1);
-
-          if (!nullLines || nullLines.length === 0) continue;
-
-          await new Promise(r => setTimeout(r, 500));
-
-          const entity = order.origin_channel === "qbo_refund" ? "RefundReceipt" : "SalesReceipt";
-          try {
-            const res = await fetchWithTimeout(`${baseUrl}/${entity.toLowerCase()}/${order.origin_reference}`, {
-              headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-            });
-            if (res.status === 429) {
-              console.warn(`Backfill: rate limited on ${entity} ${order.origin_reference}, stopping backfill`);
-              break;
-            }
-            if (!res.ok) {
-              console.warn(`Backfill: failed to fetch ${entity} ${order.origin_reference}: ${res.status}`);
-              continue;
-            }
-            const data = await res.json();
-            const receipt = data?.[entity] ?? null;
-            if (!receipt) continue;
-
-            const itemLines = (receipt.Line ?? []).filter(
-              (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
-            );
-
-            for (const line of itemLines) {
-              const detail = line.SalesItemLineDetail;
-              const taxCodeRef = detail.TaxCodeRef?.value ?? null;
-              if (!taxCodeRef) continue;
-
-              const itemRefValue = detail.ItemRef.value;
-              const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
-              const skuField = qboItem?.Sku;
-              let skuCode: string | null = null;
-
-              // Use raw QBO SKU as sku_code (trimmed to match purchase sync)
-              if (skuField && String(skuField).trim()) {
-                skuCode = String(skuField).trim();
-              } else if (detail.ItemRef?.name) {
-                skuCode = String(detail.ItemRef.name).trim();
-              }
-
-              if (!skuCode) continue;
-
-              const { data: sku } = await supabaseAdmin
-                .from("sku")
-                .select("id")
-                .eq("sku_code", skuCode)
-                .maybeSingle();
-              if (!sku) continue;
-
-              const { data: tc } = await supabaseAdmin
-                .from("tax_code")
-                .select("id")
-                .eq("qbo_tax_code_id", String(taxCodeRef))
-                .maybeSingle();
-              if (!tc) continue;
-
-              const { data: updated } = await supabaseAdmin
-                .from("sales_order_line")
-                .update({ tax_code_id: tc.id, qbo_tax_code_ref: String(taxCodeRef) })
-                .eq("sales_order_id", order.id)
-                .eq("sku_id", sku.id)
-                .is("tax_code_id", null)
-                .select("id");
-
-              vatBackfilled += (updated?.length ?? 0);
-            }
-          } catch (fetchErr) {
-            console.error(`Backfill: error processing ${entity} ${order.origin_reference}:`, fetchErr);
-          }
-        }
-      }
-    } catch (backfillErr) {
-      console.error("VAT backfill error:", backfillErr);
-    }
-
-    // ── Phase 4b: Stock reconciliation for CONFIRMED sales with unlinked lines ──
-    // Only process lines from orders in completed/paid/shipped status.
-    let stockReconciled = 0;
-    const RECONCILE_TIME_BUDGET_MS = 30_000;
-    const reconcileStart = Date.now();
-    try {
-      const validStatuses = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
-      const { data: validOrders } = await supabaseAdmin
-        .from("sales_order")
-        .select("id")
-        .in("status", validStatuses);
-
-      const validOrderIds = (validOrders ?? []).map((o: any) => o.id);
-
-      if (validOrderIds.length > 0) {
-        const BATCH = 100;
-        for (let b = 0; b < validOrderIds.length; b += BATCH) {
-          if (Date.now() - reconcileStart > RECONCILE_TIME_BUDGET_MS) {
-            console.warn("Stock reconciliation time budget exceeded, stopping");
-            break;
-          }
-          const batchIds = validOrderIds.slice(b, b + BATCH);
-          const { data: unlinkedLines } = await supabaseAdmin
-            .from("sales_order_line")
-            .select("id, sku_id, quantity")
-            .in("sales_order_id", batchIds)
-            .is("stock_unit_id", null);
-
-          if (unlinkedLines && unlinkedLines.length > 0) {
-            console.log(`Stock reconciliation: found ${unlinkedLines.length} unlinked order lines`);
-
-            for (const line of unlinkedLines) {
-              if (Date.now() - reconcileStart > RECONCILE_TIME_BUDGET_MS) break;
-
-              for (let i = 0; i < (line.quantity ?? 1); i++) {
-                const { data: stockUnit } = await supabaseAdmin
-                  .from("stock_unit")
-                  .select("id")
-                  .eq("sku_id", line.sku_id)
-                  .in("status", ["available", "received", "graded"])
-                  .order("created_at", { ascending: true })
-                  .limit(1)
-                  .maybeSingle();
-
-                if (stockUnit) {
-                  const { error: closeErr } = await supabaseAdmin
-                    .from("stock_unit")
-                    .update({ status: "closed" })
-                    .eq("id", stockUnit.id);
-                  if (!closeErr) {
-                    if ((line.quantity ?? 1) === 1) {
-                      await supabaseAdmin
-                        .from("sales_order_line")
-                        .update({ stock_unit_id: stockUnit.id })
-                        .eq("id", line.id);
-                    }
-                    stockReconciled++;
-                    affectedSkuIds.add(line.sku_id);
-                  }
-                }
-              }
-            }
-          }
-        }
-        if (stockReconciled > 0) {
-          console.log(`Stock reconciliation: closed ${stockReconciled} stock units`);
-        }
-      }
-    } catch (reconcileErr) {
-      console.error("Stock reconciliation error:", reconcileErr);
-    }
-    totalStockMatched += stockReconciled;
-
-    // ── Phase 5: Update channel listings for affected SKUs ──
+    // ── Phase 4: Update channel listings for affected SKUs ──
     let channelListingsUpdated = 0;
     if (affectedSkuIds.size > 0) {
       try {
@@ -1118,6 +950,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        month: targetMonth,
         correlation_id: correlationId,
         sales_receipts: salesReceipts.length,
         sales_landed: salesLanded.length,
@@ -1126,7 +959,6 @@ Deno.serve(async (req) => {
         sales_no_items: salesNoItems,
         sales_lines: totalSalesLines,
         stock_matched: totalStockMatched,
-        stock_reconciled: stockReconciled,
         stock_missing: totalStockMissing,
         refund_receipts: refundReceipts.length,
         refunds_landed: refundsLanded.length,
@@ -1134,7 +966,6 @@ Deno.serve(async (req) => {
         refunds_skipped: refundsSkipped,
         refund_lines: totalRefundLines,
         items_cached: itemCache.size,
-        vat_backfilled: vatBackfilled,
         channel_listings_updated: channelListingsUpdated,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
