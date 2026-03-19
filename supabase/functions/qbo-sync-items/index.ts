@@ -357,14 +357,21 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (existingByCode && existingByCode.qbo_item_id !== qboItemId) {
-        const { error } = await admin.from("sku").update({
+        const updatePayload: Record<string, any> = {
           qbo_item_id: qboItemId,
           qbo_parent_item_id: parentItemId,
           name: cleanQboName(item.Name ?? mpn),
           product_id: productId ?? existingByCode.product_id,
           active_flag: item.Active !== false,
           price: item.UnitPrice != null ? Number(item.UnitPrice) : existingByCode.price,
-        }).eq("id", existingByCode.id);
+        };
+        let { error } = await admin.from("sku").update(updatePayload).eq("id", existingByCode.id);
+
+        // Fallback: retry without qbo_parent_item_id if schema cache is stale
+        if (error && /qbo_parent_item_id|PGRST204/.test(error.message ?? "")) {
+          delete updatePayload.qbo_parent_item_id;
+          ({ error } = await admin.from("sku").update(updatePayload).eq("id", existingByCode.id));
+        }
 
         if (error) {
           console.error(`Link error for ${skuCode}:`, error.message);
