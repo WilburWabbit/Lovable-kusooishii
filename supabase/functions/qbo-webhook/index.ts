@@ -1077,12 +1077,13 @@ async function reconcileQtyOnHand(
     .maybeSingle();
   if (!sku) return null;
 
-  // Count available stock units for this SKU
+  // Count all allocatable stock units for this SKU (available + received + graded)
+  // Units in 'received' or 'graded' status are real stock that hasn't transitioned yet
   const { count: appAvailable } = await admin
     .from("stock_unit")
     .select("id", { count: "exact", head: true })
     .eq("sku_id", sku.id)
-    .eq("status", "available");
+    .in("status", ["available", "received", "graded"]);
 
   const available = appAvailable ?? 0;
   if (available === qboQty) return null; // already in sync
@@ -1090,13 +1091,13 @@ async function reconcileQtyOnHand(
   const correlationId = crypto.randomUUID();
 
   if (qboQty < available) {
-    // QBO has fewer — write off excess units (oldest first)
+    // QBO has fewer — write off excess units (oldest first, prefer 'available' status)
     const excess = available - qboQty;
     const { data: unitsToWriteOff } = await admin
       .from("stock_unit")
       .select("id, status, carrying_value, landed_cost")
       .eq("sku_id", sku.id)
-      .eq("status", "available")
+      .in("status", ["available", "received", "graded"])
       .order("created_at", { ascending: true })
       .limit(excess);
 

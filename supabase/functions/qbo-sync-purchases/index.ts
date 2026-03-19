@@ -325,7 +325,7 @@ async function autoProcessReceipt(
           sku_id: sku!.id,
           mpn,
           condition_grade: conditionGrade,
-          status: "received",
+          status: "available",
           landed_cost: landedCost,
           supplier_id: vendorName ?? null,
           inbound_receipt_line_id: line.id ?? null,
