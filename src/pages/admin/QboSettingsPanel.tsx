@@ -238,26 +238,47 @@ export function QboSettingsPanel() {
         const month = months[i];
         setSalesSyncProgress({ current: i + 1, total: months.length, month });
 
-        let data: Record<string, any>;
-        try {
-          data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", { month });
-        } catch {
-          // Direct call failed (function unreachable) — proxy through admin-data
-          data = await invokeWithAuth<Record<string, any>>("admin-data", {
-            action: "proxy-function",
-            function: "qbo-sync-sales",
-            body: { month },
-          });
-        }
-        if (data?.error) throw new Error(data.error);
+        // First invocation: land + process first chunk
+        let isFirstCall = true;
+        let hasMore = true;
 
-        totals.sales_created += data.sales_created ?? 0;
-        totals.sales_skipped += data.sales_skipped ?? 0;
-        totals.stock_matched += data.stock_matched ?? 0;
-        totals.stock_missing += data.stock_missing ?? 0;
-        totals.refunds_created += data.refunds_created ?? 0;
-        totals.refunds_skipped += data.refunds_skipped ?? 0;
-        totals.channel_listings_updated += data.channel_listings_updated ?? 0;
+        while (hasMore && !cancelSalesRef.current) {
+          let data: Record<string, any>;
+          try {
+            data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", {
+              month,
+              chunk_size: 25,
+              skip_landing: !isFirstCall, // Only land on first call per month
+            });
+          } catch {
+            data = await invokeWithAuth<Record<string, any>>("admin-data", {
+              action: "proxy-function",
+              function: "qbo-sync-sales",
+              body: { month, chunk_size: 25, skip_landing: !isFirstCall },
+            });
+          }
+          if (data?.error) throw new Error(data.error);
+
+          totals.sales_created += data.sales_created ?? 0;
+          totals.sales_skipped += data.sales_skipped ?? 0;
+          totals.stock_matched += data.stock_matched ?? 0;
+          totals.stock_missing += data.stock_missing ?? 0;
+          totals.refunds_created += data.refunds_created ?? 0;
+          totals.refunds_skipped += data.refunds_skipped ?? 0;
+          totals.channel_listings_updated += data.channel_listings_updated ?? 0;
+
+          hasMore = data.has_more === true;
+          isFirstCall = false;
+
+          // Update progress with remaining count
+          if (hasMore && data.remaining_pending) {
+            setSalesSyncProgress({
+              current: i + 1,
+              total: months.length,
+              month: `${month} (${data.remaining_pending} pending)`,
+            });
+          }
+        }
       }
 
       const parts: string[] = [];
