@@ -663,7 +663,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
-      const { data: newSku, error: skuErr } = await admin.from("sku").insert({
+      const skuInsertPayload: Record<string, any> = {
         product_id: productId,
         condition_grade: cg,
         sku_code: skuCode,
@@ -672,7 +672,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         active_flag: true,
         saleable_flag: !!productId,
         qbo_parent_item_id: lineParentItemId,
-      }).select("id").single();
+      };
+      let { data: newSku, error: skuErr } = await admin.from("sku").insert(skuInsertPayload).select("id").single();
+      // Fallback: retry without qbo_parent_item_id if schema cache is stale
+      if (skuErr && /qbo_parent_item_id|PGRST204/.test(skuErr.message ?? "")) {
+        delete skuInsertPayload.qbo_parent_item_id;
+        ({ data: newSku, error: skuErr } = await admin.from("sku").insert(skuInsertPayload).select("id").single());
+      }
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
     }
