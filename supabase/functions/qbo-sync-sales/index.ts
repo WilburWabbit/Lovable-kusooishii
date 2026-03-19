@@ -797,12 +797,20 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    // Parse request body for month parameter
+    // Parse request body for month parameter and chunk control
     let targetMonth: string | null = null;
+    let chunkSize = 25; // Process at most N receipts per invocation
+    let skipLanding = false; // If true, skip QBO fetch and only process pending landings
     try {
       const body = await req.json();
       if (body?.month && typeof body.month === "string") {
         targetMonth = body.month; // e.g. "2025-06"
+      }
+      if (body?.chunk_size && typeof body.chunk_size === "number") {
+        chunkSize = Math.min(Math.max(body.chunk_size, 1), 100);
+      }
+      if (body?.skip_landing === true) {
+        skipLanding = true;
       }
     } catch {
       // No body or invalid JSON — default to current month
@@ -860,41 +868,48 @@ Deno.serve(async (req) => {
     const dateFilter = `TxnDate >= '${monthStart}' AND TxnDate <= '${monthEnd}'`;
     console.log(`Processing sales for ${targetMonth} (${monthStart} → ${monthEnd})`);
 
-    // Fetch both entity types from QBO for this month
-    const [salesReceipts, refundReceipts] = await Promise.all([
-      queryQbo(baseUrl, accessToken, "SalesReceipt", dateFilter),
-      queryQbo(baseUrl, accessToken, "RefundReceipt", dateFilter),
-    ]);
+    // ── Phase 1: Land all raw payloads (skip if resuming a chunk) ──
+    if (!skipLanding) {
+      // Fetch both entity types from QBO for this month
+      const [salesReceipts, refundReceipts] = await Promise.all([
+        queryQbo(baseUrl, accessToken, "SalesReceipt", dateFilter),
+        queryQbo(baseUrl, accessToken, "RefundReceipt", dateFilter),
+      ]);
+      console.log(`Landing ${salesReceipts.length} sales receipts + ${refundReceipts.length} refund receipts (correlation: ${correlationId})`);
 
-    // ── Phase 1: Land all raw payloads ──
-    console.log(`Landing ${salesReceipts.length} sales receipts + ${refundReceipts.length} refund receipts (correlation: ${correlationId})`);
-
-    type LandingEntry = { receipt: any; landingId: string; alreadyCommitted: boolean; table: string };
-    const salesLanded: LandingEntry[] = [];
-    const refundsLanded: LandingEntry[] = [];
-
-    for (const sr of salesReceipts) {
-      try {
-        const result = await landSalesReceipt(supabaseAdmin, sr, correlationId);
-        salesLanded.push({ receipt: sr, ...result, table: "landing_raw_qbo_sales_receipt" });
-      } catch (err) {
-        console.error(`Failed to land SalesReceipt ${sr.Id}:`, err);
+      for (const sr of salesReceipts) {
+        try { await landSalesReceipt(supabaseAdmin, sr, correlationId); } catch (err) {
+          console.error(`Failed to land SalesReceipt ${sr.Id}:`, err);
+        }
+      }
+      for (const rr of refundReceipts) {
+        try { await landRefundReceipt(supabaseAdmin, rr, correlationId); } catch (err) {
+          console.error(`Failed to land RefundReceipt ${rr.Id}:`, err);
+        }
       }
     }
 
-    for (const rr of refundReceipts) {
-      try {
-        const result = await landRefundReceipt(supabaseAdmin, rr, correlationId);
-        refundsLanded.push({ receipt: rr, ...result, table: "landing_raw_qbo_refund_receipt" });
-      } catch (err) {
-        console.error(`Failed to land RefundReceipt ${rr.Id}:`, err);
-      }
-    }
+    // ── Phase 2: Process pending landings in bounded chunks ──
+    // Fetch pending sales receipts (limited to chunkSize)
+    const { data: pendingSales } = await supabaseAdmin
+      .from("landing_raw_qbo_sales_receipt")
+      .select("id, external_id, raw_payload, status")
+      .eq("status", "pending")
+      .order("received_at", { ascending: true })
+      .limit(chunkSize);
 
-    // ── Phase 2: Pre-fetch QBO items and land them ──
+    const { data: pendingRefunds } = await supabaseAdmin
+      .from("landing_raw_qbo_refund_receipt")
+      .select("id, external_id, raw_payload, status")
+      .eq("status", "pending")
+      .order("received_at", { ascending: true })
+      .limit(Math.max(chunkSize - (pendingSales?.length ?? 0), 5));
+
+    // Pre-fetch QBO items for this chunk
     const uniqueItemIds = new Set<string>();
-    for (const receipt of [...salesReceipts, ...refundReceipts]) {
-      for (const line of (receipt.Line ?? [])) {
+    for (const entry of [...(pendingSales ?? []), ...(pendingRefunds ?? [])]) {
+      const receipt = entry.raw_payload as any;
+      for (const line of (receipt?.Line ?? [])) {
         if (line.DetailType === "SalesItemLineDetail" && line.SalesItemLineDetail?.ItemRef?.value) {
           uniqueItemIds.add(line.SalesItemLineDetail.ItemRef.value);
         }
@@ -911,18 +926,15 @@ Deno.serve(async (req) => {
         await new Promise(r => setTimeout(r, 300));
       }
     }
-    console.log(`Pre-fetched ${itemCache.size} QBO items for sales sync`);
 
-    // Land all fetched QBO items
+    // Land fetched QBO items
     for (const [, item] of itemCache) {
       if (item) {
-        try { await landQboItem(supabaseAdmin, item, correlationId); } catch (err) {
-          console.error(`Failed to land QBO item ${item?.Id}:`, err);
-        }
+        try { await landQboItem(supabaseAdmin, item, correlationId); } catch {}
       }
     }
 
-    // ── Phase 3: Process from landing into canonical tables ──
+    // ── Phase 3: Process sales from landing into canonical tables ──
     let salesCreated = 0;
     let salesSkipped = 0;
     let salesNoItems = 0;
@@ -931,11 +943,8 @@ Deno.serve(async (req) => {
     let totalSalesLines = 0;
     const affectedSkuIds = new Set<string>();
 
-    for (const { receipt: sr, landingId, alreadyCommitted, table } of salesLanded) {
-      if (alreadyCommitted) {
-        salesSkipped++;
-        continue;
-      }
+    for (const entry of (pendingSales ?? [])) {
+      const sr = entry.raw_payload as any;
       try {
         const result = await processSalesReceipt(supabaseAdmin, sr, itemCache, baseUrl, accessToken, affectedSkuIds);
         if (result.created) {
@@ -943,22 +952,21 @@ Deno.serve(async (req) => {
           totalSalesLines += result.linesCreated;
           totalStockMatched += result.stockMatched;
           totalStockMissing += result.stockMissing;
-          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
+          await markLandingStatus(supabaseAdmin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
         } else if (!result.created) {
-          // Cross-channel dedup or no-item skip — still count any reconciled stock
           totalStockMatched += result.stockMatched;
           const hasItems = (sr.Line ?? []).some((l: any) => l.DetailType === "SalesItemLineDetail");
           if (hasItems) {
             salesSkipped++;
-            await markLandingStatus(supabaseAdmin, table, landingId, "committed"); // Already exists in canonical
+            await markLandingStatus(supabaseAdmin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
           } else {
             salesNoItems++;
-            await markLandingStatus(supabaseAdmin, table, landingId, "skipped");
+            await markLandingStatus(supabaseAdmin, "landing_raw_qbo_sales_receipt", entry.id, "skipped");
           }
         }
       } catch (err) {
-        console.error(`Failed to process SalesReceipt ${sr.Id}:`, err);
-        await markLandingStatus(supabaseAdmin, table, landingId, "error", err instanceof Error ? err.message : "Unknown");
+        console.error(`Failed to process SalesReceipt ${entry.external_id}:`, err);
+        await markLandingStatus(supabaseAdmin, "landing_raw_qbo_sales_receipt", entry.id, "error", err instanceof Error ? err.message : "Unknown");
       }
     }
 
@@ -966,26 +974,30 @@ Deno.serve(async (req) => {
     let refundsSkipped = 0;
     let totalRefundLines = 0;
 
-    for (const { receipt: rr, landingId, alreadyCommitted, table } of refundsLanded) {
-      if (alreadyCommitted) {
-        refundsSkipped++;
-        continue;
-      }
+    for (const entry of (pendingRefunds ?? [])) {
+      const rr = entry.raw_payload as any;
       try {
         const result = await processRefundReceipt(supabaseAdmin, rr, itemCache, baseUrl, accessToken);
         if (result.created) {
           refundsCreated++;
           totalRefundLines += result.linesCreated;
-          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
+          await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "committed");
         } else {
           refundsSkipped++;
-          await markLandingStatus(supabaseAdmin, table, landingId, "committed");
+          await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "committed");
         }
       } catch (err) {
-        console.error(`Failed to process RefundReceipt ${rr.Id}:`, err);
-        await markLandingStatus(supabaseAdmin, table, landingId, "error", err instanceof Error ? err.message : "Unknown");
+        console.error(`Failed to process RefundReceipt ${entry.external_id}:`, err);
+        await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "error", err instanceof Error ? err.message : "Unknown");
       }
     }
+
+    // Check remaining pending count to signal has_more
+    const [{ count: remainingSales }, { count: remainingRefunds }] = await Promise.all([
+      supabaseAdmin.from("landing_raw_qbo_sales_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      supabaseAdmin.from("landing_raw_qbo_refund_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    ]);
+    const remainingPending = (remainingSales ?? 0) + (remainingRefunds ?? 0);
 
     // ── Phase 4: Update channel listings for affected SKUs ──
     let channelListingsUpdated = 0;
@@ -1023,21 +1035,20 @@ Deno.serve(async (req) => {
         success: true,
         month: targetMonth,
         correlation_id: correlationId,
-        sales_receipts: salesReceipts.length,
-        sales_landed: salesLanded.length,
         sales_created: salesCreated,
         sales_skipped: salesSkipped,
         sales_no_items: salesNoItems,
         sales_lines: totalSalesLines,
         stock_matched: totalStockMatched,
         stock_missing: totalStockMissing,
-        refund_receipts: refundReceipts.length,
-        refunds_landed: refundsLanded.length,
         refunds_created: refundsCreated,
         refunds_skipped: refundsSkipped,
         refund_lines: totalRefundLines,
         items_cached: itemCache.size,
         channel_listings_updated: channelListingsUpdated,
+        has_more: remainingPending > 0,
+        remaining_pending: remainingPending,
+        processed_count: (pendingSales?.length ?? 0) + (pendingRefunds?.length ?? 0),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

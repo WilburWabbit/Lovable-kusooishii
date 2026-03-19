@@ -663,7 +663,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
 
     let { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
     if (!sku) {
-      const { data: newSku, error: skuErr } = await admin.from("sku").insert({
+      const skuInsertPayload: Record<string, any> = {
         product_id: productId,
         condition_grade: cg,
         sku_code: skuCode,
@@ -672,7 +672,13 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         active_flag: true,
         saleable_flag: !!productId,
         qbo_parent_item_id: lineParentItemId,
-      }).select("id").single();
+      };
+      let { data: newSku, error: skuErr } = await admin.from("sku").insert(skuInsertPayload).select("id").single();
+      // Fallback: retry without qbo_parent_item_id if schema cache is stale
+      if (skuErr && /qbo_parent_item_id|PGRST204/.test(skuErr.message ?? "")) {
+        delete skuInsertPayload.qbo_parent_item_id;
+        ({ data: newSku, error: skuErr } = await admin.from("sku").insert(skuInsertPayload).select("id").single());
+      }
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
     }
@@ -1288,19 +1294,25 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
 
   if (existingByCode && existingByCode.qbo_item_id !== qboItemId) {
     // Link the existing SKU to this QBO item ID
-    await admin.from("sku").update({
+    const linkPayload: Record<string, any> = {
       qbo_item_id: qboItemId,
       qbo_parent_item_id: parentItemId,
       name: cleanQboName(item.Name ?? mpn),
       product_id: productId ?? existingByCode.product_id,
       active_flag: item.Active !== false,
       price: item.UnitPrice != null ? Number(item.UnitPrice) : existingByCode.price,
-    }).eq("id", existingByCode.id);
+    };
+    let linkResult = await admin.from("sku").update(linkPayload).eq("id", existingByCode.id);
+    // Fallback: retry without qbo_parent_item_id if schema cache is stale
+    if (linkResult.error && /qbo_parent_item_id|PGRST204/.test(linkResult.error.message ?? "")) {
+      delete linkPayload.qbo_parent_item_id;
+      linkResult = await admin.from("sku").update(linkPayload).eq("id", existingByCode.id);
+    }
     return `item ${entityId} linked to existing SKU ${skuCode}`;
   }
 
   // Upsert SKU (now safe — unique index on qbo_item_id exists)
-  const { error } = await admin.from("sku").upsert({
+  const upsertPayload: Record<string, any> = {
     qbo_item_id: qboItemId,
     qbo_parent_item_id: parentItemId,
     sku_code: skuCode,
@@ -1310,7 +1322,13 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     active_flag: item.Active !== false,
     saleable_flag: !!productId,
     price: item.UnitPrice != null ? Number(item.UnitPrice) : null,
-  }, { onConflict: "qbo_item_id" });
+  };
+  let { error } = await admin.from("sku").upsert(upsertPayload, { onConflict: "qbo_item_id" });
+  // Fallback: retry without qbo_parent_item_id if schema cache is stale
+  if (error && /qbo_parent_item_id|PGRST204/.test(error.message ?? "")) {
+    delete upsertPayload.qbo_parent_item_id;
+    ({ error } = await admin.from("sku").upsert(upsertPayload, { onConflict: "qbo_item_id" }));
+  }
 
   if (error) return `item ${entityId} upsert error: ${error.message}`;
 
