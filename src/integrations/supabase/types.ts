@@ -1527,6 +1527,12 @@ export type Database = {
           origin_channel: string
           origin_reference: string | null
           payment_reference: string | null
+          qbo_customer_id: string | null
+          qbo_last_attempt_at: string | null
+          qbo_last_error: string | null
+          qbo_retry_count: number | null
+          qbo_sales_receipt_id: string | null
+          qbo_sync_status: string | null
           shipped_date: string | null
           shipped_via: string | null
           shipping_city: string
@@ -1564,6 +1570,12 @@ export type Database = {
           origin_channel?: string
           origin_reference?: string | null
           payment_reference?: string | null
+          qbo_customer_id?: string | null
+          qbo_last_attempt_at?: string | null
+          qbo_last_error?: string | null
+          qbo_retry_count?: number | null
+          qbo_sales_receipt_id?: string | null
+          qbo_sync_status?: string | null
           shipped_date?: string | null
           shipped_via?: string | null
           shipping_city?: string
@@ -1601,6 +1613,12 @@ export type Database = {
           origin_channel?: string
           origin_reference?: string | null
           payment_reference?: string | null
+          qbo_customer_id?: string | null
+          qbo_last_attempt_at?: string | null
+          qbo_last_error?: string | null
+          qbo_retry_count?: number | null
+          qbo_sales_receipt_id?: string | null
+          qbo_sync_status?: string | null
           shipped_date?: string | null
           shipped_via?: string | null
           shipping_city?: string
