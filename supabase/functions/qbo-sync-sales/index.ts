@@ -331,7 +331,7 @@ async function processSalesReceipt(
   const qboId = String(receipt.Id);
   const originChannel = "qbo";
 
-  // ── Same-channel dedup: already imported as QBO? ──
+  // ── Same-channel dedup: already imported as QBO? Delete-and-recreate to capture updates ──
   const { data: existing } = await supabaseAdmin
     .from("sales_order")
     .select("id")
@@ -339,7 +339,21 @@ async function processSalesReceipt(
     .eq("origin_reference", qboId)
     .maybeSingle();
 
-  if (existing) return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+  if (existing) {
+    // Reopen stock units linked to old order lines
+    const { data: oldLines } = await supabaseAdmin
+      .from("sales_order_line")
+      .select("stock_unit_id")
+      .eq("sales_order_id", existing.id);
+    for (const ol of (oldLines ?? [])) {
+      if (ol.stock_unit_id) {
+        await supabaseAdmin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
+      }
+    }
+    await supabaseAdmin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
+    await supabaseAdmin.from("sales_order").delete().eq("id", existing.id);
+    console.log(`Deleted existing QBO order ${existing.id} for re-creation (SalesReceipt ${qboId})`);
+  }
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
   const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
