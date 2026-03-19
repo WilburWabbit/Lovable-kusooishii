@@ -214,7 +214,17 @@ export function QboSettingsPanel() {
         const month = months[i];
         setSalesSyncProgress({ current: i + 1, total: months.length, month });
 
-        const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", { month });
+        let data: Record<string, any>;
+        try {
+          data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", { month });
+        } catch {
+          // Direct call failed (function unreachable) — proxy through admin-data
+          data = await invokeWithAuth<Record<string, any>>("admin-data", {
+            action: "proxy-function",
+            function: "qbo-sync-sales",
+            body: { month },
+          });
+        }
         if (data?.error) throw new Error(data.error);
 
         totals.sales_created += data.sales_created ?? 0;

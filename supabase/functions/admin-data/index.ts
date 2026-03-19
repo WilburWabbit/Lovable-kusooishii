@@ -1542,6 +1542,42 @@ Deno.serve(async (req) => {
         details,
       };
 
+    } else if (action === "proxy-function") {
+      // Server-side proxy for Edge Functions that are unreachable from the browser
+      // (e.g. CORS preflight failure due to cold-start or deployment issues).
+      const fnName = params.function;
+      if (!fnName || typeof fnName !== "string") throw new ValidationError("Missing 'function' parameter");
+
+      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-tax-rates"];
+      if (!allowed.includes(fnName)) throw new ValidationError(`Function '${fnName}' not allowed for proxying`);
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const fnUrl = `${supabaseUrl}/functions/v1/${fnName}`;
+      const fnBody = params.body ?? {};
+
+      const fnRes = await fetch(fnUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+          apikey: serviceRoleKey,
+          "x-webhook-trigger": "true",
+        },
+        body: JSON.stringify(fnBody),
+      });
+
+      if (!fnRes.ok) {
+        let detail = `HTTP ${fnRes.status}`;
+        try {
+          const errPayload = await fnRes.json();
+          detail = errPayload?.error ?? errPayload?.message ?? detail;
+        } catch { /* not JSON */ }
+        throw new Error(`${fnName} failed: ${detail}`);
+      }
+
+      result = await fnRes.json();
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
