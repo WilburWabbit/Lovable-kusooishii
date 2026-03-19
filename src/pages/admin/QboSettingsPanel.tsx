@@ -208,6 +208,7 @@ export function QboSettingsPanel() {
       if (data.refunds_created) parts.push(`${data.refunds_created} refunds imported`);
       if (data.refunds_skipped) parts.push(`${data.refunds_skipped} refunds unchanged`);
       if (data.vat_backfilled) parts.push(`${data.vat_backfilled} VAT codes backfilled`);
+      if (data.channel_listings_updated) parts.push(`${data.channel_listings_updated} channel listings updated`);
       toast({
         title: "Sales sync complete",
         description: parts.length > 0 ? parts.join(", ") + "." : "No new records.",

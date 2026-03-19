@@ -120,16 +120,35 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
 }
 
 async function queryQbo(baseUrl: string, accessToken: string, entity: string): Promise<any[]> {
-  const query = encodeURIComponent(`SELECT * FROM ${entity} MAXRESULTS 1000`);
-  const res = await fetchWithTimeout(`${baseUrl}/query?query=${query}`, {
-    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-  });
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`QBO ${entity} query failed [${res.status}]: ${errBody}`);
+  const PAGE_SIZE = 1000;
+  let startPosition = 1;
+  const allResults: any[] = [];
+
+  while (true) {
+    const query = encodeURIComponent(
+      `SELECT * FROM ${entity} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`
+    );
+    const res = await fetchWithTimeout(`${baseUrl}/query?query=${query}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`QBO ${entity} query failed [${res.status}]: ${errBody}`);
+    }
+    const data = await res.json();
+    const page = data?.QueryResponse?.[entity] ?? [];
+    allResults.push(...page);
+
+    if (page.length < PAGE_SIZE) break; // last page
+    startPosition += PAGE_SIZE;
+
+    // Safety: avoid infinite loops (cap at 10k records)
+    if (allResults.length >= 10_000) {
+      console.warn(`QBO ${entity} query capped at ${allResults.length} records`);
+      break;
+    }
   }
-  const data = await res.json();
-  return data?.QueryResponse?.[entity] ?? [];
+  return allResults;
 }
 
 async function resolveVatRateId(
@@ -252,12 +271,58 @@ async function markLandingStatus(
   await supabaseAdmin.from(table).update(update).eq("id", landingId);
 }
 
+/** Close any unclosed stock for an existing order's lines (reconciliation) */
+async function reconcileStockForOrder(
+  supabaseAdmin: any,
+  orderId: string,
+  affectedSkuIds: Set<string>
+): Promise<{ closed: number }> {
+  // Find order lines that have no stock_unit_id linked
+  const { data: unlinkedLines } = await supabaseAdmin
+    .from("sales_order_line")
+    .select("id, sku_id, quantity")
+    .eq("sales_order_id", orderId)
+    .is("stock_unit_id", null);
+
+  let closed = 0;
+  for (const line of (unlinkedLines ?? [])) {
+    for (let i = 0; i < (line.quantity ?? 1); i++) {
+      const { data: stockUnit } = await supabaseAdmin
+        .from("stock_unit")
+        .select("id")
+        .eq("sku_id", line.sku_id)
+        .in("status", ["available", "received", "graded"])
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (stockUnit) {
+        const { error: closeErr } = await supabaseAdmin
+          .from("stock_unit")
+          .update({ status: "closed" })
+          .eq("id", stockUnit.id);
+        if (!closeErr) {
+          // Link the stock unit to the order line
+          await supabaseAdmin
+            .from("sales_order_line")
+            .update({ stock_unit_id: stockUnit.id })
+            .eq("id", line.id);
+          closed++;
+          affectedSkuIds.add(line.sku_id);
+        }
+      }
+    }
+  }
+  return { closed };
+}
+
 async function processSalesReceipt(
   supabaseAdmin: any,
   receipt: any,
   itemCache: Map<string, any>,
   baseUrl: string,
-  accessToken: string
+  accessToken: string,
+  affectedSkuIds: Set<string>
 ): Promise<{ created: boolean; linesCreated: number; stockMatched: number; stockMissing: number }> {
   const qboId = String(receipt.Id);
   const originChannel = "qbo";
@@ -315,66 +380,80 @@ async function processSalesReceipt(
   // with QBO IDs instead of duplicating it.
   const docNumber = receipt.DocNumber ?? null;
   if (docNumber) {
-    // Check eBay orders (DocNumber = eBay order ID = origin_reference)
-    const { data: ebayOrder } = await supabaseAdmin
+    // Check by origin_reference (DocNumber = eBay order ID) or doc_number
+    // (DocNumber = app order_number like KO-0000123) across all channels
+    let matchedOrder: { id: string; qbo_sync_status: string } | null = null;
+    let matchChannel = "";
+
+    // 1. Check eBay by origin_reference (works when DocNumber = eBay order ID)
+    const { data: ebayByRef } = await supabaseAdmin
       .from("sales_order")
       .select("id, qbo_sync_status")
       .eq("origin_channel", "ebay")
       .eq("origin_reference", docNumber)
       .maybeSingle();
 
-    if (ebayOrder) {
+    if (ebayByRef) {
+      matchedOrder = ebayByRef;
+      matchChannel = "ebay";
+    }
+
+    // 2. Check any channel by doc_number (works when DocNumber = KO-number)
+    if (!matchedOrder) {
+      const { data: byDocNumber } = await supabaseAdmin
+        .from("sales_order")
+        .select("id, qbo_sync_status")
+        .eq("doc_number", docNumber)
+        .neq("origin_channel", "qbo")
+        .maybeSingle();
+
+      if (byDocNumber) {
+        matchedOrder = byDocNumber;
+        matchChannel = "doc_number";
+      }
+    }
+
+    // 3. Check any channel by order_number (DocNumber might be the KO-number)
+    if (!matchedOrder) {
+      const { data: byOrderNumber } = await supabaseAdmin
+        .from("sales_order")
+        .select("id, qbo_sync_status")
+        .eq("order_number", docNumber)
+        .neq("origin_channel", "qbo")
+        .maybeSingle();
+
+      if (byOrderNumber) {
+        matchedOrder = byOrderNumber;
+        matchChannel = "order_number";
+      }
+    }
+
+    if (matchedOrder) {
       const enrichFields: Record<string, any> = {
         doc_number: docNumber,
         global_tax_calculation: globalTaxCalc,
         qbo_sales_receipt_id: qboId,
         qbo_customer_id: customerRefValue,
       };
-      if (ebayOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
+      if (matchedOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
       if (customerId) enrichFields.customer_id = customerId;
       if (taxTotal) enrichFields.tax_total = taxTotal;
 
-      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", ebayOrder.id);
+      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", matchedOrder.id);
 
       if (vatRateId) {
         await supabaseAdmin.from("sales_order_line")
           .update({ vat_rate_id: vatRateId })
-          .eq("sales_order_id", ebayOrder.id)
+          .eq("sales_order_id", matchedOrder.id)
           .is("vat_rate_id", null);
       }
 
-      console.log(`Cross-channel dedup: enriched eBay order ${ebayOrder.id} with QBO data (DocNumber ${docNumber})`);
-      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
-    }
+      // Reconcile stock — close any unclosed stock for this order's lines
+      const reconciled = await reconcileStockForOrder(supabaseAdmin, matchedOrder.id, affectedSkuIds);
+      const stockNote = reconciled.closed > 0 ? `, reconciled ${reconciled.closed} stock units` : "";
 
-    // Check web orders (DocNumber = order_number e.g. KO-0000123)
-    const { data: webOrder } = await supabaseAdmin
-      .from("sales_order")
-      .select("id, qbo_sync_status")
-      .eq("origin_channel", "web")
-      .eq("doc_number", docNumber)
-      .maybeSingle();
-
-    if (webOrder) {
-      const enrichFields: Record<string, any> = {
-        global_tax_calculation: globalTaxCalc,
-        qbo_sales_receipt_id: qboId,
-        qbo_customer_id: customerRefValue,
-      };
-      if (webOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
-      if (customerId) enrichFields.customer_id = customerId;
-
-      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", webOrder.id);
-
-      if (vatRateId) {
-        await supabaseAdmin.from("sales_order_line")
-          .update({ vat_rate_id: vatRateId })
-          .eq("sales_order_id", webOrder.id)
-          .is("vat_rate_id", null);
-      }
-
-      console.log(`Cross-channel dedup: enriched web order ${webOrder.id} with QBO data (DocNumber ${docNumber})`);
-      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+      console.log(`Cross-channel dedup (${matchChannel}): enriched order ${matchedOrder.id} with QBO data (DocNumber ${docNumber})${stockNote}`);
+      return { created: false, linesCreated: 0, stockMatched: reconciled.closed, stockMissing: 0 };
     }
   }
 
@@ -421,11 +500,11 @@ async function processSalesReceipt(
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
 
-    // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField)) {
-      skuCode = String(skuField);
+    // Use raw QBO SKU as sku_code (trimmed to match purchase sync storage)
+    if (skuField && String(skuField).trim()) {
+      skuCode = String(skuField).trim();
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name);
+      skuCode = String(detail.ItemRef.name).trim();
     }
 
     let skuId: string | null = null;
@@ -434,7 +513,7 @@ async function processSalesReceipt(
         .from("sku")
         .select("id")
         .eq("sku_code", skuCode)
-        .single();
+        .maybeSingle();
       skuId = sku?.id ?? null;
     }
 
@@ -443,25 +522,27 @@ async function processSalesReceipt(
       continue;
     }
 
+    // Resolve tax code once per item line (not per unit)
+    let lineTaxCodeId: string | null = null;
+    if (taxCodeRef) {
+      const { data: tc } = await supabaseAdmin
+        .from("tax_code")
+        .select("id")
+        .eq("qbo_tax_code_id", String(taxCodeRef))
+        .maybeSingle();
+      lineTaxCodeId = tc?.id ?? null;
+    }
+
     for (let i = 0; i < qty; i++) {
+      // Match stock in any pre-sale status (sale already happened in QBO)
       const { data: stockUnit } = await supabaseAdmin
         .from("stock_unit")
-        .select("id")
+        .select("id, status")
         .eq("sku_id", skuId)
-        .eq("status", "available")
+        .in("status", ["available", "received", "graded"])
         .order("created_at", { ascending: true })
         .limit(1)
-        .single();
-
-      let lineTaxCodeId: string | null = null;
-      if (taxCodeRef) {
-        const { data: tc } = await supabaseAdmin
-          .from("tax_code")
-          .select("id")
-          .eq("qbo_tax_code_id", String(taxCodeRef))
-          .maybeSingle();
-        lineTaxCodeId = tc?.id ?? null;
-      }
+        .maybeSingle();
 
       const { error: lineErr } = await supabaseAdmin
         .from("sales_order_line")
@@ -485,11 +566,17 @@ async function processSalesReceipt(
       linesCreated++;
 
       if (stockUnit) {
-        await supabaseAdmin
+        const { error: closeErr } = await supabaseAdmin
           .from("stock_unit")
           .update({ status: "closed" })
           .eq("id", stockUnit.id);
-        stockMatched++;
+        if (closeErr) {
+          console.error(`Failed to close stock unit ${stockUnit.id}:`, closeErr);
+        } else {
+          stockMatched++;
+          // Track affected SKU for channel updates
+          affectedSkuIds.add(skuId);
+        }
       } else {
         console.warn(`No available stock for SKU ${skuCode}, order line created without stock unit`);
         stockMissing++;
@@ -597,11 +684,11 @@ async function processRefundReceipt(
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
 
-    // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField)) {
-      skuCode = String(skuField);
+    // Use raw QBO SKU as sku_code (trimmed to match purchase sync storage)
+    if (skuField && String(skuField).trim()) {
+      skuCode = String(skuField).trim();
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name);
+      skuCode = String(detail.ItemRef.name).trim();
     }
 
     let skuId: string | null = null;
@@ -610,7 +697,7 @@ async function processRefundReceipt(
         .from("sku")
         .select("id")
         .eq("sku_code", skuCode)
-        .single();
+        .maybeSingle();
       skuId = sku?.id ?? null;
     }
 
@@ -764,6 +851,7 @@ Deno.serve(async (req) => {
     let totalStockMatched = 0;
     let totalStockMissing = 0;
     let totalSalesLines = 0;
+    const affectedSkuIds = new Set<string>();
 
     for (const { receipt: sr, landingId, alreadyCommitted, table } of salesLanded) {
       if (alreadyCommitted) {
@@ -771,7 +859,7 @@ Deno.serve(async (req) => {
         continue;
       }
       try {
-        const result = await processSalesReceipt(supabaseAdmin, sr, itemCache, baseUrl, accessToken);
+        const result = await processSalesReceipt(supabaseAdmin, sr, itemCache, baseUrl, accessToken, affectedSkuIds);
         if (result.created) {
           salesCreated++;
           totalSalesLines += result.linesCreated;
@@ -879,11 +967,11 @@ Deno.serve(async (req) => {
               const skuField = qboItem?.Sku;
               let skuCode: string | null = null;
 
-              // Use raw QBO SKU verbatim as sku_code
-              if (skuField && String(skuField)) {
-                skuCode = String(skuField);
+              // Use raw QBO SKU as sku_code (trimmed to match purchase sync)
+              if (skuField && String(skuField).trim()) {
+                skuCode = String(skuField).trim();
               } else if (detail.ItemRef?.name) {
-                skuCode = String(detail.ItemRef.name);
+                skuCode = String(detail.ItemRef.name).trim();
               }
 
               if (!skuCode) continue;
@@ -921,6 +1009,37 @@ Deno.serve(async (req) => {
       console.error("VAT backfill error:", backfillErr);
     }
 
+    // ── Phase 5: Update channel listings for affected SKUs ──
+    let channelListingsUpdated = 0;
+    if (affectedSkuIds.size > 0) {
+      try {
+        for (const skuId of affectedSkuIds) {
+          // Count remaining available stock for this SKU
+          const { count: availableCount } = await supabaseAdmin
+            .from("stock_unit")
+            .select("id", { count: "exact", head: true })
+            .eq("sku_id", skuId)
+            .eq("status", "available");
+
+          const newQty = availableCount ?? 0;
+
+          // Update all channel listings for this SKU
+          const { data: updatedListings } = await supabaseAdmin
+            .from("channel_listing")
+            .update({ listed_quantity: newQty, synced_at: new Date().toISOString() })
+            .eq("sku_id", skuId)
+            .select("id");
+
+          channelListingsUpdated += (updatedListings?.length ?? 0);
+        }
+        if (channelListingsUpdated > 0) {
+          console.log(`Updated ${channelListingsUpdated} channel listings for ${affectedSkuIds.size} affected SKUs`);
+        }
+      } catch (channelErr) {
+        console.error("Channel listing update error:", channelErr);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -940,6 +1059,7 @@ Deno.serve(async (req) => {
         refund_lines: totalRefundLines,
         items_cached: itemCache.size,
         vat_backfilled: vatBackfilled,
+        channel_listings_updated: channelListingsUpdated,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
