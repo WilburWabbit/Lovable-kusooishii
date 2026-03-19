@@ -216,6 +216,7 @@ async function autoProcessReceipt(
     unit_cost: number;
     description?: string | null;
     sku_code?: string | null;
+    qbo_item_id?: string | null;
   }>
 ): Promise<{ processed: boolean; skipped: string[] }> {
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
@@ -259,6 +260,8 @@ async function autoProcessReceipt(
       .eq("sku_code", skuCode)
       .single();
 
+    const qboItemId = line.qbo_item_id ?? null;
+
     if (!sku) {
       const { data: newSku, error: skuErr } = await supabaseAdmin
         .from("sku")
@@ -270,11 +273,19 @@ async function autoProcessReceipt(
           price: landedCost,
           active_flag: true,
           saleable_flag: !!product,
+          qbo_item_id: qboItemId,
         })
         .select("id")
         .single();
       if (skuErr) throw skuErr;
       sku = newSku;
+    } else if (qboItemId) {
+      // Backfill qbo_item_id on existing SKUs that don't have it yet
+      await supabaseAdmin
+        .from("sku")
+        .update({ qbo_item_id: qboItemId })
+        .eq("id", sku.id)
+        .is("qbo_item_id", null);
     }
 
     let existingCount = 0;

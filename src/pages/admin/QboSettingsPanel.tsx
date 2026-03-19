@@ -232,7 +232,8 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("admin-data", { action: "reconcile-stock" });
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
-      parts.push(`${data.total_checked} SKUs checked`);
+      if (data.stock_closed) parts.push(`${data.stock_closed} sold units closed`);
+      parts.push(`${data.total_checked ?? 0} SKUs checked`);
       if (data.in_sync) parts.push(`${data.in_sync} in sync`);
       if (data.written_off) parts.push(`${data.written_off} units written off`);
       if (data.discrepancies) parts.push(`${data.discrepancies} discrepancies (QBO higher)`);
