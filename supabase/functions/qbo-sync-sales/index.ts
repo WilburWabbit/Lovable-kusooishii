@@ -1011,52 +1011,66 @@ Deno.serve(async (req) => {
       console.error("VAT backfill error:", backfillErr);
     }
 
-    // ── Phase 4b: Stock reconciliation for ALL orders with unlinked lines ──
-    // Runs every sync regardless of landing status. Covers cases where stock
-    // was created (by purchase sync) AFTER the sales order was committed.
+    // ── Phase 4b: Stock reconciliation for CONFIRMED sales with unlinked lines ──
+    // Only process lines from orders in completed/paid/shipped status.
     let stockReconciled = 0;
     const RECONCILE_TIME_BUDGET_MS = 30_000;
     const reconcileStart = Date.now();
     try {
-      // Query unlinked order lines directly — any line without a stock_unit_id
-      // on a completed sale is a candidate for reconciliation
-      const { data: unlinkedLines } = await supabaseAdmin
-        .from("sales_order_line")
-        .select("id, sales_order_id, sku_id, quantity")
-        .is("stock_unit_id", null)
-        .limit(200);
+      const validStatuses = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
+      const { data: validOrders } = await supabaseAdmin
+        .from("sales_order")
+        .select("id")
+        .in("status", validStatuses);
 
-      if (unlinkedLines && unlinkedLines.length > 0) {
-        console.log(`Stock reconciliation: found ${unlinkedLines.length} unlinked order lines`);
+      const validOrderIds = (validOrders ?? []).map((o: any) => o.id);
 
-        for (const line of unlinkedLines) {
+      if (validOrderIds.length > 0) {
+        const BATCH = 100;
+        for (let b = 0; b < validOrderIds.length; b += BATCH) {
           if (Date.now() - reconcileStart > RECONCILE_TIME_BUDGET_MS) {
             console.warn("Stock reconciliation time budget exceeded, stopping");
             break;
           }
+          const batchIds = validOrderIds.slice(b, b + BATCH);
+          const { data: unlinkedLines } = await supabaseAdmin
+            .from("sales_order_line")
+            .select("id, sku_id, quantity")
+            .in("sales_order_id", batchIds)
+            .is("stock_unit_id", null);
 
-          for (let i = 0; i < (line.quantity ?? 1); i++) {
-            const { data: stockUnit } = await supabaseAdmin
-              .from("stock_unit")
-              .select("id")
-              .eq("sku_id", line.sku_id)
-              .in("status", ["available", "received", "graded"])
-              .order("created_at", { ascending: true })
-              .limit(1)
-              .maybeSingle();
+          if (unlinkedLines && unlinkedLines.length > 0) {
+            console.log(`Stock reconciliation: found ${unlinkedLines.length} unlinked order lines`);
 
-            if (stockUnit) {
-              const { error: closeErr } = await supabaseAdmin
-                .from("stock_unit")
-                .update({ status: "closed" })
-                .eq("id", stockUnit.id);
-              if (!closeErr) {
-                await supabaseAdmin
-                  .from("sales_order_line")
-                  .update({ stock_unit_id: stockUnit.id })
-                  .eq("id", line.id);
-                stockReconciled++;
-                affectedSkuIds.add(line.sku_id);
+            for (const line of unlinkedLines) {
+              if (Date.now() - reconcileStart > RECONCILE_TIME_BUDGET_MS) break;
+
+              for (let i = 0; i < (line.quantity ?? 1); i++) {
+                const { data: stockUnit } = await supabaseAdmin
+                  .from("stock_unit")
+                  .select("id")
+                  .eq("sku_id", line.sku_id)
+                  .in("status", ["available", "received", "graded"])
+                  .order("created_at", { ascending: true })
+                  .limit(1)
+                  .maybeSingle();
+
+                if (stockUnit) {
+                  const { error: closeErr } = await supabaseAdmin
+                    .from("stock_unit")
+                    .update({ status: "closed" })
+                    .eq("id", stockUnit.id);
+                  if (!closeErr) {
+                    if ((line.quantity ?? 1) === 1) {
+                      await supabaseAdmin
+                        .from("sales_order_line")
+                        .update({ stock_unit_id: stockUnit.id })
+                        .eq("id", line.id);
+                    }
+                    stockReconciled++;
+                    affectedSkuIds.add(line.sku_id);
+                  }
+                }
               }
             }
           }
