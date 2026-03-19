@@ -213,16 +213,22 @@ async function landRefundReceipt(
 
   const { data: existing } = await supabaseAdmin
     .from("landing_raw_qbo_refund_receipt")
-    .select("id, status")
+    .select("id, status, raw_payload")
     .eq("external_id", externalId)
     .maybeSingle();
 
   if (existing) {
+    const oldPayload = JSON.stringify(existing.raw_payload);
+    const newPayload = JSON.stringify(receipt);
+    const payloadChanged = oldPayload !== newPayload;
+
+    const newStatus = (payloadChanged && existing.status === "committed") ? "pending" : existing.status;
+
     await supabaseAdmin
       .from("landing_raw_qbo_refund_receipt")
-      .update({ raw_payload: receipt, received_at: new Date().toISOString() })
+      .update({ raw_payload: receipt, received_at: new Date().toISOString(), status: newStatus })
       .eq("id", existing.id);
-    return { landingId: existing.id, alreadyCommitted: existing.status === "committed" };
+    return { landingId: existing.id, alreadyCommitted: newStatus === "committed" };
   }
 
   const { data: landing, error } = await supabaseAdmin
