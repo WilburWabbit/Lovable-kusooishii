@@ -1258,9 +1258,9 @@ Deno.serve(async (req) => {
       result = { ...data, theme_name: (data as any).theme?.name ?? null, theme: undefined };
 
     } else if (action === "reconcile-stock") {
-      // ── Reconcile app stock_unit counts against QBO QtyOnHand ──
-      // Fetches all Inventory items from QBO, compares with app's available
-      // stock_unit count per SKU, and writes off excess units where QBO is lower.
+      // ── Reconcile stock: first close sold stock, then compare counts with QBO ──
+      // Step A: Find sales order lines without linked stock and match available stock (FIFO)
+      // Step B: Compare remaining app counts against QBO QtyOnHand
       const clientId = Deno.env.get("QBO_CLIENT_ID");
       const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
       const realmId = Deno.env.get("QBO_REALM_ID");
@@ -1296,7 +1296,83 @@ Deno.serve(async (req) => {
       const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
       const correlationId = crypto.randomUUID();
 
-      // Fetch all Inventory items from QBO (paginated)
+      // ── Step A: Close stock for sold orders with unlinked lines ──
+      // Find sales_order_lines where stock hasn't been linked yet
+      let stockClosed = 0;
+      const closedSkuIds = new Set<string>();
+      const { data: unlinkedLines } = await admin
+        .from("sales_order_line")
+        .select("id, sku_id, quantity")
+        .is("stock_unit_id", null)
+        .limit(500);
+
+      for (const line of (unlinkedLines ?? [])) {
+        for (let i = 0; i < (line.quantity ?? 1); i++) {
+          const { data: stockUnit } = await admin
+            .from("stock_unit")
+            .select("id")
+            .eq("sku_id", line.sku_id)
+            .in("status", ["available", "received", "graded"])
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (stockUnit) {
+            const { error: closeErr } = await admin
+              .from("stock_unit")
+              .update({ status: "closed", updated_at: new Date().toISOString() })
+              .eq("id", stockUnit.id);
+
+            if (!closeErr) {
+              // Link stock to the order line (only correct for qty=1 lines)
+              if ((line.quantity ?? 1) === 1) {
+                await admin
+                  .from("sales_order_line")
+                  .update({ stock_unit_id: stockUnit.id })
+                  .eq("id", line.id);
+              }
+              stockClosed++;
+              closedSkuIds.add(line.sku_id);
+
+              await admin.from("audit_event").insert({
+                entity_type: "stock_unit",
+                entity_id: stockUnit.id,
+                trigger_type: "stock_reconciliation_sale",
+                actor_type: "user",
+                actor_id: userId,
+                source_system: "admin-data",
+                correlation_id: correlationId,
+                before_json: { status: "available" },
+                after_json: { status: "closed" },
+                input_json: {
+                  sales_order_line_id: line.id,
+                  sku_id: line.sku_id,
+                },
+              });
+            }
+          }
+        }
+      }
+
+      if (stockClosed > 0) {
+        console.log(`Step A: Closed ${stockClosed} stock units for ${closedSkuIds.size} SKUs with unlinked sales`);
+      }
+
+      // ── Step A2: Update channel listings for closed SKUs ──
+      for (const skuId of closedSkuIds) {
+        const { count: availableCount } = await admin
+          .from("stock_unit")
+          .select("id", { count: "exact", head: true })
+          .eq("sku_id", skuId)
+          .eq("status", "available");
+
+        await admin
+          .from("channel_listing")
+          .update({ listed_quantity: availableCount ?? 0, synced_at: new Date().toISOString() })
+          .eq("sku_id", skuId);
+      }
+
+      // ── Step B: Fetch all Inventory items from QBO (paginated) ──
       const qboItems: any[] = [];
       let startPos = 1;
       const pageSize = 1000;
@@ -1438,6 +1514,7 @@ Deno.serve(async (req) => {
       result = {
         success: true,
         correlation_id: correlationId,
+        stock_closed: stockClosed,
         total_qbo_items: qboItems.length,
         total_checked: totalChecked,
         in_sync: inSync,
