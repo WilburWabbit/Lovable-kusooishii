@@ -68,7 +68,11 @@ Deno.serve(async (req) => {
 
 
     if (action === "authorize_url") {
-      const actualRedirect = redirect_uri || "https://workspace-charm-market.lovable.app/admin/qbo-callback";
+      const configuredRedirect = Deno.env.get("QBO_REDIRECT_URI");
+      const actualRedirect = redirect_uri || configuredRedirect;
+      if (!actualRedirect) {
+        throw new Error("Missing redirect_uri in request and QBO_REDIRECT_URI env var not configured");
+      }
       const state = crypto.randomUUID();
       const url = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&redirect_uri=${encodeURIComponent(actualRedirect)}&response_type=code&scope=com.intuit.quickbooks.accounting&state=${state}`;
       return new Response(JSON.stringify({ url }), {

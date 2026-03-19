@@ -171,22 +171,40 @@ async function backfillProcessedReceipt(
     }
   }
 
+  // Backfill stock_unit → inbound_receipt_line links using sku_id for accuracy
+  // (matching by mpn+grade alone is fragile when multiple SKUs share the same MPN)
   const { data: receiptLines } = await supabaseAdmin
     .from("inbound_receipt_line")
-    .select("id, mpn, condition_grade, quantity")
+    .select("id, mpn, condition_grade, quantity, sku_code")
     .eq("inbound_receipt_id", receiptId)
     .eq("is_stock_line", true);
 
   for (const rl of (receiptLines ?? [])) {
     if (!rl.mpn || !rl.condition_grade) continue;
 
-    const { data: unlinkedUnits } = await supabaseAdmin
+    // Prefer matching by sku_id (via sku_code) for accuracy
+    let unlinkedQuery = supabaseAdmin
       .from("stock_unit")
       .select("id")
-      .eq("mpn", rl.mpn)
-      .eq("condition_grade", rl.condition_grade)
       .is("inbound_receipt_line_id", null)
+      .eq("status", "available")
       .limit(rl.quantity);
+
+    if (rl.sku_code) {
+      // Resolve sku_code → sku_id first
+      const { data: sku } = await supabaseAdmin
+        .from("sku").select("id").eq("sku_code", rl.sku_code).maybeSingle();
+      if (sku) {
+        unlinkedQuery = unlinkedQuery.eq("sku_id", sku.id);
+      } else {
+        // Fallback to mpn + grade if SKU not found
+        unlinkedQuery = unlinkedQuery.eq("mpn", rl.mpn).eq("condition_grade", rl.condition_grade);
+      }
+    } else {
+      unlinkedQuery = unlinkedQuery.eq("mpn", rl.mpn).eq("condition_grade", rl.condition_grade);
+    }
+
+    const { data: unlinkedUnits } = await unlinkedQuery;
 
     for (const unit of (unlinkedUnits ?? [])) {
       await supabaseAdmin
@@ -252,7 +270,9 @@ async function autoProcessReceipt(
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
     const overheadPerUnit = line.quantity > 0 ? lineOverhead / line.quantity : 0;
-    const landedCost = Math.round((Number(line.unit_cost) + overheadPerUnit) * 100) / 100;
+    // Round at the end only — avoid accumulating rounding error across lines
+    const landedCostRaw = Number(line.unit_cost) + overheadPerUnit;
+    const landedCost = Math.round(landedCostRaw * 100) / 100;
 
     let { data: sku } = await supabaseAdmin
       .from("sku")
