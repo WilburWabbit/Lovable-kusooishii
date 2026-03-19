@@ -1312,7 +1312,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   }
 
   // Upsert SKU (now safe — unique index on qbo_item_id exists)
-  const { error } = await admin.from("sku").upsert({
+  const upsertPayload: Record<string, any> = {
     qbo_item_id: qboItemId,
     qbo_parent_item_id: parentItemId,
     sku_code: skuCode,
@@ -1322,7 +1322,13 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
     active_flag: item.Active !== false,
     saleable_flag: !!productId,
     price: item.UnitPrice != null ? Number(item.UnitPrice) : null,
-  }, { onConflict: "qbo_item_id" });
+  };
+  let { error } = await admin.from("sku").upsert(upsertPayload, { onConflict: "qbo_item_id" });
+  // Fallback: retry without qbo_parent_item_id if schema cache is stale
+  if (error && /qbo_parent_item_id|PGRST204/.test(error.message ?? "")) {
+    delete upsertPayload.qbo_parent_item_id;
+    ({ error } = await admin.from("sku").upsert(upsertPayload, { onConflict: "qbo_item_id" }));
+  }
 
   if (error) return `item ${entityId} upsert error: ${error.message}`;
 
