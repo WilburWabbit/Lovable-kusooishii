@@ -1841,6 +1841,7 @@ export type Database = {
           price: number | null
           product_id: string | null
           qbo_item_id: string | null
+          qbo_parent_item_id: string | null
           saleable_flag: boolean
           sku_code: string
           updated_at: string
@@ -1854,6 +1855,7 @@ export type Database = {
           price?: number | null
           product_id?: string | null
           qbo_item_id?: string | null
+          qbo_parent_item_id?: string | null
           saleable_flag?: boolean
           sku_code: string
           updated_at?: string
@@ -1867,6 +1869,7 @@ export type Database = {
           price?: number | null
           product_id?: string | null
           qbo_item_id?: string | null
+          qbo_parent_item_id?: string | null
           saleable_flag?: boolean
           sku_code?: string
           updated_at?: string
