@@ -1011,6 +1011,65 @@ Deno.serve(async (req) => {
       console.error("VAT backfill error:", backfillErr);
     }
 
+    // ── Phase 4b: Stock reconciliation for ALL orders with unlinked lines ──
+    // Runs every sync regardless of landing status. Covers cases where stock
+    // was created (by purchase sync) AFTER the sales order was committed.
+    let stockReconciled = 0;
+    const RECONCILE_TIME_BUDGET_MS = 30_000;
+    const reconcileStart = Date.now();
+    try {
+      // Query unlinked order lines directly — any line without a stock_unit_id
+      // on a completed sale is a candidate for reconciliation
+      const { data: unlinkedLines } = await supabaseAdmin
+        .from("sales_order_line")
+        .select("id, sales_order_id, sku_id, quantity")
+        .is("stock_unit_id", null)
+        .limit(200);
+
+      if (unlinkedLines && unlinkedLines.length > 0) {
+        console.log(`Stock reconciliation: found ${unlinkedLines.length} unlinked order lines`);
+
+        for (const line of unlinkedLines) {
+          if (Date.now() - reconcileStart > RECONCILE_TIME_BUDGET_MS) {
+            console.warn("Stock reconciliation time budget exceeded, stopping");
+            break;
+          }
+
+          for (let i = 0; i < (line.quantity ?? 1); i++) {
+            const { data: stockUnit } = await supabaseAdmin
+              .from("stock_unit")
+              .select("id")
+              .eq("sku_id", line.sku_id)
+              .in("status", ["available", "received", "graded"])
+              .order("created_at", { ascending: true })
+              .limit(1)
+              .maybeSingle();
+
+            if (stockUnit) {
+              const { error: closeErr } = await supabaseAdmin
+                .from("stock_unit")
+                .update({ status: "closed" })
+                .eq("id", stockUnit.id);
+              if (!closeErr) {
+                await supabaseAdmin
+                  .from("sales_order_line")
+                  .update({ stock_unit_id: stockUnit.id })
+                  .eq("id", line.id);
+                stockReconciled++;
+                affectedSkuIds.add(line.sku_id);
+              }
+            }
+          }
+        }
+        if (stockReconciled > 0) {
+          console.log(`Stock reconciliation: closed ${stockReconciled} stock units`);
+        }
+      }
+    } catch (reconcileErr) {
+      console.error("Stock reconciliation error:", reconcileErr);
+    }
+    totalStockMatched += stockReconciled;
+
     // ── Phase 5: Update channel listings for affected SKUs ──
     let channelListingsUpdated = 0;
     if (affectedSkuIds.size > 0) {
@@ -1053,6 +1112,7 @@ Deno.serve(async (req) => {
         sales_no_items: salesNoItems,
         sales_lines: totalSalesLines,
         stock_matched: totalStockMatched,
+        stock_reconciled: stockReconciled,
         stock_missing: totalStockMissing,
         refund_receipts: refundReceipts.length,
         refunds_landed: refundsLanded.length,
