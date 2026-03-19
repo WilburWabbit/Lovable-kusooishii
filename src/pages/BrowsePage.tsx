@@ -8,7 +8,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { ThemesGrid } from "@/components/ThemesGrid";
 import { GRADE_OPTIONS, GRADE_LABELS } from "@/lib/grades";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -16,35 +16,68 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
 
 export default function BrowsePage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const viewMode = searchParams.get("view");
-  const themeFromUrl = searchParams.get("theme");
   const isNewMode = searchParams.get("new") === "true";
   const isDealsMode = searchParams.get("deals") === "true";
 
+  const selectedThemeId = searchParams.get("theme");
+  const selectedGrade = searchParams.get("grade");
+  const retiredParam = searchParams.get("retired");
+  const retiredFilter = retiredParam === "true" ? true : retiredParam === "false" ? false : null;
+  const yearMinParam = searchParams.get("yearMin");
+  const yearMaxParam = searchParams.get("yearMax");
+
   const searchFromUrl = searchParams.get("q") ?? "";
   const [search, setSearch] = useState(searchFromUrl);
-  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(themeFromUrl);
-  const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
-  const [retiredFilter, setRetiredFilter] = useState<boolean | null>(null);
-  const [yearRange, setYearRange] = useState<[number, number] | null>(null);
-
-  // Sync theme filter from URL
-  useEffect(() => {
-    setSelectedThemeId(themeFromUrl);
-  }, [themeFromUrl]);
 
   // Sync search from URL query param
   useEffect(() => {
-    if (searchFromUrl) setSearch(searchFromUrl);
+    setSearch(searchFromUrl);
   }, [searchFromUrl]);
 
-  // Debounced search
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const setParam = useCallback((key: string, value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value == null || value === "") {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const setSelectedThemeId = useCallback((v: string | null) => setParam("theme", v), [setParam]);
+  const setSelectedGrade = useCallback((v: string | null) => setParam("grade", v), [setParam]);
+  const setRetiredFilter = useCallback((v: boolean | null) => setParam("retired", v == null ? null : String(v)), [setParam]);
+
+  const yearRange: [number, number] | null = yearMinParam && yearMaxParam
+    ? [parseInt(yearMinParam, 10), parseInt(yearMaxParam, 10)]
+    : null;
+  const setYearRange = useCallback((v: [number, number] | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v == null) {
+        next.delete("yearMin");
+        next.delete("yearMax");
+      } else {
+        next.set("yearMin", String(v[0]));
+        next.set("yearMax", String(v[1]));
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // Debounced search — also sync to URL
+  const [debouncedSearch, setDebouncedSearch] = useState(searchFromUrl);
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setParam("q", search || null);
+    }, 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, setParam]);
 
   // Fetch themes and year range from in-stock products
   const { data: filterMeta } = useQuery({

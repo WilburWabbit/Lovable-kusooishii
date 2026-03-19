@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useFilterParams } from "@/hooks/useFilterParams";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -139,9 +140,13 @@ function renderCell(u: StockRow, key: string): React.ReactNode {
 
 export function InventoryPage() {
   const { user } = useAuth();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [gradeFilter, setGradeFilter] = useState<string>("all");
+  const [filters, setFilter] = useFilterParams({ search: "", status: "all", grade: "all" });
+  const search = filters.search;
+  const statusFilter = filters.status;
+  const gradeFilter = filters.grade;
+  const setSearch = (v: string) => setFilter("search", v);
+  const setStatusFilter = (v: string) => setFilter("status", v);
+  const setGradeFilter = (v: string) => setFilter("grade", v);
 
   const tp = useTablePreferences("admin-inventory", DEFAULT_VISIBLE, { key: "sku_code", dir: "asc" });
 

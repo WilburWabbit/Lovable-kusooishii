@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useFilterParams } from "@/hooks/useFilterParams";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -215,9 +216,13 @@ function renderCell(p: ProductRow, key: string, expandedId: string | null): Reac
 export function ProductsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [retiredFilter, setRetiredFilter] = useState<string>("all");
-  const [contentFilter, setContentFilter] = useState<string>("all");
+  const [filters, setFilter] = useFilterParams({ search: "", retired: "all", content: "all" });
+  const search = filters.search;
+  const retiredFilter = filters.retired;
+  const contentFilter = filters.content;
+  const setSearch = (v: string) => setFilter("search", v);
+  const setRetiredFilter = (v: string) => setFilter("retired", v);
+  const setContentFilter = (v: string) => setFilter("content", v);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const tp = useTablePreferences("admin-products", DEFAULT_VISIBLE, { key: "mpn", dir: "asc" });
