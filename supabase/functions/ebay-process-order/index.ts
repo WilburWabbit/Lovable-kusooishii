@@ -702,13 +702,14 @@ Deno.serve(async (req) => {
         // No tax codes at all — cannot process. This is a hard prerequisite.
         throw new Error(`VAT resolution failed and no fallback tax code available. Original error: ${vatErr.message}`);
       }
+      const vatRate = ukStandard.vat_rate as any;
       vatResolution = {
         destination: "uk",
         taxCodeId: ukStandard.id,
-        vatRateId: ukStandard.vat_rate.id,
+        vatRateId: vatRate.id,
         qboTaxCodeId: ukStandard.qbo_tax_code_id,
-        qboTaxRateId: ukStandard.vat_rate.qbo_tax_rate_id,
-        ratePercent: Number(ukStandard.vat_rate.rate_percent),
+        qboTaxRateId: vatRate.qbo_tax_rate_id,
+        ratePercent: Number(vatRate.rate_percent),
       };
     }
     const vatMultiplier = 1 + vatResolution.ratePercent / 100; // e.g. 1.20 for 20%
