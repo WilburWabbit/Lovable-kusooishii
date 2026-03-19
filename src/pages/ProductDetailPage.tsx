@@ -332,33 +332,6 @@ export default function ProductDetailPage() {
                   })()}
                 </div>
 
-                {/* Dimensions */}
-                {(product.length_cm || product.width_cm || product.height_cm || product.weight_kg) && (
-                  <div className="mt-4 flex gap-4 sm:gap-6 flex-wrap">
-                    {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
-                      <div>
-                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Dimensions</p>
-                        <p className="mt-1 font-display text-sm font-bold text-foreground">
-                          {product.length_cm} × {product.width_cm} × {product.height_cm} cm
-                        </p>
-                      </div>
-                    )}
-                    {product.length_cm != null && product.width_cm != null && product.height_cm != null && (
-                      <div>
-                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Girth</p>
-                        <p className="mt-1 font-display text-sm font-bold text-foreground">
-                          {(2 * ((product.width_cm ?? 0) + (product.height_cm ?? 0))).toFixed(1)} cm
-                        </p>
-                      </div>
-                    )}
-                    {product.weight_kg != null && (
-                      <div>
-                        <p className="font-display text-xs font-semibold uppercase tracking-widest text-muted-foreground">Weight</p>
-                        <p className="mt-1 font-display text-sm font-bold text-foreground">{product.weight_kg} kg</p>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Offers by grade */}
                 <div className="mt-6 space-y-3">

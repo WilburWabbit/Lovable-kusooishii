@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { useFilterParams } from "@/hooks/useFilterParams";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -94,8 +95,11 @@ function renderCell(c: CustomerRow, key: string): React.ReactNode {
 
 export function CustomersPage() {
   const { user } = useAuth();
-  const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<string>("all");
+  const [filters, setFilter] = useFilterParams({ search: "", active: "all" });
+  const search = filters.search;
+  const activeFilter = filters.active;
+  const setSearch = (v: string) => setFilter("search", v);
+  const setActiveFilter = (v: string) => setFilter("active", v);
 
   const tp = useTablePreferences("admin-customers", DEFAULT_VISIBLE, { key: "display_name", dir: "asc" });
 

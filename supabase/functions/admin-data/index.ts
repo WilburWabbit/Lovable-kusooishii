@@ -5,7 +5,11 @@ class ValidationError extends Error {
 }
 
 const STOCK_MATCHABLE = ["available", "received", "graded"];
-const VALID_SALE_STATUSES = VALID_SALE_STATUSES;
+const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -389,7 +393,7 @@ Deno.serve(async (req) => {
             // Create new theme
             const { data: newTheme, error: themeErr } = await admin
               .from("theme")
-              .insert({ name: themeName })
+              .insert({ name: themeName, slug: slugify(themeName) })
               .select("id")
               .single();
             if (themeErr) throw themeErr;
