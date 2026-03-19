@@ -365,13 +365,13 @@ async function processSalesReceipt(
   if (docNumber) {
     // Check by origin_reference (DocNumber = eBay order ID) or doc_number
     // (DocNumber = app order_number like KO-0000123) across all channels
-    let matchedOrder: { id: string; qbo_sync_status: string } | null = null;
+    let matchedOrder: { id: string; qbo_sync_status?: string } | null = null;
     let matchChannel = "";
 
     // 1. Check eBay by origin_reference (works when DocNumber = eBay order ID)
     const { data: ebayByRef } = await supabaseAdmin
       .from("sales_order")
-      .select("id, qbo_sync_status")
+      .select("id")
       .eq("origin_channel", "ebay")
       .eq("origin_reference", docNumber)
       .maybeSingle();
@@ -385,7 +385,7 @@ async function processSalesReceipt(
     if (!matchedOrder) {
       const { data: byDocNumber } = await supabaseAdmin
         .from("sales_order")
-        .select("id, qbo_sync_status")
+        .select("id")
         .eq("doc_number", docNumber)
         .neq("origin_channel", "qbo")
         .maybeSingle();
@@ -400,7 +400,7 @@ async function processSalesReceipt(
     if (!matchedOrder) {
       const { data: byOrderNumber } = await supabaseAdmin
         .from("sales_order")
-        .select("id, qbo_sync_status")
+        .select("id")
         .eq("order_number", docNumber)
         .neq("origin_channel", "qbo")
         .maybeSingle();
@@ -418,11 +418,18 @@ async function processSalesReceipt(
         qbo_sales_receipt_id: qboId,
         qbo_customer_id: customerRefValue,
       };
-      if (matchedOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
+      enrichFields.qbo_sync_status = "synced";
       if (customerId) enrichFields.customer_id = customerId;
       if (taxTotal) enrichFields.tax_total = taxTotal;
 
-      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", matchedOrder.id);
+      const { error: enrichErr } = await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", matchedOrder.id);
+      // If QBO tracking columns don't exist yet, retry with only core fields
+      if (enrichErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(enrichErr.message ?? "")) {
+        delete enrichFields.qbo_sales_receipt_id;
+        delete enrichFields.qbo_customer_id;
+        delete enrichFields.qbo_sync_status;
+        await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", matchedOrder.id);
+      }
 
       if (vatRateId) {
         await supabaseAdmin.from("sales_order_line")
@@ -441,30 +448,44 @@ async function processSalesReceipt(
   }
 
   // QBO-originated order — already in QBO, mark synced with IDs
-  const { data: order, error: orderErr } = await supabaseAdmin
+  const orderPayload: Record<string, any> = {
+    origin_channel: originChannel,
+    origin_reference: qboId,
+    status: "complete",
+    guest_name: customerName,
+    guest_email: `qbo-sale-${qboId}@imported.local`,
+    shipping_name: customerName,
+    merchandise_subtotal: merchandiseSubtotal,
+    tax_total: taxTotal,
+    gross_total: grossTotal,
+    global_tax_calculation: globalTaxCalc,
+    currency,
+    customer_id: customerId,
+    txn_date: txnDate ?? null,
+    doc_number: docNumber,
+    notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
+    qbo_sync_status: "synced",
+    qbo_sales_receipt_id: qboId,
+    qbo_customer_id: customerRefValue,
+  };
+
+  let { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
-    .insert({
-      origin_channel: originChannel,
-      origin_reference: qboId,
-      status: "complete",
-      guest_name: customerName,
-      guest_email: `qbo-sale-${qboId}@imported.local`,
-      shipping_name: customerName,
-      merchandise_subtotal: merchandiseSubtotal,
-      tax_total: taxTotal,
-      gross_total: grossTotal,
-      global_tax_calculation: globalTaxCalc,
-      currency,
-      customer_id: customerId,
-      txn_date: txnDate ?? null,
-      doc_number: docNumber,
-      notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
-      qbo_sync_status: "synced",
-      qbo_sales_receipt_id: qboId,
-      qbo_customer_id: customerRefValue,
-    })
+    .insert(orderPayload)
     .select("id")
     .single();
+
+  // If insert fails due to missing QBO tracking columns, retry without them
+  if (orderErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderErr.message ?? "")) {
+    delete orderPayload.qbo_sync_status;
+    delete orderPayload.qbo_sales_receipt_id;
+    delete orderPayload.qbo_customer_id;
+    ({ data: order, error: orderErr } = await supabaseAdmin
+      .from("sales_order")
+      .insert(orderPayload)
+      .select("id")
+      .single());
+  }
 
   if (orderErr) throw orderErr;
 
@@ -627,30 +648,43 @@ async function processRefundReceipt(
 
   const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
 
-  const { data: order, error: orderErr } = await supabaseAdmin
+  const refundPayload: Record<string, any> = {
+    origin_channel: originChannel,
+    origin_reference: qboId,
+    status: "refunded",
+    guest_name: customerName,
+    guest_email: `qbo-refund-${qboId}@imported.local`,
+    shipping_name: customerName,
+    merchandise_subtotal: merchandiseSubtotal,
+    tax_total: -taxTotal,
+    gross_total: grossTotal,
+    global_tax_calculation: globalTaxCalc,
+    currency,
+    customer_id: customerId,
+    txn_date: txnDate ?? null,
+    doc_number: receipt.DocNumber ?? null,
+    notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
+    qbo_sync_status: "synced",
+    qbo_sales_receipt_id: qboId,
+    qbo_customer_id: customerRefValue,
+  };
+
+  let { data: order, error: orderErr } = await supabaseAdmin
     .from("sales_order")
-    .insert({
-      origin_channel: originChannel,
-      origin_reference: qboId,
-      status: "refunded",
-      guest_name: customerName,
-      guest_email: `qbo-refund-${qboId}@imported.local`,
-      shipping_name: customerName,
-      merchandise_subtotal: merchandiseSubtotal,
-      tax_total: -taxTotal,
-      gross_total: grossTotal,
-      global_tax_calculation: globalTaxCalc,
-      currency,
-      customer_id: customerId,
-      txn_date: txnDate ?? null,
-      doc_number: receipt.DocNumber ?? null,
-      notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
-      qbo_sync_status: "synced",
-      qbo_sales_receipt_id: qboId,
-      qbo_customer_id: customerRefValue,
-    })
+    .insert(refundPayload)
     .select("id")
     .single();
+
+  if (orderErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderErr.message ?? "")) {
+    delete refundPayload.qbo_sync_status;
+    delete refundPayload.qbo_sales_receipt_id;
+    delete refundPayload.qbo_customer_id;
+    ({ data: order, error: orderErr } = await supabaseAdmin
+      .from("sales_order")
+      .insert(refundPayload)
+      .select("id")
+      .single());
+  }
 
   if (orderErr) throw orderErr;
 
