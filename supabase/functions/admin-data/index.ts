@@ -4,6 +4,10 @@ class ValidationError extends Error {
   constructor(message: string) { super(message); this.name = "ValidationError"; }
 }
 
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -386,7 +390,7 @@ Deno.serve(async (req) => {
             // Create new theme
             const { data: newTheme, error: themeErr } = await admin
               .from("theme")
-              .insert({ name: themeName })
+              .insert({ name: themeName, slug: slugify(themeName) })
               .select("id")
               .single();
             if (themeErr) throw themeErr;

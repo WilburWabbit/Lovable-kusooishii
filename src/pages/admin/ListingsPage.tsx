@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useFilterParams } from "@/hooks/useFilterParams";
 import { useAuth } from "@/hooks/useAuth";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -204,9 +205,13 @@ function renderCell(r: ListingRow, key: string): React.ReactNode {
 export function ListingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [channelFilter, setChannelFilter] = useState<string>("all");
-  const [coverageFilter, setCoverageFilter] = useState<string>("all");
+  const [filters, setFilter] = useFilterParams({ search: "", channel: "all", coverage: "all" });
+  const search = filters.search;
+  const channelFilter = filters.channel;
+  const coverageFilter = filters.coverage;
+  const setSearch = (v: string) => setFilter("search", v);
+  const setChannelFilter = (v: string) => setFilter("channel", v);
+  const setCoverageFilter = (v: string) => setFilter("coverage", v);
   const [syncing, setSyncing] = useState(false);
 
   const tp = useTablePreferences("admin-listings", DEFAULT_VISIBLE, { key: "sku_code", dir: "asc" });

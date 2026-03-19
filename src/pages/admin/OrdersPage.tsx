@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { useFilterParams } from "@/hooks/useFilterParams";
 import { BackOfficeLayout } from "@/components/BackOfficeLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -171,9 +172,13 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
 
 export function OrdersPage() {
   const { user } = useAuth();
-  const [search, setSearch] = useState("");
-  const [channelFilter, setChannelFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [filters, setFilter] = useFilterParams({ search: "", channel: "all", status: "all" });
+  const search = filters.search;
+  const channelFilter = filters.channel;
+  const statusFilter = filters.status;
+  const setSearch = (v: string) => setFilter("search", v);
+  const setChannelFilter = (v: string) => setFilter("channel", v);
+  const setStatusFilter = (v: string) => setFilter("status", v);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const tp = useTablePreferences("admin-orders", DEFAULT_VISIBLE, { key: "created_at", dir: "desc" });
