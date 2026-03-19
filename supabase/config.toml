@@ -17,6 +17,8 @@ project_id = "gcgrwujfyurgetvqlmbf"
     verify_jwt = false
   [functions.ebay-process-order]
     verify_jwt = false
+  [functions.ebay-retry-order]
+    verify_jwt = false
   [functions.ebay-sync]
     verify_jwt = false
   [functions.generate-product-copy]
@@ -34,6 +36,8 @@ project_id = "gcgrwujfyurgetvqlmbf"
   [functions.process-receipt]
     verify_jwt = false
   [functions.qbo-auth]
+    verify_jwt = false
+  [functions.qbo-retry-sync]
     verify_jwt = false
   [functions.qbo-sync-customers]
     verify_jwt = false

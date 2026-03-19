@@ -34,6 +34,14 @@ export async function invokeWithAuth<T = unknown>(
       // Newer Supabase client versions may pass parsed data directly
       throw new Error(String(context.error) || error.message);
     }
+
+    // FunctionsFetchError: the fetch itself failed (timeout, network, function crash).
+    // Surface the underlying cause instead of the generic wrapper message.
+    if (context instanceof Error) {
+      const cause = context.message || "Network error";
+      throw new Error(`Edge Function unreachable: ${cause}`);
+    }
+
     throw error;
   }
   return data as T;
