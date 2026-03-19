@@ -431,6 +431,75 @@ Deno.serve(async (req) => {
       }).eq("external_id", qboItemId);
     }
 
+    // ── Cleanup pass: deactivate SKUs not seen in this sync ──
+    const seenQboItemIds = qboItems.map(item => String(item.Id));
+    let deactivated = 0;
+    let stockWrittenOff = 0;
+
+    if (seenQboItemIds.length > 0) {
+      // Paginate through all SKUs with a qbo_item_id to find stale ones
+      let from = 0;
+      const pageSize = 1000;
+      const staleSkus: { id: string; sku_code: string; qbo_item_id: string }[] = [];
+      while (true) {
+        const { data } = await admin
+          .from("sku")
+          .select("id, sku_code, qbo_item_id")
+          .not("qbo_item_id", "is", null)
+          .eq("active_flag", true)
+          .range(from, from + pageSize - 1);
+        if (!data || data.length === 0) break;
+        for (const sku of data) {
+          if (!seenQboItemIds.includes(sku.qbo_item_id)) {
+            staleSkus.push(sku);
+          }
+        }
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const cleanupCorrelationId = crypto.randomUUID();
+
+      for (const sku of staleSkus) {
+        // Deactivate the SKU
+        await admin.from("sku").update({ active_flag: false }).eq("id", sku.id);
+        deactivated++;
+
+        // Write off any available stock units
+        const { data: availableUnits } = await admin
+          .from("stock_unit")
+          .select("id, landed_cost, carrying_value, status")
+          .eq("sku_id", sku.id)
+          .in("status", ["available", "received", "graded"]);
+
+        for (const unit of (availableUnits ?? [])) {
+          await admin.from("stock_unit").update({
+            status: "written_off",
+            carrying_value: 0,
+            accumulated_impairment: unit.landed_cost ?? 0,
+            updated_at: new Date().toISOString(),
+          }).eq("id", unit.id);
+
+          await admin.from("audit_event").insert({
+            entity_type: "stock_unit",
+            entity_id: unit.id,
+            trigger_type: "qbo_item_deactivated",
+            actor_type: "system",
+            source_system: "qbo-sync-items",
+            correlation_id: cleanupCorrelationId,
+            before_json: { status: unit.status, carrying_value: unit.carrying_value },
+            after_json: { status: "written_off", carrying_value: 0 },
+            input_json: { sku_id: sku.id, sku_code: sku.sku_code, qbo_item_id: sku.qbo_item_id, reason: "QBO item no longer in active items list" },
+          });
+          stockWrittenOff++;
+        }
+      }
+
+      if (deactivated > 0) {
+        console.log(`Cleanup: deactivated ${deactivated} stale SKUs, wrote off ${stockWrittenOff} stock units`);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -440,6 +509,8 @@ Deno.serve(async (req) => {
         products_created: productsCreated,
         skipped_no_mpn: skippedNoMpn,
         errors,
+        deactivated,
+        stock_written_off: stockWrittenOff,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

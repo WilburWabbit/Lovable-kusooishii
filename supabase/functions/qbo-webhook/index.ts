@@ -512,8 +512,32 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
 
   if (receiptErr) return `upsert error: ${receiptErr.message}`;
 
-  // If already processed, skip (manual re-process needed)
-  if (receipt.status === "processed") return "already processed — skipped";
+  // If already processed, reopen old stock units before re-creating lines
+  if (receipt.status === "processed") {
+    const { data: oldLines } = await admin
+      .from("inbound_receipt_line")
+      .select("id")
+      .eq("inbound_receipt_id", receipt.id);
+    const oldLineIds = (oldLines ?? []).map((l: any) => l.id);
+    if (oldLineIds.length > 0) {
+      // Reopen stock units linked to old receipt lines (set back to available or delete)
+      const { data: linkedUnits } = await admin
+        .from("stock_unit")
+        .select("id, status")
+        .in("inbound_receipt_line_id", oldLineIds);
+      for (const unit of (linkedUnits ?? [])) {
+        if (unit.status === "closed") {
+          // Stock was sold — can't reopen, just log
+          console.warn(`Stock unit ${unit.id} is closed (sold) — cannot reopen for purchase update`);
+        } else {
+          await admin.from("stock_unit").delete().eq("id", unit.id);
+        }
+      }
+    }
+    // Reset receipt status so it gets re-processed below
+    await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
+    console.log(`Re-processing already-processed purchase ${entityId} — old stock units cleaned up`);
+  }
 
   // Delete old lines and re-create
   await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
