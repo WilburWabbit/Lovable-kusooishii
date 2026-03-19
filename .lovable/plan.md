@@ -1,18 +1,23 @@
-## QBO Sync Fix — Completed
+## QBO Sync — Stock Consistency Fixes
 
 ### Changes Made
 
-1. **Database**: Added `qbo_parent_item_id text` column to `sku` table + forced PostgREST schema cache reload
-2. **qbo-sync-items**: Added PGRST204 fallback — retries upsert/update without `qbo_parent_item_id` if schema cache is stale
-3. **qbo-webhook**: Same fallback pattern applied to all 3 SKU write locations (insert, update-link, upsert)
-4. **qbo-sync-sales**: Refactored from "process entire month in one call" to chunked processing:
-   - First call per month: lands from QBO + processes up to 25 pending receipts
-   - Subsequent calls: skips landing, processes next 25 pending
-   - Returns `has_more`, `remaining_pending`, `processed_count`
-5. **QboSettingsPanel**: Inner loop per month — keeps invoking until `has_more=false` or user cancels
+1. **Sales sync re-landing (Bug 1)**: `landSalesReceipt` and `landRefundReceipt` now compare `raw_payload` JSON — if changed, reset status from `committed` → `pending` so Phase 2 reprocesses it.
 
-### Next Steps (User Action)
-1. Run **Sync Items** — should now succeed without PGRST204 errors
-2. Run **Sync Purchases** — ensures all stock units exist
-3. Run **Sync Sales** — will process in chunks without 504 timeouts
-4. Run **Reconcile Stock** — verify alignment with QBO
+2. **Sales sync delete-and-recreate (Bug 2)**: `processSalesReceipt` and `processRefundReceipt` now delete-and-recreate existing QBO-originated orders (reopening linked stock units first) instead of skipping them. Cross-channel dedup (eBay/web) still enriches only.
+
+3. **Purchase webhook reprocessing (Bug 3)**: `handlePurchase` in `qbo-webhook` no longer skips already-processed receipts. It cleans up old stock units (deletes available ones, warns about closed/sold ones), resets receipt to pending, and re-runs the auto-process flow.
+
+4. **Stale SKU cleanup (Bug 4)**: `qbo-sync-items` now runs a cleanup pass after the main loop — any SKU with a `qbo_item_id` not seen in the current sync gets `active_flag = false`, and its available stock units are written off with full audit trail.
+
+### What Was NOT Changed
+- Refunds do NOT reopen stock (per user requirement)
+- QtyOnHand reconciliation remains as safety net
+- No database migrations needed
+- No UI changes needed
+
+### Next Steps
+1. Run **Sync Items** — will now deactivate stale SKUs
+2. Run **Sync Purchases** — will now reprocess updated purchases
+3. Run **Sync Sales** — will now reprocess updated/stale receipts
+4. Verify stock alignment with QBO
