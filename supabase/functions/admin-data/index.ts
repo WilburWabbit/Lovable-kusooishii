@@ -1405,7 +1405,8 @@ Deno.serve(async (req) => {
       let totalChecked = 0;
       let inSync = 0;
       let writtenOff = 0;
-      let discrepancies = 0;
+      let appHigher = 0;
+      let qboHigher = 0;
       const details: any[] = [];
 
       for (const qboItem of qboItems) {
@@ -1415,12 +1416,13 @@ Deno.serve(async (req) => {
 
         const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
 
-        const { count: appAvailable } = await admin
+        // Count all non-closed/non-written-off stock (available + received + graded)
+        const { count: appCount } = await admin
           .from("stock_unit")
           .select("id", { count: "exact", head: true })
           .eq("sku_id", sku.id)
-          .eq("status", "available");
-        const available = appAvailable ?? 0;
+          .in("status", ["available", "received", "graded"]);
+        const available = appCount ?? 0;
         totalChecked++;
 
         if (available === qboQty) {
@@ -1428,92 +1430,35 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        if (qboQty < available) {
-          // Write off excess units (oldest first)
+        if (available > qboQty) {
+          // App has more than QBO — sold in QBO but not reflected in app
           const excess = available - qboQty;
-          const { data: unitsToWriteOff } = await admin
-            .from("stock_unit")
-            .select("id, status, carrying_value, landed_cost")
-            .eq("sku_id", sku.id)
-            .eq("status", "available")
-            .order("created_at", { ascending: true })
-            .limit(excess);
-
-          let unitWriteOffs = 0;
-          for (const unit of (unitsToWriteOff ?? [])) {
-            const { error: updateErr } = await admin
-              .from("stock_unit")
-              .update({
-                status: "written_off",
-                carrying_value: 0,
-                accumulated_impairment: unit.landed_cost ?? 0,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", unit.id);
-
-            if (updateErr) {
-              console.error(`Failed to write off unit ${unit.id}:`, updateErr.message);
-              continue;
-            }
-
-            await admin.from("audit_event").insert({
-              entity_type: "stock_unit",
-              entity_id: unit.id,
-              trigger_type: "qbo_stock_reconciliation",
-              actor_type: "user",
-              actor_id: userId,
-              source_system: "qbo",
-              correlation_id: correlationId,
-              before_json: { status: unit.status, carrying_value: unit.carrying_value },
-              after_json: { status: "written_off", carrying_value: 0 },
-              input_json: {
-                qbo_item_id: qboItemId,
-                sku_code: sku.sku_code,
-                qbo_qty_on_hand: qboQty,
-                app_available_before: available,
-              },
-            });
-
-            unitWriteOffs++;
-          }
-
-          writtenOff += unitWriteOffs;
+          appHigher++;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
-            app_available: available,
-            action: "written_off",
-            units_adjusted: unitWriteOffs,
+            app_qty: available,
+            diff: excess,
+            direction: "app_higher",
+            action: "needs_review",
           });
         } else {
-          // QBO has more — log discrepancy but don't auto-create
-          discrepancies++;
+          // QBO has more than app — missing stock in app
+          qboHigher++;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
-            app_available: available,
-            action: "discrepancy_qbo_higher",
-            units_adjusted: 0,
+            app_qty: available,
+            diff: qboQty - available,
+            direction: "qbo_higher",
+            action: "needs_review",
           });
 
-          await admin.from("audit_event").insert({
-            entity_type: "sku",
-            entity_id: sku.id,
-            trigger_type: "qbo_qty_discrepancy",
-            actor_type: "user",
-            actor_id: userId,
-            source_system: "qbo",
-            correlation_id: correlationId,
-            input_json: {
-              qbo_item_id: qboItemId,
-              sku_code: sku.sku_code,
-              qbo_qty_on_hand: qboQty,
-              app_available: available,
-              discrepancy: qboQty - available,
-            },
-          });
         }
       }
+
+      // Sort details so biggest discrepancies appear first
+      details.sort((a: any, b: any) => b.diff - a.diff);
 
       result = {
         success: true,
@@ -1522,8 +1467,8 @@ Deno.serve(async (req) => {
         total_qbo_items: qboItems.length,
         total_checked: totalChecked,
         in_sync: inSync,
-        written_off: writtenOff,
-        discrepancies,
+        app_higher: appHigher,
+        qbo_higher: qboHigher,
         details,
       };
 
