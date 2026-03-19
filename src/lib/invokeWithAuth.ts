@@ -20,10 +20,19 @@ export async function invokeWithAuth<T = unknown>(
     if (context instanceof Response) {
       try {
         const body = await context.json();
-        throw new Error(body.error || error.message);
+        if (body?.error) throw new Error(body.error);
       } catch (e) {
-        if (e instanceof Error && e.message !== error.message) throw e;
+        // Only rethrow if it's our extracted error (from body.error above),
+        // not a JSON parse failure from context.json()
+        if (e instanceof SyntaxError) {
+          // JSON parse failed — fall through to throw original error
+        } else if (e instanceof Error) {
+          throw e;
+        }
       }
+    } else if (context && typeof context === 'object' && 'error' in context) {
+      // Newer Supabase client versions may pass parsed data directly
+      throw new Error(String(context.error) || error.message);
     }
     throw error;
   }

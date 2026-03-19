@@ -294,7 +294,7 @@ async function autoProcessReceipt(
           sku_id: sku!.id,
           mpn,
           condition_grade: conditionGrade,
-          status: "available",
+          status: "received",
           landed_cost: landedCost,
           supplier_id: vendorName ?? null,
           inbound_receipt_line_id: line.id ?? null,
@@ -307,10 +307,14 @@ async function autoProcessReceipt(
     }
   }
 
-  await supabaseAdmin
+  const { error: statusErr } = await supabaseAdmin
     .from("inbound_receipt")
     .update({ status: "processed", processed_at: new Date().toISOString() })
     .eq("id", receiptId);
+
+  if (statusErr) {
+    throw new Error(`Failed to mark receipt processed: ${statusErr.message}`);
+  }
 
   return { processed: true, skipped: [] };
 }
@@ -612,10 +616,32 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          await supabaseAdmin
+          // Nullify FK on stock_units referencing old lines before deleting them
+          const { data: oldLines } = await supabaseAdmin
+            .from("inbound_receipt_line")
+            .select("id")
+            .eq("inbound_receipt_id", receipt.id);
+
+          if (oldLines && oldLines.length > 0) {
+            const oldLineIds = oldLines.map((l: { id: string }) => l.id);
+            const { error: unlinkErr } = await supabaseAdmin
+              .from("stock_unit")
+              .update({ inbound_receipt_line_id: null })
+              .in("inbound_receipt_line_id", oldLineIds);
+            if (unlinkErr) {
+              console.error(`[${monthLabel}] Failed to unlink stock_units for receipt ${receipt.id}:`, unlinkErr);
+            }
+          }
+
+          const { error: deleteErr } = await supabaseAdmin
             .from("inbound_receipt_line")
             .delete()
             .eq("inbound_receipt_id", receipt.id);
+          if (deleteErr) {
+            console.error(`[${monthLabel}] Failed to delete old lines for receipt ${receipt.id}:`, deleteErr);
+            await markLandingError(supabaseAdmin, landingId, `Line delete failed: ${deleteErr.message}`);
+            continue;
+          }
 
           const lines = purchase.Line?.filter((l: any) =>
             l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
@@ -730,12 +756,25 @@ Deno.serve(async (req) => {
 
     let cleanedUp = 0;
     for (const pr of (pendingReceipts ?? [])) {
-      const { count } = await supabaseAdmin
+      const { count: stockLineCount } = await supabaseAdmin
         .from("inbound_receipt_line")
         .select("id", { count: "exact", head: true })
         .eq("inbound_receipt_id", pr.id)
         .eq("is_stock_line", true);
-      if (count === 0) {
+      if (stockLineCount === 0) {
+        // Check no stock_units reference any lines on this receipt before deleting
+        const { data: receiptLines } = await supabaseAdmin
+          .from("inbound_receipt_line")
+          .select("id")
+          .eq("inbound_receipt_id", pr.id);
+        const lineIds = (receiptLines ?? []).map((l: { id: string }) => l.id);
+        if (lineIds.length > 0) {
+          const { count: linkedUnits } = await supabaseAdmin
+            .from("stock_unit")
+            .select("id", { count: "exact", head: true })
+            .in("inbound_receipt_line_id", lineIds);
+          if ((linkedUnits ?? 0) > 0) continue; // Skip: stock_units still reference these lines
+        }
         await supabaseAdmin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", pr.id);
         await supabaseAdmin.from("inbound_receipt").delete().eq("id", pr.id);
         cleanedUp++;
