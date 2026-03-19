@@ -638,7 +638,12 @@ async function processRefundReceipt(
     .eq("origin_reference", qboId)
     .maybeSingle();
 
-  if (existing) return { created: false, linesCreated: 0 };
+  if (existing) {
+    // Delete-and-recreate to capture updates (refunds don't reopen stock)
+    await supabaseAdmin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
+    await supabaseAdmin.from("sales_order").delete().eq("id", existing.id);
+    console.log(`Deleted existing refund order ${existing.id} for re-creation (RefundReceipt ${qboId})`);
+  }
 
   const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
   const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
