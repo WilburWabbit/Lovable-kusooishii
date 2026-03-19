@@ -234,6 +234,7 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("admin-data", { action: "reconcile-stock" });
       if (data?.error) throw new Error(data.error);
       const parts: string[] = [];
+      if (data.stock_reopened) parts.push(`${data.stock_reopened} incorrectly closed units reopened`);
       if (data.stock_closed) parts.push(`${data.stock_closed} sold units closed`);
       parts.push(`${data.total_checked ?? 0} SKUs checked`);
       if (data.in_sync) parts.push(`${data.in_sync} in sync`);
@@ -348,23 +349,29 @@ export function QboSettingsPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {reconcileDetails.map((d: any, i: number) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-3 py-1.5 font-mono">{d.sku_code}</td>
-                          <td className="text-right px-3 py-1.5">{d.app_qty}</td>
-                          <td className="text-right px-3 py-1.5">{d.qbo_qty}</td>
-                          <td className="text-right px-3 py-1.5 font-medium">{d.diff}</td>
-                          <td className="px-3 py-1.5">
-                            <Badge variant="outline" className={
-                              d.direction === "app_higher"
-                                ? "text-amber-600 border-amber-300 bg-amber-50"
-                                : "text-blue-600 border-blue-300 bg-blue-50"
-                            }>
-                              {d.direction === "app_higher" ? "App higher" : "QBO higher"}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
+                      {reconcileDetails.map((d: any, i: number) => {
+                        const appQty = d.app_qty ?? d.app_available ?? 0;
+                        const qboQty = d.qbo_qty ?? 0;
+                        const diff = d.diff ?? Math.abs(appQty - qboQty);
+                        const isAppHigher = d.direction === "app_higher" || appQty > qboQty;
+                        return (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="px-3 py-1.5 font-mono">{d.sku_code}</td>
+                            <td className="text-right px-3 py-1.5">{appQty}</td>
+                            <td className="text-right px-3 py-1.5">{qboQty}</td>
+                            <td className="text-right px-3 py-1.5 font-medium">{diff}</td>
+                            <td className="px-3 py-1.5">
+                              <Badge variant="outline" className={
+                                isAppHigher
+                                  ? "text-amber-600 border-amber-300 bg-amber-50"
+                                  : "text-blue-600 border-blue-300 bg-blue-50"
+                              }>
+                                {isAppHigher ? "App higher" : "QBO higher"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

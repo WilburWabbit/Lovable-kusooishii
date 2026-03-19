@@ -1297,58 +1297,124 @@ Deno.serve(async (req) => {
       const correlationId = crypto.randomUUID();
 
       // ── Step A: Close stock for sold orders with unlinked lines ──
-      // Find sales_order_lines where stock hasn't been linked yet
+      // ── Step A: Close stock for CONFIRMED sales with unlinked lines ──
+      // Only process lines from orders that are genuinely completed sales.
+      // First, find valid completed order IDs, then find their unlinked lines.
       let stockClosed = 0;
       const closedSkuIds = new Set<string>();
-      const { data: unlinkedLines } = await admin
-        .from("sales_order_line")
-        .select("id, sku_id, quantity")
-        .is("stock_unit_id", null)
-        .limit(500);
 
-      for (const line of (unlinkedLines ?? [])) {
-        for (let i = 0; i < (line.quantity ?? 1); i++) {
-          const { data: stockUnit } = await admin
+      // Step A0: Reopen stock incorrectly closed by previous runs that
+      // didn't filter by order status. Find stock_units closed by our
+      // reconciliation audit trail and check if the linked order is valid.
+      // (audit_event with trigger_type = 'stock_reconciliation_sale')
+      // and check if the linked order is still valid
+      const { data: reconciledAudits } = await admin
+        .from("audit_event")
+        .select("entity_id, input_json")
+        .eq("trigger_type", "stock_reconciliation_sale")
+        .eq("entity_type", "stock_unit");
+
+      let stockReopened = 0;
+      for (const audit of (reconciledAudits ?? [])) {
+        const lineId = audit.input_json?.sales_order_line_id;
+        if (!lineId) continue;
+
+        // Check if the order for this line is actually a valid completed sale
+        const { data: lineOrder } = await admin
+          .from("sales_order_line")
+          .select("sales_order_id, sales_order:sales_order_id(status)")
+          .eq("id", lineId)
+          .maybeSingle();
+
+        const orderStatus = (lineOrder as any)?.sales_order?.status;
+        const validStatuses = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
+        if (orderStatus && !validStatuses.includes(orderStatus)) {
+          // This stock was closed for an invalid order — reopen it
+          const { error: reopenErr } = await admin
             .from("stock_unit")
-            .select("id")
-            .eq("sku_id", line.sku_id)
-            .in("status", ["available", "received", "graded"])
-            .order("created_at", { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .update({ status: "available", updated_at: new Date().toISOString() })
+            .eq("id", audit.entity_id)
+            .eq("status", "closed");
 
-          if (stockUnit) {
-            const { error: closeErr } = await admin
-              .from("stock_unit")
-              .update({ status: "closed", updated_at: new Date().toISOString() })
-              .eq("id", stockUnit.id);
+          if (!reopenErr) {
+            // Unlink from the order line
+            await admin
+              .from("sales_order_line")
+              .update({ stock_unit_id: null })
+              .eq("id", lineId)
+              .eq("stock_unit_id", audit.entity_id);
+            stockReopened++;
+          }
+        }
+      }
 
-            if (!closeErr) {
-              // Link stock to the order line (only correct for qty=1 lines)
-              if ((line.quantity ?? 1) === 1) {
-                await admin
-                  .from("sales_order_line")
-                  .update({ stock_unit_id: stockUnit.id })
-                  .eq("id", line.id);
+      if (stockReopened > 0) {
+        console.log(`Step A0: Reopened ${stockReopened} stock units incorrectly closed by prior reconciliation`);
+      }
+
+      // Now find unlinked lines ONLY from valid completed orders
+      const { data: validOrders } = await admin
+        .from("sales_order")
+        .select("id")
+        .in("status", ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"]);
+
+      const validOrderIds = (validOrders ?? []).map((o: any) => o.id);
+
+      if (validOrderIds.length > 0) {
+        // Process in batches (Supabase .in() has limits)
+        const BATCH = 100;
+        for (let b = 0; b < validOrderIds.length; b += BATCH) {
+          const batchIds = validOrderIds.slice(b, b + BATCH);
+          const { data: unlinkedLines } = await admin
+            .from("sales_order_line")
+            .select("id, sku_id, quantity")
+            .in("sales_order_id", batchIds)
+            .is("stock_unit_id", null);
+
+          for (const line of (unlinkedLines ?? [])) {
+            for (let i = 0; i < (line.quantity ?? 1); i++) {
+              const { data: stockUnit } = await admin
+                .from("stock_unit")
+                .select("id")
+                .eq("sku_id", line.sku_id)
+                .in("status", ["available", "received", "graded"])
+                .order("created_at", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+
+              if (stockUnit) {
+                const { error: closeErr } = await admin
+                  .from("stock_unit")
+                  .update({ status: "closed", updated_at: new Date().toISOString() })
+                  .eq("id", stockUnit.id);
+
+                if (!closeErr) {
+                  if ((line.quantity ?? 1) === 1) {
+                    await admin
+                      .from("sales_order_line")
+                      .update({ stock_unit_id: stockUnit.id })
+                      .eq("id", line.id);
+                  }
+                  stockClosed++;
+                  closedSkuIds.add(line.sku_id);
+
+                  await admin.from("audit_event").insert({
+                    entity_type: "stock_unit",
+                    entity_id: stockUnit.id,
+                    trigger_type: "stock_reconciliation_sale",
+                    actor_type: "user",
+                    actor_id: userId,
+                    source_system: "admin-data",
+                    correlation_id: correlationId,
+                    before_json: { status: "available" },
+                    after_json: { status: "closed" },
+                    input_json: {
+                      sales_order_line_id: line.id,
+                      sku_id: line.sku_id,
+                    },
+                  });
+                }
               }
-              stockClosed++;
-              closedSkuIds.add(line.sku_id);
-
-              await admin.from("audit_event").insert({
-                entity_type: "stock_unit",
-                entity_id: stockUnit.id,
-                trigger_type: "stock_reconciliation_sale",
-                actor_type: "user",
-                actor_id: userId,
-                source_system: "admin-data",
-                correlation_id: correlationId,
-                before_json: { status: "available" },
-                after_json: { status: "closed" },
-                input_json: {
-                  sales_order_line_id: line.id,
-                  sku_id: line.sku_id,
-                },
-              });
             }
           }
         }
@@ -1459,6 +1525,7 @@ Deno.serve(async (req) => {
       result = {
         success: true,
         correlation_id: correlationId,
+        stock_reopened: stockReopened,
         stock_closed: stockClosed,
         total_qbo_items: qboItems.length,
         total_checked: totalChecked,
