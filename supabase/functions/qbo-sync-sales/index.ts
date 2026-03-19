@@ -271,6 +271,51 @@ async function markLandingStatus(
   await supabaseAdmin.from(table).update(update).eq("id", landingId);
 }
 
+/** Close any unclosed stock for an existing order's lines (reconciliation) */
+async function reconcileStockForOrder(
+  supabaseAdmin: any,
+  orderId: string,
+  affectedSkuIds: Set<string>
+): Promise<{ closed: number }> {
+  // Find order lines that have no stock_unit_id linked
+  const { data: unlinkedLines } = await supabaseAdmin
+    .from("sales_order_line")
+    .select("id, sku_id, quantity")
+    .eq("sales_order_id", orderId)
+    .is("stock_unit_id", null);
+
+  let closed = 0;
+  for (const line of (unlinkedLines ?? [])) {
+    for (let i = 0; i < (line.quantity ?? 1); i++) {
+      const { data: stockUnit } = await supabaseAdmin
+        .from("stock_unit")
+        .select("id")
+        .eq("sku_id", line.sku_id)
+        .in("status", ["available", "received", "graded"])
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (stockUnit) {
+        const { error: closeErr } = await supabaseAdmin
+          .from("stock_unit")
+          .update({ status: "closed" })
+          .eq("id", stockUnit.id);
+        if (!closeErr) {
+          // Link the stock unit to the order line
+          await supabaseAdmin
+            .from("sales_order_line")
+            .update({ stock_unit_id: stockUnit.id })
+            .eq("id", line.id);
+          closed++;
+          affectedSkuIds.add(line.sku_id);
+        }
+      }
+    }
+  }
+  return { closed };
+}
+
 async function processSalesReceipt(
   supabaseAdmin: any,
   receipt: any,
@@ -335,66 +380,80 @@ async function processSalesReceipt(
   // with QBO IDs instead of duplicating it.
   const docNumber = receipt.DocNumber ?? null;
   if (docNumber) {
-    // Check eBay orders (DocNumber = eBay order ID = origin_reference)
-    const { data: ebayOrder } = await supabaseAdmin
+    // Check by origin_reference (DocNumber = eBay order ID) or doc_number
+    // (DocNumber = app order_number like KO-0000123) across all channels
+    let matchedOrder: { id: string; qbo_sync_status: string } | null = null;
+    let matchChannel = "";
+
+    // 1. Check eBay by origin_reference (works when DocNumber = eBay order ID)
+    const { data: ebayByRef } = await supabaseAdmin
       .from("sales_order")
       .select("id, qbo_sync_status")
       .eq("origin_channel", "ebay")
       .eq("origin_reference", docNumber)
       .maybeSingle();
 
-    if (ebayOrder) {
+    if (ebayByRef) {
+      matchedOrder = ebayByRef;
+      matchChannel = "ebay";
+    }
+
+    // 2. Check any channel by doc_number (works when DocNumber = KO-number)
+    if (!matchedOrder) {
+      const { data: byDocNumber } = await supabaseAdmin
+        .from("sales_order")
+        .select("id, qbo_sync_status")
+        .eq("doc_number", docNumber)
+        .neq("origin_channel", "qbo")
+        .maybeSingle();
+
+      if (byDocNumber) {
+        matchedOrder = byDocNumber;
+        matchChannel = "doc_number";
+      }
+    }
+
+    // 3. Check any channel by order_number (DocNumber might be the KO-number)
+    if (!matchedOrder) {
+      const { data: byOrderNumber } = await supabaseAdmin
+        .from("sales_order")
+        .select("id, qbo_sync_status")
+        .eq("order_number", docNumber)
+        .neq("origin_channel", "qbo")
+        .maybeSingle();
+
+      if (byOrderNumber) {
+        matchedOrder = byOrderNumber;
+        matchChannel = "order_number";
+      }
+    }
+
+    if (matchedOrder) {
       const enrichFields: Record<string, any> = {
         doc_number: docNumber,
         global_tax_calculation: globalTaxCalc,
         qbo_sales_receipt_id: qboId,
         qbo_customer_id: customerRefValue,
       };
-      if (ebayOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
+      if (matchedOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
       if (customerId) enrichFields.customer_id = customerId;
       if (taxTotal) enrichFields.tax_total = taxTotal;
 
-      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", ebayOrder.id);
+      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", matchedOrder.id);
 
       if (vatRateId) {
         await supabaseAdmin.from("sales_order_line")
           .update({ vat_rate_id: vatRateId })
-          .eq("sales_order_id", ebayOrder.id)
+          .eq("sales_order_id", matchedOrder.id)
           .is("vat_rate_id", null);
       }
 
-      console.log(`Cross-channel dedup: enriched eBay order ${ebayOrder.id} with QBO data (DocNumber ${docNumber})`);
-      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
-    }
+      // Reconcile stock — close any unclosed stock for this order's lines
+      const reconciled = await reconcileStockForOrder(supabaseAdmin, matchedOrder.id, affectedSkuIds);
+      const stockNote = reconciled.closed > 0 ? `, reconciled ${reconciled.closed} stock units` : "";
 
-    // Check web orders (DocNumber = order_number e.g. KO-0000123)
-    const { data: webOrder } = await supabaseAdmin
-      .from("sales_order")
-      .select("id, qbo_sync_status")
-      .eq("origin_channel", "web")
-      .eq("doc_number", docNumber)
-      .maybeSingle();
-
-    if (webOrder) {
-      const enrichFields: Record<string, any> = {
-        global_tax_calculation: globalTaxCalc,
-        qbo_sales_receipt_id: qboId,
-        qbo_customer_id: customerRefValue,
-      };
-      if (webOrder.qbo_sync_status !== "synced") enrichFields.qbo_sync_status = "synced";
-      if (customerId) enrichFields.customer_id = customerId;
-
-      await supabaseAdmin.from("sales_order").update(enrichFields).eq("id", webOrder.id);
-
-      if (vatRateId) {
-        await supabaseAdmin.from("sales_order_line")
-          .update({ vat_rate_id: vatRateId })
-          .eq("sales_order_id", webOrder.id)
-          .is("vat_rate_id", null);
-      }
-
-      console.log(`Cross-channel dedup: enriched web order ${webOrder.id} with QBO data (DocNumber ${docNumber})`);
-      return { created: false, linesCreated: 0, stockMatched: 0, stockMissing: 0 };
+      console.log(`Cross-channel dedup (${matchChannel}): enriched order ${matchedOrder.id} with QBO data (DocNumber ${docNumber})${stockNote}`);
+      return { created: false, linesCreated: 0, stockMatched: reconciled.closed, stockMissing: 0 };
     }
   }
 
@@ -441,11 +500,11 @@ async function processSalesReceipt(
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
 
-    // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField)) {
-      skuCode = String(skuField);
+    // Use raw QBO SKU as sku_code (trimmed to match purchase sync storage)
+    if (skuField && String(skuField).trim()) {
+      skuCode = String(skuField).trim();
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name);
+      skuCode = String(detail.ItemRef.name).trim();
     }
 
     let skuId: string | null = null;
@@ -625,11 +684,11 @@ async function processRefundReceipt(
     const skuField = qboItem?.Sku;
     let skuCode: string | null = null;
 
-    // Use raw QBO SKU verbatim as sku_code
-    if (skuField && String(skuField)) {
-      skuCode = String(skuField);
+    // Use raw QBO SKU as sku_code (trimmed to match purchase sync storage)
+    if (skuField && String(skuField).trim()) {
+      skuCode = String(skuField).trim();
     } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name);
+      skuCode = String(detail.ItemRef.name).trim();
     }
 
     let skuId: string | null = null;
@@ -908,11 +967,11 @@ Deno.serve(async (req) => {
               const skuField = qboItem?.Sku;
               let skuCode: string | null = null;
 
-              // Use raw QBO SKU verbatim as sku_code
-              if (skuField && String(skuField)) {
-                skuCode = String(skuField);
+              // Use raw QBO SKU as sku_code (trimmed to match purchase sync)
+              if (skuField && String(skuField).trim()) {
+                skuCode = String(skuField).trim();
               } else if (detail.ItemRef?.name) {
-                skuCode = String(detail.ItemRef.name);
+                skuCode = String(detail.ItemRef.name).trim();
               }
 
               if (!skuCode) continue;
