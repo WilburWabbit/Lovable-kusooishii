@@ -38,6 +38,7 @@ export function QboSettingsPanel() {
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingItems, setSyncingItems] = useState(false);
   const [reconcilingStock, setReconcilingStock] = useState(false);
+  const [reconcileDetails, setReconcileDetails] = useState<any[] | null>(null);
   const [cancelSync, setCancelSync] = useState(false);
   const cancelRef = useRef(false);
 
@@ -228,6 +229,7 @@ export function QboSettingsPanel() {
 
   const reconcileStock = async () => {
     setReconcilingStock(true);
+    setReconcileDetails(null);
     try {
       const data = await invokeWithAuth<Record<string, any>>("admin-data", { action: "reconcile-stock" });
       if (data?.error) throw new Error(data.error);
@@ -235,12 +237,15 @@ export function QboSettingsPanel() {
       if (data.stock_closed) parts.push(`${data.stock_closed} sold units closed`);
       parts.push(`${data.total_checked ?? 0} SKUs checked`);
       if (data.in_sync) parts.push(`${data.in_sync} in sync`);
-      if (data.written_off) parts.push(`${data.written_off} units written off`);
-      if (data.discrepancies) parts.push(`${data.discrepancies} discrepancies (QBO higher)`);
+      if (data.app_higher) parts.push(`${data.app_higher} app higher`);
+      if (data.qbo_higher) parts.push(`${data.qbo_higher} QBO higher`);
       toast({
         title: "Stock reconciliation complete",
         description: parts.join(", ") + ".",
       });
+      if (data.details?.length > 0) {
+        setReconcileDetails(data.details);
+      }
     } catch (err) {
       toast({
         title: "Stock reconciliation failed",
@@ -321,6 +326,50 @@ export function QboSettingsPanel() {
                 Disconnect
               </Button>
             </div>
+
+            {/* Stock reconciliation discrepancy details */}
+            {reconcileDetails && reconcileDetails.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-display text-sm font-medium">Stock Discrepancies</h4>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setReconcileDetails(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-1.5 font-medium">SKU</th>
+                        <th className="text-right px-3 py-1.5 font-medium">App</th>
+                        <th className="text-right px-3 py-1.5 font-medium">QBO</th>
+                        <th className="text-right px-3 py-1.5 font-medium">Diff</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Direction</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconcileDetails.map((d: any, i: number) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="px-3 py-1.5 font-mono">{d.sku_code}</td>
+                          <td className="text-right px-3 py-1.5">{d.app_qty}</td>
+                          <td className="text-right px-3 py-1.5">{d.qbo_qty}</td>
+                          <td className="text-right px-3 py-1.5 font-medium">{d.diff}</td>
+                          <td className="px-3 py-1.5">
+                            <Badge variant="outline" className={
+                              d.direction === "app_higher"
+                                ? "text-amber-600 border-amber-300 bg-amber-50"
+                                : "text-blue-600 border-blue-300 bg-blue-50"
+                            }>
+                              {d.direction === "app_higher" ? "App higher" : "QBO higher"}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <Button size="sm" onClick={connectQbo} disabled={!user}>
