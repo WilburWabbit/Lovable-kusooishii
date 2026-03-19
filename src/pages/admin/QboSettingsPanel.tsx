@@ -204,6 +204,7 @@ export function QboSettingsPanel() {
       if (data.sales_created) parts.push(`${data.sales_created} sales imported`);
       if (data.sales_skipped) parts.push(`${data.sales_skipped} sales unchanged`);
       if (data.stock_matched) parts.push(`${data.stock_matched} stock matched`);
+      if (data.stock_reconciled) parts.push(`${data.stock_reconciled} stock reconciled`);
       if (data.stock_missing) parts.push(`${data.stock_missing} stock missing`);
       if (data.refunds_created) parts.push(`${data.refunds_created} refunds imported`);
       if (data.refunds_skipped) parts.push(`${data.refunds_skipped} refunds unchanged`);
