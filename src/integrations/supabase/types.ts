@@ -1272,6 +1272,7 @@ export type Database = {
       product: {
         Row: {
           age_range: string | null
+          brand: string | null
           brickeconomy_id: string | null
           bricklink_item_no: string | null
           brickowl_boid: string | null
@@ -1310,6 +1311,7 @@ export type Database = {
         }
         Insert: {
           age_range?: string | null
+          brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
@@ -1348,6 +1350,7 @@ export type Database = {
         }
         Update: {
           age_range?: string | null
+          brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
