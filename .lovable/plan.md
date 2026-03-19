@@ -1,38 +1,48 @@
 
 
-## Fix: Pricing Calculation Edge Function Timeout
+## Diagnosis: QBO Sales Sync — Schema Cache Stale + Stock Missing
 
-### Problem
-The `calculate-pricing` action in the `admin-data` edge function makes 6 sequential database queries, which combined with the large function file (1043 lines), exceeds the Edge Function CPU time limit. The logs show repeated boot/shutdown cycles with no error output — the classic sign of a worker being killed for exceeding the 2-second CPU limit.
+### What's actually happening
 
-### Solution
-Parallelize the independent database queries in the `calculate-pricing` action. Currently queries run one after another; after the first query (SKU+product), the remaining 5 queries (defaults, stock, shipping rates, fees, BrickEconomy) can all run simultaneously via `Promise.all`.
+The sync function **is mostly working** — logs show it processing 343 sales receipts and 12 refunds per run, successfully deduplicating eBay orders against QBO. But two issues cause stock divergence:
 
-### Changes
+### Issue 1: PostgREST schema cache is stale
 
-**File: `supabase/functions/admin-data/index.ts`** (lines ~670-763)
+The columns `qbo_customer_id`, `qbo_sales_receipt_id`, `qbo_sync_status` **do exist** on `sales_order` (added by migration `20260319220000`). However, PostgREST hasn't reloaded its schema cache, so it rejects writes that include these columns with `PGRST204`.
 
-Refactor the calculate-pricing action to run queries 2-6 in parallel after query 1:
+The fallback logic (lines 487-496) silently **drops** the QBO tracking columns and retries — so orders get created but **without QBO IDs or sync status**. This means:
+- No `qbo_sales_receipt_id` → re-runs can't detect these orders were already processed → potential duplicates
+- No `qbo_sync_status` → retry/alert mechanisms don't work
 
-```typescript
-// 1. Get SKU + product info (needs to run first — others depend on its results)
-const { data: skuData } = await admin.from("sku")...
+**Fix**: Run a migration with `NOTIFY pgrst, 'reload schema'` to force PostgREST to pick up the columns that already exist.
 
-// 2-6. Run remaining queries in parallel
-const [defaultsRes, stockRes, ratesRes, feesRes, beRes] = await Promise.all([
-  admin.from("selling_cost_defaults").select("key, value"),
-  admin.from("stock_unit").select("carrying_value").eq("sku_id", sku_id).eq("status", "available"),
-  admin.from("shipping_rate_table").select("*").or(...).eq("active", true).gte(...).order(...),
-  admin.from("channel_fee_schedule").select("*").eq("channel", channel).eq("active", true),
-  // BrickEconomy lookup (conditional on mpn)
-  mpn ? admin.from("brickeconomy_collection").select("current_value").in("item_number", candidates).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-]);
+### Issue 2: Missing stock units for sold SKUs
+
+Logs show repeated warnings: `No available stock for SKU 10335-1.1`, `40702-1.1`, `40651-1.1`, `40700-1.1`, `77072-1.1`, `75349-1.2`, `10317-1.1`.
+
+When the sync creates an order line but can't find an `available` stock unit, it sets `stock_unit_id = null` and doesn't close any stock. QBO has already decremented its `QtyOnHand` for these sales, but the app never closed the corresponding units — hence the discrepancy.
+
+Root causes:
+- Purchase receipts for these SKUs may not have been synced yet (stock units never created)
+- Or stock was previously closed/written off incorrectly by the item reconciliation seeing the mismatch
+
+**Fix**: After fixing Issue 1, re-run the full purchase sync first (to ensure all stock units exist), then re-run the sales sync (to close stock via FIFO). Finally run stock reconciliation to verify alignment.
+
+### Plan
+
+**Step 1 — Database migration** (one statement):
+```sql
+NOTIFY pgrst, 'reload schema';
 ```
 
-This reduces 6 sequential round-trips to 2 (1 + parallel batch), cutting wall-clock and CPU time by ~60%.
+**Step 2 — No code changes needed.** The edge function code already handles these columns correctly; it just needs PostgREST to recognise them.
 
-### Impact
-- No schema changes needed
-- No frontend changes needed
-- Same inputs/outputs — purely an internal optimization
+**Step 3 — Operational steps** (user action after deploy):
+1. Run "Sync Purchases" to ensure all stock units exist
+2. Run "Sync Sales" to reprocess — this time QBO tracking columns will persist
+3. Run "Reconcile Stock" to verify alignment
+
+### Technical detail
+
+The `allocate_stock_units` RPC function works correctly — it atomically selects and closes FIFO stock via `FOR UPDATE SKIP LOCKED`. The problem is upstream: if stock units don't exist for a SKU, there's nothing to allocate.
 
