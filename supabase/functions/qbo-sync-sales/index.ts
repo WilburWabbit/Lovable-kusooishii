@@ -797,12 +797,20 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    // Parse request body for month parameter
+    // Parse request body for month parameter and chunk control
     let targetMonth: string | null = null;
+    let chunkSize = 25; // Process at most N receipts per invocation
+    let skipLanding = false; // If true, skip QBO fetch and only process pending landings
     try {
       const body = await req.json();
       if (body?.month && typeof body.month === "string") {
         targetMonth = body.month; // e.g. "2025-06"
+      }
+      if (body?.chunk_size && typeof body.chunk_size === "number") {
+        chunkSize = Math.min(Math.max(body.chunk_size, 1), 100);
+      }
+      if (body?.skip_landing === true) {
+        skipLanding = true;
       }
     } catch {
       // No body or invalid JSON — default to current month
