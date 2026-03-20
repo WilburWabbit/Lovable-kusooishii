@@ -469,15 +469,45 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
   if (operation === "Delete") {
     const { data: receipt } = await admin.from("inbound_receipt").select("id").eq("qbo_purchase_id", entityId).maybeSingle();
     if (!receipt) return "no matching receipt found";
-    // Delete stock units linked to this receipt's lines
+    // Safely handle stock units linked to this receipt's lines
     const { data: lines } = await admin.from("inbound_receipt_line").select("id").eq("inbound_receipt_id", receipt.id);
     const lineIds = (lines ?? []).map((l: any) => l.id);
     if (lineIds.length > 0) {
-      await admin.from("stock_unit").delete().in("inbound_receipt_line_id", lineIds);
+      const { data: linkedUnits } = await admin.from("stock_unit")
+        .select("id, status, landed_cost, carrying_value")
+        .in("inbound_receipt_line_id", lineIds);
+
+      for (const unit of (linkedUnits ?? [])) {
+        if (unit.status === "closed") {
+          // Sold unit — nullify FK but preserve unit
+          await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+          await admin.from("audit_event").insert({
+            entity_type: "stock_unit", entity_id: unit.id,
+            trigger_type: "purchase_deleted", actor_type: "system",
+            source_system: "qbo-webhook",
+            input_json: { qbo_purchase_id: entityId, reason: "sold_unit_orphaned_purchase_deleted" },
+          });
+        } else {
+          // Available/received/graded — write off with audit trail
+          await admin.from("stock_unit").update({
+            status: "written_off", carrying_value: 0,
+            accumulated_impairment: unit.landed_cost ?? 0,
+            updated_at: new Date().toISOString(),
+          }).eq("id", unit.id);
+          await admin.from("audit_event").insert({
+            entity_type: "stock_unit", entity_id: unit.id,
+            trigger_type: "purchase_deleted", actor_type: "system",
+            source_system: "qbo-webhook",
+            before_json: { status: unit.status, carrying_value: unit.carrying_value },
+            after_json: { status: "written_off", carrying_value: 0 },
+            input_json: { qbo_purchase_id: entityId, reason: "purchase_deleted_in_qbo" },
+          });
+        }
+      }
     }
     await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
     await admin.from("inbound_receipt").delete().eq("id", receipt.id);
-    return `deleted receipt + ${lineIds.length} lines + stock units`;
+    return `deleted receipt + ${lineIds.length} lines (sold units preserved, available written off)`;
   }
 
   // Create / Update — fetch single purchase from QBO
