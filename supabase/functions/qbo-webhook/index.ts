@@ -469,15 +469,45 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
   if (operation === "Delete") {
     const { data: receipt } = await admin.from("inbound_receipt").select("id").eq("qbo_purchase_id", entityId).maybeSingle();
     if (!receipt) return "no matching receipt found";
-    // Delete stock units linked to this receipt's lines
+    // Safely handle stock units linked to this receipt's lines
     const { data: lines } = await admin.from("inbound_receipt_line").select("id").eq("inbound_receipt_id", receipt.id);
     const lineIds = (lines ?? []).map((l: any) => l.id);
     if (lineIds.length > 0) {
-      await admin.from("stock_unit").delete().in("inbound_receipt_line_id", lineIds);
+      const { data: linkedUnits } = await admin.from("stock_unit")
+        .select("id, status, landed_cost, carrying_value")
+        .in("inbound_receipt_line_id", lineIds);
+
+      for (const unit of (linkedUnits ?? [])) {
+        if (unit.status === "closed") {
+          // Sold unit — nullify FK but preserve unit
+          await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+          await admin.from("audit_event").insert({
+            entity_type: "stock_unit", entity_id: unit.id,
+            trigger_type: "purchase_deleted", actor_type: "system",
+            source_system: "qbo-webhook",
+            input_json: { qbo_purchase_id: entityId, reason: "sold_unit_orphaned_purchase_deleted" },
+          });
+        } else {
+          // Available/received/graded — write off with audit trail
+          await admin.from("stock_unit").update({
+            status: "written_off", carrying_value: 0,
+            accumulated_impairment: unit.landed_cost ?? 0,
+            updated_at: new Date().toISOString(),
+          }).eq("id", unit.id);
+          await admin.from("audit_event").insert({
+            entity_type: "stock_unit", entity_id: unit.id,
+            trigger_type: "purchase_deleted", actor_type: "system",
+            source_system: "qbo-webhook",
+            before_json: { status: unit.status, carrying_value: unit.carrying_value },
+            after_json: { status: "written_off", carrying_value: 0 },
+            input_json: { qbo_purchase_id: entityId, reason: "purchase_deleted_in_qbo" },
+          });
+        }
+      }
     }
     await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
     await admin.from("inbound_receipt").delete().eq("id", receipt.id);
-    return `deleted receipt + ${lineIds.length} lines + stock units`;
+    return `deleted receipt + ${lineIds.length} lines (sold units preserved, available written off)`;
   }
 
   // Create / Update — fetch single purchase from QBO
@@ -523,12 +553,66 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       // Reopen stock units linked to old receipt lines (set back to available or delete)
       const { data: linkedUnits } = await admin
         .from("stock_unit")
-        .select("id, status")
+        .select("id, status, sku_id, landed_cost, carrying_value, mpn, condition_grade")
         .in("inbound_receipt_line_id", oldLineIds);
       for (const unit of (linkedUnits ?? [])) {
         if (unit.status === "closed") {
-          // Stock was sold — can't reopen, just log
-          console.warn(`Stock unit ${unit.id} is closed (sold) — cannot reopen for purchase update`);
+          // Sold unit — attempt SKU reallocation by MPN from new purchase lines
+          const newPurchaseLines = (purchase.Line ?? []).filter((l: any) => l.DetailType === "ItemBasedExpenseLineDetail");
+          let reallocated = false;
+
+          for (const nl of newPurchaseLines) {
+            const itemRef = nl.ItemBasedExpenseLineDetail?.ItemRef;
+            if (!itemRef?.value) continue;
+            const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${itemRef.value}`);
+            const qboItem = itemData?.Item ?? null;
+            const skuField = qboItem?.Sku;
+            const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : (itemRef.name ?? "").trim();
+            if (!rawSku) continue;
+            const parsed = parseSku(rawSku);
+
+            if (parsed.mpn === unit.mpn) {
+              // Same MPN — update landed cost and potentially SKU
+              const newUnitCost = nl.ItemBasedExpenseLineDetail?.UnitPrice ?? 0;
+              const updates: Record<string, any> = {
+                landed_cost: newUnitCost,
+                carrying_value: newUnitCost,
+              };
+
+              // Check if grade (SKU) changed
+              if (parsed.conditionGrade !== unit.condition_grade) {
+                const newSkuCode = parsed.conditionGrade !== "1" ? `${parsed.mpn}.${parsed.conditionGrade}` : parsed.mpn;
+                const { data: newSku } = await admin.from("sku").select("id").eq("sku_code", newSkuCode).maybeSingle();
+                if (newSku) {
+                  updates.sku_id = newSku.id;
+                  updates.condition_grade = parsed.conditionGrade;
+                }
+              }
+
+              await admin.from("stock_unit").update(updates).eq("id", unit.id);
+              await admin.from("audit_event").insert({
+                entity_type: "stock_unit", entity_id: unit.id,
+                trigger_type: "purchase_reprocessing", actor_type: "system",
+                source_system: "qbo-webhook",
+                before_json: { landed_cost: unit.landed_cost, carrying_value: unit.carrying_value, sku_id: unit.sku_id },
+                after_json: updates,
+                input_json: { qbo_purchase_id: entityId, reason: "purchase_updated_sold_unit_reallocated" },
+              });
+              reallocated = true;
+              break;
+            }
+          }
+
+          if (!reallocated) {
+            // Unlink from receipt line but preserve the sold unit
+            await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+            await admin.from("audit_event").insert({
+              entity_type: "stock_unit", entity_id: unit.id,
+              trigger_type: "purchase_reprocessing", actor_type: "system",
+              source_system: "qbo-webhook",
+              input_json: { qbo_purchase_id: entityId, reason: "sold_unit_orphaned_no_matching_mpn" },
+            });
+          }
         } else {
           await admin.from("stock_unit").delete().eq("id", unit.id);
         }
@@ -1172,18 +1256,35 @@ async function reconcileQtyOnHand(
     return `wrote off ${writtenOff}/${excess} units (QBO=${qboQty}, app was ${available})`;
   }
 
-  // QBO has more than app — log warning, don't auto-create
-  // (new stock should come through the purchase/receipt flow)
-  console.warn(
+  // QBO has more than app — auto-create balancing stock units
+  const shortfall = qboQty - available;
+  console.log(
     `[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). ` +
-    `Difference of ${qboQty - available} units — check for missing receipts.`
+    `Creating ${shortfall} balancing units.`
   );
 
-  // Record the discrepancy as an audit event for visibility
+  // Resolve sku_id for backfill units
+  const { data: skuForBackfill } = await admin.from("sku").select("id").eq("qbo_item_id", qboItemId).maybeSingle();
+  if (skuForBackfill) {
+    const backfillUnits = [];
+    for (let i = 0; i < shortfall; i++) {
+      backfillUnits.push({
+        sku_id: skuForBackfill.id,
+        mpn,
+        condition_grade: parseSku(skuCode).conditionGrade,
+        status: "available",
+        landed_cost: 0,
+        carrying_value: 0,
+      });
+    }
+    await admin.from("stock_unit").insert(backfillUnits);
+  }
+
+  // Record the backfill as an audit event
   await admin.from("audit_event").insert({
     entity_type: "sku",
     entity_id: sku.id,
-    trigger_type: "qbo_qty_discrepancy",
+    trigger_type: "qbo_qty_backfill",
     actor_type: "system",
     source_system: "qbo",
     correlation_id: correlationId,
@@ -1192,12 +1293,12 @@ async function reconcileQtyOnHand(
       sku_code: skuCode,
       qbo_qty_on_hand: qboQty,
       app_available: available,
-      discrepancy: qboQty - available,
+      units_created: shortfall,
       direction: "qbo_higher",
     },
   });
 
-  return `discrepancy: QBO=${qboQty} vs app=${available} (logged, no auto-create)`;
+  return `backfilled ${shortfall} units (QBO=${qboQty}, app was ${available})`;
 }
 
 async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {

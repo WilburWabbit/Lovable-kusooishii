@@ -362,17 +362,36 @@ async function landPurchase(
   // Check if already landed
   const { data: existing } = await supabaseAdmin
     .from("landing_raw_qbo_purchase")
-    .select("id, status")
+    .select("id, status, raw_payload")
     .eq("external_id", externalId)
     .maybeSingle();
 
   if (existing) {
-    // Update the raw payload (QBO data may have changed) but keep existing status
+    // Compare payload — if changed and committed, reset to pending for reprocessing
+    const oldPayload = JSON.stringify(existing.raw_payload ?? {});
+    const newPayload = JSON.stringify(purchase);
+    const payloadChanged = oldPayload !== newPayload;
+
+    const updateFields: Record<string, any> = {
+      raw_payload: purchase,
+      received_at: new Date().toISOString(),
+    };
+
+    if (payloadChanged && existing.status === "committed") {
+      // Payload changed — reset to pending so Phase 3 reprocesses it
+      updateFields.status = "pending";
+      updateFields.processed_at = null;
+      console.log(`[landPurchase] Purchase ${externalId} payload changed — resetting committed → pending`);
+    }
+
     await supabaseAdmin
       .from("landing_raw_qbo_purchase")
-      .update({ raw_payload: purchase, received_at: new Date().toISOString() })
+      .update(updateFields)
       .eq("id", existing.id);
-    return { landingId: existing.id, alreadyLanded: existing.status === "committed" };
+
+    // Only skip if still committed (i.e. payload unchanged)
+    const effectiveStatus = (payloadChanged && existing.status === "committed") ? "pending" : existing.status;
+    return { landingId: existing.id, alreadyLanded: effectiveStatus === "committed" };
   }
 
   const { data: landing, error } = await supabaseAdmin
@@ -633,18 +652,95 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          // Already processed — run backfill, then mark landing as committed
+          // Already processed — delete-and-recreate to handle changed data
           if (receipt.status === "processed") {
-            try {
-              const bf = await backfillProcessedReceipt(supabaseAdmin, receipt.id, purchase);
-              backfilledTaxCodes += bf.taxCodesUpdated;
-              backfilledStockLinks += bf.stockUnitsLinked;
-            } catch (bfErr) {
-              console.error(`[${monthLabel}] Backfill failed for receipt ${receipt.id}:`, bfErr);
+            console.log(`[${monthLabel}] Reprocessing already-processed receipt ${receipt.id} (purchase ${qboPurchaseId})`);
+
+            // Query old lines and their stock units
+            const { data: oldProcLines } = await supabaseAdmin
+              .from("inbound_receipt_line")
+              .select("id, mpn, condition_grade, sku_code")
+              .eq("inbound_receipt_id", receipt.id);
+
+            const oldProcLineIds = (oldProcLines ?? []).map((l: any) => l.id);
+
+            if (oldProcLineIds.length > 0) {
+              const { data: linkedUnits } = await supabaseAdmin
+                .from("stock_unit")
+                .select("id, status, sku_id, landed_cost, carrying_value, mpn, condition_grade, inbound_receipt_line_id")
+                .in("inbound_receipt_line_id", oldProcLineIds);
+
+              for (const unit of (linkedUnits ?? [])) {
+                if (unit.status === "closed") {
+                  // Sold unit — attempt SKU reallocation by MPN from new purchase lines
+                  const newLines = (purchase.Line ?? []).filter((l: any) => l.DetailType === "ItemBasedExpenseLineDetail");
+                  let reallocated = false;
+
+                  for (const nl of newLines) {
+                    const itemRef = nl.ItemBasedExpenseLineDetail?.ItemRef;
+                    if (!itemRef?.value) continue;
+                    const qboItem = await fetchQboItem(itemRef.value, itemCache, baseUrl, accessToken);
+                    const skuField = qboItem?.Sku;
+                    const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : (itemRef.name ?? "").trim();
+                    if (!rawSku) continue;
+                    const parsed = parseSku(rawSku);
+
+                    if (parsed.mpn === unit.mpn) {
+                      // Same MPN — update landed cost
+                      const newUnitCost = nl.ItemBasedExpenseLineDetail?.UnitPrice ?? 0;
+                      const updates: Record<string, any> = {
+                        landed_cost: newUnitCost,
+                        carrying_value: newUnitCost,
+                      };
+
+                      // Check if SKU changed (grade changed)
+                      if (parsed.conditionGrade !== unit.condition_grade) {
+                        const newSkuCode = parsed.conditionGrade !== "1" ? `${parsed.mpn}.${parsed.conditionGrade}` : parsed.mpn;
+                        const { data: newSku } = await supabaseAdmin.from("sku").select("id").eq("sku_code", newSkuCode).maybeSingle();
+                        if (newSku) {
+                          updates.sku_id = newSku.id;
+                          updates.condition_grade = parsed.conditionGrade;
+                        }
+                      }
+
+                      await supabaseAdmin.from("stock_unit").update(updates).eq("id", unit.id);
+                      await supabaseAdmin.from("audit_event").insert({
+                        entity_type: "stock_unit", entity_id: unit.id,
+                        trigger_type: "purchase_reprocessing", actor_type: "system",
+                        source_system: "qbo-sync-purchases",
+                        before_json: { landed_cost: unit.landed_cost, carrying_value: unit.carrying_value, sku_id: unit.sku_id },
+                        after_json: updates,
+                        input_json: { qbo_purchase_id: qboPurchaseId, reason: "purchase_updated_sold_unit_reallocated" },
+                      });
+                      reallocated = true;
+                      break;
+                    }
+                  }
+
+                  if (!reallocated) {
+                    // Unlink from receipt line but preserve the unit
+                    await supabaseAdmin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+                    await supabaseAdmin.from("audit_event").insert({
+                      entity_type: "stock_unit", entity_id: unit.id,
+                      trigger_type: "purchase_reprocessing", actor_type: "system",
+                      source_system: "qbo-sync-purchases",
+                      input_json: { qbo_purchase_id: qboPurchaseId, reason: "sold_unit_orphaned_no_matching_mpn" },
+                    });
+                  }
+                } else {
+                  // Available/received/graded — delete and recreate
+                  await supabaseAdmin.from("stock_unit").delete().eq("id", unit.id);
+                }
+              }
             }
-            skippedExisting++;
-            await markLandingCommitted(supabaseAdmin, landingId);
-            continue;
+
+            // Delete old lines
+            await supabaseAdmin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
+
+            // Reset receipt to pending so the code below recreates lines and auto-processes
+            await supabaseAdmin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
+
+            // Fall through to the line-creation + auto-process code below
           }
 
           // Nullify FK on stock_units referencing old lines before deleting them

@@ -154,15 +154,40 @@ async function reconcileQtyOnHand(
     return `wrote off ${writtenOff}/${excess} units (QBO=${qboQty}, app was ${available})`;
   }
 
-  // QBO has more — log warning
-  console.warn(`[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). Difference of ${qboQty - available} units.`);
+  // QBO has more than app — auto-create balancing stock units
+  const shortfall = qboQty - available;
+  console.log(
+    `[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). ` +
+    `Creating ${shortfall} balancing units.`
+  );
+
+  // Resolve sku for backfill
+  if (sku) {
+    const backfillUnits = [];
+    for (let i = 0; i < shortfall; i++) {
+      backfillUnits.push({
+        sku_id: sku.id,
+        mpn,
+        condition_grade: parseSku(skuCode).conditionGrade,
+        status: "available",
+        landed_cost: 0,
+        carrying_value: 0,
+      });
+    }
+    await admin.from("stock_unit").insert(backfillUnits);
+  }
+
   await admin.from("audit_event").insert({
     entity_type: "sku", entity_id: sku.id,
-    trigger_type: "qbo_qty_discrepancy", actor_type: "system",
+    trigger_type: "qbo_qty_backfill", actor_type: "system",
     source_system: "qbo-sync-items", correlation_id: reconcileCorrelationId,
-    input_json: { qbo_item_id: qboItemId, sku_code: skuCode, qbo_qty_on_hand: qboQty, app_available: available, discrepancy: qboQty - available, direction: "qbo_higher" },
+    input_json: {
+      qbo_item_id: qboItemId, sku_code: skuCode,
+      qbo_qty_on_hand: qboQty, app_available: available,
+      units_created: shortfall, direction: "qbo_higher",
+    },
   });
-  return `discrepancy: QBO=${qboQty} vs app=${available} (logged, no auto-create)`;
+  return `backfilled ${shortfall} units (QBO=${qboQty}, app was ${available})`;
 }
 
 async function queryQboAll(baseUrl: string, accessToken: string, query: string, entityKey: string): Promise<any[]> {

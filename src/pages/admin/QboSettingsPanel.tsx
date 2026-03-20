@@ -6,8 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Link2, RefreshCw, Unplug, Square, Scale } from "lucide-react";
+import { Loader2, Link2, RefreshCw, Unplug, Square, Scale, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 /** Generate month labels from current month back to April 2023 */
 function generateMonthList(): string[] {
@@ -40,6 +51,8 @@ export function QboSettingsPanel() {
   const [syncingItems, setSyncingItems] = useState(false);
   const [reconcilingStock, setReconcilingStock] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<any[] | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildPhase, setRebuildPhase] = useState<string | null>(null);
   const cancelPurchasesRef = useRef(false);
   const cancelSalesRef = useRef(false);
 
@@ -337,6 +350,44 @@ export function QboSettingsPanel() {
     }
   };
 
+  const rebuildFromQbo = async () => {
+    if (!status?.connected) return;
+    setRebuilding(true);
+    setRebuildPhase("Resetting data…");
+    try {
+      // Phase 1: Reset
+      const resetData = await invokeWithAuth<Record<string, any>>("admin-data", { action: "rebuild-from-qbo" });
+      if (resetData?.error) throw new Error(resetData.error);
+      toast({
+        title: "Reset complete",
+        description: `${resetData.receipts_reset ?? 0} receipts reset, ${resetData.orders_deleted ?? 0} orders deleted, ${resetData.stock_written_off ?? 0} stock written off.`,
+      });
+
+      // Phase 2: Sync Purchases
+      setRebuildPhase("Syncing purchases…");
+      await syncPurchases();
+
+      // Phase 3: Sync Sales
+      setRebuildPhase("Syncing sales…");
+      await syncSales();
+
+      // Phase 4: Reconcile
+      setRebuildPhase("Reconciling stock…");
+      await reconcileStock();
+
+      toast({ title: "Rebuild complete", description: "All QBO data has been resynchronised." });
+    } catch (err) {
+      toast({
+        title: "Rebuild failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setRebuilding(false);
+      setRebuildPhase(null);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -396,6 +447,10 @@ export function QboSettingsPanel() {
               </div>
             )}
 
+            {rebuildPhase && (
+              <p className="font-body text-xs text-muted-foreground">{rebuildPhase}</p>
+            )}
+
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
@@ -417,6 +472,26 @@ export function QboSettingsPanel() {
                 {reconcilingStock ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Scale className="mr-2 h-3.5 w-3.5" />}
                 Reconcile Stock
               </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive" disabled={rebuilding || !user}>
+                    {rebuilding ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-2 h-3.5 w-3.5" />}
+                    Rebuild from QBO
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Rebuild from QBO?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will reset all purchase receipts, delete QBO-originated sales orders, write off available stock units, and then re-sync everything from QuickBooks. This is a destructive operation that cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={rebuildFromQbo}>Yes, rebuild</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
                 {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
                 Disconnect
