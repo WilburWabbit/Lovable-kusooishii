@@ -350,6 +350,44 @@ export function QboSettingsPanel() {
     }
   };
 
+  const rebuildFromQbo = async () => {
+    if (!status?.connected) return;
+    setRebuilding(true);
+    setRebuildPhase("Resetting data…");
+    try {
+      // Phase 1: Reset
+      const resetData = await invokeWithAuth<Record<string, any>>("admin-data", { action: "rebuild-from-qbo" });
+      if (resetData?.error) throw new Error(resetData.error);
+      toast({
+        title: "Reset complete",
+        description: `${resetData.receipts_reset ?? 0} receipts reset, ${resetData.orders_deleted ?? 0} orders deleted, ${resetData.stock_written_off ?? 0} stock written off.`,
+      });
+
+      // Phase 2: Sync Purchases
+      setRebuildPhase("Syncing purchases…");
+      await syncPurchases();
+
+      // Phase 3: Sync Sales
+      setRebuildPhase("Syncing sales…");
+      await syncSales();
+
+      // Phase 4: Reconcile
+      setRebuildPhase("Reconciling stock…");
+      await reconcileStock();
+
+      toast({ title: "Rebuild complete", description: "All QBO data has been resynchronised." });
+    } catch (err) {
+      toast({
+        title: "Rebuild failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setRebuilding(false);
+      setRebuildPhase(null);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
