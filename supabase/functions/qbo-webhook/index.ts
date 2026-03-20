@@ -1256,18 +1256,35 @@ async function reconcileQtyOnHand(
     return `wrote off ${writtenOff}/${excess} units (QBO=${qboQty}, app was ${available})`;
   }
 
-  // QBO has more than app — log warning, don't auto-create
-  // (new stock should come through the purchase/receipt flow)
-  console.warn(
+  // QBO has more than app — auto-create balancing stock units
+  const shortfall = qboQty - available;
+  console.log(
     `[reconcileQtyOnHand] SKU ${skuCode}: QBO QtyOnHand (${qboQty}) > app available (${available}). ` +
-    `Difference of ${qboQty - available} units — check for missing receipts.`
+    `Creating ${shortfall} balancing units.`
   );
 
-  // Record the discrepancy as an audit event for visibility
+  // Resolve sku_id for backfill units
+  const { data: skuForBackfill } = await admin.from("sku").select("id").eq("qbo_item_id", qboItemId).maybeSingle();
+  if (skuForBackfill) {
+    const backfillUnits = [];
+    for (let i = 0; i < shortfall; i++) {
+      backfillUnits.push({
+        sku_id: skuForBackfill.id,
+        mpn,
+        condition_grade: parseSku(skuCode).conditionGrade,
+        status: "available",
+        landed_cost: 0,
+        carrying_value: 0,
+      });
+    }
+    await admin.from("stock_unit").insert(backfillUnits);
+  }
+
+  // Record the backfill as an audit event
   await admin.from("audit_event").insert({
     entity_type: "sku",
     entity_id: sku.id,
-    trigger_type: "qbo_qty_discrepancy",
+    trigger_type: "qbo_qty_backfill",
     actor_type: "system",
     source_system: "qbo",
     correlation_id: correlationId,
@@ -1276,12 +1293,12 @@ async function reconcileQtyOnHand(
       sku_code: skuCode,
       qbo_qty_on_hand: qboQty,
       app_available: available,
-      discrepancy: qboQty - available,
+      units_created: shortfall,
       direction: "qbo_higher",
     },
   });
 
-  return `discrepancy: QBO=${qboQty} vs app=${available} (logged, no auto-create)`;
+  return `backfilled ${shortfall} units (QBO=${qboQty}, app was ${available})`;
 }
 
 async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {
