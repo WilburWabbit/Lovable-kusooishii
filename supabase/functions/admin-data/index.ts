@@ -1603,6 +1603,100 @@ Deno.serve(async (req) => {
         details,
       };
 
+    } else if (action === "rebuild-from-qbo") {
+      // Nuclear reset: clear all QBO-sourced data and reset landing tables for full replay
+      const rebuildCorrelationId = crypto.randomUUID();
+      let purchasesReset = 0, salesReset = 0, refundsReset = 0;
+      let receiptsReset = 0, ordersDeleted = 0;
+      let stockWrittenOff = 0, stockOrphaned = 0;
+
+      // 1. Reset all landing tables to pending
+      const { count: pCount } = await admin.from("landing_raw_qbo_purchase")
+        .update({ status: "pending", processed_at: null }).neq("status", "pending")
+        .select("id", { count: "exact", head: true });
+      purchasesReset = pCount ?? 0;
+
+      const { count: sCount } = await admin.from("landing_raw_qbo_sales_receipt")
+        .update({ status: "pending", processed_at: null }).neq("status", "pending")
+        .select("id", { count: "exact", head: true });
+      salesReset = sCount ?? 0;
+
+      const { count: rCount } = await admin.from("landing_raw_qbo_refund_receipt")
+        .update({ status: "pending", processed_at: null }).neq("status", "pending")
+        .select("id", { count: "exact", head: true });
+      refundsReset = rCount ?? 0;
+
+      // 2. Process each inbound_receipt: handle stock units, delete lines, reset status
+      const { data: allReceipts } = await admin.from("inbound_receipt").select("id");
+      for (const receipt of (allReceipts ?? [])) {
+        const { data: receiptLines } = await admin.from("inbound_receipt_line")
+          .select("id").eq("inbound_receipt_id", receipt.id);
+        const lineIds = (receiptLines ?? []).map((l: any) => l.id);
+
+        if (lineIds.length > 0) {
+          const { data: units } = await admin.from("stock_unit")
+            .select("id, status, landed_cost, carrying_value")
+            .in("inbound_receipt_line_id", lineIds);
+
+          for (const unit of (units ?? [])) {
+            if (unit.status === "closed") {
+              // Sold — nullify FK, preserve unit
+              await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+              stockOrphaned++;
+            } else {
+              // Write off
+              await admin.from("stock_unit").update({
+                status: "written_off", carrying_value: 0,
+                accumulated_impairment: unit.landed_cost ?? 0,
+                inbound_receipt_line_id: null,
+              }).eq("id", unit.id);
+              stockWrittenOff++;
+            }
+          }
+        }
+
+        await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
+        await admin.from("inbound_receipt").update({ status: "pending", processed_at: null }).eq("id", receipt.id);
+        receiptsReset++;
+      }
+
+      // 3. Delete all QBO-originated sales orders
+      const { data: qboOrders } = await admin.from("sales_order")
+        .select("id").in("origin_channel", ["qbo", "qbo_refund"]);
+
+      for (const order of (qboOrders ?? [])) {
+        // Reopen stock linked to order lines
+        const { data: orderLines } = await admin.from("sales_order_line")
+          .select("stock_unit_id").eq("sales_order_id", order.id);
+        for (const ol of (orderLines ?? [])) {
+          if (ol.stock_unit_id) {
+            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
+          }
+        }
+        await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
+        await admin.from("sales_order").delete().eq("id", order.id);
+        ordersDeleted++;
+      }
+
+      await admin.from("audit_event").insert({
+        entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
+        trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
+        source_system: "admin-data", correlation_id: rebuildCorrelationId,
+        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, receipts_reset: receiptsReset, orders_deleted: ordersDeleted, stock_written_off: stockWrittenOff, stock_orphaned: stockOrphaned },
+      });
+
+      result = {
+        success: true,
+        correlation_id: rebuildCorrelationId,
+        purchases_reset: purchasesReset,
+        sales_reset: salesReset,
+        refunds_reset: refundsReset,
+        receipts_reset: receiptsReset,
+        orders_deleted: ordersDeleted,
+        stock_written_off: stockWrittenOff,
+        stock_orphaned: stockOrphaned,
+      };
+
     } else if (action === "proxy-function") {
       // Server-side proxy for Edge Functions that are unreachable from the browser
       // (e.g. CORS preflight failure due to cold-start or deployment issues).
