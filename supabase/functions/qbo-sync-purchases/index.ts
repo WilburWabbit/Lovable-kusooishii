@@ -362,7 +362,7 @@ async function landPurchase(
   // Check if already landed
   const { data: existing } = await supabaseAdmin
     .from("landing_raw_qbo_purchase")
-    .select("id, status")
+    .select("id, status, raw_payload")
     .eq("external_id", externalId)
     .maybeSingle();
 
