@@ -1603,14 +1603,42 @@ Deno.serve(async (req) => {
         details,
       };
 
+    } else if (action === "cleanup-orphaned-stock") {
+      // Delete available stock units with no receipt line link (ghost units from failed rebuilds)
+      const { data: orphans } = await admin.from("stock_unit")
+        .select("id")
+        .is("inbound_receipt_line_id", null)
+        .eq("status", "available");
+
+      const orphanIds = (orphans ?? []).map((o: any) => o.id);
+      let deleted = 0;
+      if (orphanIds.length > 0) {
+        // Delete in batches of 100
+        for (let i = 0; i < orphanIds.length; i += 100) {
+          const batch = orphanIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", batch);
+          deleted += batch.length;
+        }
+      }
+
+      await admin.from("audit_event").insert({
+        entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
+        trigger_type: "cleanup_orphaned_stock", actor_type: "user", actor_id: userId,
+        source_system: "admin-data",
+        output_json: { orphans_deleted: deleted },
+      });
+
+      result = { success: true, orphans_deleted: deleted };
+
     } else if (action === "rebuild-from-qbo") {
       // Nuclear reset: clear all QBO-sourced data and reset landing tables for full replay
+      // STEP ORDER: 1) Reset landing → 2) Delete sales orders (no stock reopening) → 3) Hard-delete stock → 4) Delete receipt lines & reset receipts
       const rebuildCorrelationId = crypto.randomUUID();
       let purchasesReset = 0, salesReset = 0, refundsReset = 0;
       let receiptsReset = 0, ordersDeleted = 0;
-      let stockWrittenOff = 0, stockOrphaned = 0;
+      let stockDeleted = 0, stockOrphaned = 0;
 
-      // 1. Reset all landing tables to pending
+      // Step 1: Reset all landing tables to pending
       const { count: pCount } = await admin.from("landing_raw_qbo_purchase")
         .update({ status: "pending", processed_at: null }).neq("status", "pending")
         .select("id", { count: "exact", head: true });
@@ -1626,7 +1654,17 @@ Deno.serve(async (req) => {
         .select("id", { count: "exact", head: true });
       refundsReset = rCount ?? 0;
 
-      // 2. Process each inbound_receipt: handle stock units, delete lines, reset status
+      // Step 2: Delete all QBO-originated sales orders FIRST (NO stock reopening)
+      const { data: qboOrders } = await admin.from("sales_order")
+        .select("id").in("origin_channel", ["qbo", "qbo_refund"]);
+
+      for (const order of (qboOrders ?? [])) {
+        await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
+        await admin.from("sales_order").delete().eq("id", order.id);
+        ordersDeleted++;
+      }
+
+      // Step 3: Process each inbound_receipt: hard-delete non-closed stock, orphan closed stock, delete lines, reset receipt
       const { data: allReceipts } = await admin.from("inbound_receipt").select("id");
       for (const receipt of (allReceipts ?? [])) {
         const { data: receiptLines } = await admin.from("inbound_receipt_line")
@@ -1634,24 +1672,28 @@ Deno.serve(async (req) => {
         const lineIds = (receiptLines ?? []).map((l: any) => l.id);
 
         if (lineIds.length > 0) {
-          const { data: units } = await admin.from("stock_unit")
-            .select("id, status, landed_cost, carrying_value")
-            .in("inbound_receipt_line_id", lineIds);
-
-          for (const unit of (units ?? [])) {
-            if (unit.status === "closed") {
-              // Sold — nullify FK, preserve unit
-              await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
-              stockOrphaned++;
-            } else {
-              // Write off
-              await admin.from("stock_unit").update({
-                status: "written_off", carrying_value: 0,
-                accumulated_impairment: unit.landed_cost ?? 0,
-                inbound_receipt_line_id: null,
-              }).eq("id", unit.id);
-              stockWrittenOff++;
+          // Hard-delete available/received/graded stock units (no write-off, no ghosts)
+          const { data: deletableUnits } = await admin.from("stock_unit")
+            .select("id")
+            .in("inbound_receipt_line_id", lineIds)
+            .in("status", ["available", "received", "graded", "written_off"]);
+          const delIds = (deletableUnits ?? []).map((u: any) => u.id);
+          if (delIds.length > 0) {
+            for (let i = 0; i < delIds.length; i += 100) {
+              const batch = delIds.slice(i, i + 100);
+              await admin.from("stock_unit").delete().in("id", batch);
             }
+            stockDeleted += delIds.length;
+          }
+
+          // Closed (sold) units: nullify FK but preserve the unit
+          const { data: closedUnits } = await admin.from("stock_unit")
+            .select("id")
+            .in("inbound_receipt_line_id", lineIds)
+            .eq("status", "closed");
+          for (const unit of (closedUnits ?? [])) {
+            await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+            stockOrphaned++;
           }
         }
 
@@ -1660,29 +1702,25 @@ Deno.serve(async (req) => {
         receiptsReset++;
       }
 
-      // 3. Delete all QBO-originated sales orders
-      const { data: qboOrders } = await admin.from("sales_order")
-        .select("id").in("origin_channel", ["qbo", "qbo_refund"]);
-
-      for (const order of (qboOrders ?? [])) {
-        // Reopen stock linked to order lines
-        const { data: orderLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", order.id);
-        for (const ol of (orderLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
-          }
+      // Step 4: Clean up any remaining orphaned available stock (safety net)
+      const { data: remainingOrphans } = await admin.from("stock_unit")
+        .select("id")
+        .is("inbound_receipt_line_id", null)
+        .eq("status", "available");
+      const orphanIds = (remainingOrphans ?? []).map((o: any) => o.id);
+      if (orphanIds.length > 0) {
+        for (let i = 0; i < orphanIds.length; i += 100) {
+          const batch = orphanIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", batch);
         }
-        await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
-        await admin.from("sales_order").delete().eq("id", order.id);
-        ordersDeleted++;
+        stockDeleted += orphanIds.length;
       }
 
       await admin.from("audit_event").insert({
         entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
         trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
         source_system: "admin-data", correlation_id: rebuildCorrelationId,
-        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, receipts_reset: receiptsReset, orders_deleted: ordersDeleted, stock_written_off: stockWrittenOff, stock_orphaned: stockOrphaned },
+        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, receipts_reset: receiptsReset, orders_deleted: ordersDeleted, stock_deleted: stockDeleted, stock_orphaned: stockOrphaned },
       });
 
       result = {
@@ -1693,7 +1731,7 @@ Deno.serve(async (req) => {
         refunds_reset: refundsReset,
         receipts_reset: receiptsReset,
         orders_deleted: ordersDeleted,
-        stock_written_off: stockWrittenOff,
+        stock_deleted: stockDeleted,
         stock_orphaned: stockOrphaned,
       };
 
