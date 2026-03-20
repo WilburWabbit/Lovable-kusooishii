@@ -367,12 +367,31 @@ async function landPurchase(
     .maybeSingle();
 
   if (existing) {
-    // Update the raw payload (QBO data may have changed) but keep existing status
+    // Compare payload — if changed and committed, reset to pending for reprocessing
+    const oldPayload = JSON.stringify(existing.raw_payload ?? {});
+    const newPayload = JSON.stringify(purchase);
+    const payloadChanged = oldPayload !== newPayload;
+
+    const updateFields: Record<string, any> = {
+      raw_payload: purchase,
+      received_at: new Date().toISOString(),
+    };
+
+    if (payloadChanged && existing.status === "committed") {
+      // Payload changed — reset to pending so Phase 3 reprocesses it
+      updateFields.status = "pending";
+      updateFields.processed_at = null;
+      console.log(`[landPurchase] Purchase ${externalId} payload changed — resetting committed → pending`);
+    }
+
     await supabaseAdmin
       .from("landing_raw_qbo_purchase")
-      .update({ raw_payload: purchase, received_at: new Date().toISOString() })
+      .update(updateFields)
       .eq("id", existing.id);
-    return { landingId: existing.id, alreadyLanded: existing.status === "committed" };
+
+    // Only skip if still committed (i.e. payload unchanged)
+    const effectiveStatus = (payloadChanged && existing.status === "committed") ? "pending" : existing.status;
+    return { landingId: existing.id, alreadyLanded: effectiveStatus === "committed" };
   }
 
   const { data: landing, error } = await supabaseAdmin
