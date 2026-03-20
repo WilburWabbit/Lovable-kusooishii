@@ -447,6 +447,10 @@ export function QboSettingsPanel() {
               </div>
             )}
 
+            {rebuildPhase && (
+              <p className="font-body text-xs text-muted-foreground">{rebuildPhase}</p>
+            )}
+
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
                 {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
