@@ -51,6 +51,8 @@ export function QboSettingsPanel() {
   const [syncingItems, setSyncingItems] = useState(false);
   const [reconcilingStock, setReconcilingStock] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<any[] | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildPhase, setRebuildPhase] = useState<string | null>(null);
   const cancelPurchasesRef = useRef(false);
   const cancelSalesRef = useRef(false);
 
