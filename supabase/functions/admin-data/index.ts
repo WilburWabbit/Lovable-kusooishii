@@ -1593,6 +1593,8 @@ Deno.serve(async (req) => {
         correlation_id: correlationId,
         stock_reopened: stockReopened,
         stock_closed: stockClosed,
+        stock_written_off: writtenOff,
+        stock_backfilled: backfilled,
         total_qbo_items: qboItems.length,
         total_checked: totalChecked,
         in_sync: inSync,
