@@ -1500,27 +1500,85 @@ Deno.serve(async (req) => {
         }
 
         if (available > qboQty) {
-          // App has more than QBO — sold in QBO but not reflected in app
+          // App has more than QBO — auto write-off excess (FIFO, oldest first)
           const excess = available - qboQty;
           appHigher++;
+
+          const { data: excessUnits } = await admin
+            .from("stock_unit")
+            .select("id, status, landed_cost, carrying_value")
+            .eq("sku_id", sku.id)
+            .in("status", STOCK_MATCHABLE)
+            .order("created_at", { ascending: true })
+            .limit(excess);
+
+          let unitWrittenOff = 0;
+          for (const unit of (excessUnits ?? [])) {
+            await admin.from("stock_unit").update({
+              status: "written_off", carrying_value: 0,
+              accumulated_impairment: unit.landed_cost ?? 0,
+              updated_at: new Date().toISOString(),
+            }).eq("id", unit.id);
+
+            await admin.from("audit_event").insert({
+              entity_type: "stock_unit", entity_id: unit.id,
+              trigger_type: "stock_reconciliation_write_off", actor_type: "user",
+              actor_id: userId, source_system: "admin-data",
+              correlation_id: correlationId,
+              before_json: { status: unit.status, carrying_value: unit.carrying_value },
+              after_json: { status: "written_off", carrying_value: 0 },
+              input_json: { sku_code: sku.sku_code, qbo_qty: qboQty, app_qty: available, reason: "app_higher_auto_write_off" },
+            });
+            unitWrittenOff++;
+          }
+
+          writtenOff += unitWrittenOff;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
             app_qty: available,
             diff: excess,
             direction: "app_higher",
-            action: "needs_review",
+            action: `wrote_off_${unitWrittenOff}`,
           });
         } else {
-          // QBO has more than app — missing stock in app
+          // QBO has more than app — auto-backfill balancing units
+          const shortfall = qboQty - available;
           qboHigher++;
+
+          const backfillUnits = [];
+          const { data: skuRecord } = await admin.from("sku").select("id, sku_code").eq("id", sku.id).single();
+          const parsed = skuRecord ? { conditionGrade: skuRecord.sku_code.includes(".") ? skuRecord.sku_code.split(".").pop() : "1" } : { conditionGrade: "1" };
+          const mpn = sku.sku_code.includes(".") ? sku.sku_code.substring(0, sku.sku_code.lastIndexOf(".")) : sku.sku_code;
+
+          for (let i = 0; i < shortfall; i++) {
+            backfillUnits.push({
+              sku_id: sku.id,
+              mpn,
+              condition_grade: parsed.conditionGrade,
+              status: "available",
+              landed_cost: 0,
+              carrying_value: 0,
+            });
+          }
+          await admin.from("stock_unit").insert(backfillUnits);
+
+          await admin.from("audit_event").insert({
+            entity_type: "sku", entity_id: sku.id,
+            trigger_type: "stock_reconciliation_backfill", actor_type: "user",
+            actor_id: userId, source_system: "admin-data",
+            correlation_id: correlationId,
+            input_json: { sku_code: sku.sku_code, qbo_qty: qboQty, app_qty: available, units_created: shortfall, reason: "qbo_higher_auto_backfill" },
+          });
+
+          backfilled += shortfall;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
             app_qty: available,
-            diff: qboQty - available,
+            diff: shortfall,
             direction: "qbo_higher",
-            action: "needs_review",
+            action: `backfilled_${shortfall}`,
           });
 
         }
