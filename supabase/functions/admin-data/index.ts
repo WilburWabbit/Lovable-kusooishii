@@ -1474,6 +1474,7 @@ Deno.serve(async (req) => {
       let totalChecked = 0;
       let inSync = 0;
       let writtenOff = 0;
+      let backfilled = 0;
       let appHigher = 0;
       let qboHigher = 0;
       const details: any[] = [];
