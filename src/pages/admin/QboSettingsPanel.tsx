@@ -360,7 +360,7 @@ export function QboSettingsPanel() {
       if (resetData?.error) throw new Error(resetData.error);
       toast({
         title: "Reset complete",
-        description: `${resetData.receipts_reset ?? 0} receipts reset, ${resetData.orders_deleted ?? 0} orders deleted, ${resetData.stock_written_off ?? 0} stock written off.`,
+        description: `${resetData.receipts_reset ?? 0} receipts reset, ${resetData.orders_deleted ?? 0} orders deleted, ${resetData.stock_deleted ?? 0} stock deleted.`,
       });
 
       // Phase 2: Sync Purchases
