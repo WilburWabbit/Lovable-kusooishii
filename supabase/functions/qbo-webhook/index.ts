@@ -557,8 +557,62 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         .in("inbound_receipt_line_id", oldLineIds);
       for (const unit of (linkedUnits ?? [])) {
         if (unit.status === "closed") {
-          // Stock was sold — can't reopen, just log
-          console.warn(`Stock unit ${unit.id} is closed (sold) — cannot reopen for purchase update`);
+          // Sold unit — attempt SKU reallocation by MPN from new purchase lines
+          const newPurchaseLines = (purchase.Line ?? []).filter((l: any) => l.DetailType === "ItemBasedExpenseLineDetail");
+          let reallocated = false;
+
+          for (const nl of newPurchaseLines) {
+            const itemRef = nl.ItemBasedExpenseLineDetail?.ItemRef;
+            if (!itemRef?.value) continue;
+            const itemData = await fetchQboEntity(baseUrl, accessToken, `item/${itemRef.value}`);
+            const qboItem = itemData?.Item ?? null;
+            const skuField = qboItem?.Sku;
+            const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : (itemRef.name ?? "").trim();
+            if (!rawSku) continue;
+            const parsed = parseSku(rawSku);
+
+            if (parsed.mpn === unit.mpn) {
+              // Same MPN — update landed cost and potentially SKU
+              const newUnitCost = nl.ItemBasedExpenseLineDetail?.UnitPrice ?? 0;
+              const updates: Record<string, any> = {
+                landed_cost: newUnitCost,
+                carrying_value: newUnitCost,
+              };
+
+              // Check if grade (SKU) changed
+              if (parsed.conditionGrade !== unit.condition_grade) {
+                const newSkuCode = parsed.conditionGrade !== "1" ? `${parsed.mpn}.${parsed.conditionGrade}` : parsed.mpn;
+                const { data: newSku } = await admin.from("sku").select("id").eq("sku_code", newSkuCode).maybeSingle();
+                if (newSku) {
+                  updates.sku_id = newSku.id;
+                  updates.condition_grade = parsed.conditionGrade;
+                }
+              }
+
+              await admin.from("stock_unit").update(updates).eq("id", unit.id);
+              await admin.from("audit_event").insert({
+                entity_type: "stock_unit", entity_id: unit.id,
+                trigger_type: "purchase_reprocessing", actor_type: "system",
+                source_system: "qbo-webhook",
+                before_json: { landed_cost: unit.landed_cost, carrying_value: unit.carrying_value, sku_id: unit.sku_id },
+                after_json: updates,
+                input_json: { qbo_purchase_id: entityId, reason: "purchase_updated_sold_unit_reallocated" },
+              });
+              reallocated = true;
+              break;
+            }
+          }
+
+          if (!reallocated) {
+            // Unlink from receipt line but preserve the sold unit
+            await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+            await admin.from("audit_event").insert({
+              entity_type: "stock_unit", entity_id: unit.id,
+              trigger_type: "purchase_reprocessing", actor_type: "system",
+              source_system: "qbo-webhook",
+              input_json: { qbo_purchase_id: entityId, reason: "sold_unit_orphaned_no_matching_mpn" },
+            });
+          }
         } else {
           await admin.from("stock_unit").delete().eq("id", unit.id);
         }
