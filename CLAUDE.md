@@ -1,6 +1,8 @@
 # CLAUDE.md — AI Agent Context for LEGO Resale Commerce Platform
 
 > **Read `docs/design-specification.md` and the YAML specs in `docs/specs/` before making any significant changes.** Together they are the single source of truth for product design, architecture, domain rules, and integration patterns.
+>
+> **Cross-reference `docs/knowledgebase/`** (git submodule → [Lovable-knowledgebase](https://github.com/WilburWabbit/Lovable-knowledgebase)) for additional technical specs, integration details, and domain knowledge shared across projects.
 
 ## What This Project Is
 
@@ -48,6 +50,7 @@ supabase/
 docs/
   design-specification.md   # FULL design spec — READ THIS
   specs/                    # YAML spec files — READ THESE TOO
+  knowledgebase/            # Shared knowledge base (git submodule)
 ```
 
 ## API Specs (`docs/specs/`)

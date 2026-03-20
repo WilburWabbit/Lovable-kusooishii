@@ -1,0 +1,3 @@
+[submodule "docs/knowledgebase"]
+	path = docs/knowledgebase
+	url = https://github.com/WilburWabbit/Lovable-knowledgebase.git
