@@ -553,7 +553,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       // Reopen stock units linked to old receipt lines (set back to available or delete)
       const { data: linkedUnits } = await admin
         .from("stock_unit")
-        .select("id, status")
+        .select("id, status, sku_id, landed_cost, carrying_value, mpn, condition_grade")
         .in("inbound_receipt_line_id", oldLineIds);
       for (const unit of (linkedUnits ?? [])) {
         if (unit.status === "closed") {
