@@ -949,21 +949,40 @@ Deno.serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // Process in dependency order (or single entity if specified)
-    if (!entityType || entityType === "items") {
-      results.items = await processItems(admin, batchSize);
-    }
-    if (!entityType || entityType === "purchases") {
-      results.purchases = await processPurchases(admin, batchSize);
-    }
-    if (!entityType || entityType === "sales") {
-      results.sales = await processSalesReceipts(admin, batchSize);
-    }
-    if (!entityType || entityType === "refunds") {
-      results.refunds = await processRefundReceipts(admin, batchSize);
-    }
-    if (!entityType || entityType === "customers") {
-      results.customers = await processCustomers(admin, batchSize);
+    if (entityType) {
+      // Single entity type requested — process just that
+      if (entityType === "customers") results.customers = await processCustomers(admin, batchSize);
+      else if (entityType === "items") results.items = await processItems(admin, batchSize);
+      else if (entityType === "purchases") results.purchases = await processPurchases(admin, batchSize);
+      else if (entityType === "sales") results.sales = await processSalesReceipts(admin, batchSize);
+      else if (entityType === "refunds") results.refunds = await processRefundReceipts(admin, batchSize);
+    } else {
+      // Tiered processing: respect dependency order
+      // Tier 1: Customers + Items (no inter-dependencies)
+      const [pendingCust, pendingItems] = await Promise.all([
+        admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      ]);
+      const tier1Remaining = (pendingCust.count ?? 0) + (pendingItems.count ?? 0);
+
+      if (tier1Remaining > 0) {
+        // Process Tier 1 only
+        results.customers = await processCustomers(admin, batchSize);
+        results.items = await processItems(admin, batchSize);
+      } else {
+        // Tier 1 complete — check Tier 2: Purchases
+        const { count: pendingPurch } = await admin.from("landing_raw_qbo_purchase")
+          .select("id", { count: "exact", head: true }).eq("status", "pending");
+
+        if ((pendingPurch ?? 0) > 0) {
+          // Process Tier 2 only
+          results.purchases = await processPurchases(admin, batchSize);
+        } else {
+          // Tier 2 complete — process Tier 3: Sales + Refunds
+          results.sales = await processSalesReceipts(admin, batchSize);
+          results.refunds = await processRefundReceipts(admin, batchSize);
+        }
+      }
     }
 
     // Check remaining pending counts
