@@ -1,10 +1,106 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { createVerify } from "node:crypto";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+const EBAY_API = "https://api.ebay.com";
+const PUBLIC_KEY_CACHE_TTL_MS = 15 * 60 * 1000;
+const publicKeyCache = new Map<string, { key: string; expiresAt: number }>();
+
+function formatPublicKey(key: string): string {
+  const trimmed = key.trim();
+  if (trimmed.includes("BEGIN PUBLIC KEY")) {
+    return trimmed
+      .replace(/-----BEGIN PUBLIC KEY-----\s*/g, "-----BEGIN PUBLIC KEY-----\n")
+      .replace(/\s*-----END PUBLIC KEY-----/g, "\n-----END PUBLIC KEY-----");
+  }
+  return `-----BEGIN PUBLIC KEY-----\n${trimmed}\n-----END PUBLIC KEY-----`;
+}
+
+function decodeSignatureHeader(signatureHeader: string): { alg?: string; kid?: string; signature?: string; digest?: string } {
+  const decoded = atob(signatureHeader);
+  return JSON.parse(decoded);
+}
+
+async function getEbayAppToken(): Promise<string> {
+  const clientId = Deno.env.get("EBAY_CLIENT_ID") || "";
+  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET") || "";
+  if (!clientId || !clientSecret) {
+    throw new Error("Missing eBay client credentials");
+  }
+
+  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: "https://api.ebay.com/oauth/api_scope",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`eBay app token failed [${res.status}]`);
+  }
+
+  const data = await res.json();
+  if (!data?.access_token) {
+    throw new Error("Missing eBay app access token");
+  }
+  return data.access_token;
+}
+
+async function getEbayPublicKey(kid: string): Promise<string> {
+  const cached = publicKeyCache.get(kid);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.key;
+  }
+
+  const accessToken = await getEbayAppToken();
+  const res = await fetch(`${EBAY_API}/commerce/notification/v1/public_key/${encodeURIComponent(kid)}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`eBay public key fetch failed [${res.status}]`);
+  }
+
+  const data = await res.json();
+  const key = data?.key;
+  if (!key || typeof key !== "string") {
+    throw new Error("Missing eBay public key");
+  }
+
+  publicKeyCache.set(kid, {
+    key,
+    expiresAt: Date.now() + PUBLIC_KEY_CACHE_TTL_MS,
+  });
+
+  return key;
+}
+
+async function verifyEbaySignature(rawBody: string, signatureHeader: string): Promise<boolean> {
+  const header = decodeSignatureHeader(signatureHeader);
+  if (!header?.kid || !header?.signature) {
+    return false;
+  }
+
+  const publicKey = await getEbayPublicKey(header.kid);
+  const verifier = createVerify("sha1");
+  verifier.update(rawBody);
+  verifier.end();
+
+  return verifier.verify(formatPublicKey(publicKey), header.signature, "base64");
+}
 
 /**
  * eBay Notification Webhook
@@ -54,37 +150,25 @@ Deno.serve(async (req) => {
     // --- Signature verification ---
     const rawBody = await req.text();
     const sigHeader = req.headers.get("x-ebay-signature");
-    if (!sigHeader || !VERIFICATION_TOKEN) {
-      console.error("eBay notification: missing signature or verification token");
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
+    if (!sigHeader) {
+      console.error("eBay notification: missing signature");
+      return new Response(JSON.stringify({ error: "Precondition Failed" }), {
+        status: 412,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Compute HMAC-SHA256 of the raw body using the verification token
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(VERIFICATION_TOKEN);
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-    );
-    const sigBytes = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(rawBody));
-    const computed = Array.from(new Uint8Array(sigBytes))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    // Constant-time comparison
-    const enc = new TextEncoder();
-    const a = enc.encode(computed);
-    const b = enc.encode(sigHeader);
-    let mismatch = a.length !== b.length ? 1 : 0;
-    for (let i = 0; i < a.length; i++) {
-      mismatch |= (a[i] ?? 0) ^ (b[i] ?? 0);
+    let valid = false;
+    try {
+      valid = await verifyEbaySignature(rawBody, sigHeader);
+    } catch (err) {
+      console.error("eBay notification: signature verification failed", err);
     }
-    if (mismatch !== 0) {
+
+    if (!valid) {
       console.error("eBay notification: signature mismatch");
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
+      return new Response(JSON.stringify({ error: "Precondition Failed" }), {
+        status: 412,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

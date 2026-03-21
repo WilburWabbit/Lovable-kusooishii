@@ -763,7 +763,14 @@ Deno.serve(async (req) => {
       const VERIFICATION_TOKEN = Deno.env.get("EBAY_VERIFICATION_TOKEN") || "";
       const ENDPOINT = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
 
-      const topics = ["FEEDBACK_LEFT", "FEEDBACK_RECEIVED", "ITEM_MARKED_SHIPPED", "ORDER_CONFIRMATION", "MARKETPLACE_ACCOUNT_DELETION"];
+      const topics = [
+        "FEEDBACK_LEFT",
+        "FEEDBACK_RECEIVED",
+        "ITEM_MARKED_SHIPPED",
+        "ORDER_CONFIRMATION",
+        "ORDER_CHANGE",
+        "MARKETPLACE_ACCOUNT_DELETION",
+      ];
 
       // Step 1: Create/update config
       try {
@@ -1168,7 +1175,7 @@ Deno.serve(async (req) => {
       if (disabledSubs.length) {
         report.issues.push(`${disabledSubs.length} subscription(s) not ENABLED: ${disabledSubs.map((s: any) => s.topicId).join(", ")}`);
       }
-      const requiredTopics = ["ORDER_CONFIRMATION", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
+      const requiredTopics = ["ORDER_CONFIRMATION", "ORDER_CHANGE", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
       const subscribedTopics = report.subscriptions.map((s: any) => s.topicId);
       const missingTopics = requiredTopics.filter(t => !subscribedTopics.includes(t));
       if (missingTopics.length) {
@@ -1195,7 +1202,7 @@ Deno.serve(async (req) => {
        ═══════════════════════════════════════════════ */
     if (action === "test_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
-      const REQUIRED_TOPICS = ["ORDER_CONFIRMATION", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
+      const REQUIRED_TOPICS = ["ORDER_CONFIRMATION", "ORDER_CHANGE", "ITEM_MARKED_SHIPPED", "MARKETPLACE_ACCOUNT_DELETION"];
       const expectedEndpoint = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ebay-notifications`;
       const configIssues: string[] = [];
       let registeredEndpoint: string | null = null;

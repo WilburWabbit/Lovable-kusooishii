@@ -76,6 +76,43 @@ async function fetchQboEntity(baseUrl: string, accessToken: string, entityPath: 
   return await res.json();
 }
 
+async function drainPendingQbo(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<{ iterations: number; totalCommitted: number; totalRemaining: number }> {
+  let iterations = 0;
+  let totalCommitted = 0;
+  let totalRemaining = 0;
+
+  for (let i = 0; i < 25; i++) {
+    const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-process-pending`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        "Content-Type": "application/json",
+        "x-webhook-trigger": "true",
+      },
+      body: JSON.stringify({ batch_size: 50 }),
+    }, 60_000);
+
+    if (!res.ok) {
+      throw new Error(`qbo-process-pending failed [${res.status}]`);
+    }
+
+    const data = await res.json();
+    const r = data?.results ?? {};
+    totalCommitted += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
+      (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+    totalRemaining = data?.total_remaining ?? 0;
+    iterations++;
+
+    if (!data?.has_more) break;
+  }
+
+  return { iterations, totalCommitted, totalRemaining };
+}
+
 // ────────────────────────────────────────────────────────────
 // Signature verification
 // ────────────────────────────────────────────────────────────
@@ -131,6 +168,31 @@ async function landEntity(
   return `landed`;
 }
 
+async function landReferencedItems(
+  admin: any,
+  baseUrl: string,
+  accessToken: string,
+  lines: any[],
+  correlationId: string,
+): Promise<void> {
+  const uniqueItemIds = new Set<string>();
+  for (const line of (lines ?? [])) {
+    if (line.DetailType === "SalesItemLineDetail" && line.SalesItemLineDetail?.ItemRef?.value) {
+      uniqueItemIds.add(String(line.SalesItemLineDetail.ItemRef.value));
+    }
+    if (line.DetailType === "ItemBasedExpenseLineDetail" && line.ItemBasedExpenseLineDetail?.ItemRef?.value) {
+      uniqueItemIds.add(String(line.ItemBasedExpenseLineDetail.ItemRef.value));
+    }
+  }
+
+  for (const itemId of uniqueItemIds) {
+    const data = await fetchQboEntity(baseUrl, accessToken, `item/${itemId}`);
+    const item = data?.Item ?? null;
+    if (!item) continue;
+    await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, "Create");
+  }
+}
+
 async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
   if (operation === "Delete") {
     return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation);
@@ -138,6 +200,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
   const data = await fetchQboEntity(baseUrl, accessToken, `purchase/${entityId}`);
   const purchase = data?.Purchase;
   if (!purchase) return "could not fetch purchase from QBO";
+  await landReferencedItems(admin, baseUrl, accessToken, purchase.Line ?? [], correlationId);
   return await landEntity(admin, "landing_raw_qbo_purchase", entityId, purchase, correlationId, operation);
 }
 
@@ -148,6 +211,7 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
   const data = await fetchQboEntity(baseUrl, accessToken, `salesreceipt/${entityId}`);
   const receipt = data?.SalesReceipt;
   if (!receipt) return "could not fetch SalesReceipt from QBO";
+  await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
   return await landEntity(admin, "landing_raw_qbo_sales_receipt", String(receipt.Id), receipt, correlationId, operation);
 }
 
@@ -158,6 +222,7 @@ async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: str
   const data = await fetchQboEntity(baseUrl, accessToken, `refundreceipt/${entityId}`);
   const receipt = data?.RefundReceipt;
   if (!receipt) return "could not fetch RefundReceipt from QBO";
+  await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
   return await landEntity(admin, "landing_raw_qbo_refund_receipt", String(receipt.Id), receipt, correlationId, operation);
 }
 
@@ -259,6 +324,7 @@ Deno.serve(async (req) => {
   const clientId = Deno.env.get("QBO_CLIENT_ID")!;
   const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
   const admin = createClient(supabaseUrl, serviceRoleKey);
+  let landedAny = false;
 
   for (const notification of notifications) {
     const realmId = notification.realmId;
@@ -290,10 +356,24 @@ Deno.serve(async (req) => {
 
       try {
         const result = await handler(admin, baseUrl, accessToken, entityId, operation, correlationId);
+        landedAny = true;
         log.info("Entity landed", { entity_name: entityName, entity_id: entityId, operation, result });
       } catch (err: any) {
         log.error("Entity landing failed", { entity_name: entityName, entity_id: entityId, operation, error: err.message });
       }
+    }
+  }
+
+  if (landedAny) {
+    try {
+      const autoProcess = await drainPendingQbo(supabaseUrl, serviceRoleKey);
+      log.info("Auto processed pending QBO records", {
+        iterations: autoProcess.iterations,
+        committed: autoProcess.totalCommitted,
+        remaining: autoProcess.totalRemaining,
+      });
+    } catch (err: any) {
+      log.error("Auto processing failed", { error: err.message });
     }
   }
 

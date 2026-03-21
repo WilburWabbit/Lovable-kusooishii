@@ -16,7 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-webhook-trigger, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 
@@ -991,13 +991,16 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
+    const isInternal = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
 
-    const { data: { user }, error: userError } = await admin.auth.getUser(token);
-    if (userError || !user) throw new Error("Unauthorized");
+    if (!isInternal) {
+      const { data: { user }, error: userError } = await admin.auth.getUser(token);
+      if (userError || !user) throw new Error("Unauthorized");
 
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some((r: any) => r.role === "admin" || r.role === "staff");
-    if (!hasAccess) throw new Error("Forbidden");
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+      const hasAccess = (roles ?? []).some((r: any) => r.role === "admin" || r.role === "staff");
+      if (!hasAccess) throw new Error("Forbidden");
+    }
 
     // Parse optional params
     let entityType: string | null = null;
