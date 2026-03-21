@@ -4,16 +4,17 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { ThemesGrid } from "@/components/ThemesGrid";
-import { GRADE_OPTIONS, GRADE_LABELS } from "@/lib/grades";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { GRADE_OPTIONS } from "@/lib/grades";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
+import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
+import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -103,6 +104,12 @@ export default function BrowsePage() {
           if (row.release_year > maxYear) maxYear = row.release_year;
         }
       }
+
+      const collectibleMinifigsTheme = await fetchBrowsableCollectibleMinifigsTheme();
+      if (collectibleMinifigsTheme) {
+        themeMap.set(collectibleMinifigsTheme.theme.id, collectibleMinifigsTheme.theme);
+      }
+
       return {
         themes: Array.from(themeMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
         yearMin: minYear === Infinity ? null : minYear,
@@ -127,12 +134,7 @@ export default function BrowsePage() {
         filter_retired: retiredFilter,
       });
       if (error) throw error;
-      return data as {
-        product_id: string; mpn: string; name: string; theme_name: string | null;
-        theme_id: string | null; retired_flag: boolean; release_year: number | null;
-        piece_count: number | null; min_price: number | null; best_grade: string | null;
-        total_stock: number; img_url: string | null;
-      }[];
+      return data as BrowseCatalogItem[];
     },
     enabled: viewMode !== "themes",
   });
@@ -211,12 +213,12 @@ export default function BrowsePage() {
     );
   }
 
-  const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Sets";
+  const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Stock";
   const pageSubtitle = isNewMode
     ? "Newest arrivals, sorted by release year"
     : isDealsMode
-    ? "Retired sets — collectible bargains"
-    : `${filteredProducts?.length ?? 0} sets · graded · priced · ready to ship`;
+    ? "Retired sets and minifigs - collectible bargins"
+    : `${filteredProducts?.length ?? 0} items · graded · priced · ready to ship`;
 
   const filterContent = (
     <div className="space-y-6">
@@ -406,65 +408,7 @@ export default function BrowsePage() {
                 <>
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {paginatedProducts.map((set) => (
-                    <Link
-                      key={set.product_id}
-                      to={`/sets/${set.mpn}`}
-                      className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
-                    >
-                      <div className="aspect-square bg-white">
-                        {set.img_url ? (
-                          <img
-                            src={set.img_url}
-                            alt={set.name}
-                            className="h-full w-full object-contain p-4"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center p-6">
-                            <span className="font-display text-3xl font-bold text-muted-foreground/20">
-                              {set.mpn.split("-")[0]}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Badges — grade first, then retired */}
-                      <div className="absolute left-2 top-2 flex gap-1">
-                        {set.best_grade && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
-                                {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="text-xs">
-                              Condition Grade: {set.best_grade} — {GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}`}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                        {set.retired_flag && (
-                          <span className="bg-primary px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-primary-foreground">
-                            Retired
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-1 flex-col p-3">
-                        <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">
-                          {set.name}
-                        </h3>
-                        <p className="mt-0.5 font-body text-[11px] text-muted-foreground">
-                          {set.theme_name ?? "Uncategorised"} · {set.mpn}
-                        </p>
-                        <div className="mt-auto flex items-baseline justify-between pt-2">
-                          <span className="font-display text-base font-bold text-foreground">
-                            {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
-                          </span>
-                          <span className="font-body text-[11px] text-muted-foreground">
-                            {set.total_stock} in stock
-                          </span>
-                        </div>
-                      </div>
-                    </Link>
+                    <BrowseCatalogCard key={set.product_id} item={set} />
                   ))}
                 </div>
                 <PaginationControls

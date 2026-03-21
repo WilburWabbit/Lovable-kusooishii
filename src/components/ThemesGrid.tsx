@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Package } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
+import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
 
 interface ThemeWithCount {
   theme_id: string;
@@ -48,6 +49,16 @@ export function ThemesGrid() {
             sample_img: row.img_url || null,
           });
         }
+      }
+
+      const collectibleMinifigsTheme = await fetchBrowsableCollectibleMinifigsTheme();
+      if (collectibleMinifigsTheme) {
+        themeMap.set(collectibleMinifigsTheme.theme.id, {
+          theme_id: collectibleMinifigsTheme.theme.id,
+          theme_name: collectibleMinifigsTheme.theme.name,
+          product_count: collectibleMinifigsTheme.rows.length,
+          sample_img: collectibleMinifigsTheme.rows.find((row) => row.img_url)?.img_url ?? null,
+        });
       }
 
       return Array.from(themeMap.values()).sort((a, b) =>

@@ -4,7 +4,6 @@ import { Minus, Plus, Trash2, ShoppingBag, Loader2, Truck, Store, Tag } from 'lu
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { useStore } from '@/lib/store';
@@ -12,12 +11,30 @@ import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
-import BeerIcon from '@/assets/beer-icon.svg';
 
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
 { id: 'express', label: 'Express', carrier: 'Royal Mail Tracked 24', price: 5.99, est: '1–2 working days' },
 { id: 'collection', label: 'Collection', carrier: 'Blue Bell LEGO® Club', price: 0, est: 'Next club meet' }];
+
+function BeerIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5"
+    >
+      <path d="M9 21h6a1 1 0 0 0 1 -1v-3.625c0 -1.397 .29 -2.775 .845 -4.025l.31 -.7c.556 -1.25 .845 -2.253 .845 -3.65v-4a1 1 0 0 0 -1 -1h-10a1 1 0 0 0 -1 1v4c0 1.397 .29 2.4 .845 3.65l.31 .7a9.931 9.931 0 0 1 .845 4.025v3.625a1 1 0 0 0 1 1z" />
+      <path d="M6 8h12" />
+    </svg>
+  );
+}
 
 
 export default function CartPage() {
@@ -110,8 +127,10 @@ export default function CartPage() {
                       <div className="flex-1 space-y-2">
                         <div>
                           <h3 className="font-display text-sm font-semibold">{item.name}</h3>
-                          <p className="font-body text-xs text-muted-foreground">#{item.setNumber} · {item.theme}</p>
-                          <Badge variant="secondary" className="mt-1 font-display text-[10px]">{GRADE_LABELS_NUMERIC[item.conditionGrade] || `Grade ${item.conditionGrade}`}</Badge>
+                          <p className="font-body text-xs text-muted-foreground">{item.theme} · {item.setNumber}</p>
+                          <span className="mt-1 inline-flex bg-foreground px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-background">
+                            {GRADE_LABELS_NUMERIC[item.conditionGrade] || `Grade ${item.conditionGrade}`}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
@@ -179,7 +198,7 @@ export default function CartPage() {
 
                   {isCollection &&
                   <div className="flex justify-between font-body text-xs text-blue-600">
-                      <span className="flex items-center gap-1.5"><img src={BeerIcon} alt="" className="h-3.5 w-3.5 text-blue-600" style={{ filter: 'invert(29%) sepia(98%) saturate(1834%) hue-rotate(212deg) brightness(95%) contrast(93%)' }} />Blue Bell Donation (5%)</span>
+                      <span className="flex items-center gap-1.5"><BeerIcon />Blue Bell Donation (5%)</span>
                       <span>(£{blueBellDonation.toFixed(2)})</span>
                     </div>
                   }

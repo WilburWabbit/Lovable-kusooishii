@@ -6,12 +6,38 @@ import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BlueBellClubPage() {
   useEffect(() => {
-    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!link) return;
-    const original = link.href;
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    const createdLink = !link;
+
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+
+    const originalHref = link.getAttribute("href");
+    const originalType = link.getAttribute("type");
+
+    link.type = "image/x-icon";
     link.href = "/bluebell-favicon.ico";
+
     return () => {
-      link.href = original;
+      if (createdLink) {
+        link.remove();
+        return;
+      }
+
+      if (originalType == null) {
+        link.removeAttribute("type");
+      } else {
+        link.type = originalType;
+      }
+
+      if (originalHref == null) {
+        link.removeAttribute("href");
+      } else {
+        link.href = originalHref;
+      }
     };
   }, []);
 
