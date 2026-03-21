@@ -183,10 +183,10 @@ export function InventoryPage() {
   );
 
   const totalValue = useMemo(
-    () => units.reduce((s, u) => s + (u.carrying_value ?? 0), 0),
-    [units],
+    () => filtered.reduce((s, u) => s + (u.carrying_value ?? 0), 0),
+    [filtered],
   );
-  const countByStatus = (st: string) => units.filter((u) => u.status === st).length;
+  const countByStatus = (st: string) => filtered.filter((u) => u.status === st).length;
 
   const visibleCols = tp.prefs.visibleColumns
     .map((k) => ALL_COLUMNS.find((c) => c.key === k)!)
