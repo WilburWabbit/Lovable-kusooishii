@@ -1,13 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Link2, RefreshCw, Unplug, Square, Scale } from "lucide-react";
+import { Loader2, Link2, RefreshCw, Unplug, Square, Scale, RotateCcw, Play } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 /** Generate month labels from current month back to April 2023 */
 function generateMonthList(): string[] {
@@ -40,6 +50,10 @@ export function QboSettingsPanel() {
   const [syncingItems, setSyncingItems] = useState(false);
   const [reconcilingStock, setReconcilingStock] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<any[] | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildPhase, setRebuildPhase] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [processProgress, setProcessProgress] = useState<string | null>(null);
   const cancelPurchasesRef = useRef(false);
   const cancelSalesRef = useRef(false);
 
@@ -58,101 +72,69 @@ export function QboSettingsPanel() {
 
   useEffect(() => { fetchStatus(); }, []);
 
+  // ── Land-only sync functions ──
+
   const syncPurchases = async () => {
     if (!status?.connected) {
-      toast({
-        title: "QBO not connected",
-        description: "Connect to QuickBooks Online first before syncing purchases.",
-        variant: "destructive",
-      });
+      toast({ title: "QBO not connected", description: "Connect to QuickBooks Online first.", variant: "destructive" });
       return;
     }
     setSyncing(true);
     cancelPurchasesRef.current = false;
     const months = generateMonthList();
-    const totals = {
-      total: 0, auto_processed: 0, left_pending: 0,
-      skipped_existing: 0, skipped_no_items: 0, cleaned_up: 0,
-      backfilled_tax_codes: 0, backfilled_stock_links: 0,
-    };
+    let totalLanded = 0, totalSkipped = 0;
 
     try {
       for (let i = 0; i < months.length; i++) {
         if (cancelPurchasesRef.current) break;
         const month = months[i];
         setSyncProgress({ current: i + 1, total: months.length, month });
-
         const data = await invokeWithAuth<Record<string, any>>("qbo-sync-purchases", { month });
         if (data?.error) throw new Error(data.error);
-
-        totals.total += data.total ?? 0;
-        totals.auto_processed += data.auto_processed ?? 0;
-        totals.left_pending += data.left_pending ?? 0;
-        totals.skipped_existing += data.skipped_existing ?? 0;
-        totals.skipped_no_items += data.skipped_no_items ?? 0;
-        totals.cleaned_up += data.cleaned_up ?? 0;
-        totals.backfilled_tax_codes += data.backfilled_tax_codes ?? 0;
-        totals.backfilled_stock_links += data.backfilled_stock_links ?? 0;
+        totalLanded += data.landed ?? 0;
+        totalSkipped += data.skipped_existing ?? data.skipped ?? 0;
       }
-
-      const parts = [`${totals.auto_processed} auto-processed`];
-      if (totals.left_pending) parts.push(`${totals.left_pending} pending review`);
-      if (totals.skipped_existing) parts.push(`${totals.skipped_existing} unchanged`);
-      if (totals.skipped_no_items) parts.push(`${totals.skipped_no_items} non-stock skipped`);
-      if (totals.cleaned_up) parts.push(`${totals.cleaned_up} empty receipts cleaned up`);
-      if (totals.backfilled_tax_codes) parts.push(`${totals.backfilled_tax_codes} tax codes backfilled`);
-      if (totals.backfilled_stock_links) parts.push(`${totals.backfilled_stock_links} stock units linked`);
-
       toast({
-        title: cancelPurchasesRef.current ? "Sync stopped" : "Sync complete",
-        description: `${totals.total} purchases: ${parts.join(", ")}.`,
+        title: cancelPurchasesRef.current ? "Sync stopped" : "Purchases landed",
+        description: `${totalLanded} landed, ${totalSkipped} unchanged.`,
       });
-      fetchStatus();
     } catch (err) {
-      toast({
-        title: "Sync failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      toast({ title: "Sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setSyncing(false);
       setSyncProgress(null);
     }
   };
 
-  const stopPurchaseSync = () => { cancelPurchasesRef.current = true; };
-  const stopSalesSync = () => { cancelSalesRef.current = true; };
-
-  const connectQbo = async () => {
-    try {
-      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "authorize_url" });
-      if (data?.error) throw new Error(data.error);
-      window.location.href = data.url;
-    } catch (err) {
-      toast({
-        title: "Connection failed",
-        description: err instanceof Error ? err.message : "Could not generate authorization URL",
-        variant: "destructive",
-      });
+  const syncSales = async () => {
+    if (!status?.connected) {
+      toast({ title: "QBO not connected", description: "Connect to QuickBooks Online first.", variant: "destructive" });
+      return;
     }
-  };
+    setSyncingSales(true);
+    cancelSalesRef.current = false;
+    const months = generateMonthList();
+    let totalLanded = 0, totalSkipped = 0;
 
-  const disconnectQbo = async () => {
-    if (!status?.realm_id) return;
-    setDisconnecting(true);
     try {
-      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
-      if (data?.error) throw new Error(data.error);
-      toast({ title: "Disconnected", description: "QuickBooks connection removed." });
-      setStatus({ connected: false });
-    } catch (err) {
+      for (let i = 0; i < months.length; i++) {
+        if (cancelSalesRef.current) break;
+        const month = months[i];
+        setSalesSyncProgress({ current: i + 1, total: months.length, month });
+        const data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", { month });
+        if (data?.error) throw new Error(data.error);
+        totalLanded += (data.sales_landed ?? 0) + (data.refunds_landed ?? 0);
+        totalSkipped += (data.sales_skipped ?? 0) + (data.refunds_skipped ?? 0);
+      }
       toast({
-        title: "Disconnect failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
+        title: cancelSalesRef.current ? "Sales sync stopped" : "Sales landed",
+        description: `${totalLanded} landed, ${totalSkipped} unchanged.`,
       });
+    } catch (err) {
+      toast({ title: "Sales sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
-      setDisconnecting(false);
+      setSyncingSales(false);
+      setSalesSyncProgress(null);
     }
   };
 
@@ -165,20 +147,9 @@ export function QboSettingsPanel() {
     try {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-customers");
       if (data?.error) throw new Error(data.error);
-      const parts: string[] = [];
-      if (data.upserted) parts.push(`${data.upserted} customers synced`);
-      if (data.skipped) parts.push(`${data.skipped} skipped`);
-      if (data.orders_linked) parts.push(`${data.orders_linked} orders linked`);
-      toast({
-        title: "Customer sync complete",
-        description: parts.length > 0 ? parts.join(", ") + "." : "No changes.",
-      });
+      toast({ title: "Customers landed", description: `${data.landed ?? 0} landed, ${data.skipped ?? 0} unchanged.` });
     } catch (err) {
-      toast({
-        title: "Customer sync failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      toast({ title: "Customer sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setSyncingCustomers(false);
     }
@@ -193,118 +164,49 @@ export function QboSettingsPanel() {
     try {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-items");
       if (data?.error) throw new Error(data.error);
-      const parts: string[] = [];
-      if (data.upserted) parts.push(`${data.upserted} items upserted`);
-      if (data.linked) parts.push(`${data.linked} linked to existing SKUs`);
-      if (data.skipped_no_mpn) parts.push(`${data.skipped_no_mpn} skipped (no MPN)`);
-      if (data.errors) parts.push(`${data.errors} errors`);
-      toast({
-        title: "Item sync complete",
-        description: parts.length > 0 ? `${data.total} items: ${parts.join(", ")}.` : "No items found.",
-      });
-      fetchStatus();
+      toast({ title: "Items landed", description: `${data.landed ?? 0} landed, ${data.skipped ?? 0} unchanged.` });
     } catch (err) {
-      toast({
-        title: "Item sync failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      toast({ title: "Item sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setSyncingItems(false);
     }
   };
 
-  const syncSales = async () => {
-    if (!status?.connected) {
-      toast({
-        title: "QBO not connected",
-        description: "Connect to QuickBooks Online first before syncing sales.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setSyncingSales(true);
-    cancelSalesRef.current = false;
-    const months = generateMonthList();
-    const totals = {
-      sales_created: 0, sales_skipped: 0, stock_matched: 0,
-      stock_missing: 0, refunds_ignored: 0, refund_orders_removed: 0,
-      channel_listings_updated: 0,
-    };
+  // ── Process pending (centralized processor) ──
 
+  const processPending = async (entityType?: string) => {
+    setProcessing(true);
+    setProcessProgress(entityType ? `Processing ${entityType}…` : "Processing all pending…");
     try {
-      for (let i = 0; i < months.length; i++) {
-        if (cancelSalesRef.current) break;
-        const month = months[i];
-        setSalesSyncProgress({ current: i + 1, total: months.length, month });
+      const params: Record<string, any> = { batch_size: 50 };
+      if (entityType) params.entity_type = entityType;
+      const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", params);
+      if (data?.error) throw new Error(data.error);
 
-        // First invocation: land + process first chunk
-        let isFirstCall = true;
-        let hasMore = true;
-
-        while (hasMore && !cancelSalesRef.current) {
-          let data: Record<string, any>;
-          try {
-            data = await invokeWithAuth<Record<string, any>>("qbo-sync-sales", {
-              month,
-              chunk_size: 25,
-              skip_landing: !isFirstCall, // Only land on first call per month
-            });
-          } catch {
-            data = await invokeWithAuth<Record<string, any>>("admin-data", {
-              action: "proxy-function",
-              function: "qbo-sync-sales",
-              body: { month, chunk_size: 25, skip_landing: !isFirstCall },
-            });
-          }
-          if (data?.error) throw new Error(data.error);
-
-          totals.sales_created += data.sales_created ?? 0;
-          totals.sales_skipped += data.sales_skipped ?? 0;
-          totals.stock_matched += data.stock_matched ?? 0;
-          totals.stock_missing += data.stock_missing ?? 0;
-          totals.refunds_ignored += data.refunds_ignored ?? data.refunds_skipped ?? 0;
-          totals.refund_orders_removed += data.refund_orders_removed ?? 0;
-          totals.channel_listings_updated += data.channel_listings_updated ?? 0;
-
-          hasMore = data.has_more === true;
-          isFirstCall = false;
-
-          // Update progress with remaining count
-          if (hasMore && data.remaining_pending) {
-            setSalesSyncProgress({
-              current: i + 1,
-              total: months.length,
-              month: `${month} (${data.remaining_pending} pending)`,
-            });
-          }
-        }
-      }
-
+      const r = data.results ?? {};
       const parts: string[] = [];
-      if (totals.sales_created) parts.push(`${totals.sales_created} sales imported`);
-      if (totals.sales_skipped) parts.push(`${totals.sales_skipped} sales unchanged`);
-      if (totals.stock_matched) parts.push(`${totals.stock_matched} stock matched`);
-      if (totals.stock_missing) parts.push(`${totals.stock_missing} stock missing`);
-      if (totals.refunds_ignored) parts.push(`${totals.refunds_ignored} refunds ignored`);
-      if (totals.refund_orders_removed) parts.push(`${totals.refund_orders_removed} legacy refund rows removed`);
-      if (totals.channel_listings_updated) parts.push(`${totals.channel_listings_updated} channel listings updated`);
+      if (r.items?.processed) parts.push(`${r.items.processed} items`);
+      if (r.purchases?.processed) parts.push(`${r.purchases.processed} purchases`);
+      if (r.sales?.processed) parts.push(`${r.sales.processed} sales`);
+      if (r.refunds?.ignored) parts.push(`${r.refunds.ignored} refunds ignored`);
+      else if (r.refunds?.processed) parts.push(`${r.refunds.processed} refunds`);
+      if (r.refunds?.refund_orders_removed) parts.push(`${r.refunds.refund_orders_removed} legacy refund rows removed`);
+      if (r.customers?.processed) parts.push(`${r.customers.processed} customers`);
+      if (data.total_remaining) parts.push(`${data.total_remaining} remaining`);
+
       toast({
-        title: cancelSalesRef.current ? "Sales sync stopped" : "Sales sync complete",
-        description: parts.length > 0 ? parts.join(", ") + "." : "No new records.",
+        title: "Processing complete",
+        description: parts.length > 0 ? parts.join(", ") + "." : "Nothing to process.",
       });
-      fetchStatus();
     } catch (err) {
-      toast({
-        title: "Sales sync failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      toast({ title: "Processing failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
-      setSyncingSales(false);
-      setSalesSyncProgress(null);
+      setProcessing(false);
+      setProcessProgress(null);
     }
   };
+
+  // ── Reconcile stock ──
 
   const reconcileStock = async () => {
     setReconcilingStock(true);
@@ -319,30 +221,96 @@ export function QboSettingsPanel() {
       if (data.in_sync) parts.push(`${data.in_sync} in sync`);
       if (data.app_higher) parts.push(`${data.app_higher} app higher`);
       if (data.qbo_higher) parts.push(`${data.qbo_higher} QBO higher`);
-      toast({
-        title: "Stock reconciliation complete",
-        description: parts.join(", ") + ".",
-      });
-      if (data.details?.length > 0) {
-        setReconcileDetails(data.details);
-      }
+      toast({ title: "Stock reconciliation complete", description: parts.join(", ") + "." });
+      if (data.details?.length > 0) setReconcileDetails(data.details);
     } catch (err) {
-      toast({
-        title: "Stock reconciliation failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      toast({ title: "Stock reconciliation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setReconcilingStock(false);
     }
   };
+
+  // ── Connection ──
+
+  const connectQbo = async () => {
+    try {
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "authorize_url" });
+      if (data?.error) throw new Error(data.error);
+      window.location.href = data.url;
+    } catch (err) {
+      toast({ title: "Connection failed", description: err instanceof Error ? err.message : "Could not generate authorization URL", variant: "destructive" });
+    }
+  };
+
+  const disconnectQbo = async () => {
+    if (!status?.realm_id) return;
+    setDisconnecting(true);
+    try {
+      const data = await invokeWithAuth<Record<string, any>>("qbo-auth", { action: "disconnect", realm_id: status.realm_id });
+      if (data?.error) throw new Error(data.error);
+      toast({ title: "Disconnected", description: "QuickBooks connection removed." });
+      setStatus({ connected: false });
+    } catch (err) {
+      toast({ title: "Disconnect failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  // ── Rebuild from QBO ──
+
+  const rebuildFromQbo = async () => {
+    if (!status?.connected) return;
+    setRebuilding(true);
+    try {
+      // Phase 1: Reset canonical data
+      setRebuildPhase("Resetting canonical data…");
+      const resetData = await invokeWithAuth<Record<string, any>>("admin-data", { action: "rebuild-from-qbo" });
+      if (resetData?.error) throw new Error(resetData.error);
+      toast({
+        title: "Reset complete",
+        description: `${resetData.receipts_deleted ?? 0} receipts deleted, ${resetData.orders_deleted ?? 0} orders deleted, ${resetData.stock_deleted ?? 0} stock deleted. Landing tables reset: ${resetData.purchases_reset ?? 0} purchases, ${resetData.sales_reset ?? 0} sales, ${resetData.refunds_reset ?? 0} refunds.`,
+      });
+
+      // Phase 2: Process all pending (items → purchases → sales → refunds → customers)
+      setRebuildPhase("Processing all pending records…");
+      // Process in a loop until nothing remains
+      let totalProcessed = 0;
+      for (let iteration = 0; iteration < 200; iteration++) {
+        const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", { batch_size: 50 });
+        if (data?.error) throw new Error(data.error);
+        const r = data.results ?? {};
+        const committed = (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
+          (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+        totalProcessed += committed;
+        setRebuildPhase(`Processed ${totalProcessed} records (${data.total_remaining ?? 0} remaining)…`);
+        if (!data.has_more) break;
+      }
+
+      // Phase 3: Reconcile stock
+      setRebuildPhase("Reconciling stock…");
+      await reconcileStock();
+
+      toast({ title: "Rebuild complete", description: `All QBO data has been reprocessed. ${totalProcessed} records committed.` });
+    } catch (err) {
+      toast({ title: "Rebuild failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRebuilding(false);
+      setRebuildPhase(null);
+    }
+  };
+
+  const stopPurchaseSync = () => { cancelPurchasesRef.current = true; };
+  const stopSalesSync = () => { cancelSalesRef.current = true; };
+
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || processing || reconcilingStock || rebuilding;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="font-display text-base">QuickBooks Online</CardTitle>
         <CardDescription className="font-body text-xs">
-          Connect to QBO to pull purchase receipts for inventory intake.
+          Connect to QBO to sync purchases, sales, items, and customers. Data lands in staging tables then gets processed centrally.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -364,63 +332,113 @@ export function QboSettingsPanel() {
               </p>
             )}
 
-            {/* Progress indicator for purchase sync */}
+            {/* Progress indicators */}
             {syncProgress && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <p className="font-body text-xs text-muted-foreground">
-                    Syncing purchases {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
+                    Landing purchases {syncProgress.month}… ({syncProgress.current} of {syncProgress.total})
                   </p>
                   <Button size="sm" variant="ghost" onClick={stopPurchaseSync} className="h-6 px-2 text-xs">
-                    <Square className="mr-1 h-3 w-3" />
-                    Stop
+                    <Square className="mr-1 h-3 w-3" /> Stop
                   </Button>
                 </div>
                 <Progress value={(syncProgress.current / syncProgress.total) * 100} className="h-2" />
               </div>
             )}
 
-            {/* Progress indicator for sales sync */}
             {salesSyncProgress && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <p className="font-body text-xs text-muted-foreground">
-                    Syncing sales {salesSyncProgress.month}… ({salesSyncProgress.current} of {salesSyncProgress.total})
+                    Landing sales {salesSyncProgress.month}… ({salesSyncProgress.current} of {salesSyncProgress.total})
                   </p>
                   <Button size="sm" variant="ghost" onClick={stopSalesSync} className="h-6 px-2 text-xs">
-                    <Square className="mr-1 h-3 w-3" />
-                    Stop
+                    <Square className="mr-1 h-3 w-3" /> Stop
                   </Button>
                 </div>
                 <Progress value={(salesSyncProgress.current / salesSyncProgress.total) * 100} className="h-2" />
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={syncPurchases} disabled={syncing || !user}>
-                {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
-                Sync Purchases
-              </Button>
-              <Button size="sm" onClick={syncSales} disabled={syncingSales || !user}>
-                {syncingSales ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
-                Sync Sales
-              </Button>
-              <Button size="sm" onClick={syncCustomers} disabled={syncingCustomers || !user}>
-                {syncingCustomers ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
-                Sync Customers
-              </Button>
-              <Button size="sm" onClick={syncItems} disabled={syncingItems || !user}>
-                {syncingItems ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
-                Sync Items
-              </Button>
-              <Button size="sm" variant="secondary" onClick={reconcileStock} disabled={reconcilingStock || !user}>
-                {reconcilingStock ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Scale className="mr-2 h-3.5 w-3.5" />}
-                Reconcile Stock
-              </Button>
-              <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={disconnecting || !user}>
-                {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
-                Disconnect
-              </Button>
+            {processProgress && (
+              <p className="font-body text-xs text-muted-foreground">{processProgress}</p>
+            )}
+
+            {rebuildPhase && (
+              <p className="font-body text-xs text-muted-foreground">{rebuildPhase}</p>
+            )}
+
+            {/* Action buttons */}
+            <div className="space-y-2">
+              {/* Row 1: Land data */}
+              <div>
+                <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Land Data</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={syncPurchases} disabled={anyBusy || !user}>
+                    {syncing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                    Purchases
+                  </Button>
+                  <Button size="sm" onClick={syncSales} disabled={anyBusy || !user}>
+                    {syncingSales ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                    Sales
+                  </Button>
+                  <Button size="sm" onClick={syncCustomers} disabled={anyBusy || !user}>
+                    {syncingCustomers ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                    Customers
+                  </Button>
+                  <Button size="sm" onClick={syncItems} disabled={anyBusy || !user}>
+                    {syncingItems ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
+                    Items
+                  </Button>
+                </div>
+              </div>
+
+              {/* Row 2: Process & Reconcile */}
+              <div>
+                <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Process & Reconcile</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => processPending()} disabled={anyBusy || !user}>
+                    {processing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-2 h-3.5 w-3.5" />}
+                    Process Pending
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={reconcileStock} disabled={anyBusy || !user}>
+                    {reconcilingStock ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Scale className="mr-2 h-3.5 w-3.5" />}
+                    Reconcile Stock
+                  </Button>
+                </div>
+              </div>
+
+              {/* Row 3: Dangerous actions */}
+              <div>
+                <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Admin</p>
+                <div className="flex flex-wrap gap-2">
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="destructive" disabled={anyBusy || !user}>
+                        {rebuilding ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-2 h-3.5 w-3.5" />}
+                        Rebuild from QBO
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Rebuild from QBO?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will delete all receipts, stock units, and QBO sales orders, reset all landing tables to pending, then reprocess everything from staged data. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={rebuildFromQbo}>Yes, rebuild</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <Button size="sm" variant="outline" onClick={disconnectQbo} disabled={anyBusy || !user}>
+                    {disconnecting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Unplug className="mr-2 h-3.5 w-3.5" />}
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
             </div>
 
             {/* Stock reconciliation discrepancy details */}
@@ -440,28 +458,25 @@ export function QboSettingsPanel() {
                         <th className="text-right px-3 py-1.5 font-medium">App</th>
                         <th className="text-right px-3 py-1.5 font-medium">QBO</th>
                         <th className="text-right px-3 py-1.5 font-medium">Diff</th>
-                        <th className="text-left px-3 py-1.5 font-medium">Direction</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {reconcileDetails.map((d: any, i: number) => {
-                        const appQty = d.app_qty ?? d.app_available ?? 0;
-                        const qboQty = d.qbo_qty ?? 0;
-                        const diff = d.diff ?? Math.abs(appQty - qboQty);
-                        const isAppHigher = d.direction === "app_higher" || appQty > qboQty;
+                        const isAppHigher = d.direction === "app_higher";
                         return (
                           <tr key={i} className="border-b last:border-0">
                             <td className="px-3 py-1.5 font-mono">{d.sku_code}</td>
-                            <td className="text-right px-3 py-1.5">{appQty}</td>
-                            <td className="text-right px-3 py-1.5">{qboQty}</td>
-                            <td className="text-right px-3 py-1.5 font-medium">{diff}</td>
+                            <td className="text-right px-3 py-1.5">{d.app_qty ?? 0}</td>
+                            <td className="text-right px-3 py-1.5">{d.qbo_qty ?? 0}</td>
+                            <td className="text-right px-3 py-1.5 font-medium">{d.diff ?? 0}</td>
                             <td className="px-3 py-1.5">
                               <Badge variant="outline" className={
                                 isAppHigher
                                   ? "text-amber-600 border-amber-300 bg-amber-50"
                                   : "text-blue-600 border-blue-300 bg-blue-50"
                               }>
-                                {isAppHigher ? "App higher" : "QBO higher"}
+                                {d.action ?? (isAppHigher ? "write-off" : "backfill")}
                               </Badge>
                             </td>
                           </tr>

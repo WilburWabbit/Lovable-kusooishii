@@ -183,10 +183,10 @@ export function InventoryPage() {
   );
 
   const totalValue = useMemo(
-    () => units.reduce((s, u) => s + (u.carrying_value ?? 0), 0),
-    [units],
+    () => filtered.reduce((s, u) => s + (u.carrying_value ?? 0), 0),
+    [filtered],
   );
-  const countByStatus = (st: string) => units.filter((u) => u.status === st).length;
+  const countByStatus = (st: string) => filtered.filter((u) => u.status === st).length;
 
   const visibleCols = tp.prefs.visibleColumns
     .map((k) => ALL_COLUMNS.find((c) => c.key === k)!)
@@ -202,7 +202,7 @@ export function InventoryPage() {
               <CardTitle className="text-xs font-medium text-muted-foreground">Total Units</CardTitle>
               <Package className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
-            <CardContent><p className="text-2xl font-bold font-display">{units.length}</p></CardContent>
+            <CardContent><p className="text-2xl font-bold font-display">{filtered.length}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
