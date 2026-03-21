@@ -10,6 +10,7 @@ import { useState } from "react";
 import { GRADE_DETAILS } from "@/lib/grades";
 import { useStore, type Product } from "@/lib/store";
 import { toast } from "sonner";
+import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
 
 interface ProductDetailRow {
   id: string;
@@ -19,6 +20,7 @@ interface ProductDetailRow {
   piece_count: number | null;
   release_year: number | null;
   retired_flag: boolean;
+  product_type: string | null;
   age_range: string | null;
   subtheme_name: string | null;
   length_cm: number | null;
@@ -54,7 +56,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
+        .select("id, mpn, name, description, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -144,7 +146,7 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = product?.theme?.name ?? null;
+  const themeName = getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null);
 
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {

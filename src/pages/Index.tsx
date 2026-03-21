@@ -6,8 +6,7 @@ import { ArrowRight, Shield, Truck, Bell } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { GRADE_LABELS, GRADE_LABELS_NUMERIC } from "@/lib/grades";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
 
 export default function HomePage() {
   const { data: featuredSets, isLoading } = useQuery({
@@ -20,8 +19,8 @@ export default function HomePage() {
         filter_retired: null,
       });
       if (error) throw error;
-      return (data as any[])
-        .sort((a: any, b: any) => (b.release_year ?? 0) - (a.release_year ?? 0))
+      return ((data as BrowseCatalogItem[]) ?? [])
+        .sort((a, b) => (b.release_year ?? 0) - (a.release_year ?? 0))
         .slice(0, 6);
     },
   });
@@ -116,67 +115,7 @@ export default function HomePage() {
                   </div>
                 ))
               : featuredSets?.map((set) => (
-                  <Link
-                    key={set.product_id}
-                    to={`/sets/${set.mpn}`}
-                    className="group relative flex flex-col overflow-hidden border border-border bg-card transition-all hover:shadow-md"
-                  >
-                    {/* Image */}
-                    <div className="aspect-square bg-background">
-                      {set.img_url ? (
-                        <img
-                          src={set.img_url}
-                          alt={set.name}
-                          className="h-full w-full object-contain p-4"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center p-8">
-                          <span className="font-display text-4xl font-bold text-muted-foreground/20">
-                            {set.mpn.split("-")[0]}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Badges — grade first, then retired */}
-                    <div className="absolute left-3 top-3 flex gap-1.5">
-                      {set.best_grade && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="bg-foreground px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-background">
-                              {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="text-xs">
-                            Condition Grade: {set.best_grade} — {GRADE_LABELS_NUMERIC[set.best_grade] ?? `Grade ${set.best_grade}`}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                      {set.retired_flag && (
-                        <span className="bg-primary px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
-                          Retired
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex flex-1 flex-col p-4">
-                      <h3 className="font-display text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
-                        {set.name}
-                      </h3>
-                      <p className="mt-1 font-body text-xs text-muted-foreground">
-                        {set.theme_name ?? "Uncategorised"} · {set.mpn}
-                      </p>
-                      <div className="mt-auto pt-3 flex items-baseline justify-between">
-                        <span className="font-display text-lg font-bold text-foreground">
-                          {set.min_price != null ? `£${Number(set.min_price).toFixed(2)}` : "—"}
-                        </span>
-                        <span className="font-body text-xs text-muted-foreground">
-                          {set.best_grade ? GRADE_LABELS[set.best_grade] ?? `Grade ${set.best_grade}` : ""}
-                        </span>
-                      </div>
-                    </div>
-                  </Link>
+                  <BrowseCatalogCard key={set.product_id} item={set} />
                 ))}
           </div>
 
@@ -197,9 +136,17 @@ export default function HomePage() {
           <p className="mx-auto mt-4 max-w-md font-body text-sm text-muted-foreground">
             Add it to your wishlist and we'll go hunting. Members get stock alerts the moment a set lands. No spam. Just bricks.
           </p>
-          <div className="mt-8">
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="font-display font-semibold">
               <Link to="/signup">Create Account</Link>
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              size="lg"
+              className="border-primary bg-background font-display font-semibold text-primary hover:bg-primary hover:text-primary-foreground"
+            >
+              <Link to="/login">Sign In</Link>
             </Button>
           </div>
         </div>
