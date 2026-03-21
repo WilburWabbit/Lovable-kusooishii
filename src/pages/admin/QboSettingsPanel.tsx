@@ -183,13 +183,14 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", params);
       if (data?.error) throw new Error(data.error);
 
+      const r = data.results ?? {};
       const parts: string[] = [];
-      if (data.items_committed) parts.push(`${data.items_committed} items`);
-      if (data.purchases_committed) parts.push(`${data.purchases_committed} purchases`);
-      if (data.sales_committed) parts.push(`${data.sales_committed} sales`);
-      if (data.refunds_committed) parts.push(`${data.refunds_committed} refunds`);
-      if (data.customers_committed) parts.push(`${data.customers_committed} customers`);
-      if (data.errors?.length) parts.push(`${data.errors.length} errors`);
+      if (r.items?.processed) parts.push(`${r.items.processed} items`);
+      if (r.purchases?.processed) parts.push(`${r.purchases.processed} purchases`);
+      if (r.sales?.processed) parts.push(`${r.sales.processed} sales`);
+      if (r.refunds?.processed) parts.push(`${r.refunds.processed} refunds`);
+      if (r.customers?.processed) parts.push(`${r.customers.processed} customers`);
+      if (data.total_remaining) parts.push(`${data.total_remaining} remaining`);
 
       toast({
         title: "Processing complete",
@@ -273,14 +274,15 @@ export function QboSettingsPanel() {
       setRebuildPhase("Processing all pending records…");
       // Process in a loop until nothing remains
       let totalProcessed = 0;
-      for (let iteration = 0; iteration < 50; iteration++) {
+      for (let iteration = 0; iteration < 200; iteration++) {
         const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", { batch_size: 50 });
         if (data?.error) throw new Error(data.error);
-        const committed = (data.items_committed ?? 0) + (data.purchases_committed ?? 0) +
-          (data.sales_committed ?? 0) + (data.refunds_committed ?? 0) + (data.customers_committed ?? 0);
+        const r = data.results ?? {};
+        const committed = (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
+          (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
         totalProcessed += committed;
-        setRebuildPhase(`Processed ${totalProcessed} records (batch ${iteration + 1})…`);
-        if (committed === 0) break; // Nothing left to process
+        setRebuildPhase(`Processed ${totalProcessed} records (${data.total_remaining ?? 0} remaining)…`);
+        if (!data.has_more) break;
       }
 
       // Phase 3: Reconcile stock
