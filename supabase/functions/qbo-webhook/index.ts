@@ -99,6 +99,12 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
+const ALLOCABLE_FEE_PATTERN = /\b(buy(?:ing)?\s+fee|purchase\s+fee|fees?|shipping|delivery|courier|postage|freight|carriage|inbound|warehouse)\b/i;
+
+function isAllocableFeeLine(description?: string | null): boolean {
+  return ALLOCABLE_FEE_PATTERN.test(description ?? "");
+}
+
 /**
  * Parse QBO parent item name to extract brand and item type.
  * Convention: "LEGO:<ItemType>" → { brand: "LEGO", itemType: "<ItemType>" }
@@ -449,6 +455,21 @@ async function resolveSkuFromQboItem(admin: any, baseUrl: string, accessToken: s
   return { skuId: sku?.id ?? null, skuCode };
 }
 
+async function deleteImportedRefundOrder(admin: any, refundId: string): Promise<boolean> {
+  const { data: order } = await admin
+    .from("sales_order")
+    .select("id")
+    .eq("origin_channel", "qbo_refund")
+    .eq("origin_reference", refundId)
+    .maybeSingle();
+
+  if (!order) return false;
+
+  await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
+  await admin.from("sales_order").delete().eq("id", order.id);
+  return true;
+}
+
 // ────────────────────────────────────────────────────────────
 // Signature verification
 // ────────────────────────────────────────────────────────────
@@ -582,9 +603,14 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
     }
 
     const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+    const lineDescription = [
+      line.Description,
+      isStockLine ? detail.ItemRef?.name : detail.AccountRef?.name,
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" - ") || "No description";
+
     lineRows.push({
       inbound_receipt_id: receipt.id,
-      description: line.Description ?? detail.ItemRef?.name ?? "No description",
+      description: lineDescription,
       quantity: detail.Qty ?? 1,
       unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
       line_total: line.Amount ?? 0,
@@ -616,7 +642,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
 
   // Auto-process: create SKUs + stock units
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
-  const overheadLines = lineRows.filter(l => !l.is_stock_line);
+  const overheadLines = lineRows.filter(l => !l.is_stock_line && isAllocableFeeLine(l.description));
 
   if (stockLines.length === 0) return "upserted receipt — no stock lines to auto-process";
   const unmapped = lineRows.filter(l => l.is_stock_line && (!l.mpn || !l.condition_grade));
@@ -664,7 +690,7 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
         }).select("id").single();
         if (!prodErr && newProduct) { productId = newProduct.id; }
         else if (prodErr) { console.error(`Auto-create product for ${line.mpn}:`, prodErr.message); }
-      } else if (lineBrand || lineItemType) {
+      } else {
         const { data: newProduct, error: prodErr } = await admin.from("product").insert({
           mpn: line.mpn, name: cleanQboName(line.description ?? line.mpn),
           product_type: lineItemType ?? "set", brand: lineBrand, status: "active",
@@ -705,6 +731,20 @@ async function handlePurchase(admin: any, baseUrl: string, accessToken: string, 
       }
       if (skuErr) { console.error("SKU create error:", skuErr); continue; }
       sku = newSku;
+    } else {
+      const skuUpdatePayload: Record<string, any> = {
+        product_id: productId,
+        saleable_flag: !!productId,
+      };
+      if (lineParentItemId) skuUpdatePayload.qbo_parent_item_id = lineParentItemId;
+      let { error: skuUpdateErr } = await admin.from("sku").update(skuUpdatePayload).eq("id", sku.id);
+      if (skuUpdateErr && /qbo_parent_item_id|PGRST204/.test(skuUpdateErr.message ?? "")) {
+        delete skuUpdatePayload.qbo_parent_item_id;
+        ({ error: skuUpdateErr } = await admin.from("sku").update(skuUpdatePayload).eq("id", sku.id));
+      }
+      if (skuUpdateErr) {
+        console.error("SKU update error:", skuUpdateErr);
+      }
     }
 
     const receiptLineId = insertedLines?.[lineRows.indexOf(line)]?.id ?? null;
@@ -939,109 +979,16 @@ async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: stri
   return `created order — ${linesCreated} lines, ${stockMatched} stock matched`;
 }
 
-async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {
-  const originChannel = "qbo_refund";
+async function handleRefundReceipt(admin: any, _baseUrl: string, _accessToken: string, entityId: string, operation: string): Promise<string> {
+  const removedExisting = await deleteImportedRefundOrder(admin, entityId);
 
   if (operation === "Delete") {
-    const { data: order } = await admin.from("sales_order").select("id").eq("origin_channel", originChannel).eq("origin_reference", entityId).maybeSingle();
-    if (!order) return "no matching refund order found";
-    await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
-    await admin.from("sales_order").delete().eq("id", order.id);
-    return "deleted refund order";
+    return removedExisting ? "deleted legacy refund order" : "ignored refund delete";
   }
 
-  const data = await fetchQboEntity(baseUrl, accessToken, `refundreceipt/${entityId}`);
-  const receipt = data?.RefundReceipt;
-  if (!receipt) return "could not fetch RefundReceipt from QBO";
-
-  // Idempotency: if exists, delete and re-create
-  const { data: existing } = await admin.from("sales_order").select("id").eq("origin_channel", originChannel).eq("origin_reference", String(receipt.Id)).maybeSingle();
-  if (existing) {
-    await admin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
-    await admin.from("sales_order").delete().eq("id", existing.id);
-  }
-
-  const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
-  const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
-  const txnDate = receipt.TxnDate ?? null;
-  const totalAmount = receipt.TotalAmt ?? 0;
-  const currency = receipt.CurrencyRef?.value ?? "GBP";
-  const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
-  const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
-
-  let merchandiseSubtotal: number, grossTotal: number;
-  if (globalTaxCalc === "TaxInclusive") {
-    merchandiseSubtotal = -(totalAmount - taxTotal);
-    grossTotal = -totalAmount;
-  } else {
-    merchandiseSubtotal = -totalAmount;
-    grossTotal = -(totalAmount + taxTotal);
-  }
-
-  const itemLines = (receipt.Line ?? []).filter((l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value);
-  if (itemLines.length === 0) return "skipped — no item lines";
-
-  let customerId: string | null = null;
-  if (customerRefValue) {
-    const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", customerRefValue).maybeSingle();
-    customerId = cust?.id ?? null;
-  }
-
-  const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
-
-  const { data: order, error: orderErr } = await admin.from("sales_order").insert({
-    origin_channel: originChannel,
-    origin_reference: String(receipt.Id),
-    status: "refunded",
-    guest_name: customerName,
-    guest_email: `qbo-refund-${receipt.Id}@imported.local`,
-    shipping_name: customerName,
-    merchandise_subtotal: merchandiseSubtotal,
-    tax_total: -taxTotal,
-    gross_total: grossTotal,
-    global_tax_calculation: globalTaxCalc,
-    currency,
-    customer_id: customerId,
-    txn_date: txnDate,
-    doc_number: receipt.DocNumber ?? null,
-    notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? receipt.Id}`,
-    qbo_sync_status: "synced",
-    qbo_sales_receipt_id: String(receipt.Id),
-    qbo_customer_id: customerRefValue,
-  }).select("id").single();
-
-  if (orderErr) return `refund order insert error: ${orderErr.message}`;
-
-  let linesCreated = 0;
-  for (const line of itemLines) {
-    const detail = line.SalesItemLineDetail;
-    const qty = detail.Qty ?? 1;
-    const unitPrice = detail.UnitPrice ?? 0;
-    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
-
-    const { skuId } = await resolveSkuFromQboItem(admin, baseUrl, accessToken, detail.ItemRef.value, detail.ItemRef?.name ?? null);
-    if (!skuId) continue;
-
-    let lineTaxCodeId: string | null = null;
-    if (taxCodeRef) {
-      const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
-      lineTaxCodeId = tc?.id ?? null;
-    }
-
-    await admin.from("sales_order_line").insert({
-      sales_order_id: order.id,
-      sku_id: skuId,
-      quantity: qty,
-      unit_price: -unitPrice,
-      line_total: -(line.Amount ?? 0),
-      qbo_tax_code_ref: taxCodeRef,
-      vat_rate_id: vatRateId,
-      tax_code_id: lineTaxCodeId,
-    });
-    linesCreated++;
-  }
-
-  return `created refund order — ${linesCreated} lines`;
+  return removedExisting
+    ? "ignored refund receipt and removed legacy refund order"
+    : "ignored refund receipt";
 }
 
 async function handleCustomer(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string): Promise<string> {

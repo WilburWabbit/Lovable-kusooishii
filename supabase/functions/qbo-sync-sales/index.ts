@@ -221,8 +221,17 @@ async function landRefundReceipt(
     const oldPayload = JSON.stringify(existing.raw_payload);
     const newPayload = JSON.stringify(receipt);
     const payloadChanged = oldPayload !== newPayload;
+    const { data: existingRefundOrder } = await supabaseAdmin
+      .from("sales_order")
+      .select("id")
+      .eq("origin_channel", "qbo_refund")
+      .eq("origin_reference", externalId)
+      .maybeSingle();
 
-    const newStatus = (payloadChanged && existing.status === "committed") ? "pending" : existing.status;
+    const shouldReprocessForCleanup = !!existingRefundOrder && existing.status === "committed";
+    const newStatus = (payloadChanged && existing.status === "committed") || shouldReprocessForCleanup
+      ? "pending"
+      : existing.status;
 
     await supabaseAdmin
       .from("landing_raw_qbo_refund_receipt")
@@ -261,6 +270,24 @@ async function landQboItem(supabaseAdmin: any, item: any, correlationId: string)
       },
       { onConflict: "external_id" }
     );
+}
+
+async function deleteImportedRefundOrder(
+  supabaseAdmin: any,
+  refundId: string,
+): Promise<boolean> {
+  const { data: existing } = await supabaseAdmin
+    .from("sales_order")
+    .select("id")
+    .eq("origin_channel", "qbo_refund")
+    .eq("origin_reference", refundId)
+    .maybeSingle();
+
+  if (!existing) return false;
+
+  await supabaseAdmin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
+  await supabaseAdmin.from("sales_order").delete().eq("id", existing.id);
+  return true;
 }
 
 async function markLandingStatus(
@@ -624,171 +651,13 @@ async function processSalesReceipt(
 async function processRefundReceipt(
   supabaseAdmin: any,
   receipt: any,
-  itemCache: Map<string, any>,
-  baseUrl: string,
-  accessToken: string
-): Promise<{ created: boolean; linesCreated: number }> {
+): Promise<{ ignored: true; removedExisting: boolean }> {
   const qboId = String(receipt.Id);
-  const originChannel = "qbo_refund";
-
-  const { data: existing } = await supabaseAdmin
-    .from("sales_order")
-    .select("id")
-    .eq("origin_channel", originChannel)
-    .eq("origin_reference", qboId)
-    .maybeSingle();
-
-  if (existing) {
-    // Delete-and-recreate to capture updates (refunds don't reopen stock)
-    await supabaseAdmin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
-    await supabaseAdmin.from("sales_order").delete().eq("id", existing.id);
-    console.log(`Deleted existing refund order ${existing.id} for re-creation (RefundReceipt ${qboId})`);
+  const removedExisting = await deleteImportedRefundOrder(supabaseAdmin, qboId);
+  if (removedExisting) {
+    console.log(`Removed legacy refund order while ignoring RefundReceipt ${qboId}`);
   }
-
-  const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
-  const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
-  const txnDate = receipt.TxnDate ?? null;
-  const totalAmount = receipt.TotalAmt ?? 0;
-  const currency = receipt.CurrencyRef?.value ?? "GBP";
-  const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
-  const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
-
-  let merchandiseSubtotal: number;
-  let grossTotal: number;
-  if (globalTaxCalc === "TaxInclusive") {
-    merchandiseSubtotal = -(totalAmount - taxTotal);
-    grossTotal = -totalAmount;
-  } else {
-    merchandiseSubtotal = -totalAmount;
-    grossTotal = -(totalAmount + taxTotal);
-  }
-
-  const itemLines = (receipt.Line ?? []).filter(
-    (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
-  );
-
-  if (itemLines.length === 0) {
-    return { created: false, linesCreated: 0 };
-  }
-
-  let customerId: string | null = null;
-  if (customerRefValue) {
-    const { data: cust } = await supabaseAdmin
-      .from("customer")
-      .select("id")
-      .eq("qbo_customer_id", customerRefValue)
-      .maybeSingle();
-    customerId = cust?.id ?? null;
-  }
-
-  const vatRateId = await resolveVatRateId(supabaseAdmin, receipt.TxnTaxDetail);
-
-  const refundPayload: Record<string, any> = {
-    origin_channel: originChannel,
-    origin_reference: qboId,
-    status: "refunded",
-    guest_name: customerName,
-    guest_email: `qbo-refund-${qboId}@imported.local`,
-    shipping_name: customerName,
-    merchandise_subtotal: merchandiseSubtotal,
-    tax_total: -taxTotal,
-    gross_total: grossTotal,
-    global_tax_calculation: globalTaxCalc,
-    currency,
-    customer_id: customerId,
-    txn_date: txnDate ?? null,
-    doc_number: receipt.DocNumber ?? null,
-    notes: `Imported from QBO RefundReceipt #${receipt.DocNumber ?? qboId} on ${txnDate ?? "unknown date"}`,
-    qbo_sync_status: "synced",
-    qbo_sales_receipt_id: qboId,
-    qbo_customer_id: customerRefValue,
-  };
-
-  let { data: order, error: orderErr } = await supabaseAdmin
-    .from("sales_order")
-    .insert(refundPayload)
-    .select("id")
-    .single();
-
-  if (orderErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderErr.message ?? "")) {
-    delete refundPayload.qbo_sync_status;
-    delete refundPayload.qbo_sales_receipt_id;
-    delete refundPayload.qbo_customer_id;
-    ({ data: order, error: orderErr } = await supabaseAdmin
-      .from("sales_order")
-      .insert(refundPayload)
-      .select("id")
-      .single());
-  }
-
-  if (orderErr) throw orderErr;
-
-  let linesCreated = 0;
-
-  for (const line of itemLines) {
-    const detail = line.SalesItemLineDetail;
-    const qty = detail.Qty ?? 1;
-    const unitPrice = detail.UnitPrice ?? 0;
-    const itemRefValue = detail.ItemRef.value;
-    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
-
-    const qboItem = await fetchQboItem(itemRefValue, itemCache, baseUrl, accessToken);
-    const skuField = qboItem?.Sku;
-    let skuCode: string | null = null;
-
-    // Use raw QBO SKU as sku_code (trimmed to match purchase sync storage)
-    if (skuField && String(skuField).trim()) {
-      skuCode = String(skuField).trim();
-    } else if (detail.ItemRef?.name) {
-      skuCode = String(detail.ItemRef.name).trim();
-    }
-
-    let skuId: string | null = null;
-    if (skuCode) {
-      const { data: sku } = await supabaseAdmin
-        .from("sku")
-        .select("id")
-        .eq("sku_code", skuCode)
-        .maybeSingle();
-      skuId = sku?.id ?? null;
-    }
-
-    if (!skuId) {
-      console.warn(`No SKU found for refund QBO item ${itemRefValue}, skipping line`);
-      continue;
-    }
-
-    let lineTaxCodeId: string | null = null;
-    if (taxCodeRef) {
-      const { data: tc } = await supabaseAdmin
-        .from("tax_code")
-        .select("id")
-        .eq("qbo_tax_code_id", String(taxCodeRef))
-        .maybeSingle();
-      lineTaxCodeId = tc?.id ?? null;
-    }
-
-    const { error: lineErr } = await supabaseAdmin
-      .from("sales_order_line")
-      .insert({
-        sales_order_id: order.id,
-        sku_id: skuId,
-        quantity: qty,
-        unit_price: -unitPrice,
-        line_total: -(line.Amount ?? 0),
-        qbo_tax_code_ref: taxCodeRef,
-        vat_rate_id: vatRateId,
-        tax_code_id: lineTaxCodeId,
-      });
-
-    if (lineErr) {
-      console.error(`Failed to create refund order line:`, lineErr);
-      continue;
-    }
-    linesCreated++;
-  }
-
-  return { created: true, linesCreated };
+  return { ignored: true, removedExisting };
 }
 
 Deno.serve(async (req) => {
@@ -939,7 +808,7 @@ Deno.serve(async (req) => {
 
     // Pre-fetch QBO items for this chunk
     const uniqueItemIds = new Set<string>();
-    for (const entry of [...(pendingSales ?? []), ...(pendingRefunds ?? [])]) {
+    for (const entry of (pendingSales ?? [])) {
       const receipt = entry.raw_payload as any;
       for (const line of (receipt?.Line ?? [])) {
         if (line.DetailType === "SalesItemLineDetail" && line.SalesItemLineDetail?.ItemRef?.value) {
@@ -1002,22 +871,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    let refundsCreated = 0;
-    let refundsSkipped = 0;
-    let totalRefundLines = 0;
+    let refundsIgnored = 0;
+    let refundOrdersRemoved = 0;
 
     for (const entry of (pendingRefunds ?? [])) {
       const rr = entry.raw_payload as any;
       try {
-        const result = await processRefundReceipt(supabaseAdmin, rr, itemCache, baseUrl, accessToken);
-        if (result.created) {
-          refundsCreated++;
-          totalRefundLines += result.linesCreated;
-          await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "committed");
-        } else {
-          refundsSkipped++;
-          await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "committed");
-        }
+        const result = await processRefundReceipt(supabaseAdmin, rr);
+        refundsIgnored++;
+        if (result.removedExisting) refundOrdersRemoved++;
+        await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "skipped");
       } catch (err) {
         console.error(`Failed to process RefundReceipt ${entry.external_id}:`, err);
         await markLandingStatus(supabaseAdmin, "landing_raw_qbo_refund_receipt", entry.id, "error", err instanceof Error ? err.message : "Unknown");
@@ -1073,9 +936,10 @@ Deno.serve(async (req) => {
         sales_lines: totalSalesLines,
         stock_matched: totalStockMatched,
         stock_missing: totalStockMissing,
-        refunds_created: refundsCreated,
-        refunds_skipped: refundsSkipped,
-        refund_lines: totalRefundLines,
+        refunds_ignored: refundsIgnored,
+        refunds_skipped: refundsIgnored,
+        refund_orders_removed: refundOrdersRemoved,
+        refund_lines: 0,
         items_cached: itemCache.size,
         channel_listings_updated: channelListingsUpdated,
         has_more: remainingPending > 0,

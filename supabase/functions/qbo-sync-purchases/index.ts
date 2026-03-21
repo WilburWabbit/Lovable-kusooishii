@@ -110,6 +110,84 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
+const ALLOCABLE_FEE_PATTERN = /\b(buy(?:ing)?\s+fee|purchase\s+fee|fees?|shipping|delivery|courier|postage|freight|carriage|inbound|warehouse)\b/i;
+
+function isAllocableFeeLine(description?: string | null): boolean {
+  return ALLOCABLE_FEE_PATTERN.test(description ?? "");
+}
+
+async function ensureProductExists(
+  supabaseAdmin: any,
+  mpn: string,
+  fallbackName: string,
+): Promise<string> {
+  const productName = cleanQboName(fallbackName || mpn);
+
+  const { data: ensuredProductId, error: ensureErr } = await supabaseAdmin.rpc("ensure_product_exists", {
+    p_mpn: mpn,
+    p_item_type: "set",
+    p_name: productName,
+  });
+
+  if (!ensureErr && ensuredProductId) {
+    return ensuredProductId;
+  }
+
+  if (ensureErr) {
+    console.warn(`ensure_product_exists failed for ${mpn}, falling back to direct lookup: ${ensureErr.message}`);
+  }
+
+  const { data: existingProduct } = await supabaseAdmin
+    .from("product")
+    .select("id")
+    .eq("mpn", mpn)
+    .maybeSingle();
+
+  if (existingProduct?.id) {
+    return existingProduct.id;
+  }
+
+  const { data: catalog } = await supabaseAdmin
+    .from("lego_catalog")
+    .select("id, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+    .eq("mpn", mpn)
+    .eq("status", "active")
+    .maybeSingle();
+
+  const productPayload = catalog
+    ? {
+        mpn,
+        name: catalog.name,
+        theme_id: catalog.theme_id,
+        piece_count: catalog.piece_count,
+        release_year: catalog.release_year,
+        retired_flag: catalog.retired_flag ?? false,
+        img_url: catalog.img_url,
+        subtheme_name: catalog.subtheme_name,
+        product_type: catalog.product_type ?? "set",
+        lego_catalog_id: catalog.id,
+        status: "active",
+      }
+    : {
+        mpn,
+        name: productName,
+        product_type: "set",
+        status: "active",
+      };
+
+  const { data: createdProduct, error: createErr } = await supabaseAdmin
+    .from("product")
+    .upsert(productPayload, { onConflict: "mpn" })
+    .select("id")
+    .single();
+
+  if (createErr || !createdProduct?.id) {
+    throw createErr ?? new Error(`Failed to ensure product for ${mpn}`);
+  }
+
+  return createdProduct.id;
+}
+
 // ── Backfill: resolve tax codes and link stock units for already-processed receipts ──
 
 async function backfillProcessedReceipt(
@@ -175,12 +253,23 @@ async function backfillProcessedReceipt(
   // (matching by mpn+grade alone is fragile when multiple SKUs share the same MPN)
   const { data: receiptLines } = await supabaseAdmin
     .from("inbound_receipt_line")
-    .select("id, mpn, condition_grade, quantity, sku_code")
+    .select("id, mpn, condition_grade, quantity, sku_code, description")
     .eq("inbound_receipt_id", receiptId)
     .eq("is_stock_line", true);
 
   for (const rl of (receiptLines ?? [])) {
     if (!rl.mpn || !rl.condition_grade) continue;
+
+    const productId = await ensureProductExists(
+      supabaseAdmin,
+      rl.mpn,
+      rl.description ?? rl.sku_code ?? rl.mpn,
+    );
+    const skuCode = rl.sku_code || (rl.condition_grade !== "1" ? `${rl.mpn}.${rl.condition_grade}` : rl.mpn);
+    await supabaseAdmin
+      .from("sku")
+      .update({ product_id: productId, saleable_flag: true })
+      .eq("sku_code", skuCode);
 
     // Prefer matching by sku_id (via sku_code) for accuracy
     let unlinkedQuery = supabaseAdmin
@@ -238,7 +327,7 @@ async function autoProcessReceipt(
   }>
 ): Promise<{ processed: boolean; skipped: string[] }> {
   const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
-  const overheadLines = lineRows.filter(l => !l.is_stock_line);
+  const overheadLines = lineRows.filter(l => !l.is_stock_line && isAllocableFeeLine(l.description));
 
   if (stockLines.length === 0) {
     return { processed: false, skipped: ["No mapped stock lines"] };
@@ -260,12 +349,11 @@ async function autoProcessReceipt(
     const mpn = line.mpn!;
     // Use raw sku_code from line if available, otherwise reconstruct from mpn + grade
     const skuCode = line.sku_code || (conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn);
-
-    const { data: product } = await supabaseAdmin
-      .from("product")
-      .select("id, mpn")
-      .eq("mpn", mpn)
-      .single();
+    const productId = await ensureProductExists(
+      supabaseAdmin,
+      mpn,
+      line.description ?? line.sku_code ?? mpn,
+    );
 
     const lineTotal = Number(line.line_total);
     const lineOverhead = totalStockCost > 0 ? totalOverhead * (lineTotal / totalStockCost) : 0;
@@ -286,26 +374,29 @@ async function autoProcessReceipt(
       const { data: newSku, error: skuErr } = await supabaseAdmin
         .from("sku")
         .insert({
-          product_id: product?.id ?? null,
+          product_id: productId,
           condition_grade: conditionGrade,
           sku_code: skuCode,
           name: cleanQboName(line.description ?? mpn),
           price: landedCost,
           active_flag: true,
-          saleable_flag: !!product,
+          saleable_flag: true,
           qbo_item_id: qboItemId,
         })
         .select("id")
         .single();
       if (skuErr) throw skuErr;
       sku = newSku;
-    } else if (qboItemId) {
-      // Backfill qbo_item_id on existing SKUs that don't have it yet
+    } else {
+      const skuUpdate: Record<string, any> = {
+        product_id: productId,
+        saleable_flag: true,
+      };
+      if (qboItemId) skuUpdate.qbo_item_id = qboItemId;
       await supabaseAdmin
         .from("sku")
-        .update({ qbo_item_id: qboItemId })
-        .eq("id", sku.id)
-        .is("qbo_item_id", null);
+        .update(skuUpdate)
+        .eq("id", sku.id);
     }
 
     let existingCount = 0;
@@ -705,9 +796,14 @@ Deno.serve(async (req) => {
 
             const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
+            const lineDescription = [
+              line.Description,
+              isStockLine ? detail.ItemRef?.name : detail.AccountRef?.name,
+            ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" - ") || "No description";
+
             lineRows.push({
               inbound_receipt_id: receipt.id,
-              description: line.Description ?? detail.ItemRef?.name ?? "No description",
+              description: lineDescription,
               quantity: detail.Qty ?? 1,
               unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
               line_total: line.Amount ?? 0,

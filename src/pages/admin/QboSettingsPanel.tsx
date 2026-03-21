@@ -228,7 +228,7 @@ export function QboSettingsPanel() {
     const months = generateMonthList();
     const totals = {
       sales_created: 0, sales_skipped: 0, stock_matched: 0,
-      stock_missing: 0, refunds_created: 0, refunds_skipped: 0,
+      stock_missing: 0, refunds_ignored: 0, refund_orders_removed: 0,
       channel_listings_updated: 0,
     };
 
@@ -263,8 +263,8 @@ export function QboSettingsPanel() {
           totals.sales_skipped += data.sales_skipped ?? 0;
           totals.stock_matched += data.stock_matched ?? 0;
           totals.stock_missing += data.stock_missing ?? 0;
-          totals.refunds_created += data.refunds_created ?? 0;
-          totals.refunds_skipped += data.refunds_skipped ?? 0;
+          totals.refunds_ignored += data.refunds_ignored ?? data.refunds_skipped ?? 0;
+          totals.refund_orders_removed += data.refund_orders_removed ?? 0;
           totals.channel_listings_updated += data.channel_listings_updated ?? 0;
 
           hasMore = data.has_more === true;
@@ -286,8 +286,8 @@ export function QboSettingsPanel() {
       if (totals.sales_skipped) parts.push(`${totals.sales_skipped} sales unchanged`);
       if (totals.stock_matched) parts.push(`${totals.stock_matched} stock matched`);
       if (totals.stock_missing) parts.push(`${totals.stock_missing} stock missing`);
-      if (totals.refunds_created) parts.push(`${totals.refunds_created} refunds imported`);
-      if (totals.refunds_skipped) parts.push(`${totals.refunds_skipped} refunds unchanged`);
+      if (totals.refunds_ignored) parts.push(`${totals.refunds_ignored} refunds ignored`);
+      if (totals.refund_orders_removed) parts.push(`${totals.refund_orders_removed} legacy refund rows removed`);
       if (totals.channel_listings_updated) parts.push(`${totals.channel_listings_updated} channel listings updated`);
       toast({
         title: cancelSalesRef.current ? "Sales sync stopped" : "Sales sync complete",

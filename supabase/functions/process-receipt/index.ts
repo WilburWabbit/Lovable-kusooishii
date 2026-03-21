@@ -10,6 +10,84 @@ function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
+const ALLOCABLE_FEE_PATTERN = /\b(buy(?:ing)?\s+fee|purchase\s+fee|fees?|shipping|delivery|courier|postage|freight|carriage|inbound|warehouse)\b/i;
+
+function isAllocableFeeLine(description?: string | null): boolean {
+  return ALLOCABLE_FEE_PATTERN.test(description ?? "");
+}
+
+async function ensureProductExists(
+  supabaseAdmin: any,
+  mpn: string,
+  fallbackName: string,
+): Promise<string> {
+  const productName = cleanQboName(fallbackName || mpn);
+
+  const { data: ensuredProductId, error: ensureErr } = await supabaseAdmin.rpc("ensure_product_exists", {
+    p_mpn: mpn,
+    p_item_type: "set",
+    p_name: productName,
+  });
+
+  if (!ensureErr && ensuredProductId) {
+    return ensuredProductId;
+  }
+
+  if (ensureErr) {
+    console.warn(`ensure_product_exists failed for ${mpn}, falling back to direct lookup: ${ensureErr.message}`);
+  }
+
+  const { data: existingProduct } = await supabaseAdmin
+    .from("product")
+    .select("id")
+    .eq("mpn", mpn)
+    .maybeSingle();
+
+  if (existingProduct?.id) {
+    return existingProduct.id;
+  }
+
+  const { data: catalog } = await supabaseAdmin
+    .from("lego_catalog")
+    .select("id, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
+    .eq("mpn", mpn)
+    .eq("status", "active")
+    .maybeSingle();
+
+  const productPayload = catalog
+    ? {
+        mpn,
+        name: catalog.name,
+        theme_id: catalog.theme_id,
+        piece_count: catalog.piece_count,
+        release_year: catalog.release_year,
+        retired_flag: catalog.retired_flag ?? false,
+        img_url: catalog.img_url,
+        subtheme_name: catalog.subtheme_name,
+        product_type: catalog.product_type ?? "set",
+        lego_catalog_id: catalog.id,
+        status: "active",
+      }
+    : {
+        mpn,
+        name: productName,
+        product_type: "set",
+        status: "active",
+      };
+
+  const { data: createdProduct, error: createErr } = await supabaseAdmin
+    .from("product")
+    .upsert(productPayload, { onConflict: "mpn" })
+    .select("id")
+    .single();
+
+  if (createErr || !createdProduct?.id) {
+    throw createErr ?? new Error(`Failed to ensure product for ${mpn}`);
+  }
+
+  return createdProduct.id;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -90,7 +168,7 @@ Deno.serve(async (req) => {
 
     // Split into stock lines (with MPN and grade) and overhead lines
     const stockLines = (allLines ?? []).filter((l: any) => l.is_stock_line && l.mpn && l.condition_grade);
-    const overheadLines = (allLines ?? []).filter((l: any) => !l.is_stock_line);
+    const overheadLines = (allLines ?? []).filter((l: any) => !l.is_stock_line && isAllocableFeeLine(l.description));
 
     if (stockLines.length === 0) {
       return new Response(JSON.stringify({ error: "No mapped stock lines to process" }), {
@@ -112,13 +190,11 @@ Deno.serve(async (req) => {
       const mpn = line.mpn;
       // Use the sku_code from the receipt line if available, otherwise reconstruct from mpn + grade
       const skuCode = line.sku_code || (conditionGrade !== "1" ? `${mpn}.${conditionGrade}` : mpn);
-
-      // Optionally link to product if MPN matches
-      const { data: product } = await supabaseAdmin
-        .from("product")
-        .select("id, mpn")
-        .eq("mpn", mpn)
-        .single();
+      const productId = await ensureProductExists(
+        supabaseAdmin,
+        mpn,
+        line.description ?? line.sku_code ?? mpn,
+      );
 
       // Calculate apportioned overhead per unit for this line
       const lineTotal = Number(line.line_total);
@@ -139,19 +215,24 @@ Deno.serve(async (req) => {
         const { data: newSku, error: skuErr } = await supabaseAdmin
           .from("sku")
           .insert({
-            product_id: product?.id ?? null,
+            product_id: productId,
             condition_grade: conditionGrade,
             sku_code: skuCode,
             name: cleanQboName(line.description ?? mpn),
             price: landedCost,
             active_flag: true,
-            saleable_flag: !!product,
+            saleable_flag: true,
           })
           .select("id")
           .single();
 
         if (skuErr) throw skuErr;
         sku = newSku;
+      } else {
+        await supabaseAdmin
+          .from("sku")
+          .update({ product_id: productId, saleable_flag: true })
+          .eq("id", sku.id);
       }
 
       // Shortfall guard: only insert units not already created for this receipt line
