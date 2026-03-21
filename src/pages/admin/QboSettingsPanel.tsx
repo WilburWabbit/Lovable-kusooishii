@@ -183,13 +183,14 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", params);
       if (data?.error) throw new Error(data.error);
 
+      const r = data.results ?? {};
       const parts: string[] = [];
-      if (data.items_committed) parts.push(`${data.items_committed} items`);
-      if (data.purchases_committed) parts.push(`${data.purchases_committed} purchases`);
-      if (data.sales_committed) parts.push(`${data.sales_committed} sales`);
-      if (data.refunds_committed) parts.push(`${data.refunds_committed} refunds`);
-      if (data.customers_committed) parts.push(`${data.customers_committed} customers`);
-      if (data.errors?.length) parts.push(`${data.errors.length} errors`);
+      if (r.items?.processed) parts.push(`${r.items.processed} items`);
+      if (r.purchases?.processed) parts.push(`${r.purchases.processed} purchases`);
+      if (r.sales?.processed) parts.push(`${r.sales.processed} sales`);
+      if (r.refunds?.processed) parts.push(`${r.refunds.processed} refunds`);
+      if (r.customers?.processed) parts.push(`${r.customers.processed} customers`);
+      if (data.total_remaining) parts.push(`${data.total_remaining} remaining`);
 
       toast({
         title: "Processing complete",
