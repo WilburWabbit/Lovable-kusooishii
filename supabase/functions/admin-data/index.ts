@@ -1682,11 +1682,10 @@ Deno.serve(async (req) => {
         receiptsDeleted++;
       }
 
-      // Step 3: Clean up any remaining orphaned stock units
+      // Step 3: Clean up any remaining orphaned stock units (all statuses)
       const { data: remainingOrphans } = await admin.from("stock_unit")
         .select("id")
-        .is("inbound_receipt_line_id", null)
-        .in("status", ["available", "received", "graded"]);
+        .is("inbound_receipt_line_id", null);
       const orphanIds = (remainingOrphans ?? []).map((o: any) => o.id);
       if (orphanIds.length > 0) {
         for (let i = 0; i < orphanIds.length; i += 100) {
