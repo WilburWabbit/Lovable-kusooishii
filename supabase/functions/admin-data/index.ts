@@ -94,8 +94,7 @@ Deno.serve(async (req) => {
         .select(
           "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, product:product_id(name)), receipt_line:inbound_receipt_line_id(tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent)), receipt:inbound_receipt_id(txn_date))"
         )
-        .order("created_at", { ascending: false })
-        .limit(1000);
+        .order("created_at", { ascending: false });
       if (error) throw error;
       // Flatten vat_rate_percent and purchase_date
       result = (data ?? []).map((u: any) => ({
