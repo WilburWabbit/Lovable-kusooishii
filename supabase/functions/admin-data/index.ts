@@ -5,7 +5,7 @@ class ValidationError extends Error {
 }
 
 const STOCK_MATCHABLE = ["available", "received", "graded"];
-const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "delivered", "packed", "picking", "awaiting_dispatch"];
+const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
