@@ -22,7 +22,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { sortRows } from "@/lib/table-utils";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
-import { MobileListCard, MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
+import { MobileCardTitle, MobileCardMeta, MobileCardBadges } from "@/components/admin/MobileListCard";
 
 type OrderLineRow = {
   id: string;
@@ -33,7 +33,7 @@ type OrderLineRow = {
   sku: {
     sku_code: string;
     name: string | null;
-    product: { name: string } | null;
+    product: { name: string; mpn: string | null } | null;
   } | null;
 };
 
@@ -45,6 +45,8 @@ type OrderRow = {
   origin_reference: string | null;
   status: string;
   merchandise_subtotal: number;
+  discount_total: number;
+  club_discount_amount: number;
   tax_total: number;
   gross_total: number;
   currency: string;
@@ -90,16 +92,15 @@ function lineVatAmount(l: OrderLineRow) {
   return Math.round(l.line_total * (l.vat_rate_percent / 100) * 100) / 100;
 }
 
-function orderNetFromLines(o: OrderRow) {
-  return o.sales_order_line.reduce((s, l) => s + l.line_total, 0);
+function orderDiscountAmount(o: OrderRow) {
+  return o.discount_total > 0 ? o.discount_total : (o.club_discount_amount ?? 0);
 }
 
-function orderVatFromLines(o: OrderRow) {
-  return o.sales_order_line.reduce((s, l) => s + (lineVatAmount(l) ?? 0), 0);
-}
-
-function orderGrossFromLines(o: OrderRow) {
-  return orderNetFromLines(o) + orderVatFromLines(o);
+function orderDiscountPercent(o: OrderRow) {
+  const discountAmount = orderDiscountAmount(o);
+  const preDiscountSubtotal = o.merchandise_subtotal + discountAmount;
+  if (discountAmount <= 0 || preDiscountSubtotal <= 0) return 0;
+  return (discountAmount / preDiscountSubtotal) * 100;
 }
 
 const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "right" }[] = [
@@ -111,6 +112,8 @@ const ALL_COLUMNS: { key: string; label: string; align?: "left" | "center" | "ri
   { key: "origin_reference", label: "Reference" },
   { key: "status", label: "Status" },
   { key: "items", label: "Items", align: "center" as const },
+  { key: "discount_pct", label: "Discount %", align: "right" as const },
+  { key: "discount_amount", label: "Discount", align: "right" as const },
   { key: "net", label: "Net", align: "right" as const },
   { key: "vat", label: "VAT", align: "right" as const },
   { key: "total", label: "Total", align: "right" as const },
@@ -128,9 +131,11 @@ function getSortValue(o: OrderRow, key: string): unknown {
     case "origin_reference": return o.origin_reference;
     case "status": return o.status;
     case "items": return o.sales_order_line.length;
-    case "net": return orderNetFromLines(o);
-    case "vat": return orderVatFromLines(o);
-    case "total": return orderGrossFromLines(o);
+    case "discount_pct": return orderDiscountPercent(o);
+    case "discount_amount": return orderDiscountAmount(o);
+    case "net": return o.merchandise_subtotal;
+    case "vat": return o.tax_total;
+    case "total": return o.gross_total;
     case "created_at": return o.txn_date ?? o.created_at;
     default: return null;
   }
@@ -156,12 +161,16 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
       return <Badge variant="outline" className={STATUS_COLORS[o.status] ?? ""}>{o.status.replace(/_/g, " ")}</Badge>;
     case "items":
       return o.sales_order_line.length;
+    case "discount_pct":
+      return <span className="font-mono text-xs">{orderDiscountPercent(o).toFixed(2)}%</span>;
+    case "discount_amount":
+      return <span className="font-mono text-xs">{fmt(orderDiscountAmount(o))}</span>;
     case "net":
-      return <span className="font-mono text-xs">{fmt(orderNetFromLines(o))}</span>;
+      return <span className="font-mono text-xs">{fmt(o.merchandise_subtotal)}</span>;
     case "vat":
-      return <span className="font-mono text-xs">{fmt(orderVatFromLines(o))}</span>;
+      return <span className="font-mono text-xs">{fmt(o.tax_total)}</span>;
     case "total":
-      return <span className="font-mono text-xs">{fmt(orderGrossFromLines(o))}</span>;
+      return <span className="font-mono text-xs">{fmt(o.gross_total)}</span>;
     case "created_at": {
       const dateStr = o.txn_date ?? o.created_at;
       return <span className="text-xs text-muted-foreground">{format(new Date(dateStr), "dd MMM yyyy")}</span>;
@@ -172,13 +181,17 @@ function renderCell(o: OrderRow, key: string, expandedId: string | null): React.
 
 export function OrdersPage() {
   const { user } = useAuth();
-  const [filters, setFilter] = useFilterParams({ search: "", channel: "all", status: "all" });
+  const [filters, setFilter] = useFilterParams({ search: "", channel: "all", status: "all", mpn: "", sku: "" });
   const search = filters.search;
   const channelFilter = filters.channel;
   const statusFilter = filters.status;
+  const mpnFilter = filters.mpn;
+  const skuFilter = filters.sku;
   const setSearch = (v: string) => setFilter("search", v);
   const setChannelFilter = (v: string) => setFilter("channel", v);
   const setStatusFilter = (v: string) => setFilter("status", v);
+  const setMpnFilter = (v: string) => setFilter("mpn", v);
+  const setSkuFilter = (v: string) => setFilter("sku", v);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const tp = useTablePreferences("admin-orders", DEFAULT_VISIBLE, { key: "created_at", dir: "desc" });
@@ -207,11 +220,27 @@ export function OrdersPage() {
           (o.origin_reference ?? "").toLowerCase().includes(q) ||
           (o.customer?.display_name ?? "").toLowerCase().includes(q) ||
           (o.guest_name ?? "").toLowerCase().includes(q) ||
-          (o.guest_email ?? "").toLowerCase().includes(q),
+          (o.guest_email ?? "").toLowerCase().includes(q) ||
+          o.sales_order_line.some((l) =>
+            (l.sku?.sku_code ?? "").toLowerCase().includes(q) ||
+            (l.sku?.product?.mpn ?? "").toLowerCase().includes(q),
+          ),
+      );
+    }
+    if (mpnFilter.trim()) {
+      const q = mpnFilter.toLowerCase();
+      list = list.filter((o) =>
+        o.sales_order_line.some((l) => (l.sku?.product?.mpn ?? "").toLowerCase().includes(q)),
+      );
+    }
+    if (skuFilter.trim()) {
+      const q = skuFilter.toLowerCase();
+      list = list.filter((o) =>
+        o.sales_order_line.some((l) => (l.sku?.sku_code ?? "").toLowerCase().includes(q)),
       );
     }
     return list;
-  }, [orders, channelFilter, statusFilter, search]);
+  }, [orders, channelFilter, statusFilter, search, mpnFilter, skuFilter]);
 
   const sorted = useMemo(
     () => sortRows(filtered, tp.prefs.sort.key, tp.prefs.sort.dir, getSortValue),
@@ -219,7 +248,7 @@ export function OrdersPage() {
   );
 
   const totalRevenue = useMemo(
-    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + orderGrossFromLines(o), 0),
+    () => orders.filter((o) => o.origin_channel !== "qbo_refund").reduce((s, o) => s + o.gross_total, 0),
     [orders],
   );
   const salesCount = orders.filter((o) => o.origin_channel !== "qbo_refund").length;
@@ -265,11 +294,23 @@ export function OrdersPage() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
           <Input
-            placeholder="Search order #, reference, customer…"
+            placeholder="Search order #, reference, customer, MPN, SKU…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            className="xl:max-w-sm"
+          />
+          <Input
+            placeholder="Filter MPN…"
+            value={mpnFilter}
+            onChange={(e) => setMpnFilter(e.target.value)}
+            className="sm:max-w-xs"
+          />
+          <Input
+            placeholder="Filter SKU…"
+            value={skuFilter}
+            onChange={(e) => setSkuFilter(e.target.value)}
             className="sm:max-w-xs"
           />
           <Select value={channelFilter} onValueChange={setChannelFilter}>
@@ -291,7 +332,7 @@ export function OrdersPage() {
               ))}
             </SelectContent>
           </Select>
-          <div className="hidden md:block sm:ml-auto">
+          <div className="hidden md:block xl:ml-auto">
             <ColumnSelector
               allColumns={ALL_COLUMNS.filter((c) => c.key !== "_expand")}
               visibleColumns={tp.prefs.visibleColumns.filter((k) => k !== "_expand")}
@@ -322,7 +363,7 @@ export function OrdersPage() {
                         <MobileCardTitle>{o.doc_number ?? o.order_number}</MobileCardTitle>
                         <MobileCardMeta>
                           <span>{o.customer?.display_name ?? o.guest_name ?? "—"}</span>
-                          <span className="font-mono">{fmt(orderGrossFromLines(o))}</span>
+                          <span className="font-mono">{fmt(o.gross_total)}</span>
                           <span>{format(new Date(dateStr), "dd MMM yyyy")}</span>
                         </MobileCardMeta>
                         <MobileCardBadges>
@@ -340,6 +381,7 @@ export function OrdersPage() {
                             <div key={l.id} className="flex items-center justify-between text-xs">
                               <div className="min-w-0 flex-1">
                                 <span className="font-mono">{l.sku?.sku_code ?? "—"}</span>
+                                {l.sku?.product?.mpn ? <span className="text-muted-foreground ml-1.5">{l.sku.product.mpn}</span> : null}
                                 <span className="text-muted-foreground ml-1.5">{l.sku?.product?.name ?? l.sku?.name ?? ""}</span>
                                 <span className="text-muted-foreground ml-1">×{l.quantity}</span>
                               </div>
@@ -409,9 +451,32 @@ export function OrdersPage() {
                                     Guest: {o.guest_name}{o.guest_email ? ` (${o.guest_email})` : ""}
                                   </p>
                                 ) : null}
+                                <div className="mb-3 grid gap-3 sm:grid-cols-5">
+                                  <div>
+                                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Discount %</p>
+                                    <p className="font-mono text-xs">{orderDiscountPercent(o).toFixed(2)}%</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Discount</p>
+                                    <p className="font-mono text-xs">{fmt(orderDiscountAmount(o))}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Net</p>
+                                    <p className="font-mono text-xs">{fmt(o.merchandise_subtotal)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">VAT</p>
+                                    <p className="font-mono text-xs">{fmt(o.tax_total)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Total</p>
+                                    <p className="font-mono text-xs">{fmt(o.gross_total)}</p>
+                                  </div>
+                                </div>
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
+                                      <SortableTableHead columnKey="" label="MPN" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" />
                                       <SortableTableHead columnKey="" label="SKU" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" />
                                       <SortableTableHead columnKey="" label="Product" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" />
                                       <SortableTableHead columnKey="" label="Qty" sortKey="" sortDir="asc" onToggleSort={() => {}} sortable={false} className="text-xs" align="center" />
@@ -428,6 +493,7 @@ export function OrdersPage() {
                                       const gross = vat != null ? l.line_total + vat : null;
                                       return (
                                         <TableRow key={l.id}>
+                                          <TableCell className="font-mono text-xs">{l.sku?.product?.mpn ?? "—"}</TableCell>
                                           <TableCell className="font-mono text-xs">{l.sku?.sku_code ?? "—"}</TableCell>
                                           <TableCell className="text-xs max-w-[200px] truncate">{l.sku?.product?.name ?? l.sku?.name ?? "—"}</TableCell>
                                           <TableCell className="text-xs text-center">{l.quantity}</TableCell>
