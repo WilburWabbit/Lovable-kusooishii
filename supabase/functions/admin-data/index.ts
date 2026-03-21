@@ -1603,11 +1603,10 @@ Deno.serve(async (req) => {
       };
 
     } else if (action === "cleanup-orphaned-stock") {
-      // Delete available stock units with no receipt line link (ghost units from failed rebuilds)
+      // Delete ALL stock units with no receipt line link (ghost units from failed rebuilds)
       const { data: orphans } = await admin.from("stock_unit")
         .select("id")
-        .is("inbound_receipt_line_id", null)
-        .eq("status", "available");
+        .is("inbound_receipt_line_id", null);
 
       const orphanIds = (orphans ?? []).map((o: any) => o.id);
       let deleted = 0;
