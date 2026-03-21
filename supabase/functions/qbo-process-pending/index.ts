@@ -19,7 +19,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const STOCK_MATCHABLE = ["available", "received", "graded"];
 
 function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   const trimmed = sku.trim();
@@ -192,59 +191,10 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
         if (error) { errors++; await markLanding(admin, "landing_raw_qbo_item", entry.id, "error", error.message); continue; }
       }
 
-      // QtyOnHand reconciliation for Inventory items
-      if (item.Type === "Inventory") {
-        const qboQty = Math.floor(Number(item.QtyOnHand ?? 0));
-        const { data: sku } = await admin.from("sku").select("id").eq("qbo_item_id", qboItemId).maybeSingle();
-        if (sku) {
-          const { count: appAvailable } = await admin
-            .from("stock_unit").select("id", { count: "exact", head: true })
-            .eq("sku_id", sku.id).in("status", STOCK_MATCHABLE);
-          const available = appAvailable ?? 0;
-
-          if (available !== qboQty) {
-            const reconcileCorrelationId = crypto.randomUUID();
-            if (qboQty < available) {
-              const excess = available - qboQty;
-              const { data: unitsToWriteOff } = await admin
-                .from("stock_unit").select("id, status, carrying_value, landed_cost")
-                .eq("sku_id", sku.id).in("status", STOCK_MATCHABLE)
-                .order("created_at", { ascending: true }).limit(excess);
-              for (const unit of (unitsToWriteOff ?? [])) {
-                await admin.from("stock_unit").update({
-                  status: "written_off", carrying_value: 0,
-                  accumulated_impairment: unit.landed_cost ?? 0,
-                  updated_at: new Date().toISOString(),
-                }).eq("id", unit.id);
-                await admin.from("audit_event").insert({
-                  entity_type: "stock_unit", entity_id: unit.id,
-                  trigger_type: "qbo_inventory_adjustment", actor_type: "system",
-                  source_system: "qbo-process-pending", correlation_id: reconcileCorrelationId,
-                  before_json: { status: unit.status, carrying_value: unit.carrying_value },
-                  after_json: { status: "written_off", carrying_value: 0 },
-                  input_json: { qbo_item_id: qboItemId, sku_code: skuCode, qbo_qty: qboQty, app_qty: available },
-                });
-              }
-            } else {
-              const shortfall = qboQty - available;
-              const backfillUnits = [];
-              for (let i = 0; i < shortfall; i++) {
-                backfillUnits.push({
-                  sku_id: sku.id, mpn, condition_grade: conditionGrade,
-                  status: "available", landed_cost: 0, carrying_value: 0,
-                });
-              }
-              await admin.from("stock_unit").insert(backfillUnits);
-              await admin.from("audit_event").insert({
-                entity_type: "sku", entity_id: sku.id,
-                trigger_type: "qbo_qty_backfill", actor_type: "system",
-                source_system: "qbo-process-pending", correlation_id: reconcileCorrelationId,
-                input_json: { qbo_item_id: qboItemId, sku_code: skuCode, qbo_qty: qboQty, app_qty: available, units_created: shortfall },
-              });
-            }
-          }
-        }
-      }
+      // QtyOnHand reconciliation is handled exclusively by the dedicated
+      // reconcile-stock action (admin-data) AFTER all tiers have been processed.
+      // It must NOT run here in processItems (Tier 1) because purchases and sales
+      // have not yet been processed, leading to incorrect backfill/write-off.
 
       await markLanding(admin, "landing_raw_qbo_item", entry.id, "committed");
       processed++;
@@ -335,7 +285,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
 
                 if (parsed.mpn === unit.mpn) {
                   const newUnitCost = nl.ItemBasedExpenseLineDetail?.UnitPrice ?? 0;
-                  const updates: Record<string, any> = { landed_cost: newUnitCost, carrying_value: newUnitCost };
+                  const updates: Record<string, any> = { landed_cost: newUnitCost };
                   if (parsed.conditionGrade !== unit.condition_grade) {
                     const newSkuCode = parsed.conditionGrade !== "1" ? `${parsed.mpn}.${parsed.conditionGrade}` : parsed.mpn;
                     const { data: newSku } = await admin.from("sku").select("id").eq("sku_code", newSkuCode).maybeSingle();
