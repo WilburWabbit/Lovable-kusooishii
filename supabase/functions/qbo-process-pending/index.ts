@@ -897,17 +897,8 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
         continue;
       }
 
-      // Backlink orders
-      const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", qboId).maybeSingle();
-      if (cust) {
-        // Find QBO orders with this customer's QBO ID that lack customer_id
-        const { data: unlinked } = await admin.from("sales_order")
-          .select("id").eq("qbo_customer_id", qboId).is("customer_id", null);
-        for (const order of (unlinked ?? [])) {
-          await admin.from("sales_order").update({ customer_id: cust.id }).eq("id", order.id);
-          ordersLinked++;
-        }
-      }
+      // Customers are processed before sales, so customer_id is resolved at sale insert time.
+      // No backlinking needed.
 
       await markLanding(admin, "landing_raw_qbo_customer", entry.id, "committed");
       processed++;
