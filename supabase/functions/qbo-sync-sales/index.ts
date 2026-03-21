@@ -73,10 +73,30 @@ async function landRecord(admin: any, table: string, receipt: any, correlationId
 
   if (existing) {
     const payloadChanged = JSON.stringify(existing.raw_payload) !== JSON.stringify(receipt);
-    const newStatus = (payloadChanged && existing.status === "committed") ? "pending" : existing.status;
-    await admin.from(table).update({
-      raw_payload: receipt, received_at: new Date().toISOString(), status: newStatus,
-    }).eq("id", existing.id);
+    let needsRefundCleanup = false;
+
+    if (table === "landing_raw_qbo_refund_receipt" && existing.status === "committed") {
+      const { data: legacyRefund } = await admin.from("sales_order")
+        .select("id")
+        .eq("origin_channel", "qbo_refund")
+        .eq("origin_reference", externalId)
+        .maybeSingle();
+      needsRefundCleanup = !!legacyRefund;
+    }
+
+    const newStatus = ((payloadChanged && existing.status === "committed") || needsRefundCleanup)
+      ? "pending"
+      : existing.status;
+    const updatePayload: Record<string, any> = {
+      raw_payload: receipt,
+      received_at: new Date().toISOString(),
+      status: newStatus,
+    };
+    if (newStatus === "pending") {
+      updatePayload.processed_at = null;
+    }
+
+    await admin.from(table).update(updatePayload).eq("id", existing.id);
     return newStatus !== "committed"; // true if new/pending
   }
 

@@ -92,7 +92,7 @@ export function QboSettingsPanel() {
         const data = await invokeWithAuth<Record<string, any>>("qbo-sync-purchases", { month });
         if (data?.error) throw new Error(data.error);
         totalLanded += data.landed ?? 0;
-        totalSkipped += data.skipped ?? 0;
+        totalSkipped += data.skipped_existing ?? data.skipped ?? 0;
       }
       toast({
         title: cancelPurchasesRef.current ? "Sync stopped" : "Purchases landed",
@@ -188,7 +188,9 @@ export function QboSettingsPanel() {
       if (r.items?.processed) parts.push(`${r.items.processed} items`);
       if (r.purchases?.processed) parts.push(`${r.purchases.processed} purchases`);
       if (r.sales?.processed) parts.push(`${r.sales.processed} sales`);
-      if (r.refunds?.processed) parts.push(`${r.refunds.processed} refunds`);
+      if (r.refunds?.ignored) parts.push(`${r.refunds.ignored} refunds ignored`);
+      else if (r.refunds?.processed) parts.push(`${r.refunds.processed} refunds`);
+      if (r.refunds?.refund_orders_removed) parts.push(`${r.refunds.refund_orders_removed} legacy refund rows removed`);
       if (r.customers?.processed) parts.push(`${r.customers.processed} customers`);
       if (data.total_remaining) parts.push(`${data.total_remaining} remaining`);
 

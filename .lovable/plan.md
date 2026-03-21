@@ -30,4 +30,3 @@
 
 1. `src/pages/admin/InventoryPage.tsx` — summary cards use filtered data
 2. `supabase/functions/admin-data/index.ts` — remove limit, fix orphan cleanup to include all statuses
-
