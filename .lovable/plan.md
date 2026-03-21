@@ -1,58 +1,44 @@
 
 
-## Root Cause: UI Reads Wrong Response Fields — Loop Breaks After First Batch
+## Fix: Reorder Processing Sequence + Add Stock Adjustments
 
-### The Bug
+### Why the current order is wrong
 
-The `qbo-process-pending` edge function returns this shape:
-```json
-{
-  "success": true,
-  "results": {
-    "items": { "processed": 50, "errors": 0 },
-    "purchases": { "processed": 14, "errors": 0, "stock_created": 42 }
-  },
-  "remaining": { "items": 317, "purchases": 559, ... },
-  "has_more": true,
-  "total_remaining": 900
-}
-```
+The current order is: Items → Purchases → Sales → Refunds → Customers
 
-But the UI (`QboSettingsPanel.tsx`) reads `data.items_committed`, `data.purchases_committed`, etc. — **fields that do not exist**. They are always `undefined`, so `committed` computes to `0`, and the loop on line 283 (`if (committed === 0) break`) exits immediately after the **first batch**.
+But sales processing (line 662) looks up `customer_id` from the `customer` table. If customers haven't been committed yet, the lookup returns null, and the order gets created without a customer link. The customer processor then tries to backlink, but this is fragile and unnecessary if customers are simply processed first.
 
-This is why only 14 of 623 purchases were processed. The processor works correctly — the UI just stops calling it.
+Correct dependency chain:
+1. **Customers** — no dependencies, referenced by sales orders
+2. **Items** — no dependencies, referenced by purchases and sales (SKU resolution)
+3. **Purchases** — depends on items/SKUs for stock unit creation
+4. **Sales** — depends on items (SKU lookup) + purchases (stock allocation) + customers (customer_id)
+5. **Refunds** — depends on sales (refund references)
+6. **Stock Adjustments** — not currently handled; QBO Inventory Quantity Adjustment entities that adjust stock without a purchase or sale
 
-**Current database state confirms this:**
-- 573 purchases still `pending`, only 14 `committed`
-- 317 items still `pending`, only 50 `committed`
-- Only 56 available stock units exist (from the one batch that ran)
+### Changes
 
-### Fix
+**File: `supabase/functions/qbo-process-pending/index.ts`**
 
-**File: `src/pages/admin/QboSettingsPanel.tsx`**
+1. **Reorder the main handler** (lines 962-976): Move customers first, then items, purchases, sales, refunds.
 
-1. **Rebuild loop (lines 276-284):** Replace field reads with the actual response shape. Use `data.results` to sum processed counts and `data.has_more` / `data.total_remaining` for the continue condition.
+2. **Enforce tiered processing** (from the previously approved plan): When running without `entity_type` filter, only process the current tier — don't start sales until all items AND purchases are done. Sequence:
+   - Tier 1: Customers + Items (no dependencies between them, can run in same batch)
+   - Tier 2: Purchases (only if no pending customers/items remain)
+   - Tier 3: Sales + Refunds (only if no pending purchases remain)
 
-2. **Standalone `processPending` function (lines 186-192):** Same fix — read from `data.results.items.processed` etc. instead of nonexistent `data.items_committed`.
+3. **Remove customer backlinking logic** (lines 900-909): Since customers are now processed before sales, the `customer_id` will always be resolved at insert time. The backlink code becomes dead code.
 
-3. **Loop break condition:** Use `data.has_more === false` or `data.total_remaining === 0` instead of checking committed counts.
+### Stock Adjustments — deferred
 
-### Technical Detail
+QBO Inventory Quantity Adjustments aren't currently landed by any sync function. Adding them requires:
+- A new landing table or reusing `landing_raw_qbo_item` with an entity_type discriminator
+- Landing logic in `qbo-sync-items` or a new `qbo-sync-adjustments` function
+- Processing logic to create/delete stock units based on adjustment direction
 
-```typescript
-// BEFORE (broken):
-const committed = (data.items_committed ?? 0) + (data.purchases_committed ?? 0) + ...;
-if (committed === 0) break;
-
-// AFTER (correct):
-const r = data.results ?? {};
-const committed = (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-  (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
-setRebuildPhase(`Processed ${totalProcessed} records (${data.total_remaining ?? 0} remaining)…`);
-if (!data.has_more) break;
-```
+This is a separate piece of work and should be tackled after the current rebuild is verified working correctly. I'll note it for follow-up.
 
 ### Files Modified
 
-- `src/pages/admin/QboSettingsPanel.tsx` — fix response field mapping in both `processPending` and `rebuildFromQbo`
+- `supabase/functions/qbo-process-pending/index.ts` — reorder to Customers → Items → Purchases → Sales → Refunds; add tier gating; remove backlink code
 
