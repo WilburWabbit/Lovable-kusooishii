@@ -1318,7 +1318,9 @@ Deno.serve(async (req) => {
         .from("audit_event")
         .select("entity_id, input_json")
         .eq("trigger_type", "stock_reconciliation_sale")
-        .eq("entity_type", "stock_unit");
+        .eq("entity_type", "stock_unit")
+        .gte("created_at", new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString())
+        .limit(5000);
 
       let stockReopened = 0;
       for (const audit of (reconciledAudits ?? [])) {
@@ -1515,7 +1517,7 @@ Deno.serve(async (req) => {
           let unitWrittenOff = 0;
           for (const unit of (excessUnits ?? [])) {
             await admin.from("stock_unit").update({
-              status: "written_off", carrying_value: 0,
+              status: "written_off",
               accumulated_impairment: unit.landed_cost ?? 0,
               updated_at: new Date().toISOString(),
             }).eq("id", unit.id);
@@ -1558,7 +1560,6 @@ Deno.serve(async (req) => {
               condition_grade: parsed.conditionGrade,
               status: "available",
               landed_cost: 0,
-              carrying_value: 0,
             });
           }
           await admin.from("stock_unit").insert(backfillUnits);
@@ -1694,6 +1695,17 @@ Deno.serve(async (req) => {
         }
         stockDeleted += orphanIds.length;
       }
+
+      // Step 3b: Clean up QBO-related audit events from prior processing cycles
+      // These reference entities that were just deleted and would cause stale
+      // lookups in reconcile-stock Step A0.
+      await admin.from("audit_event").delete()
+        .in("trigger_type", [
+          "qbo_inventory_adjustment", "qbo_qty_backfill",
+          "stock_reconciliation_write_off", "stock_reconciliation_backfill",
+          "stock_reconciliation_sale", "purchase_reprocessing",
+          "cleanup_orphaned_stock",
+        ]);
 
       // Step 4: Reset ALL landing tables to pending
       const { count: pCount } = await admin.from("landing_raw_qbo_purchase")
