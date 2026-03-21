@@ -94,8 +94,7 @@ Deno.serve(async (req) => {
         .select(
           "id, mpn, condition_grade, status, landed_cost, carrying_value, accumulated_impairment, created_at, sku:sku_id(sku_code, name, product:product_id(name)), receipt_line:inbound_receipt_line_id(tax_code:tax_code_id(purchase_tax_rate:purchase_tax_rate_id(rate_percent)), receipt:inbound_receipt_id(txn_date))"
         )
-        .order("created_at", { ascending: false })
-        .limit(1000);
+        .order("created_at", { ascending: false });
       if (error) throw error;
       // Flatten vat_rate_percent and purchase_date
       result = (data ?? []).map((u: any) => ({
@@ -1604,11 +1603,10 @@ Deno.serve(async (req) => {
       };
 
     } else if (action === "cleanup-orphaned-stock") {
-      // Delete available stock units with no receipt line link (ghost units from failed rebuilds)
+      // Delete ALL stock units with no receipt line link (ghost units from failed rebuilds)
       const { data: orphans } = await admin.from("stock_unit")
         .select("id")
-        .is("inbound_receipt_line_id", null)
-        .eq("status", "available");
+        .is("inbound_receipt_line_id", null);
 
       const orphanIds = (orphans ?? []).map((o: any) => o.id);
       let deleted = 0;
@@ -1684,11 +1682,10 @@ Deno.serve(async (req) => {
         receiptsDeleted++;
       }
 
-      // Step 3: Clean up any remaining orphaned stock units
+      // Step 3: Clean up any remaining orphaned stock units (all statuses)
       const { data: remainingOrphans } = await admin.from("stock_unit")
         .select("id")
-        .is("inbound_receipt_line_id", null)
-        .in("status", ["available", "received", "graded"]);
+        .is("inbound_receipt_line_id", null);
       const orphanIds = (remainingOrphans ?? []).map((o: any) => o.id);
       if (orphanIds.length > 0) {
         for (let i = 0; i < orphanIds.length; i += 100) {
