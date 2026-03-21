@@ -161,6 +161,26 @@ async function deleteImportedRefundOrder(admin: any, refundId: string): Promise<
   return true;
 }
 
+async function cleanupSalesOrder(admin: any, orderId: string): Promise<void> {
+  const { data: createdLines } = await admin
+    .from("sales_order_line")
+    .select("stock_unit_id")
+    .eq("sales_order_id", orderId);
+
+  for (const createdLine of (createdLines ?? [])) {
+    if (createdLine.stock_unit_id) {
+      await admin
+        .from("stock_unit")
+        .update({ status: "available" })
+        .eq("id", createdLine.stock_unit_id)
+        .eq("status", "closed");
+    }
+  }
+
+  await admin.from("sales_order_line").delete().eq("sales_order_id", orderId);
+  await admin.from("sales_order").delete().eq("id", orderId);
+}
+
 // ════════════════════════════════════════════════════════════
 // 1. PROCESS ITEMS → SKUs
 // ════════════════════════════════════════════════════════════
@@ -606,10 +626,29 @@ async function resolveVatRateId(admin: any, txnTaxDetail: any): Promise<string |
   return vr?.id ?? null;
 }
 
-async function resolveSkuFromItem(admin: any, itemRefValue: string, itemRefName: string | null): Promise<{ skuId: string | null; skuCode: string | null }> {
-  // Look up from landing table instead of QBO API
-  const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
-    .select("raw_payload").eq("external_id", itemRefValue).maybeSingle();
+async function resolveSkuFromItem(
+  admin: any,
+  itemRefValue: string,
+  itemRefName: string | null,
+): Promise<{ skuId: string | null; skuCode: string | null }> {
+  // First try the strongest key: the QBO item id itself.
+  const { data: skuByItemId } = await admin
+    .from("sku")
+    .select("id, sku_code")
+    .eq("qbo_item_id", itemRefValue)
+    .maybeSingle();
+
+  if (skuByItemId?.id) {
+    return { skuId: skuByItemId.id, skuCode: skuByItemId.sku_code ?? null };
+  }
+
+  // Fall back to the landed QBO item payload to recover the raw SKU code.
+  const { data: itemLanding } = await admin
+    .from("landing_raw_qbo_item")
+    .select("raw_payload")
+    .eq("external_id", itemRefValue)
+    .maybeSingle();
+
   const qboItem = itemLanding?.raw_payload;
   const skuField = qboItem?.Sku;
   let skuCode: string | null = null;
@@ -618,9 +657,18 @@ async function resolveSkuFromItem(admin: any, itemRefValue: string, itemRefName:
   } else if (itemRefName) {
     skuCode = String(itemRefName).trim();
   }
-  if (!skuCode) return { skuId: null, skuCode: null };
-  const { data: sku } = await admin.from("sku").select("id").eq("sku_code", skuCode).maybeSingle();
-  return { skuId: sku?.id ?? null, skuCode };
+
+  if (!skuCode) {
+    return { skuId: null, skuCode: null };
+  }
+
+  const { data: skuByCode } = await admin
+    .from("sku")
+    .select("id")
+    .eq("sku_code", skuCode)
+    .maybeSingle();
+
+  return { skuId: skuByCode?.id ?? null, skuCode };
 }
 
 async function processSalesReceipts(admin: any, batchSize: number): Promise<{ processed: number; errors: number; stock_matched: number; stock_missing: number }> {
@@ -753,37 +801,70 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
       }
       if (orderErr) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderErr.message); continue; }
 
-      for (const line of itemLines) {
-        const detail = line.SalesItemLineDetail;
-        const qty = detail.Qty ?? 1;
-        const unitPrice = detail.UnitPrice ?? 0;
-        const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+      let orderStockMatched = 0;
+      let orderStockMissing = 0;
+      const unresolvedLines: string[] = [];
 
-        const { skuId } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
-        if (!skuId) continue;
+      try {
+        for (const line of itemLines) {
+          const detail = line.SalesItemLineDetail;
+          const qty = detail.Qty ?? 1;
+          const unitPrice = detail.UnitPrice ?? 0;
+          const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
-        let lineTaxCodeId: string | null = null;
-        if (taxCodeRef) {
-          const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
-          lineTaxCodeId = tc?.id ?? null;
+          const { skuId, skuCode } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
+          if (!skuId) {
+            unresolvedLines.push(`${detail.ItemRef.value}:${skuCode ?? detail.ItemRef?.name ?? "unknown"}`);
+            continue;
+          }
+
+          let lineTaxCodeId: string | null = null;
+          if (taxCodeRef) {
+            const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
+            lineTaxCodeId = tc?.id ?? null;
+          }
+
+          // Atomic stock allocation
+          const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", { p_sku_id: skuId, p_quantity: qty });
+          if (allocErr) throw allocErr;
+          const unitIds: string[] = allocatedIds ?? [];
+
+          for (let i = 0; i < qty; i++) {
+            const stockUnitId = unitIds[i] ?? null;
+            const { error: lineErr } = await admin.from("sales_order_line").insert({
+              sales_order_id: order.id, sku_id: skuId, quantity: 1,
+              unit_price: unitPrice, line_total: unitPrice,
+              stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
+              vat_rate_id: vatRateId, tax_code_id: lineTaxCodeId,
+            });
+            if (lineErr) {
+              throw lineErr;
+            }
+            if (stockUnitId) orderStockMatched++;
+            else orderStockMissing++;
+          }
         }
 
-        // Atomic stock allocation
-        const { data: allocatedIds } = await admin.rpc("allocate_stock_units", { p_sku_id: skuId, p_quantity: qty });
-        const unitIds: string[] = allocatedIds ?? [];
+        if (unresolvedLines.length > 0) {
+          await cleanupSalesOrder(admin, order.id);
 
-        for (let i = 0; i < qty; i++) {
-          const stockUnitId = unitIds[i] ?? null;
-          await admin.from("sales_order_line").insert({
-            sales_order_id: order.id, sku_id: skuId, quantity: 1,
-            unit_price: unitPrice, line_total: unitPrice,
-            stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
-            vat_rate_id: vatRateId, tax_code_id: lineTaxCodeId,
-          });
-          if (stockUnitId) stockMatched++;
-          else stockMissing++;
+          errors++;
+          await markLanding(
+            admin,
+            "landing_raw_qbo_sales_receipt",
+            entry.id,
+            "error",
+            `Unresolved sales line SKUs: ${unresolvedLines.slice(0, 5).join(", ")}`,
+          );
+          continue;
         }
+      } catch (lineErr: any) {
+        await cleanupSalesOrder(admin, order.id);
+        throw lineErr;
       }
+
+      stockMatched += orderStockMatched;
+      stockMissing += orderStockMissing;
 
       await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
       processed++;
