@@ -4,6 +4,24 @@
 >
 > **Cross-reference `docs/knowledgebase/`** (git submodule → [Lovable-knowledgebase](https://github.com/WilburWabbit/Lovable-knowledgebase)) for additional technical specs, integration details, and domain knowledge shared across projects.
 
+## ⚠️ Active Build: Admin V2
+
+An admin UI rebuild is in progress. **Before working on any admin-related code, read these files in `docs/v2/`:**
+
+| File | What it is |
+|---|---|
+| `docs/v2/KUSO_HUB_CLAUDE_CODE_GUIDE.md` | Implementation guide — phased build plan, codebase conventions, parallel build strategy, critical gotchas |
+| `docs/v2/KUSO_HUB_ADMIN_SPEC.md` | Full specification — entity model, business rules, UI structure, integration points |
+| `docs/v2/kuso-hub-v2.jsx` | Interactive wireframe — visual target for layout, components, and data display patterns |
+
+**Key rules for the v2 build:**
+
+- New admin lives at `/admin/v2/*` — do NOT modify anything in `src/components/admin/` or `src/pages/admin/`
+- New components go in `src/components/admin-v2/`, pages in `src/pages/admin-v2/`, hooks in `src/hooks/admin/`
+- New database tables are additive — existing tables are extended, not replaced
+- The stock unit is the atomic lifecycle entity — read the spec before touching inventory logic
+- The implementation guide defines 11 phases in dependency order — follow them sequentially
+
 ## What This Project Is
 
 A LEGO resale commerce platform — public storefront + back-office operations — for buying, grading, listing, selling, and reconciling LEGO sets across multiple channels (website, eBay, BrickLink, BrickOwl). Built with Lovable (React/Tailwind/Vite) on Supabase (PostgreSQL, Edge Functions, Auth, Storage).
