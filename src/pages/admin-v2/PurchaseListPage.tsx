@@ -1,12 +1,10 @@
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
+import { PurchaseList } from "@/components/admin-v2/PurchaseList";
 
 export default function PurchaseListPage() {
   return (
     <AdminV2Layout>
-      <div>
-        <h1 className="text-[22px] font-bold text-zinc-50 mb-1">Purchases</h1>
-        <p className="text-zinc-500 text-[13px]">Purchase batches and goods-in grading.</p>
-      </div>
+      <PurchaseList />
     </AdminV2Layout>
   );
 }
