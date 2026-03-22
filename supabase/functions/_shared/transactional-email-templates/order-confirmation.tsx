@@ -76,7 +76,7 @@ const OrderConfirmationEmail = ({
   )
 }
 
-export const template = {
+export const template: TemplateEntry = {
   component: OrderConfirmationEmail,
   subject: (data: Record<string, any>) =>
     `Order confirmed — ${data.orderNumber || 'KO-000'}`,
@@ -90,7 +90,7 @@ export const template = {
     grossTotal: '559.98',
     currency: 'GBP',
   },
-} satisfies TemplateEntry
+}
 
 const main = { backgroundColor: '#ffffff', fontFamily: "'Space Grotesk', 'Noto Sans JP', Arial, sans-serif" }
 const container = { padding: '32px 28px' }

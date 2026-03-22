@@ -54,7 +54,7 @@ const OrderShippedEmail = ({
   </Html>
 )
 
-export const template = {
+export const template: TemplateEntry = {
   component: OrderShippedEmail,
   subject: (data: Record<string, any>) =>
     `Your order has shipped — ${data.orderNumber || 'KO-000'}`,
@@ -64,7 +64,7 @@ export const template = {
     trackingNumber: 'RM1234567890GB',
     shippingCarrier: 'Royal Mail',
   },
-} satisfies TemplateEntry
+}
 
 const main = { backgroundColor: '#ffffff', fontFamily: "'Space Grotesk', 'Noto Sans JP', Arial, sans-serif" }
 const container = { padding: '32px 28px' }

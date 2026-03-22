@@ -41,12 +41,12 @@ const WelcomeEmail = ({ displayName }: WelcomeProps) => (
   </Html>
 )
 
-export const template = {
+export const template: TemplateEntry = {
   component: WelcomeEmail,
   subject: 'Welcome to the obsession',
   displayName: 'Welcome email',
   previewData: { displayName: 'Alex' },
-} satisfies TemplateEntry
+}
 
 const main = { backgroundColor: '#ffffff', fontFamily: "'Space Grotesk', 'Noto Sans JP', Arial, sans-serif" }
 const container = { padding: '32px 28px' }
