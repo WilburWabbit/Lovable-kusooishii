@@ -27,6 +27,7 @@ CREATE TABLE public.purchase_batches (
   shared_costs JSONB NOT NULL DEFAULT '{}'::jsonb,
   total_shared_costs NUMERIC(12,2) NOT NULL DEFAULT 0,
   status public.purchase_batch_status NOT NULL DEFAULT 'draft',
+  unit_counter INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
