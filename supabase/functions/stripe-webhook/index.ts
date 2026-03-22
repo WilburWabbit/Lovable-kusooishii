@@ -14,6 +14,9 @@ const stripeSandbox = new Stripe(Deno.env.get("STRIPE_SANDBOX_SECRET_KEY") || ""
 const liveWebhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
 const sandboxWebhookSecret = Deno.env.get("STRIPE_SANDBOX_WEBHOOK_SECRET") || "";
 
+if (!liveWebhookSecret) console.warn("STRIPE_WEBHOOK_SECRET is not set — live webhook verification will fail");
+if (!sandboxWebhookSecret) console.warn("STRIPE_SANDBOX_WEBHOOK_SECRET is not set — sandbox webhook verification will fail");
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -170,6 +173,8 @@ serve(async (req) => {
   }
 
   // ── Process event ──
+  let processingError: Error | null = null;
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
@@ -184,16 +189,38 @@ serve(async (req) => {
     if (existingOrder) {
       console.log(`Order for Stripe session ${session.id} already exists (${existingOrder.id}), skipping`);
     } else {
-      await handleCheckoutCompleted(session, stripe, isTestEvent);
+      try {
+        await handleCheckoutCompleted(session, stripe, isTestEvent);
+      } catch (err) {
+        processingError = err as Error;
+      }
     }
   }
 
-  // Mark landing as committed
+  // ── Update landing status based on processing outcome ──
   try {
-    await supabase
-      .from("landing_raw_stripe_event")
-      .update({ status: "committed", processed_at: new Date().toISOString() })
-      .eq("external_id", event.id);
+    if (processingError) {
+      console.error("Order creation failed, marking landing as error:", processingError.message);
+      await supabase
+        .from("landing_raw_stripe_event")
+        .update({
+          status: "error",
+          error_message: (processingError.message || "Unknown error").substring(0, 1000),
+          processed_at: new Date().toISOString(),
+        })
+        .eq("external_id", event.id);
+
+      // Return 500 so Stripe will retry this webhook delivery
+      return new Response(
+        JSON.stringify({ error: processingError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    } else {
+      await supabase
+        .from("landing_raw_stripe_event")
+        .update({ status: "committed", processed_at: new Date().toISOString() })
+        .eq("external_id", event.id);
+    }
   } catch (updateErr) {
     console.error("Failed to update landing status:", updateErr);
   }
@@ -585,6 +612,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     }
   } catch (err) {
     console.error("Error handling checkout.session.completed:", err);
+    throw err; // Propagate to caller so landing status reflects failure and Stripe retries
   }
 }
 
