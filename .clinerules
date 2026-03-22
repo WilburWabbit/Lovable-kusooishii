@@ -41,3 +41,16 @@ LEGO resale commerce platform: public storefront + back-office for buying, gradi
 - Scrape BrickEconomy beyond 100 req/day
 - Remove MPN version suffixes
 - Put integration config on operational pages
+- Process webhooks inline — land in staging, process async
+- Skip staging tables for any external data
+- Build monolithic receive+process Edge Functions
+
+## Integration Patterns
+> Full doc: `docs/knowledgebase/docs/qbo-integration-lessons.md`
+- Land-only receivers — store raw payload in staging, return immediately
+- Separate processor — read staging → validate → map → promote
+- Dependency-ordered processing — parents before children, drain each tier fully
+- Reconciliation is its own concern, not part of sync
+- Preserve failed data in staging for retry
+- Idempotency keys on every staged record
+- Cross-channel dedup via external ID reference tables

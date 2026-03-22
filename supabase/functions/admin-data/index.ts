@@ -1789,6 +1789,94 @@ Deno.serve(async (req) => {
 
       result = await fnRes.json();
 
+    } else if (action === "get-stripe-test-mode") {
+      const { data } = await admin.from("app_settings")
+        .select("stripe_test_mode").single();
+      result = { stripe_test_mode: data?.stripe_test_mode ?? false };
+
+    } else if (action === "get-test-order-count") {
+      const { count } = await admin.from("sales_order")
+        .select("id", { count: "exact", head: true })
+        .eq("is_test", true);
+      result = { count: count ?? 0 };
+
+    } else if (action === "set-stripe-test-mode") {
+      const { enabled } = params;
+      if (typeof enabled !== "boolean") throw new ValidationError("'enabled' must be a boolean");
+
+      await admin.from("app_settings")
+        .update({
+          stripe_test_mode: enabled,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        })
+        .eq("id", "00000000-0000-0000-0000-000000000001");
+
+      // If disabling test mode, clean up all test data
+      let ordersDeleted = 0, linesDeleted = 0, stockReopened = 0, eventsDeleted = 0;
+      if (!enabled) {
+        // 1. Find all test orders
+        const { data: testOrders } = await admin.from("sales_order")
+          .select("id").eq("is_test", true);
+
+        for (const order of (testOrders ?? [])) {
+          // Reopen stock units closed by test order lines
+          const { data: lines } = await admin.from("sales_order_line")
+            .select("stock_unit_id").eq("sales_order_id", order.id);
+          for (const line of (lines ?? [])) {
+            if (line.stock_unit_id) {
+              const { data: updated } = await admin.from("stock_unit")
+                .update({ status: "available" })
+                .eq("id", line.stock_unit_id)
+                .eq("status", "closed")
+                .select("id");
+              if (updated?.length) stockReopened++;
+            }
+          }
+          // Delete order lines
+          const { data: deletedLines } = await admin.from("sales_order_line")
+            .delete().eq("sales_order_id", order.id).select("id");
+          linesDeleted += deletedLines?.length ?? 0;
+
+          // Delete audit events for this order
+          await admin.from("audit_event").delete()
+            .eq("entity_type", "sales_order").eq("entity_id", order.id);
+        }
+
+        // 2. Delete test orders
+        if ((testOrders ?? []).length > 0) {
+          await admin.from("sales_order").delete().eq("is_test", true);
+          ordersDeleted = testOrders!.length;
+        }
+
+        // 3. Delete test landing events
+        const { data: deletedEvents } = await admin.from("landing_raw_stripe_event")
+          .delete().eq("is_test", true).select("id");
+        eventsDeleted = deletedEvents?.length ?? 0;
+
+        // 4. Audit the cleanup
+        await admin.from("audit_event").insert({
+          entity_type: "system",
+          entity_id: "00000000-0000-0000-0000-000000000001",
+          trigger_type: "stripe_test_mode_cleanup",
+          actor_type: "user",
+          actor_id: userId,
+          source_system: "admin-data",
+          after_json: {
+            orders_deleted: ordersDeleted,
+            lines_deleted: linesDeleted,
+            stock_reopened: stockReopened,
+            events_deleted: eventsDeleted,
+          },
+        });
+      }
+
+      result = {
+        success: true,
+        stripe_test_mode: enabled,
+        cleanup: !enabled ? { orders_deleted: ordersDeleted, lines_deleted: linesDeleted, stock_reopened: stockReopened, events_deleted: eventsDeleted } : undefined,
+      };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

@@ -2,12 +2,17 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
+const stripeLive = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
+  apiVersion: "2023-10-16",
+  httpClient: Stripe.createFetchHttpClient(),
+});
+const stripeSandbox = new Stripe(Deno.env.get("STRIPE_SANDBOX_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
   httpClient: Stripe.createFetchHttpClient(),
 });
 
-const endpointSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
+const liveWebhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
+const sandboxWebhookSecret = Deno.env.get("STRIPE_SANDBOX_WEBHOOK_SECRET") || "";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -100,12 +105,30 @@ serve(async (req) => {
 
   const body = await req.text();
 
+  // Try verifying with live secret first, then sandbox secret.
+  // This determines whether the event came from Stripe live or test mode.
   let event: Stripe.Event;
+  let isTestEvent = false;
+  let stripe: Stripe;
+
   try {
-    event = await stripe.webhooks.constructEventAsync(body, signature, endpointSecret);
-  } catch (err) {
-    console.error("Webhook signature verification failed:", (err as Error).message);
-    return new Response(`Webhook Error: ${(err as Error).message}`, { status: 400 });
+    event = await stripeLive.webhooks.constructEventAsync(body, signature, liveWebhookSecret);
+    stripe = stripeLive;
+  } catch {
+    // Live verification failed — try sandbox secret
+    if (!sandboxWebhookSecret) {
+      console.error("Webhook signature verification failed and no sandbox secret configured");
+      return new Response("Webhook signature verification failed", { status: 400 });
+    }
+    try {
+      event = await stripeSandbox.webhooks.constructEventAsync(body, signature, sandboxWebhookSecret);
+      stripe = stripeSandbox;
+      isTestEvent = true;
+      console.log("Stripe event verified with sandbox secret (test mode)");
+    } catch (err) {
+      console.error("Webhook signature verification failed for both live and sandbox:", (err as Error).message);
+      return new Response(`Webhook Error: ${(err as Error).message}`, { status: 400 });
+    }
   }
 
   // ── Idempotency: check landing status BEFORE upserting ──
@@ -138,6 +161,7 @@ serve(async (req) => {
           status: "pending",
           correlation_id: landingCorrelation,
           received_at: new Date().toISOString(),
+          is_test: isTestEvent,
         },
         { onConflict: "external_id" }
       );
@@ -160,7 +184,7 @@ serve(async (req) => {
     if (existingOrder) {
       console.log(`Order for Stripe session ${session.id} already exists (${existingOrder.id}), skipping`);
     } else {
-      await handleCheckoutCompleted(session);
+      await handleCheckoutCompleted(session, stripe, isTestEvent);
     }
   }
 
@@ -180,7 +204,7 @@ serve(async (req) => {
   });
 });
 
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe: Stripe, isTestEvent: boolean) {
   try {
     const shippingMethod = session.metadata?.shipping_method || "standard";
     const isCollection = shippingMethod === "collection";
@@ -350,7 +374,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         shipping_county: address?.state || null,
         shipping_postcode: address?.postal_code || (isCollection ? "N/A" : ""),
         shipping_country: shippingCountry,
-        qbo_sync_status: "pending",
+        qbo_sync_status: isTestEvent ? "skipped" : "pending",
+        is_test: isTestEvent,
         ...(isCollection
           ? {
               club_discount_amount: discountTotal,
@@ -484,6 +509,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         vat_rate_percent: vatResolution.ratePercent,
         vat_fallback: vatResolutionFallback,
         status: "paid",
+        is_test: isTestEvent,
       },
     });
 
@@ -497,24 +523,29 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
     // The order has qbo_sync_status='pending'. The retry function will
     // create the QBO Customer + SalesReceipt and store confirmation IDs.
+    // Skip for test/sandbox events — they should not sync to QBO.
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    try {
-      if (supabaseUrl && serviceRoleKey) {
-        fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${serviceRoleKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({}),
-        }).catch((err) => {
-          console.warn("qbo-retry-sync trigger failed (non-blocking):", err);
-        });
-        console.log("Triggered qbo-retry-sync for new web order");
+    if (isTestEvent) {
+      console.log("Test event — skipping QBO sync trigger");
+    } else {
+      try {
+        if (supabaseUrl && serviceRoleKey) {
+          fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${serviceRoleKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({}),
+          }).catch((err) => {
+            console.warn("qbo-retry-sync trigger failed (non-blocking):", err);
+          });
+          console.log("Triggered qbo-retry-sync for new web order");
+        }
+      } catch (qboErr) {
+        console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
       }
-    } catch (qboErr) {
-      console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
     }
 
     // ── Send order confirmation email (best-effort, non-blocking) ──

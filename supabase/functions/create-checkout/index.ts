@@ -50,16 +50,27 @@ serve(async (req) => {
       }
     );
 
-    const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
-      apiVersion: "2023-10-16",
-      httpClient: Stripe.createFetchHttpClient(),
-    });
-
-    // Use service role to look up canonical prices
+    // Use service role to look up canonical prices and app settings
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
+
+    // Check if Stripe test/sandbox mode is enabled
+    const { data: appSettings } = await adminClient
+      .from("app_settings")
+      .select("stripe_test_mode")
+      .single();
+    const isTestMode = appSettings?.stripe_test_mode ?? false;
+
+    const stripeSecretKey = isTestMode
+      ? Deno.env.get("STRIPE_SANDBOX_SECRET_KEY") || ""
+      : Deno.env.get("STRIPE_SECRET_KEY") || "";
+
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: "2023-10-16",
+      httpClient: Stripe.createFetchHttpClient(),
+    });
 
     // Anon client for auth check
     const anonClient = createClient(
@@ -194,6 +205,7 @@ serve(async (req) => {
         shipping_method: shippingMethod,
         origin_channel: "web",
         sku_items: skuItemsStr,
+        ...(isTestMode ? { is_test: "true" } : {}),
       },
       ...(customerId
         ? { customer: customerId }
