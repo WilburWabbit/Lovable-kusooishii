@@ -96,6 +96,25 @@ export function useStockUnitsByVariant(skuCode: string | undefined) {
   });
 }
 
+// ─── useStockUnitsByMPN ───────────────────────────────────────
+
+export function useStockUnitsByMPN(mpn: string | undefined) {
+  return useQuery({
+    queryKey: ['v2', 'stock-units', 'mpn', mpn ?? ''] as const,
+    enabled: !!mpn,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('stock_unit')
+        .select('*')
+        .eq('mpn' as never, mpn!)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapStockUnit);
+    },
+  });
+}
+
 // ─── useGradeStockUnit ──────────────────────────────────────
 
 interface GradeInput {
