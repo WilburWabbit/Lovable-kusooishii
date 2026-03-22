@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+import { setGTMUserId, trackLogin, trackSignUp, consumeAuthAction } from "@/lib/gtm-ecommerce";
 
 interface ProfileData {
   display_name: string | null;

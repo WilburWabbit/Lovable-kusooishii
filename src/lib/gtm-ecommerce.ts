@@ -52,3 +52,41 @@ export function trackPurchase(transactionId: string, cartItems: CartItem[], cart
     },
   });
 }
+
+// ── User identification & auth events ────────────────────────
+
+/** Push user_id so GA4 can stitch sessions across devices. Pass null on sign-out. */
+export function setGTMUserId(userId: string | null) {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ user_id: userId });
+}
+
+export function trackLogin(method: string) {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: 'login', method });
+}
+
+export function trackSignUp(method: string) {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: 'sign_up', method });
+}
+
+/**
+ * Stash the auth action (login or sign_up) and method before an OAuth redirect.
+ * The auth provider picks this up when onAuthStateChange fires SIGNED_IN.
+ */
+export function stashAuthAction(action: 'login' | 'sign_up', method: string) {
+  try {
+    sessionStorage.setItem('kuso_auth_action', JSON.stringify({ action, method }));
+  } catch { /* sessionStorage unavailable */ }
+}
+
+/** Consume a stashed auth action (returns null if none). */
+export function consumeAuthAction(): { action: 'login' | 'sign_up'; method: string } | null {
+  try {
+    const raw = sessionStorage.getItem('kuso_auth_action');
+    if (!raw) return null;
+    sessionStorage.removeItem('kuso_auth_action');
+    return JSON.parse(raw);
+  } catch { return null; }
+}
