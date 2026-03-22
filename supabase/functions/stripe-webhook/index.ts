@@ -195,6 +195,12 @@ serve(async (req) => {
         processingError = err as Error;
       }
     }
+  } else if (event.type === "payout.paid") {
+    try {
+      await handlePayoutPaid(event.data.object as Record<string, unknown>, isTestEvent);
+    } catch (err) {
+      processingError = err as Error;
+    }
   }
 
   // ── Update landing status based on processing outcome ──
@@ -668,6 +674,57 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     console.error("Error handling checkout.session.completed:", err);
     throw err; // Propagate to caller so landing status reflects failure and Stripe retries
   }
+}
+
+// ─── Handle payout.paid ─────────────────────────────────────
+
+async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent: boolean) {
+  const payoutId = payoutObj.id as string;
+  const amount = (payoutObj.amount as number) ?? 0; // in pence
+  const currency = (payoutObj.currency as string) ?? "gbp";
+
+  // Stripe amounts are in smallest currency unit (pence for GBP)
+  const grossAmount = amount / 100;
+  const payoutDate = payoutObj.arrival_date
+    ? new Date((payoutObj.arrival_date as number) * 1000).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  // Check for duplicate
+  const { data: existing } = await supabase
+    .from("payouts")
+    .select("id")
+    .eq("external_payout_id", payoutId)
+    .maybeSingle();
+
+  if (existing) {
+    console.log(`Stripe payout ${payoutId} already recorded, skipping`);
+    return;
+  }
+
+  // Stripe payouts don't include fee breakdowns in the payout object itself.
+  // The net amount is what's deposited; fees are deducted from individual charges.
+  // We record the payout amount as net (what arrived in bank).
+  const { error: insertErr } = await supabase
+    .from("payouts")
+    .insert({
+      channel: "stripe",
+      payout_date: payoutDate,
+      gross_amount: grossAmount,
+      total_fees: 0, // Stripe fees are per-charge, not per-payout
+      net_amount: grossAmount,
+      fee_breakdown: { fvf: 0, promoted_listings: 0, international: 0, processing: 0 },
+      order_count: 0, // Will be reconciled separately
+      unit_count: 0,
+      qbo_sync_status: "pending",
+      external_payout_id: payoutId,
+    });
+
+  if (insertErr) {
+    console.error("Failed to insert Stripe payout:", insertErr);
+    throw new Error(`Failed to record payout: ${insertErr.message}`);
+  }
+
+  console.log(`Stripe payout ${payoutId} recorded: £${grossAmount.toFixed(2)} on ${payoutDate}${isTestEvent ? " (test)" : ""}`);
 }
 
 async function findUserByEmail(email: string): Promise<string | null> {
