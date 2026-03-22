@@ -53,6 +53,17 @@ import { LegoCatalogPage } from "./pages/admin/LegoCatalogPage";
 import NotFound from "./pages/NotFound";
 import { RequireAdmin } from "./components/RequireAdmin";
 
+// Admin V2 pages
+import PurchaseListPage from "./pages/admin-v2/PurchaseListPage";
+import NewPurchaseFormPage from "./pages/admin-v2/NewPurchaseFormPage";
+import BatchDetailPage from "./pages/admin-v2/BatchDetailPage";
+import ProductListPage from "./pages/admin-v2/ProductListPage";
+import V2ProductDetailPage from "./pages/admin-v2/ProductDetailPage";
+import OrderListPage from "./pages/admin-v2/OrderListPage";
+import OrderDetailPage from "./pages/admin-v2/OrderDetailPage";
+import PayoutListPage from "./pages/admin-v2/PayoutListPage";
+import V2SettingsPage from "./pages/admin-v2/SettingsPage";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -116,6 +127,17 @@ const App = () => (
             <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
             <Route path="/admin/ebay-callback" element={<RequireAdmin><EbayCallbackPage /></RequireAdmin>} />
             <Route path="/admin/gmc-callback" element={<RequireAdmin><GmcCallbackPage /></RequireAdmin>} />
+
+            {/* Admin V2 */}
+            <Route path="/admin/v2/purchases" element={<RequireAdmin><PurchaseListPage /></RequireAdmin>} />
+            <Route path="/admin/v2/purchases/new" element={<RequireAdmin><NewPurchaseFormPage /></RequireAdmin>} />
+            <Route path="/admin/v2/purchases/:batchId" element={<RequireAdmin><BatchDetailPage /></RequireAdmin>} />
+            <Route path="/admin/v2/products" element={<RequireAdmin><ProductListPage /></RequireAdmin>} />
+            <Route path="/admin/v2/products/:mpn" element={<RequireAdmin><V2ProductDetailPage /></RequireAdmin>} />
+            <Route path="/admin/v2/orders" element={<RequireAdmin><OrderListPage /></RequireAdmin>} />
+            <Route path="/admin/v2/orders/:orderId" element={<RequireAdmin><OrderDetailPage /></RequireAdmin>} />
+            <Route path="/admin/v2/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
+            <Route path="/admin/v2/settings" element={<RequireAdmin><V2SettingsPage /></RequireAdmin>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
