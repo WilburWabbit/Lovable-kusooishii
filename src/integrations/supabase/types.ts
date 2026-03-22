@@ -784,6 +784,69 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_raw_rebrickable: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      rebrickable_sync_state: {
+        Row: {
+          id: string
+          last_modified_cutoff: string | null
+          last_synced_at: string | null
+          sets_processed: number | null
+          sync_type: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          last_modified_cutoff?: string | null
+          last_synced_at?: string | null
+          sets_processed?: number | null
+          sync_type: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          last_modified_cutoff?: string | null
+          last_synced_at?: string | null
+          sets_processed?: number | null
+          sync_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       landing_raw_ebay_listing: {
         Row: {
           correlation_id: string | null
@@ -2061,6 +2124,7 @@ export type Database = {
           id: string
           name: string
           parent_theme_id: string | null
+          rebrickable_theme_id: number | null
           slug: string
           updated_at: string
         }
@@ -2069,6 +2133,7 @@ export type Database = {
           id?: string
           name: string
           parent_theme_id?: string | null
+          rebrickable_theme_id?: number | null
           slug: string
           updated_at?: string
         }
@@ -2077,6 +2142,7 @@ export type Database = {
           id?: string
           name?: string
           parent_theme_id?: string | null
+          rebrickable_theme_id?: number | null
           slug?: string
           updated_at?: string
         }
