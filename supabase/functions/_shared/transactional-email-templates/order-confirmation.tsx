@@ -36,7 +36,7 @@ const OrderConfirmationEmail = ({
   return (
     <Html lang="en" dir="ltr">
       <Head />
-      <Preview>Order confirmed — {orderNumber}</Preview>
+      <Preview>Order confirmed - {orderNumber}</Preview>
       <Body style={main}>
         <Container style={container}>
           <Img src={LOGO_URL} alt="KUSO OISHII" width="120" style={logo} />
@@ -51,7 +51,7 @@ const OrderConfirmationEmail = ({
             <Section style={itemsSection}>
               {items.map((item, i) => (
                 <Text key={i} style={itemLine}>
-                  {item.name} ({item.sku}) × {item.quantity} — {symbol}{item.unitPrice}
+                  {item.name} ({item.sku}) x {item.quantity} - {symbol}{item.unitPrice}
                 </Text>
               ))}
             </Section>
@@ -79,7 +79,7 @@ const OrderConfirmationEmail = ({
 export const template: TemplateEntry = {
   component: OrderConfirmationEmail,
   subject: (data: Record<string, any>) =>
-    `Order confirmed — ${data.orderNumber || 'KO-000'}`,
+    `Order confirmed - ${data.orderNumber || 'KO-000'}`,
   displayName: 'Order confirmation',
   previewData: {
     orderNumber: 'KO-1042',

@@ -23,7 +23,7 @@ const OrderShippedEmail = ({
 }: OrderShippedProps) => (
   <Html lang="en" dir="ltr">
     <Head />
-    <Preview>Your order has shipped — {orderNumber}</Preview>
+    <Preview>Your order has shipped - {orderNumber}</Preview>
     <Body style={main}>
       <Container style={container}>
         <Img src={LOGO_URL} alt="KUSO OISHII" width="120" style={logo} />
@@ -57,7 +57,7 @@ const OrderShippedEmail = ({
 export const template: TemplateEntry = {
   component: OrderShippedEmail,
   subject: (data: Record<string, any>) =>
-    `Your order has shipped — ${data.orderNumber || 'KO-000'}`,
+    `Your order has shipped - ${data.orderNumber || 'KO-000'}`,
   displayName: 'Order shipped',
   previewData: {
     orderNumber: 'KO-1042',
