@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { trackLogin, stashAuthAction } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -23,6 +24,7 @@ export default function LoginPage() {
     if (error) {
       toast.error(error.message);
     } else {
+      trackLogin('email');
       toast.success("Welcome back.");
       navigate("/account");
     }
@@ -30,6 +32,7 @@ export default function LoginPage() {
   };
 
   const handleAppleSignIn = async () => {
+    stashAuthAction('login', 'apple');
     const { error } = await lovable.auth.signInWithOAuth("apple", {
       redirect_uri: window.location.origin,
     });
@@ -39,6 +42,7 @@ export default function LoginPage() {
   };
 
   const handleGoogleSignIn = async () => {
+    stashAuthAction('login', 'google');
     const { error } = await lovable.auth.signInWithOAuth("google", {
       redirect_uri: window.location.origin,
     });

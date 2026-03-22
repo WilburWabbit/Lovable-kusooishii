@@ -80,11 +80,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
+          setGTMUserId(session.user.id);
+          // Check for a stashed OAuth auth action (login or sign_up)
+          const pending = consumeAuthAction();
+          if (pending) {
+            if (pending.action === 'login') trackLogin(pending.method);
+            else if (pending.action === 'sign_up') trackSignUp(pending.method);
+          }
           setTimeout(() => {
             fetchProfile(session.user.id);
             fetchRoles(session.user.id);
           }, 0);
         } else {
+          setGTMUserId(null);
           setProfile(null);
           setRoles([]);
         }
@@ -96,6 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
+        setGTMUserId(session.user.id);
         fetchProfile(session.user.id);
         fetchRoles(session.user.id);
       }
