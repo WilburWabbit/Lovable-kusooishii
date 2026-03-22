@@ -26,14 +26,15 @@ BEGIN
   IF NEW.batch_id IS NOT NULL AND NEW.uid IS NULL THEN
     -- Extract the numeric part from PO-NNN format
     batch_num := replace(replace(NEW.batch_id, 'PO-', ''), 'PO', '');
-    -- Remove leading zeros for the UID format (PO052, not PO-052)
+    -- Remove leading zeros for the UID format (PO1, not PO001)
     batch_num := ltrim(batch_num, '0');
     IF batch_num = '' THEN batch_num := '0'; END IF;
 
-    -- Count existing units in this batch + 1
-    SELECT COUNT(*) + 1 INTO seq_num
-    FROM public.stock_unit
-    WHERE batch_id = NEW.batch_id;
+    -- Atomically increment the batch unit counter to avoid race conditions
+    UPDATE public.purchase_batches
+    SET unit_counter = unit_counter + 1
+    WHERE id = NEW.batch_id
+    RETURNING unit_counter INTO seq_num;
 
     -- Format: PO{num}-{seq} e.g. PO1-01, PO52-01
     NEW.uid := 'PO' || batch_num || '-' || lpad(seq_num::text, 2, '0');
@@ -311,3 +312,10 @@ SELECT
 FROM public.sku sk
 LEFT JOIN public.stock_unit su ON su.sku_id = sk.id
 GROUP BY sk.sku_code, sk.mpn, sk.condition_grade, sk.sale_price, sk.market_price;
+
+-- ─── Composite index for FIFO queries ───
+-- Speeds up: SELECT ... WHERE sku_id = $1 AND v2_status = 'listed' ORDER BY created_at ASC LIMIT 1
+
+CREATE INDEX IF NOT EXISTS idx_stock_unit_fifo
+  ON public.stock_unit(sku_id, created_at ASC)
+  WHERE v2_status = 'listed';
