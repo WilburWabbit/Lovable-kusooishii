@@ -80,6 +80,14 @@ export default function CartPage() {
 
       const result = await res.json();
       if (result.url) {
+        // Stash cart snapshot for purchase tracking on success page
+        try {
+          sessionStorage.setItem('kuso_checkout_cart', JSON.stringify({
+            items: cart.map(i => ({ id: i.id, name: i.name, setNumber: i.setNumber, price: i.price, theme: i.theme, quantity: i.quantity })),
+            total: subtotal,
+            shipping: shippingPrice,
+          }));
+        } catch { /* sessionStorage unavailable — purchase event just won't fire */ }
         window.location.href = result.url;
       } else {
         throw new Error(result.error || 'Failed to create checkout session');

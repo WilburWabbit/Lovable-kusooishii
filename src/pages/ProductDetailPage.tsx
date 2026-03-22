@@ -6,9 +6,10 @@ import { useParams, Link } from "react-router-dom";
 import { ShoppingBag, Heart, Shield, Package, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GRADE_DETAILS } from "@/lib/grades";
 import { useStore, type Product } from "@/lib/store";
+import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
 
@@ -165,6 +166,36 @@ export default function ProductDetailPage() {
   const primaryImageUrl = displayMedia.find(m => m.is_primary)?.url ?? displayMedia[0]?.url ?? null;
   const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
+
+  // Fire view_item event once per product load
+  const viewItemFired = useRef<string | null>(null);
+  useEffect(() => {
+    if (!product || !offers?.length) return;
+    if (viewItemFired.current === product.id) return;
+    viewItemFired.current = product.id;
+    const cheapest = offers.reduce((a, b) => ((a.price ?? Infinity) < (b.price ?? Infinity) ? a : b));
+    trackViewItem({
+      id: product.id,
+      name: product.name,
+      setNumber: product.mpn,
+      price: cheapest.price ?? 0,
+      rrp: 0,
+      image: primaryImageUrl ?? "",
+      images: allImageUrls,
+      theme: themeName ?? "Uncategorised",
+      themeId: null,
+      pieceCount: product.piece_count ?? 0,
+      condition: GRADE_DETAILS[cheapest.condition_grade]?.label ?? "",
+      conditionGrade: parseInt(cheapest.condition_grade, 10),
+      ageRange: product.age_range ?? "",
+      hook: "",
+      description: product.description ?? "",
+      highlights: [],
+      stock: cheapest.stock_count,
+      retired: product.retired_flag,
+      yearReleased: product.release_year,
+    });
+  }, [product, offers]);
 
   function buildCartProduct(p: ProductDetailRow, offer: Offer): Product {
     return {

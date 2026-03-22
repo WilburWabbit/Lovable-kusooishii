@@ -22,6 +22,13 @@ function toGA4Item(product: Product, quantity = 1) {
   };
 }
 
+export function trackViewItem(product: Product) {
+  pushEvent({
+    event: 'view_item',
+    ecommerce: { currency: 'GBP', value: product.price, items: [toGA4Item(product)] },
+  });
+}
+
 export function trackAddToCart(product: Product, quantity = 1) {
   pushEvent({
     event: 'add_to_cart',
