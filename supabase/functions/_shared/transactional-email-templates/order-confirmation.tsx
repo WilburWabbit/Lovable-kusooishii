@@ -4,7 +4,7 @@ import * as React from 'npm:react@18.3.1'
 import {
   Body, Button, Container, Head, Heading, Hr, Html, Img, Preview, Section, Text,
 } from 'npm:@react-email/components@0.0.22'
-import type { TemplateEntry } from './registry.ts'
+import type { TemplateEntry } from './registry.tsx'
 
 const SITE_NAME = 'Kuso Oishii'
 const SITE_URL = 'https://www.kusooishii.com'
