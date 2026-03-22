@@ -340,6 +340,42 @@ Deno.serve(async (req) => {
     })
   }
 
+  // 6. BCC copy to contact@kusooishii.com (separate enqueue with distinct message_id)
+  const BCC_ADDRESS = 'contact@kusooishii.com'
+  if (effectiveRecipient.toLowerCase() !== BCC_ADDRESS.toLowerCase()) {
+    const bccMessageId = crypto.randomUUID()
+    const bccIdempotencyKey = `${idempotencyKey}-bcc`
+
+    await supabase.from('email_send_log').insert({
+      message_id: bccMessageId,
+      template_name: templateName,
+      recipient_email: BCC_ADDRESS,
+      status: 'pending',
+    })
+
+    const { error: bccError } = await supabase.rpc('enqueue_email', {
+      queue_name: 'transactional_emails',
+      payload: {
+        message_id: bccMessageId,
+        to: BCC_ADDRESS,
+        from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
+        sender_domain: SENDER_DOMAIN,
+        subject: `[BCC] ${resolvedSubject}`,
+        html,
+        text: plainText,
+        purpose: 'transactional',
+        label: templateName,
+        idempotency_key: bccIdempotencyKey,
+        unsubscribe_token: unsubscribeToken,
+        queued_at: new Date().toISOString(),
+      },
+    })
+
+    if (bccError) {
+      console.warn('Failed to enqueue BCC copy', { error: bccError })
+    }
+  }
+
   console.log('Transactional email enqueued', { templateName, effectiveRecipient })
 
   return new Response(

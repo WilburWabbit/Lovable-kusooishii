@@ -497,9 +497,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
     // The order has qbo_sync_status='pending'. The retry function will
     // create the QBO Customer + SalesReceipt and store confirmation IDs.
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     try {
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
       if (supabaseUrl && serviceRoleKey) {
         fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
           method: "POST",
@@ -515,6 +515,42 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       }
     } catch (qboErr) {
       console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
+    }
+
+    // ── Send order confirmation email (best-effort, non-blocking) ──
+    try {
+      if (supabaseUrl && serviceRoleKey && customerEmail) {
+        const emailItems = preparedLines.map((pl) => ({
+          name: pl.skuCode,
+          sku: pl.skuCode,
+          quantity: 1,
+          unitPrice: pl.grossPrice.toFixed(2),
+        }));
+        fetch(`${supabaseUrl}/functions/v1/send-transactional-email`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            templateName: "order-confirmation",
+            recipientEmail: customerEmail,
+            idempotencyKey: `order-confirm-${order.id}`,
+            templateData: {
+              orderNumber: order.order_number,
+              items: emailItems,
+              shippingName: shippingDetails?.name || "",
+              grossTotal: grossTotal.toFixed(2),
+              currency: (session.currency || "gbp").toUpperCase(),
+            },
+          }),
+        }).catch((err) => {
+          console.warn("Order confirmation email trigger failed (non-blocking):", err);
+        });
+        console.log("Triggered order confirmation email for", customerEmail);
+      }
+    } catch (emailErr) {
+      console.warn("Failed to trigger order confirmation email (non-blocking):", emailErr);
     }
   } catch (err) {
     console.error("Error handling checkout.session.completed:", err);
