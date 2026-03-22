@@ -36,12 +36,17 @@ const channelVariant: Record<string, "default" | "secondary" | "outline" | "dest
 
 const statusLabel: Record<string, string> = {
   pending_payment: "Pending Payment",
-  confirmed: "Confirmed",
-  processing: "Processing",
+  authorised: "Authorised",
+  paid: "Paid",
+  picking: "Picking",
+  packed: "Packed",
+  awaiting_dispatch: "Awaiting Dispatch",
   shipped: "Shipped",
-  delivered: "Delivered",
+  complete: "Complete",
   cancelled: "Cancelled",
+  partially_refunded: "Partially Refunded",
   refunded: "Refunded",
+  exception: "Exception",
 };
 
 export default function OrdersTab({ userId, userEmail }: OrdersTabProps) {

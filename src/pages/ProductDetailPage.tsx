@@ -368,6 +368,9 @@ export default function ProductDetailPage() {
                             <p className="font-display text-lg font-bold text-foreground">
                               {offer.price != null ? `£${Number(offer.price).toFixed(2)}` : "—"}
                             </p>
+                            {offer.price != null && (
+                              <p className="font-body text-[10px] text-muted-foreground">inc. VAT</p>
+                            )}
                             <p className="font-body text-[11px] text-muted-foreground">
                               {offer.stock_count} in stock
                             </p>
