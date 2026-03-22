@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          id: string
+          stripe_test_mode: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: string
+          stripe_test_mode?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: string
+          stripe_test_mode?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       audit_event: {
         Row: {
           actor_id: string | null
@@ -1037,6 +1058,7 @@ export type Database = {
           event_type: string
           external_id: string
           id: string
+          is_test: boolean
           processed_at: string | null
           raw_payload: Json
           received_at: string
@@ -1048,6 +1070,7 @@ export type Database = {
           event_type: string
           external_id: string
           id?: string
+          is_test?: boolean
           processed_at?: string | null
           raw_payload: Json
           received_at?: string
@@ -1059,6 +1082,7 @@ export type Database = {
           event_type?: string
           external_id?: string
           id?: string
+          is_test?: boolean
           processed_at?: string | null
           raw_payload?: Json
           received_at?: string
@@ -1521,6 +1545,7 @@ export type Database = {
           guest_email: string | null
           guest_name: string | null
           id: string
+          is_test: boolean
           merchandise_subtotal: number
           notes: string | null
           order_number: string
@@ -1564,6 +1589,7 @@ export type Database = {
           guest_email?: string | null
           guest_name?: string | null
           id?: string
+          is_test?: boolean
           merchandise_subtotal: number
           notes?: string | null
           order_number?: string
@@ -1607,6 +1633,7 @@ export type Database = {
           guest_email?: string | null
           guest_name?: string | null
           id?: string
+          is_test?: boolean
           merchandise_subtotal?: number
           notes?: string | null
           order_number?: string
