@@ -27,13 +27,13 @@ const OrderShippedEmail = ({
     <Body style={main}>
       <Container style={container}>
         <Img src={LOGO_URL} alt="KUSO OISHII" width="120" style={logo} />
-        <Heading style={h1}>It's on the way.</Heading>
+        <Heading style={h1}>It&apos;s on the way.</Heading>
         <Text style={text}>
           Your order <strong>{orderNumber}</strong> has been shipped
           {shippingCarrier ? ` via ${shippingCarrier}` : ''}.
           {trackingNumber
             ? ` Your tracking number is:`
-            : ' We'll update you when tracking is available.'}
+            : " We'll update you when tracking is available."}
         </Text>
 
         {trackingNumber && (
