@@ -96,6 +96,13 @@ serve(async (req) => {
           });
           if (customers.data.length > 0) {
             customerId = customers.data[0].id;
+          } else {
+            // Create a Stripe customer for registered users so they aren't treated as guests
+            const newCustomer = await stripe.customers.create({
+              email: userEmail,
+              metadata: { supabase_user_id: userId ?? "" },
+            });
+            customerId = newCustomer.id;
           }
         }
       }
