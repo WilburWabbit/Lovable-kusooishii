@@ -78,9 +78,14 @@ export function BrowseCatalogCard({ item, className }: BrowseCatalogCardProps) {
           {item.theme_name ?? "Uncategorised"} · {item.mpn}
         </p>
         <div className="mt-auto flex items-baseline justify-between pt-2">
-          <span className="font-display text-base font-bold text-foreground">
-            {item.min_price != null ? `£${Number(item.min_price).toFixed(2)}` : "—"}
-          </span>
+          <div className="flex items-baseline gap-1">
+            <span className="font-display text-base font-bold text-foreground">
+              {item.min_price != null ? `£${Number(item.min_price).toFixed(2)}` : "—"}
+            </span>
+            {item.min_price != null && (
+              <span className="font-body text-[10px] text-muted-foreground">inc. VAT</span>
+            )}
+          </div>
           <span className="font-body text-[11px] text-muted-foreground">
             {item.total_stock} in stock
           </span>

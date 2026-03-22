@@ -49,6 +49,9 @@ export default function CartPage() {
   const subtotal = cartTotal();
   const collectionDiscount = isCollection ? subtotal * 0.05 : 0;
   const blueBellDonation = isCollection ? subtotal * 0.05 : 0;
+  // VAT calculation: merchandise (after discount) + VAT-liable shipping are all gross (inc. 20% VAT)
+  const vatableAmount = (subtotal - collectionDiscount) + shippingPrice;
+  const vatAmount = Math.round((vatableAmount - vatableAmount / 1.2) * 100) / 100;
 
   const handleCheckout = async () => {
     setIsCheckingOut(true);
@@ -143,7 +146,10 @@ export default function CartPage() {
                             </Button>
                           </div>
                           <div className="flex items-center gap-3">
-                            <span className="font-display text-base font-bold">£{(item.price * item.quantity).toFixed(2)}</span>
+                            <div className="text-right">
+                              <span className="font-display text-base font-bold">£{(item.price * item.quantity).toFixed(2)}</span>
+                              <p className="font-body text-[10px] text-muted-foreground">inc. VAT</p>
+                            </div>
                             <Button variant="ghost" size="icon" className="text-destructive h-7 w-7" onClick={() => removeFromCart(item.id)}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -165,7 +171,10 @@ export default function CartPage() {
                 <div className="space-y-4">
                   <div className="flex justify-between font-body text-sm">
                     <span>Subtotal</span>
-                    <span className="font-medium">£{subtotal.toFixed(2)}</span>
+                    <div className="text-right">
+                      <span className="font-medium">£{subtotal.toFixed(2)}</span>
+                      <p className="font-body text-[10px] text-muted-foreground">inc. VAT</p>
+                    </div>
                   </div>
 
                   <div className="space-y-3">
@@ -202,6 +211,11 @@ export default function CartPage() {
                       <span>(£{blueBellDonation.toFixed(2)})</span>
                     </div>
                   }
+
+                  <div className="flex justify-between font-body text-xs text-muted-foreground">
+                    <span>Includes VAT (20%)</span>
+                    <span>£{vatAmount.toFixed(2)}</span>
+                  </div>
 
                   <Separator />
                   <div className="flex justify-between font-display text-lg font-bold">

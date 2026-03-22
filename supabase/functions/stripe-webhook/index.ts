@@ -547,6 +547,61 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       }).eq("id", order.id);
     }
 
+    // ── Find or create customer record and link to order ──
+    let customerId: string | null = null;
+    try {
+      if (userId) {
+        const { data: existingCustomer } = await supabase
+          .from("customer")
+          .select("id")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (existingCustomer) {
+          customerId = existingCustomer.id;
+        } else {
+          const { data: newCustomer } = await supabase
+            .from("customer")
+            .insert({
+              user_id: userId,
+              display_name: shippingDetails?.name || customerEmail || "Customer",
+              email: customerEmail,
+            })
+            .select("id")
+            .single();
+          customerId = newCustomer?.id ?? null;
+        }
+      } else if (customerEmail) {
+        const { data: existingCustomer } = await supabase
+          .from("customer")
+          .select("id")
+          .eq("email", customerEmail)
+          .is("user_id", null)
+          .maybeSingle();
+
+        if (existingCustomer) {
+          customerId = existingCustomer.id;
+        } else {
+          const { data: newCustomer } = await supabase
+            .from("customer")
+            .insert({
+              display_name: shippingDetails?.name || customerEmail || "Guest",
+              email: customerEmail,
+            })
+            .select("id")
+            .single();
+          customerId = newCustomer?.id ?? null;
+        }
+      }
+
+      if (customerId) {
+        await supabase.from("sales_order").update({ customer_id: customerId }).eq("id", order.id);
+        console.log(`Linked customer ${customerId} to order ${order.order_number}`);
+      }
+    } catch (custErr: any) {
+      console.warn(`Failed to create/link customer record (non-fatal):`, custErr.message);
+    }
+
     // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
     // The order has qbo_sync_status='pending'. The retry function will
     // create the QBO Customer + SalesReceipt and store confirmation IDs.
@@ -558,20 +613,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     } else {
       try {
         if (supabaseUrl && serviceRoleKey) {
-          fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
+          const syncResp = await fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${serviceRoleKey}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({}),
-          }).catch((err) => {
-            console.warn("qbo-retry-sync trigger failed (non-blocking):", err);
           });
-          console.log("Triggered qbo-retry-sync for new web order");
+          const syncBody = await syncResp.text();
+          console.log(`qbo-retry-sync triggered: ${syncResp.status} — ${syncBody.substring(0, 200)}`);
         }
       } catch (qboErr) {
-        console.warn("Failed to trigger qbo-retry-sync (non-blocking):", qboErr);
+        console.warn("qbo-retry-sync trigger failed (non-blocking):", qboErr);
       }
     }
 

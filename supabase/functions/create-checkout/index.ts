@@ -155,6 +155,7 @@ serve(async (req) => {
       lineItems.push({
         price_data: {
           currency: "gbp",
+          tax_behavior: "inclusive",
           product_data: {
             name: product?.name ?? sku.name ?? "LEGO Set",
             description: `#${product?.mpn ?? sku.sku_code} · Grade ${sku.condition_grade}`,
@@ -167,11 +168,13 @@ serve(async (req) => {
     }
 
     // --- Shipping (server-derived) ---
+    // Express shipping is VAT-liable at 20% (inclusive). Standard/collection are free.
     const shippingPrice = SHIPPING_PRICES[shippingMethod as ShippingMethod];
     if (shippingPrice > 0) {
       lineItems.push({
         price_data: {
           currency: "gbp",
+          tax_behavior: "inclusive",
           product_data: {
             name:
               shippingMethod === "express"
@@ -199,6 +202,7 @@ serve(async (req) => {
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
       line_items: lineItems,
+      automatic_tax: { enabled: true },
       success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cart`,
       metadata: {
@@ -222,16 +226,12 @@ serve(async (req) => {
       };
     }
 
-    // Apply collection discount as a coupon (server-calculated)
+    // Apply collection discount using the existing Blue Bell LEGO Club coupon.
+    // Discounts apply to merchandise only (Stripe default for percentage coupons).
     if (isCollection) {
       collectionDiscount = merchandiseSubtotal * COLLECTION_DISCOUNT_RATE;
       if (collectionDiscount > 0) {
-        const coupon = await stripe.coupons.create({
-          percent_off: 5,
-          duration: "once",
-          name: "LEGO Club Collection Discount (5%)",
-        });
-        sessionParams.discounts = [{ coupon: coupon.id }];
+        sessionParams.discounts = [{ coupon: "EcehICVy" }];
       }
     }
 
