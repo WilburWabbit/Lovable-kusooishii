@@ -1,32 +1,27 @@
 
 
-## Fix: Inventory Totals and Orphan Cleanup
+## Two Issues Found
 
-### Issues
+### 1. Build Error in `admin-data/index.ts`
 
-1. **Summary cards ignore filters**: The four header cards (Total Units, Carrying Value, Available, Received) always compute from the full `units` array, not from `filtered`. When you apply a search, status, or grade filter, the cards don't change.
+The `.select("id", { count: "exact", head: true })` syntax is not supported by the Supabase JS client used in edge functions (v2.47.x). The second argument to `.select()` is not accepted in the chained form after `.update()`.
 
-2. **`list-stock-units` capped at 1000 rows**: The query has `.limit(1000)`, so if you have 300+ stock units the data may be complete now, but this will silently truncate as inventory grows. Should be raised or paginated.
+**Fix (lines 1711-1734):** Replace each `.select("id", { count: "exact", head: true })` with `.select("id")`, then use `.data?.length ?? 0` for the count instead of destructuring `{ count }`.
 
-3. **Rebuild leaves orphaned closed stock units**: Step 3 of `rebuild-from-qbo` only deletes orphans with status `available/received/graded`. Orphaned **closed** units (created by earlier buggy sales processing where `inbound_receipt_line_id` is null) survive the rebuild. These get counted and inflated the totals. The `cleanup-orphaned-stock` action also only targets `available` status.
+There are 5 occurrences (purchases, sales, refunds, items, customers).
 
-### Changes
+**File:** `supabase/functions/admin-data/index.ts`
 
-**File: `src/pages/admin/InventoryPage.tsx`**
+### 2. eBay Webhook Endpoint Not Deployed
 
-- Change summary card computations from `units` → `filtered`:
-  - Total Units: `filtered.length`
-  - Carrying Value: sum of `filtered` carrying values
-  - Available: count of `filtered` with status `available`
-  - Received: count of `filtered` with status `received`
+The `ebay-notifications` edge function returns **404 Not Found**. The code exists in the repo at `supabase/functions/ebay-notifications/index.ts` but is not deployed.
 
-**File: `supabase/functions/admin-data/index.ts`**
+This explains why no notifications have been received since March 12 — eBay's delivery attempts fail, and after enough failures eBay disables the destination.
 
-- `list-stock-units`: Remove `.limit(1000)` or raise to 5000
-- `rebuild-from-qbo` Step 3: Delete ALL orphaned stock units regardless of status (remove the `.in("status", [...])` filter) — any unit with `inbound_receipt_line_id = null` after receipts are deleted is orphaned
-- `cleanup-orphaned-stock`: Same fix — delete orphans in any status, not just `available`
+**Fix:** Deploy the `ebay-notifications` edge function, then re-run `setup_notifications` from the eBay settings panel to re-register and re-enable the destination with eBay.
 
 ### Files Modified
 
-1. `src/pages/admin/InventoryPage.tsx` — summary cards use filtered data
-2. `supabase/functions/admin-data/index.ts` — remove limit, fix orphan cleanup to include all statuses
+1. `supabase/functions/admin-data/index.ts` — fix `.select()` call signature (5 occurrences)
+2. Deploy `ebay-notifications` edge function
+
