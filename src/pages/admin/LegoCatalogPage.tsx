@@ -19,7 +19,10 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
 } from "@/components/ui/sheet";
 import {
-  Database, Search, X, BookOpen, Archive, Layers, Calendar,
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Database, Search, X, BookOpen, Archive, Layers, Calendar, RefreshCw, Loader2,
 } from "lucide-react";
 import { useTablePreferences } from "@/hooks/useTablePreferences";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
@@ -447,9 +450,87 @@ export function LegoCatalogPage() {
     .map((k) => ALL_COLUMNS.find((c) => c.key === k))
     .filter(Boolean) as typeof ALL_COLUMNS;
 
+  // ─── Rebrickable Sync ──────────────────────────────────────
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncMode, setSyncMode] = useState<"incremental" | "since" | "full">("incremental");
+  const [syncSince, setSyncSince] = useState("");
+  const [syncProgress, setSyncProgress] = useState("");
+  const [syncing, setSyncing] = useState(false);
+
+  const runRebrickableSync = async () => {
+    setSyncing(true);
+    setSyncProgress("Syncing themes…");
+    try {
+      // Step 1: Sync themes
+      await invokeWithAuth("rebrickable-sync", { mode: "themes" });
+
+      // Step 2: Sync sets
+      if (syncMode === "incremental") {
+        setSyncProgress("Syncing sets (incremental)…");
+        const res = await invokeWithAuth<{ sets_upserted: number; pages_processed: number }>(
+          "rebrickable-sync", { mode: "sets" },
+        );
+        setSyncProgress(`Done — ${res.sets_upserted} sets synced across ${res.pages_processed} page(s).`);
+      } else if (syncMode === "since") {
+        if (!syncSince) { setSyncing(false); return; }
+        setSyncProgress(`Syncing sets modified since ${syncSince}…`);
+        const res = await invokeWithAuth<{ sets_upserted: number; pages_processed: number }>(
+          "rebrickable-sync", { mode: "sets", since: syncSince },
+        );
+        setSyncProgress(`Done — ${res.sets_upserted} sets synced across ${res.pages_processed} page(s).`);
+      } else {
+        // Full sync: paginate
+        let currentPage = 1;
+        let totalSets = 0;
+        let hasMore = true;
+        while (hasMore) {
+          setSyncProgress(`Full sync — fetching page ${currentPage}…`);
+          const res = await invokeWithAuth<{
+            sets_upserted: number;
+            pages_processed: number;
+            has_more: boolean;
+            next_page: number | null;
+          }>("rebrickable-sync", {
+            mode: "sets",
+            full_sync: true,
+            page: currentPage,
+            pages_per_run: 5,
+          });
+          totalSets += res.sets_upserted;
+          hasMore = res.has_more;
+          currentPage = res.next_page ?? currentPage + 1;
+        }
+        setSyncProgress(`Done — ${totalSets} sets synced (full).`);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["admin-lego-catalog"] });
+      queryClient.invalidateQueries({ queryKey: ["lego-catalog-filter-options"] });
+      toast.success("Rebrickable sync complete");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setSyncProgress(`Error: ${msg}`);
+      toast.error(`Rebrickable sync failed: ${msg}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <BackOfficeLayout title="LEGO Catalog">
       <div className="space-y-6 animate-fade-in">
+        {/* Header with sync button */}
+        <div className="flex items-center justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+            onClick={() => { setSyncProgress(""); setSyncDialogOpen(true); }}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Sync from Rebrickable
+          </Button>
+        </div>
+
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
@@ -668,6 +749,70 @@ export function LegoCatalogPage() {
         onClose={() => setEditRow(null)}
         onSaved={handleSaved}
       />
+
+      {/* Rebrickable Sync Dialog */}
+      <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sync from Rebrickable</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Sync Mode</Label>
+              <Select
+                value={syncMode}
+                onValueChange={(v) => setSyncMode(v as "incremental" | "since" | "full")}
+                disabled={syncing}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="incremental">Incremental (since last sync)</SelectItem>
+                  <SelectItem value="since">From date</SelectItem>
+                  <SelectItem value="full">Full sync (all sets)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {syncMode === "since" && (
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Modified since</Label>
+                <Input
+                  type="date"
+                  value={syncSince}
+                  onChange={(e) => setSyncSince(e.target.value)}
+                  disabled={syncing}
+                />
+              </div>
+            )}
+            {syncProgress && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                {syncing && <Loader2 className="h-4 w-4 animate-spin" />}
+                <span>{syncProgress}</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSyncDialogOpen(false)}
+              disabled={syncing}
+              className="text-xs"
+            >
+              {syncing ? "Close" : "Cancel"}
+            </Button>
+            <Button
+              onClick={runRebrickableSync}
+              disabled={syncing || (syncMode === "since" && !syncSince)}
+              className="text-xs gap-2"
+            >
+              {syncing ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Syncing…</>
+              ) : (
+                <><RefreshCw className="h-3.5 w-3.5" /> Start Sync</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </BackOfficeLayout>
   );
 }
