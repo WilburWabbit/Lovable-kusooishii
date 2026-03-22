@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import type { StockUnitStatus, ConditionGrade } from "@/lib/types/admin";
-import { UNIT_STATUSES, GRADE_COLORS } from "@/lib/constants/unit-statuses";
+import type { StockUnitStatus, OrderStatus, ConditionGrade } from "@/lib/types/admin";
+import { UNIT_STATUSES, ORDER_STATUSES, GRADE_COLORS } from "@/lib/constants/unit-statuses";
 
 // ─── Mono (JetBrains Mono data text) ────────────────────────
 
@@ -57,6 +57,13 @@ export function Badge({ label, color, small }: BadgeProps) {
 
 export function StatusBadge({ status }: { status: StockUnitStatus }) {
   const s = UNIT_STATUSES[status] ?? { label: status, color: "#71717A" };
+  return <Badge label={s.label} color={s.color} small />;
+}
+
+// ─── OrderStatusBadge ───────────────────────────────────────
+
+export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+  const s = ORDER_STATUSES[status] ?? { label: status, color: "#71717A" };
   return <Badge label={s.label} color={s.color} small />;
 }
 
