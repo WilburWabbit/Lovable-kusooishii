@@ -81,6 +81,7 @@ const App = () => (
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/bluebell" element={<BlueBellClubPage />} />
+            <Route path="/unsubscribe" element={<UnsubscribePage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />
