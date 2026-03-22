@@ -1,27 +1,57 @@
 
 
-## Two Issues Found
+## App Emails: Welcome, Order Confirmation, Order Shipped
 
-### 1. Build Error in `admin-data/index.ts`
+### Scope
 
-The `.select("id", { count: "exact", head: true })` syntax is not supported by the Supabase JS client used in edge functions (v2.47.x). The second argument to `.select()` is not accepted in the chained form after `.update()`.
+Three branded transactional email templates + BCC to contact@kusooishii.com. Emails triggered only for **web storefront** orders (Stripe). No email triggers for eBay orders.
 
-**Fix (lines 1711-1734):** Replace each `.select("id", { count: "exact", head: true })` with `.select("id")`, then use `.data?.length ?? 0` for the count instead of destructuring `{ count }`.
+### Step 1 — Scaffold transactional email infrastructure
 
-There are 5 occurrences (purchases, sales, refunds, items, customers).
+Call `scaffold_transactional_email` to create `send-transactional-email`, `handle-email-unsubscribe`, `handle-email-suppression` edge functions, registry, and sample template.
 
-**File:** `supabase/functions/admin-data/index.ts`
+### Step 2 — Create three email templates
 
-### 2. eBay Webhook Endpoint Not Deployed
+All in `supabase/functions/_shared/transactional-email-templates/`, matching existing auth email style (Torii red buttons, Space Grotesk + Noto Sans JP, Kuso Oishii logo, white background, edgy tone).
 
-The `ebay-notifications` edge function returns **404 Not Found**. The code exists in the repo at `supabase/functions/ebay-notifications/index.ts` but is not deployed.
+1. **`welcome.tsx`** — Sent after signup. Subject: "Welcome to the obsession". Brand intro, link to browse catalog.
+2. **`order-confirmation.tsx`** — Sent after Stripe checkout. Subject: "Order confirmed — {orderNumber}". Order number, items, shipping address, total. Props: `orderNumber`, `items`, `shippingName`, `grossTotal`, `currency`.
+3. **`order-shipped.tsx`** — Sent when web order status changes to "shipped" (admin action). Subject: "Your order has shipped — {orderNumber}". Tracking number, carrier. Props: `orderNumber`, `trackingNumber`, `shippingCarrier`.
 
-This explains why no notifications have been received since March 12 — eBay's delivery attempts fail, and after enough failures eBay disables the destination.
+Register all three in `registry.ts`.
 
-**Fix:** Deploy the `ebay-notifications` edge function, then re-run `setup_notifications` from the eBay settings panel to re-register and re-enable the destination with eBay.
+### Step 3 — Add BCC support
+
+After each primary email is enqueued in `send-transactional-email/index.ts`, enqueue a duplicate to `contact@kusooishii.com` with idempotency key suffixed `-bcc`.
+
+### Step 4 — Wire triggers
+
+**`stripe-webhook/index.ts`** — After order creation (~line 488), invoke `send-transactional-email` with `order-confirmation` template using customer email and order details. Only fires for web/Stripe orders.
+
+**Welcome email** — Invoke from auth-email-hook or client-side after first login/email verification.
+
+**Order shipped** — No eBay trigger. Will be triggered from the admin UI when an order's status is manually updated to "shipped" (future admin action).
+
+### Step 5 — Unsubscribe page
+
+Create `/unsubscribe` route with branded page that validates tokens via `handle-email-unsubscribe`. Add route to `App.tsx`.
+
+### Step 6 — Deploy
+
+Deploy all new/modified edge functions.
+
+### Files Created
+- `supabase/functions/_shared/transactional-email-templates/welcome.tsx`
+- `supabase/functions/_shared/transactional-email-templates/order-confirmation.tsx`
+- `supabase/functions/_shared/transactional-email-templates/order-shipped.tsx`
+- `supabase/functions/_shared/transactional-email-templates/registry.ts`
+- `supabase/functions/send-transactional-email/index.ts` (scaffolded)
+- `supabase/functions/handle-email-unsubscribe/index.ts` (scaffolded)
+- `supabase/functions/handle-email-suppression/index.ts` (scaffolded)
+- `src/pages/UnsubscribePage.tsx`
 
 ### Files Modified
-
-1. `supabase/functions/admin-data/index.ts` — fix `.select()` call signature (5 occurrences)
-2. Deploy `ebay-notifications` edge function
+- `supabase/functions/stripe-webhook/index.ts` — order confirmation email trigger
+- `supabase/functions/send-transactional-email/index.ts` — BCC logic
+- `src/App.tsx` — /unsubscribe route
 
