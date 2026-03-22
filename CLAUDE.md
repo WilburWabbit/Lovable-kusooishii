@@ -79,6 +79,19 @@ The `docs/specs/` directory contains **27 OpenAPI specifications** for every ext
 - Respect RLS policies — public-facing queries use the anon key; admin uses service role
 - Keep Edge Functions focused — one concern per function where possible
 
+## Integration Architecture Patterns
+
+> Derived from QBO integration debugging. Full analysis: `docs/knowledgebase/docs/qbo-integration-lessons.md`
+
+- **Land-only Edge Functions** — Webhook/API receivers must store raw payloads in staging tables (`landing_raw_*`) and return immediately. No inline business logic processing in receiver functions.
+- **Centralized processor pattern** — A separate processor function reads from staging, validates, maps, and promotes to canonical tables. Never combine receiving and processing in the same function.
+- **Dependency-ordered processing** — Process entities in strict dependency order (e.g., Items → SKUs → Stock → Orders). Check pending counts at each tier boundary; only advance when the previous tier is fully drained.
+- **Reconciliation is separate** — Never tangle reconciliation logic (comparing app vs external state) into the sync/promotion pipeline. It runs as a distinct admin action after all ingestion is complete.
+- **Fail-safe with preserved data** — Never discard raw payloads on error. Failed records stay in staging with `status: "error"` and `error_message` for retry or investigation. Processing must be idempotent.
+- **Idempotency keys** — Every staged record needs an external ID to prevent duplicate processing on retry.
+- **Cross-channel dedup via reference tables** — Deduplicate orders/transactions using external ID mapping (DocNumber, origin_channel + origin_reference), never timing or amount matching.
+- **Don't fix symptoms, fix architecture** — If you're making 5+ incremental fixes to the same subsystem, step back and evaluate whether the architecture is sound.
+
 ## What NOT To Do
 
 - Do NOT let external systems write directly to canonical tables
@@ -87,3 +100,6 @@ The `docs/specs/` directory contains **27 OpenAPI specifications** for every ext
 - Do NOT collapse unit-level stock into coarse SKU-only operations
 - Do NOT embed integration config on operational pages
 - Do NOT remove MPN version suffixes — they affect pricing and collectability
+- Do NOT process webhook payloads inline in the receiving Edge Function — land them in staging and process asynchronously
+- Do NOT skip staging tables for "simple" integrations — all external data flows through staging
+- Do NOT build monolithic Edge Functions that receive + validate + process + write in one function

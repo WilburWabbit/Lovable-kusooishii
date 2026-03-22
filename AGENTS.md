@@ -57,3 +57,21 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - Do NOT remove MPN version suffixes — they affect pricing and collectability
 - Do NOT embed integration config on operational pages
 - Do NOT collapse unit-level stock into coarse SKU-only operations
+- Do NOT process webhook payloads inline in receivers — land in staging, process asynchronously
+- Do NOT skip staging tables for any external data
+- Do NOT build monolithic receive-validate-process-write Edge Functions
+
+## Integration Architecture Patterns
+
+> Full analysis: `docs/knowledgebase/docs/qbo-integration-lessons.md`
+
+When building or modifying any external integration:
+
+1. **Land-only receivers** — Webhook/API receiver Edge Functions store raw payloads in staging (`landing_raw_*`) and return immediately. No inline processing.
+2. **Separate processor** — A dedicated processor function reads staging → validates → maps → promotes to canonical tables.
+3. **Dependency ordering** — Process entities in strict dependency order. Parents before children. Check pending counts at tier boundaries.
+4. **Reconciliation is separate** — Do not mix reconciliation into sync/promotion. It runs as a distinct admin action after all ingestion completes.
+5. **Preserve failed data** — Never discard payloads on error. Failed records stay in staging with `status: "error"` for retry.
+6. **Idempotency** — Every staged record needs an external ID to prevent duplicate processing.
+7. **Cross-channel dedup** — Use external ID reference tables (DocNumber, origin_channel + origin_reference), not timing/amount matching.
+8. **Fix architecture, not symptoms** — If 5+ incremental fixes target the same subsystem, the architecture needs restructuring.

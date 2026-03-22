@@ -52,3 +52,21 @@ LEGO resale commerce platform: public storefront + back-office for buying, gradi
 - Remove MPN version suffixes
 - Embed integration config on operational pages
 - Collapse unit-level stock into SKU-only operations
+- Process webhook payloads inline in receiver Edge Functions — land in staging, process async
+- Skip staging tables for any integration, however "simple"
+- Build monolithic receive+validate+process+write Edge Functions
+
+## Integration Architecture Patterns
+
+> Full lessons-learned document: `docs/knowledgebase/docs/qbo-integration-lessons.md`
+
+When building or modifying external integrations, follow these patterns:
+
+- **Land-only receivers**: Webhook/API Edge Functions store raw payloads in staging tables (`landing_raw_*`) and return immediately. No inline business logic.
+- **Centralized processor**: Separate function reads staging → validates → maps → promotes to canonical tables.
+- **Dependency ordering**: Process entities in strict dependency order (parents before children). Check pending counts at tier boundaries.
+- **Reconciliation is separate**: Never mix reconciliation into the sync/promotion pipeline. It runs as a distinct admin action.
+- **Fail-safe**: Never discard payloads on error. Failed records stay in staging with `status: "error"` for retry.
+- **Idempotency keys**: Every staged record needs an external ID to prevent duplicate processing.
+- **Cross-channel dedup**: Use external ID reference tables (DocNumber, origin_channel + origin_reference), not timing or amount matching.
+- **Fix architecture, not symptoms**: If 5+ incremental fixes target the same subsystem, restructure the data flow.
