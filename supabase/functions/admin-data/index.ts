@@ -1708,30 +1708,30 @@ Deno.serve(async (req) => {
         ]);
 
       // Step 4: Reset ALL landing tables to pending
-      const { count: pCount } = await admin.from("landing_raw_qbo_purchase")
+      const { data: pData } = await admin.from("landing_raw_qbo_purchase")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id", { count: "exact", head: true });
-      purchasesReset = pCount ?? 0;
+        .select("id");
+      purchasesReset = pData?.length ?? 0;
 
-      const { count: sCount } = await admin.from("landing_raw_qbo_sales_receipt")
+      const { data: sData } = await admin.from("landing_raw_qbo_sales_receipt")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id", { count: "exact", head: true });
-      salesReset = sCount ?? 0;
+        .select("id");
+      salesReset = sData?.length ?? 0;
 
-      const { count: rCount } = await admin.from("landing_raw_qbo_refund_receipt")
+      const { data: rData } = await admin.from("landing_raw_qbo_refund_receipt")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id", { count: "exact", head: true });
-      refundsReset = rCount ?? 0;
+        .select("id");
+      refundsReset = rData?.length ?? 0;
 
-      const { count: iCount } = await admin.from("landing_raw_qbo_item")
+      const { data: iData } = await admin.from("landing_raw_qbo_item")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id", { count: "exact", head: true });
-      itemsReset = iCount ?? 0;
+        .select("id");
+      itemsReset = iData?.length ?? 0;
 
-      const { count: cCount } = await admin.from("landing_raw_qbo_customer")
+      const { data: cData } = await admin.from("landing_raw_qbo_customer")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id", { count: "exact", head: true });
-      customersReset = cCount ?? 0;
+        .select("id");
+      customersReset = cData?.length ?? 0;
 
       await admin.from("audit_event").insert({
         entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
