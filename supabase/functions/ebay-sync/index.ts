@@ -256,13 +256,6 @@ Deno.serve(async (req) => {
         if (o.origin_reference) ordersByOriginRef.set(`${o.origin_channel}:${o.origin_reference}`, o);
       }
 
-      // Pre-fetch SKU lookup
-      const { data: allSkus } = await admin.from("sku").select("id, sku_code").eq("active_flag", true);
-      const skuMap = new Map<string, string>();
-      for (const s of allSkus || []) {
-        skuMap.set(s.sku_code, s.id);
-      }
-
       for (const order of ebayOrders) {
         const ebayOrderId = order.orderId;
 
@@ -272,20 +265,15 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Extract buyer details from fulfillment data
-        const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
-        const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
-        const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
-        const totalAmount = parseFloat(order.pricingSummary?.total?.value || "0");
-        const taxAmount = parseFloat(order.pricingSummary?.tax?.value || "0");
-        const currency = order.pricingSummary?.total?.currency || "GBP";
-        const creationDate = order.creationDate?.split("T")[0] || null;
-
         // Check if a QBO-synced order already exists with this doc_number
         const existingOrder = ordersByDocNumber.get(ebayOrderId);
 
         if (existingOrder) {
           // ENRICH existing QBO record — don't overwrite financial data (QBO is master)
+          const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
+          const buyerName = shipTo?.fullName || order.buyer?.username || "eBay Buyer";
+          const buyerEmail = order.buyer?.buyerRegistrationAddress?.email || null;
+
           console.log(`Matched eBay order ${ebayOrderId} to existing order ${existingOrder.id}`);
           const updatePayload: Record<string, any> = {
             origin_channel: "ebay",
@@ -313,70 +301,38 @@ Deno.serve(async (req) => {
           await admin.from("sales_order").update(updatePayload).eq("id", existingOrder.id);
           results.orders_enriched++;
         } else {
-          // No matching QBO sale — insert new eBay order
-          // Determine net/gross from eBay totals (eBay UK prices are VAT-inclusive)
-          const merchandiseSubtotal = totalAmount - taxAmount;
-          const grossTotal = totalAmount;
-
-          const lineItems = order.lineItems || [];
-
-          const { data: newOrder, error: orderErr } = await admin
-            .from("sales_order")
-            .insert({
-              origin_channel: "ebay",
-              origin_reference: ebayOrderId,
-              doc_number: ebayOrderId,
-              status: "complete",
-              guest_name: buyerName,
-              guest_email: buyerEmail || `ebay-${ebayOrderId}@imported.local`,
-              shipping_name: shipTo?.fullName || buyerName,
-              shipping_line_1: shipTo?.contactAddress?.addressLine1 || "",
-              shipping_line_2: shipTo?.contactAddress?.addressLine2 || null,
-              shipping_city: shipTo?.contactAddress?.city || "",
-              shipping_postcode: shipTo?.contactAddress?.postalCode || "",
-              shipping_country: shipTo?.contactAddress?.countryCode || "GB",
-              shipping_county: shipTo?.contactAddress?.stateOrProvince || null,
-              merchandise_subtotal: merchandiseSubtotal,
-              tax_total: taxAmount,
-              gross_total: grossTotal,
-              global_tax_calculation: "TaxInclusive",
-              currency,
-              txn_date: creationDate,
-              notes: `eBay order ${ebayOrderId} | Buyer: ${order.buyer?.username || "unknown"}`,
-            })
-            .select("id")
-            .single();
-
-          if (orderErr) {
-            console.error(`Failed to insert eBay order ${ebayOrderId}:`, orderErr.message);
-            continue;
-          }
-
-          // Create order lines
-          for (const li of lineItems) {
-            const ebaySku = li.sku;
-            let skuId: string | null = null;
-
-            if (ebaySku) {
-              // Direct lookup — eBay SKU should match sku_code exactly
-              skuId = skuMap.get(ebaySku) || null;
+          // Delegate to ebay-process-order for the full pipeline:
+          // local customer, VAT resolution, FIFO stock depletion, eBay stock push,
+          // QBO Customer upsert, QBO SalesReceipt creation, audit trail.
+          try {
+            const processRes = await fetchWithTimeout(
+              `${supabaseUrl}/functions/v1/ebay-process-order`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${serviceRoleKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  order_id: ebayOrderId,
+                  action: "process_order",
+                }),
+              },
+              60_000, // 60s timeout per order
+            );
+            if (!processRes.ok) {
+              const errText = await processRes.text();
+              console.error(`ebay-process-order failed for ${ebayOrderId}: ${errText}`);
+            } else {
+              const processResult = await processRes.json();
+              if (processResult.skipped) {
+                console.log(`Order ${ebayOrderId} already processed, skipping`);
+              } else {
+                console.log(`Order ${ebayOrderId} processed: qbo_sync_status=${processResult.qbo_sync_status}`);
+              }
             }
-
-            if (!skuId) {
-              console.warn(`No SKU match for eBay line item sku="${ebaySku}" in order ${ebayOrderId}`);
-              continue;
-            }
-
-            const unitPrice = parseFloat(li.lineItemCost?.value || "0");
-            const qty = li.quantity || 1;
-
-            await admin.from("sales_order_line").insert({
-              sales_order_id: newOrder.id,
-              sku_id: skuId,
-              quantity: qty,
-              unit_price: unitPrice,
-              line_total: unitPrice * qty,
-            });
+          } catch (e: any) {
+            console.error(`Failed to process eBay order ${ebayOrderId}: ${e.message}`);
           }
         }
         results.orders_synced++;
