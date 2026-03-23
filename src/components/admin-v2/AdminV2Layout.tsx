@@ -1,12 +1,28 @@
+import { useMemo } from "react";
 import { AdminV2Sidebar } from "./AdminV2Sidebar";
+import { useBatchUnitSummaries } from "@/hooks/admin/use-purchase-batches";
+import { useOrders } from "@/hooks/admin/use-orders";
 
 interface AdminV2LayoutProps {
   children: React.ReactNode;
-  ungradedCount?: number;
-  actionNeededCount?: number;
 }
 
-export function AdminV2Layout({ children, ungradedCount, actionNeededCount }: AdminV2LayoutProps) {
+export function AdminV2Layout({ children }: AdminV2LayoutProps) {
+  const { data: summaryMap } = useBatchUnitSummaries();
+  const { data: orders } = useOrders();
+
+  const ungradedCount = useMemo(() => {
+    if (!summaryMap) return 0;
+    return Array.from(summaryMap.values()).reduce((s, b) => s + b.ungradedCount, 0);
+  }, [summaryMap]);
+
+  const actionNeededCount = useMemo(() => {
+    if (!orders) return 0;
+    return orders.filter(
+      (o) => o.status === "needs_allocation" || o.status === "return_pending"
+    ).length;
+  }, [orders]);
+
   return (
     <div className="flex h-screen bg-[#1C1C1E] font-sans text-zinc-50">
       <AdminV2Sidebar

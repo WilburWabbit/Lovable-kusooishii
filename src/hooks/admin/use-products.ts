@@ -125,6 +125,48 @@ export function useProducts() {
   });
 }
 
+// ─── useProductStockCounts ───────────────────────────────────
+
+export interface ProductStockCounts {
+  listed: number;
+  sold: number;
+}
+
+const SOLD_STATUSES = ['sold', 'shipped', 'delivered', 'payout_received', 'complete'];
+
+export function useProductStockCounts() {
+  return useQuery({
+    queryKey: ['v2', 'product-stock-counts'] as const,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('stock_unit')
+        .select('mpn, v2_status')
+        .in('v2_status' as never, ['listed', ...SOLD_STATUSES]);
+
+      if (error) throw error;
+
+      const counts = new Map<string, ProductStockCounts>();
+
+      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+        const mpn = row.mpn as string;
+        const status = row.v2_status as string;
+        if (!mpn) continue;
+
+        let entry = counts.get(mpn);
+        if (!entry) {
+          entry = { listed: 0, sold: 0 };
+          counts.set(mpn, entry);
+        }
+
+        if (status === 'listed') entry.listed += 1;
+        else if (SOLD_STATUSES.includes(status)) entry.sold += 1;
+      }
+
+      return counts;
+    },
+  });
+}
+
 // ─── useProduct ─────────────────────────────────────────────
 
 export function useProduct(mpn: string | undefined) {

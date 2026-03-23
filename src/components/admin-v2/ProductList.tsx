@@ -1,11 +1,12 @@
 import { useNavigate } from "react-router-dom";
-import { useProducts } from "@/hooks/admin/use-products";
+import { useProducts, useProductStockCounts } from "@/hooks/admin/use-products";
 import type { Product, ProductVariant } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
 
 export function ProductList() {
   const navigate = useNavigate();
   const { data: products = [], isLoading } = useProducts();
+  const { data: stockCounts } = useProductStockCounts();
 
   if (isLoading) {
     return <p className="text-zinc-500 text-sm">Loading products…</p>;
@@ -38,6 +39,8 @@ export function ProductList() {
                 key={p.mpn}
                 product={p}
                 variants={p.variants}
+                listedCount={stockCounts?.get(p.mpn)?.listed ?? 0}
+                soldCount={stockCounts?.get(p.mpn)?.sold ?? 0}
                 onClick={() => navigate(`/admin/v2/products/${p.mpn}`)}
               />
             ))}
@@ -51,14 +54,17 @@ export function ProductList() {
 function ProductRow({
   product,
   variants,
+  listedCount,
+  soldCount,
   onClick,
 }: {
   product: Product;
   variants: ProductVariant[];
+  listedCount: number;
+  soldCount: number;
   onClick: () => void;
 }) {
   const totalUnits = variants.reduce((s, v) => s + v.qtyOnHand, 0);
-  // We approximate listed/sold from variant data; exact counts need unit-level data
   const noVariants = variants.length === 0;
 
   return (
@@ -84,10 +90,10 @@ function ProductRow({
         <Mono>{totalUnits || "—"}</Mono>
       </td>
       <td className="px-3 py-2.5">
-        <Mono color="dim">—</Mono>
+        <Mono color={listedCount > 0 ? "amber" : "dim"}>{listedCount}</Mono>
       </td>
       <td className="px-3 py-2.5">
-        <Mono color="dim">—</Mono>
+        <Mono color={soldCount > 0 ? "green" : "dim"}>{soldCount}</Mono>
       </td>
       <td className="px-3 py-2.5">
         {noVariants ? (

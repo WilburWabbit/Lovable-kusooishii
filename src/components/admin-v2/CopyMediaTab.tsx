@@ -107,6 +107,8 @@ function CopySection({ product }: { product: ProductDetail }) {
   const [description, setDescription] = useState(product.description ?? "");
   const [highlights, setHighlights] = useState(product.highlights ?? "");
   const [cta, setCta] = useState(product.cta ?? "");
+  const [seoTitle, setSeoTitle] = useState(product.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(product.seoDescription ?? "");
 
   const handleSave = async () => {
     try {
@@ -116,6 +118,8 @@ function CopySection({ product }: { product: ProductDetail }) {
         description,
         highlights,
         cta,
+        seoTitle,
+        seoDescription,
       });
       toast.success("Product copy saved");
     } catch (err: unknown) {
@@ -146,6 +150,30 @@ function CopySection({ product }: { product: ProductDetail }) {
             />
           </div>
         ))}
+        <SectionHead>SEO</SectionHead>
+        <div>
+          <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
+            SEO Title <span className="text-zinc-600 font-normal">({seoTitle.length}/60)</span>
+          </label>
+          <input
+            value={seoTitle}
+            onChange={(e) => setSeoTitle(e.target.value)}
+            maxLength={60}
+            className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 font-sans box-border"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
+            SEO Description <span className="text-zinc-600 font-normal">({seoDescription.length}/160)</span>
+          </label>
+          <textarea
+            rows={2}
+            value={seoDescription}
+            onChange={(e) => setSeoDescription(e.target.value)}
+            maxLength={160}
+            className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 resize-y font-sans box-border"
+          />
+        </div>
         <button
           onClick={handleSave}
           disabled={updateCopy.isPending}

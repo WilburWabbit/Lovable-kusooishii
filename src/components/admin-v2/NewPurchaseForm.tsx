@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreatePurchaseBatch } from "@/hooks/admin/use-purchase-batches";
-import type { SharedCosts } from "@/lib/types/admin";
+import { useProducts } from "@/hooks/admin/use-products";
+import type { SharedCosts, Product, ProductVariant } from "@/lib/types/admin";
 import { SurfaceCard, Mono, SectionHead, BackButton } from "./ui-primitives";
 import { toast } from "sonner";
 
@@ -245,11 +246,9 @@ export function NewPurchaseForm() {
               return (
                 <tr key={li.key} className="border-b border-zinc-700/80">
                   <td className="px-3 py-2">
-                    <input
+                    <MpnAutocomplete
                       value={li.mpn}
-                      onChange={(e) => updateLine(li.key, "mpn", e.target.value)}
-                      placeholder="e.g. 75348-1"
-                      className="w-28 px-2 py-1 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+                      onChange={(v) => updateLine(li.key, "mpn", v)}
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -339,6 +338,86 @@ export function NewPurchaseForm() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+
+// ─── MPN Autocomplete ───────────────────────────────────────
+
+function MpnAutocomplete({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { data: products = [] } = useProducts();
+  const [focused, setFocused] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const suggestions = useMemo(() => {
+    if (!value || value.length < 2) return [];
+    const q = value.toLowerCase();
+    return products
+      .filter((p) => p.mpn.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [value, products]);
+
+  const matchedProduct = products.find(
+    (p) => p.mpn.toLowerCase() === value.toLowerCase()
+  );
+
+  const totalOnHand = matchedProduct
+    ? (matchedProduct as Product & { variants: ProductVariant[] }).variants.reduce(
+        (s: number, v: ProductVariant) => s + v.qtyOnHand,
+        0
+      )
+    : 0;
+  const avgCost = matchedProduct
+    ? (matchedProduct as Product & { variants: ProductVariant[] }).variants.reduce(
+        (s: number, v: ProductVariant) => s + (v.avgCost ?? 0) * v.qtyOnHand,
+        0
+      ) / (totalOnHand || 1)
+    : 0;
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        placeholder="e.g. 75348-1"
+        className="w-32 px-2 py-1 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+      />
+      {focused && suggestions.length > 0 && (
+        <div className="absolute z-20 top-full left-0 w-56 mt-1 bg-[#2A2A2E] border border-zinc-700/80 rounded-md shadow-lg max-h-40 overflow-auto">
+          {suggestions.map((p) => (
+            <button
+              key={p.mpn}
+              onMouseDown={() => onChange(p.mpn)}
+              className="w-full text-left px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-[#35353A] transition-colors border-none bg-transparent cursor-pointer"
+            >
+              <span className="font-mono text-amber-500">{p.mpn}</span>{" "}
+              <span className="text-zinc-500">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {value && matchedProduct && (
+        <div className="text-[10px] text-zinc-500 mt-0.5">
+          {totalOnHand > 0 ? (
+            <span>
+              {totalOnHand} on hand at £{avgCost.toFixed(2)} avg
+            </span>
+          ) : (
+            <span className="text-amber-500/70">New to catalogue</span>
+          )}
+        </div>
+      )}
+      {value && value.length >= 3 && !matchedProduct && (
+        <div className="text-[10px] text-amber-500/70 mt-0.5">New to catalogue</div>
+      )}
+    </div>
+  );
+}
 
 function FormField({
   label,

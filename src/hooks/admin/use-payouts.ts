@@ -144,7 +144,7 @@ export function usePayoutSummary() {
       return {
         pendingByChannel: channelSummary,
         blueBellCommission: {
-          owedSinceLastPayment: Math.round(bbTotal * 0.1 * 100) / 100, // 10% commission estimate
+          owedSinceLastPayment: Math.round(bbTotal * 0.05 * 100) / 100, // 5% commission per spec Section 3.10
           qualifyingOrderCount: (bbOrders ?? []).length,
         },
       };

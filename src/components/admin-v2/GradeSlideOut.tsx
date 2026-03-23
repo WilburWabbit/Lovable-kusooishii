@@ -8,7 +8,7 @@ import {
 import { useGradeStockUnit } from "@/hooks/admin/use-stock-units";
 import { CONDITION_FLAGS, GRADE_COLORS } from "@/lib/constants/unit-statuses";
 import { GRADE_LABELS_NUMERIC } from "@/lib/grades";
-import type { StockUnit, ConditionGrade, ConditionFlag } from "@/lib/types/admin";
+import type { StockUnit, ConditionGrade, ConditionFlag, ProductVariant } from "@/lib/types/admin";
 import { Mono, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 
@@ -16,6 +16,7 @@ interface GradeSlideOutProps {
   unit: (StockUnit & { productName?: string }) | null;
   open: boolean;
   onClose: () => void;
+  variants?: ProductVariant[];
 }
 
 const GRADE_DESCRIPTIONS: Record<number, string> = {
@@ -25,7 +26,13 @@ const GRADE_DESCRIPTIONS: Record<number, string> = {
   4: "Incomplete, all issues disclosed",
 };
 
-export function GradeSlideOut({ unit, open, onClose }: GradeSlideOutProps) {
+export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlideOutProps) {
+  // Build market price lookup from variants
+  const marketPriceByGrade = new Map<number, number>();
+  for (const v of variants) {
+    const price = v.marketPrice ?? v.salePrice;
+    if (price) marketPriceByGrade.set(v.grade, price);
+  }
   const [selectedGrade, setSelectedGrade] = useState<ConditionGrade | null>(
     (unit?.grade as ConditionGrade) ?? null
   );
@@ -116,6 +123,11 @@ export function GradeSlideOut({ unit, open, onClose }: GradeSlideOutProps) {
                       <div className="text-[11px] text-zinc-500 mt-0.5">
                         {GRADE_DESCRIPTIONS[g]}
                       </div>
+                      {marketPriceByGrade.has(g) && (
+                        <div className="text-[11px] text-teal-500 font-mono mt-0.5">
+                          £{marketPriceByGrade.get(g)!.toFixed(2)}
+                        </div>
+                      )}
                     </button>
                   );
                 })}

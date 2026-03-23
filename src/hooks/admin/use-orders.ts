@@ -142,6 +142,37 @@ export function useOrder(orderId: string | undefined) {
       const row = data as Record<string, unknown>;
       const order = mapOrder(row);
       const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map(mapLineItem);
+
+      // Fetch stock unit statuses for allocated line items
+      const allocatedUnitIds = lines
+        .map((li) => li.stockUnitId)
+        .filter((id): id is string => !!id);
+
+      if (allocatedUnitIds.length > 0) {
+        const { data: unitRows } = await supabase
+          .from('stock_unit')
+          .select('id, uid, v2_status')
+          .in('id', allocatedUnitIds);
+
+        const unitMap = new Map<string, { uid: string | null; status: string }>();
+        for (const u of ((unitRows ?? []) as Record<string, unknown>[])) {
+          unitMap.set(u.id as string, {
+            uid: (u.uid as string) ?? null,
+            status: (u.v2_status as string) ?? 'sold',
+          });
+        }
+
+        for (const li of lines) {
+          if (li.stockUnitId) {
+            const unit = unitMap.get(li.stockUnitId);
+            if (unit) {
+              (li as Record<string, unknown>)._unitStatus = unit.status;
+              (li as Record<string, unknown>)._unitUid = unit.uid;
+            }
+          }
+        }
+      }
+
       const customerRow = row.customer as Record<string, unknown> | null;
 
       return {

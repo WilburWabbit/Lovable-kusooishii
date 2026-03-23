@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useOrder } from "@/hooks/admin/use-orders";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useOrder, orderKeys } from "@/hooks/admin/use-orders";
+import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
 import type { OrderLineItem, StockUnitStatus } from "@/lib/types/admin";
 import {
   SurfaceCard,
@@ -13,6 +16,8 @@ import {
   BackButton,
 } from "./ui-primitives";
 import { OrderUnitSlideOut } from "./OrderUnitSlideOut";
+import { AllocateItemsDialog } from "./AllocateItemsDialog";
+import { toast } from "sonner";
 
 interface OrderDetailProps {
   orderId: string;
@@ -20,7 +25,9 @@ interface OrderDetailProps {
 
 export function OrderDetail({ orderId }: OrderDetailProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: order, isLoading } = useOrder(orderId);
+  const [showAllocate, setShowAllocate] = useState(false);
   const [slideItem, setSlideItem] = useState<(OrderLineItem & {
     unitUid?: string;
     unitStatus?: StockUnitStatus;
@@ -29,6 +36,28 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     trackingNumber?: string | null;
     payoutStatus?: string;
   }) | null>(null);
+
+  const markComplete = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("sales_order")
+        .update({ status: "complete" } as never)
+        .eq("id", orderId);
+      if (error) throw error;
+
+      // Update associated stock units
+      await supabase
+        .from("stock_unit")
+        .update({ v2_status: "complete", completed_at: new Date().toISOString() } as never)
+        .eq("order_id" as never, orderId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: orderKeys.all });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+      queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
+      toast.success("Order marked as complete");
+    },
+  });
 
   if (isLoading) {
     return <p className="text-zinc-500 text-sm">Loading order…</p>;
@@ -77,13 +106,20 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         </div>
         <div className="flex gap-2">
           {order.status === "needs_allocation" && (
-            <button className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors">
+            <button
+              onClick={() => setShowAllocate(true)}
+              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
+            >
               Allocate Items
             </button>
           )}
           {(order.status === "shipped" || order.status === "delivered") && (
-            <button className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-200 transition-colors">
-              Mark Complete
+            <button
+              onClick={() => markComplete.mutate()}
+              disabled={markComplete.isPending}
+              className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+            >
+              {markComplete.isPending ? "Completing…" : "Mark Complete"}
             </button>
           )}
         </div>
@@ -120,12 +156,20 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           <tbody>
             {order.lineItems.map((item) => {
               const isUnallocated = !item.stockUnitId;
+              const itemAny = item as Record<string, unknown>;
               const unitStatus: StockUnitStatus = isUnallocated
                 ? "needs_allocation"
-                : "sold";
+                : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");
+              const unitUid = (itemAny._unitUid as string) ?? item.stockUnitId?.slice(0, 10);
 
-              // Determine payout status
-              const payoutStatus = isUnallocated ? undefined : "Pending";
+              // Determine payout status from unit lifecycle
+              const payoutStatus = isUnallocated
+                ? undefined
+                : unitStatus === "payout_received" || unitStatus === "complete"
+                ? "Received"
+                : unitStatus === "return_pending"
+                ? "Held"
+                : "Pending";
 
               return (
                 <tr
@@ -144,7 +188,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   </td>
                   <td className="px-3 py-2.5">
                     <Mono color={isUnallocated ? "amber" : "default"}>
-                      {item.stockUnitId ? item.stockUnitId.slice(0, 10) : "Unallocated"}
+                      {isUnallocated ? "Unallocated" : unitUid ?? "—"}
                     </Mono>
                   </td>
                   <td className="px-3 py-2.5">
@@ -212,6 +256,15 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         open={!!slideItem}
         onClose={() => setSlideItem(null)}
       />
+
+      {order && (
+        <AllocateItemsDialog
+          open={showAllocate}
+          onClose={() => setShowAllocate(false)}
+          orderId={order.id}
+          lineItems={order.lineItems}
+        />
+      )}
     </div>
   );
 }
