@@ -193,6 +193,22 @@ export function usePurchaseBatch(batchId: string | undefined) {
       if (unitErr) throw unitErr;
       const units = ((unitRows ?? []) as Record<string, unknown>[]).map(mapStockUnit);
 
+      // Fetch product names for all MPNs in this batch
+      const uniqueMpns = [...new Set(lineItems.map((li) => li.mpn))];
+      const productNameMap = new Map<string, string>();
+      if (uniqueMpns.length > 0) {
+        const { data: products } = await supabase
+          .from('product')
+          .select('mpn, name')
+          .in('mpn', uniqueMpns);
+
+        for (const p of ((products ?? []) as Record<string, unknown>[])) {
+          const mpn = p.mpn as string;
+          const name = p.name as string;
+          if (mpn && name && name !== mpn) productNameMap.set(mpn, name);
+        }
+      }
+
       // Group units by line_item_id
       const unitsByLine = new Map<string, StockUnit[]>();
       for (const unit of units) {
@@ -207,6 +223,7 @@ export function usePurchaseBatch(batchId: string | undefined) {
         ...batch,
         lineItems: lineItems.map((li) => ({
           ...li,
+          productName: productNameMap.get(li.mpn) ?? null,
           units: unitsByLine.get(li.id) ?? [],
         })),
       };

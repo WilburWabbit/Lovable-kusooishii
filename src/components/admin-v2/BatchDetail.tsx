@@ -114,8 +114,22 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           line={line}
           selectedUnitIds={selectedUnitIds}
           onToggleSelect={toggleSelect}
+          onSelectAllUngraded={(unitIds) => {
+            setSelectedUnitIds((prev) => {
+              const next = new Set(prev);
+              // If deselecting (empty array), remove this line's ungraded units
+              if (unitIds.length === 0) {
+                for (const u of line.units) {
+                  if (u.grade === null) next.delete(u.id);
+                }
+              } else {
+                for (const id of unitIds) next.add(id);
+              }
+              return next;
+            });
+          }}
           onGradeUnit={(unit) =>
-            setGradingUnit({ ...unit, productName: undefined })
+            setGradingUnit({ ...unit, productName: (line as { productName?: string }).productName ?? undefined })
           }
         />
       ))}
@@ -143,25 +157,45 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
 // ─── Line Item Card ─────────────────────────────────────────
 
 interface LineItemCardProps {
-  line: PurchaseLineItem & { units: StockUnit[] };
+  line: PurchaseLineItem & { units: StockUnit[]; productName?: string | null };
   selectedUnitIds: Set<string>;
   onToggleSelect: (id: string) => void;
+  onSelectAllUngraded: (unitIds: string[]) => void;
   onGradeUnit: (unit: StockUnit) => void;
 }
 
-function LineItemCard({ line, selectedUnitIds, onToggleSelect, onGradeUnit }: LineItemCardProps) {
+function LineItemCard({ line, selectedUnitIds, onToggleSelect, onSelectAllUngraded, onGradeUnit }: LineItemCardProps) {
+  const ungradedIds = line.units.filter((u) => u.grade === null).map((u) => u.id);
+  const allUngradedSelected = ungradedIds.length > 0 && ungradedIds.every((id) => selectedUnitIds.has(id));
+
   return (
     <SurfaceCard noPadding className="mb-3 overflow-hidden">
       {/* Line header */}
       <div className="px-4 py-3 border-b border-zinc-200 flex justify-between items-center">
         <div className="flex items-center gap-2.5">
           <Mono color="amber">{line.mpn}</Mono>
+          {line.productName && (
+            <span className="text-zinc-600 text-sm truncate max-w-[280px]">{line.productName}</span>
+          )}
         </div>
-        <div className="flex gap-3 text-xs text-zinc-500">
+        <div className="flex items-center gap-3 text-xs text-zinc-500">
           <span>Qty: {line.quantity}</span>
           <span>
             Unit cost: <Mono>£{line.unitCost.toFixed(2)}</Mono>
           </span>
+          {ungradedIds.length > 1 && (
+            <button
+              onClick={() => onSelectAllUngraded(allUngradedSelected ? [] : ungradedIds)}
+              className="ml-1 rounded px-2 py-0.5 text-[11px] cursor-pointer transition-colors border"
+              style={
+                allUngradedSelected
+                  ? { background: "#F59E0B20", color: "#F59E0B", borderColor: "#F59E0B" }
+                  : { background: "transparent", color: "#71717A", borderColor: "#D4D4D8" }
+              }
+            >
+              {allUngradedSelected ? "Deselect all" : `Select all ${ungradedIds.length} ungraded`}
+            </button>
+          )}
         </div>
       </div>
 
