@@ -210,7 +210,7 @@ export function usePublishListing() {
           v2_status: 'listed',
           listed_at: new Date().toISOString(),
         } as never)
-        .eq('sku_id' as never, skuRow.id)
+        .eq('sku_id' as never, (skuRow as unknown as Record<string, unknown>).id as string)
         .eq('v2_status' as never, 'graded');
 
       // Fire-and-forget: trigger external channel push

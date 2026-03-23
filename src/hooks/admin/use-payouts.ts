@@ -171,7 +171,7 @@ export function useCreatePayout() {
   return useMutation({
     mutationFn: async (input: CreatePayoutInput) => {
       const { data, error } = await supabase
-        .from('payouts')
+        .from('payouts' as never)
         .insert({
           channel: input.channel,
           payout_date: input.payoutDate,

@@ -327,7 +327,7 @@ export function useCreatePurchaseBatch() {
 
       // 4. Run cost apportionment
       const { error: apportionErr } = await supabase
-        .rpc('v2_calculate_apportioned_costs', { p_batch_id: batchId } as never);
+        .rpc('v2_calculate_apportioned_costs' as never, { p_batch_id: batchId } as never);
 
       if (apportionErr) throw apportionErr;
 

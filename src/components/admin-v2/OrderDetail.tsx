@@ -186,7 +186,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           <tbody>
             {order.lineItems.map((item) => {
               const isUnallocated = !item.stockUnitId;
-              const itemAny = item as Record<string, unknown>;
+              const itemAny = item as unknown as Record<string, unknown>;
               const unitStatus: StockUnitStatus = isUnallocated
                 ? "needs_allocation"
                 : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");

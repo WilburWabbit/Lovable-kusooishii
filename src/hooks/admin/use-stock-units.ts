@@ -159,12 +159,12 @@ export function useGradeStockUnit() {
       let skuId: string;
       const { data: existingSku } = await supabase
         .from('sku')
-        .select('id, market_price')
+        .select('id, market_price' as never)
         .eq('sku_code', skuCode)
         .maybeSingle();
 
       if (existingSku) {
-        skuId = existingSku.id;
+        skuId = (existingSku as unknown as Record<string, unknown>).id as string;
 
         // Update market_price with latest data (preserve user-set sale_price)
         if (gradeMarketPrice != null) {

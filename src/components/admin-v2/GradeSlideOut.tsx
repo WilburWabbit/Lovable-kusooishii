@@ -69,8 +69,8 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
     // Pre-populate physical fields from product data
     setPhysical({
       ean: product?.ean ?? "",
-      upc: (product as Record<string, unknown> | undefined)?.upc as string ?? "",
-      isbn: (product as Record<string, unknown> | undefined)?.isbn as string ?? "",
+      upc: (product as unknown as Record<string, unknown> | undefined)?.upc as string ?? "",
+      isbn: (product as unknown as Record<string, unknown> | undefined)?.isbn as string ?? "",
       ageMark: product?.ageMark ?? "",
       lengthCm: product?.dimensionsCm?.split("×")?.[0]?.trim() ?? "",
       widthCm: product?.dimensionsCm?.split("×")?.[1]?.trim() ?? "",

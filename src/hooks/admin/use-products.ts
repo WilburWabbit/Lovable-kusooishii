@@ -140,14 +140,14 @@ export function useProductStockCounts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stock_unit')
-        .select('mpn, v2_status')
+        .select('mpn, v2_status' as never)
         .in('v2_status' as never, ['listed', ...SOLD_STATUSES]);
 
       if (error) throw error;
 
       const counts = new Map<string, ProductStockCounts>();
 
-      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+      for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const mpn = row.mpn as string;
         const status = row.v2_status as string;
         if (!mpn) continue;

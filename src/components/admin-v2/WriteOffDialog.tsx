@@ -60,8 +60,8 @@ export function WriteOffDialog({ open, onClose, stockUnitIds }: WriteOffDialogPr
           .single();
 
         if (skuRow) {
-          await supabase.rpc("v2_recalculate_variant_stats", {
-            p_sku_code: (skuRow as Record<string, unknown>).sku_code,
+          await supabase.rpc("v2_recalculate_variant_stats" as never, {
+            p_sku_code: (skuRow as unknown as Record<string, unknown>).sku_code,
           } as never);
         }
       }

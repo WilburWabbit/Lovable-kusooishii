@@ -212,10 +212,10 @@ export function useAllocateOrderItems() {
       for (const alloc of allocations) {
         // Consume FIFO unit via database function
         const { data: unit, error: fifoErr } = await supabase
-          .rpc('v2_consume_fifo_unit', { p_sku_code: alloc.skuCode } as never);
+          .rpc('v2_consume_fifo_unit' as never, { p_sku_code: alloc.skuCode } as never);
 
         if (fifoErr) throw fifoErr;
-        const consumed = unit as Record<string, unknown>;
+        const consumed = unit as unknown as Record<string, unknown>;
 
         // Update the order line item with the allocated unit
         const { error: lineErr } = await supabase

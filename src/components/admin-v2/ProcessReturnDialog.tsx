@@ -70,7 +70,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
 
       // Recalculate variant stats for affected SKUs
       for (const skuCode of affectedSkus) {
-        await supabase.rpc("v2_recalculate_variant_stats", { p_sku_code: skuCode } as never);
+        await supabase.rpc("v2_recalculate_variant_stats" as never, { p_sku_code: skuCode } as never);
       }
 
       // Determine final order status based on all line actions
