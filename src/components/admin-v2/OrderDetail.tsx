@@ -287,27 +287,33 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         onClose={() => setSlideItem(null)}
       />
 
-      {order && (
+      {order && showAllocate && (
         <AllocateItemsDialog
           open={showAllocate}
           onClose={() => setShowAllocate(false)}
           orderId={order.id}
           lineItems={order.lineItems}
         />
+      )}
 
+      {order && showShip && (
         <ShipOrderDialog
           open={showShip}
           onClose={() => setShowShip(false)}
           orderId={order.id}
         />
+      )}
 
+      {order && showReturn && (
         <ReturnDialog
           open={showReturn}
           onClose={() => setShowReturn(false)}
           orderId={order.id}
           lineItems={order.lineItems}
         />
+      )}
 
+      {order && showProcessReturn && (
         <ProcessReturnDialog
           open={showProcessReturn}
           onClose={() => setShowProcessReturn(false)}

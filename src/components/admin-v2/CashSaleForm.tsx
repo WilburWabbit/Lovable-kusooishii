@@ -87,7 +87,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
         .maybeSingle();
 
       const lastNum = lastOrder
-        ? parseInt((lastOrder as Record<string, unknown>).order_number as string
+        ? parseInt(((lastOrder as Record<string, unknown>).order_number as string)
             .replace("KO-", ""), 10) || 0
         : 0;
       const orderNumber = `KO-${String(lastNum + 1).padStart(4, "0")}`;
