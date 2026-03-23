@@ -95,6 +95,68 @@ export function usePurchaseBatches() {
   });
 }
 
+// ─── useBatchUnitSummaries ───────────────────────────────────
+
+export interface BatchUnitSummary {
+  batchId: string;
+  totalUnits: number;
+  mpnCount: number;
+  ungradedCount: number;
+  statusCounts: Record<string, number>;
+}
+
+export function useBatchUnitSummaries() {
+  return useQuery({
+    queryKey: ['v2', 'batch-unit-summaries'] as const,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('stock_unit')
+        .select('batch_id, mpn, v2_status, condition_grade')
+        .not('batch_id', 'is', null);
+
+      if (error) throw error;
+
+      const summaryMap = new Map<string, BatchUnitSummary>();
+
+      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+        const batchId = row.batch_id as string;
+        if (!batchId) continue;
+
+        let summary = summaryMap.get(batchId);
+        if (!summary) {
+          summary = { batchId, totalUnits: 0, mpnCount: 0, ungradedCount: 0, statusCounts: {} };
+          summaryMap.set(batchId, summary);
+        }
+
+        summary.totalUnits += 1;
+        const status = (row.v2_status as string) ?? 'purchased';
+        summary.statusCounts[status] = (summary.statusCounts[status] ?? 0) + 1;
+
+        if (row.condition_grade == null) {
+          summary.ungradedCount += 1;
+        }
+      }
+
+      // Count distinct MPNs per batch
+      const mpnSets = new Map<string, Set<string>>();
+      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+        const batchId = row.batch_id as string;
+        const mpn = row.mpn as string;
+        if (!batchId || !mpn) continue;
+        const set = mpnSets.get(batchId) ?? new Set();
+        set.add(mpn);
+        mpnSets.set(batchId, set);
+      }
+      for (const [batchId, mpnSet] of mpnSets) {
+        const summary = summaryMap.get(batchId);
+        if (summary) summary.mpnCount = mpnSet.size;
+      }
+
+      return summaryMap;
+    },
+  });
+}
+
 // ─── usePurchaseBatch ───────────────────────────────────────
 
 export function usePurchaseBatch(batchId: string | undefined) {

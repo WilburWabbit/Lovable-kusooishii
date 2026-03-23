@@ -9,6 +9,7 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
 
 interface SidebarItemProps {
   icon: React.ElementType;
@@ -142,22 +143,43 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
       </div>
 
       {/* Connection Status Footer */}
-      <div className="mt-auto px-4 py-4 border-t border-zinc-700/80 space-y-1">
-        <ConnectionIndicator label="QBO" connected />
-        <ConnectionIndicator label="eBay" connected />
-        <ConnectionIndicator label="Stripe" connected />
-      </div>
+      <ConnectionFooter />
     </aside>
   );
 }
 
-function ConnectionIndicator({ label, connected }: { label: string; connected: boolean }) {
+function ConnectionFooter() {
+  const { data: status } = useConnectionStatus();
+
+  const indicators: { label: string; state: string }[] = [
+    { label: "QBO", state: status?.qbo ?? "disconnected" },
+    { label: "eBay", state: status?.ebay ?? "disconnected" },
+    { label: "Stripe", state: status?.stripe ?? "disconnected" },
+  ];
+
   return (
-    <div className="text-[11px] text-zinc-500">
-      {label}:{" "}
-      <span className={connected ? "text-green-500" : "text-red-500"}>
-        {connected ? "●" : "●"} {connected ? "Connected" : "Disconnected"}
-      </span>
+    <div className="mt-auto px-4 py-4 border-t border-zinc-700/80 space-y-1">
+      {indicators.map((i) => (
+        <div key={i.label} className="text-[11px] text-zinc-500">
+          {i.label}:{" "}
+          <span
+            className={
+              i.state === "connected"
+                ? "text-green-500"
+                : i.state === "expired"
+                ? "text-amber-500"
+                : "text-red-500"
+            }
+          >
+            ●{" "}
+            {i.state === "connected"
+              ? "Connected"
+              : i.state === "expired"
+              ? "Expired"
+              : "Disconnected"}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

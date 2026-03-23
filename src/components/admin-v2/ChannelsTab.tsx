@@ -12,6 +12,7 @@ const CHANNELS: { key: Channel; label: string }[] = [
   { key: "ebay", label: "eBay" },
   { key: "website", label: "Website" },
   { key: "bricklink", label: "BrickLink" },
+  { key: "brickowl", label: "BrickOwl" },
 ];
 
 export function ChannelsTab({ variants }: ChannelsTabProps) {

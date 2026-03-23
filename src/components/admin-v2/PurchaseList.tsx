@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
-import { usePurchaseBatches } from "@/hooks/admin/use-purchase-batches";
+import { usePurchaseBatches, useBatchUnitSummaries } from "@/hooks/admin/use-purchase-batches";
+import type { BatchUnitSummary } from "@/hooks/admin/use-purchase-batches";
 import { UNIT_STATUSES } from "@/lib/constants/unit-statuses";
 import type { PurchaseBatch, StockUnitStatus } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
@@ -7,6 +8,11 @@ import { SurfaceCard, Mono, Badge } from "./ui-primitives";
 export function PurchaseList() {
   const navigate = useNavigate();
   const { data: batches = [], isLoading } = usePurchaseBatches();
+  const { data: summaryMap } = useBatchUnitSummaries();
+
+  const totalUngraded = summaryMap
+    ? Array.from(summaryMap.values()).reduce((s, b) => s + b.ungradedCount, 0)
+    : 0;
 
   if (isLoading) {
     return <p className="text-zinc-500 text-sm">Loading batches…</p>;
@@ -25,11 +31,19 @@ export function PurchaseList() {
       </div>
       <p className="text-zinc-500 text-[13px] mb-5">
         Purchase batches and goods-in grading.
+        {totalUngraded > 0 && (
+          <span className="text-amber-500"> {totalUngraded} units awaiting grading.</span>
+        )}
       </p>
 
       <div className="grid gap-3">
         {batches.map((b) => (
-          <BatchCard key={b.id} batch={b} onClick={() => navigate(`/admin/v2/purchases/${b.id}`)} />
+          <BatchCard
+            key={b.id}
+            batch={b}
+            summary={summaryMap?.get(b.id)}
+            onClick={() => navigate(`/admin/v2/purchases/${b.id}`)}
+          />
         ))}
         {batches.length === 0 && (
           <p className="text-zinc-500 text-sm">No purchase batches yet.</p>
@@ -41,16 +55,27 @@ export function PurchaseList() {
 
 // ─── Batch Card ─────────────────────────────────────────────
 
-function BatchCard({ batch, onClick }: { batch: PurchaseBatch; onClick: () => void }) {
+function BatchCard({
+  batch,
+  summary,
+  onClick,
+}: {
+  batch: PurchaseBatch;
+  summary?: BatchUnitSummary;
+  onClick: () => void;
+}) {
   const totalShared = batch.totalSharedCosts;
   const totalCost = batch.sharedCosts.shipping + batch.sharedCosts.broker_fee + batch.sharedCosts.other;
 
-  // We don't have unit-level data in the list query — we show what we have
   const formattedDate = new Date(batch.purchaseDate).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
+
+  const ungradedCount = summary?.ungradedCount ?? 0;
+  const totalUnits = summary?.totalUnits ?? 0;
+  const mpnCount = summary?.mpnCount ?? 0;
 
   return (
     <SurfaceCard onClick={onClick} noPadding className="overflow-hidden">
@@ -61,23 +86,42 @@ function BatchCard({ batch, onClick }: { batch: PurchaseBatch; onClick: () => vo
           <span className="text-zinc-500 text-xs">{formattedDate}</span>
         </div>
         <div className="flex items-center gap-3">
-          {batch.status === "draft" && (
-            <Badge label="Draft" color="#F59E0B" small />
-          )}
-          {batch.status === "recorded" && (
-            <Badge label="Recorded" color="#22C55E" small />
-          )}
+          {ungradedCount > 0 ? (
+            <Badge label={`${ungradedCount} ungraded`} color="#F59E0B" />
+          ) : totalUnits > 0 ? (
+            <Badge label="All graded" color="#22C55E" small />
+          ) : null}
           <Mono color="teal">
             £{totalShared.toFixed(2)}
           </Mono>
         </div>
       </div>
       <div className="px-4 pb-3 flex gap-4 text-xs text-zinc-500">
+        {totalUnits > 0 && <span>{totalUnits} units</span>}
+        {mpnCount > 0 && <span>{mpnCount} MPNs</span>}
         <span>Shared: £{totalCost.toFixed(2)}</span>
         {batch.supplierVatRegistered && (
           <span className="text-teal-500">VAT reg. supplier</span>
         )}
       </div>
+      {/* Status bar */}
+      {summary && totalUnits > 0 && (
+        <div className="flex h-[3px]">
+          {Object.entries(summary.statusCounts).map(([status, count]) => {
+            const s = UNIT_STATUSES[status as StockUnitStatus];
+            return (
+              <div
+                key={status}
+                style={{
+                  flex: count,
+                  background: s?.color ?? "#71717A",
+                  opacity: 0.6,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
     </SurfaceCard>
   );
 }
