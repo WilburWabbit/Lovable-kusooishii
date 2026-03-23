@@ -81,10 +81,12 @@ function mapImage(
 ): ProductImage {
   return {
     id: pm.id as string,
+    mediaAssetId: ma.id as string,
     mpn: productMpn,
     storagePath: ma.original_url as string,
     altText: (ma.alt_text as string) ?? null,
     sortOrder: (pm.sort_order as number) ?? 0,
+    isPrimary: (pm.is_primary as boolean) ?? false,
   };
 }
 

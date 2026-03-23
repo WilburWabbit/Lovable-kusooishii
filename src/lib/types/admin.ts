@@ -174,10 +174,12 @@ export interface ProductVariant {
 
 export interface ProductImage {
   id: string;
+  mediaAssetId: string;
   mpn: string;
   storagePath: string;
   altText: string | null;
   sortOrder: number;
+  isPrimary: boolean;
 }
 
 // ─── 2.7 Channel Listing ──────────────────────────────────
