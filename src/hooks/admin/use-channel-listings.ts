@@ -166,13 +166,13 @@ export function usePublishListing() {
       // Look up SKU + floor price for validation
       const { data: skuRow, error: skuErr } = await supabase
         .from('sku')
-        .select('id, floor_price')
+        .select('id, floor_price' as never)
         .eq('sku_code', skuCode)
         .single();
 
       if (skuErr) throw skuErr;
 
-      const floorPrice = (skuRow as Record<string, unknown>).floor_price as number | null;
+      const floorPrice = (skuRow as unknown as Record<string, unknown>).floor_price as number | null;
       if (floorPrice != null && listingPrice < floorPrice) {
         throw new Error(`Price £${listingPrice.toFixed(2)} is below floor price £${floorPrice.toFixed(2)}`);
       }
