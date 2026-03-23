@@ -272,6 +272,36 @@ export function useCreatePurchaseBatch() {
 
       if (lineErr) throw lineErr;
 
+      // 2b. Auto-create product records for new MPNs (lazy creation per spec)
+      const uniqueMpns = [...new Set(input.lineItems.map((li) => li.mpn))];
+      for (const mpn of uniqueMpns) {
+        const { data: existingProduct } = await supabase
+          .from('product')
+          .select('id')
+          .eq('mpn', mpn)
+          .maybeSingle();
+
+        if (!existingProduct) {
+          // Create minimal product record — will be enriched asynchronously
+          const { error: productErr } = await supabase
+            .from('product')
+            .insert({
+              mpn,
+              name: mpn, // Placeholder — enrichment will update with real name
+              set_number: mpn.split('-')[0],
+            } as never);
+
+          if (productErr) {
+            console.warn(`Failed to auto-create product for ${mpn}:`, productErr.message);
+          } else {
+            // Fire-and-forget: trigger product data enrichment from external APIs
+            supabase.functions
+              .invoke('rebrickable-sync', { body: { mpn } })
+              .catch((err) => console.warn(`Product enrichment for ${mpn} failed (non-blocking):`, err));
+          }
+        }
+      }
+
       // 3. Create stock units (one per quantity per line item)
       const stockUnitInserts: Record<string, unknown>[] = [];
       for (const li of (lineItems ?? []) as Record<string, unknown>[]) {

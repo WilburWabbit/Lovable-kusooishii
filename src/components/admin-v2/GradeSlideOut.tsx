@@ -6,17 +6,30 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useGradeStockUnit } from "@/hooks/admin/use-stock-units";
+import { supabase } from "@/integrations/supabase/client";
 import { CONDITION_FLAGS, GRADE_COLORS } from "@/lib/constants/unit-statuses";
 import { GRADE_LABELS_NUMERIC } from "@/lib/grades";
-import type { StockUnit, ConditionGrade, ConditionFlag, ProductVariant } from "@/lib/types/admin";
+import type { StockUnit, ConditionGrade, ConditionFlag, ProductVariant, Product } from "@/lib/types/admin";
 import { Mono, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
+
+interface PhysicalData {
+  ean: string;
+  upc: string;
+  isbn: string;
+  ageMark: string;
+  lengthCm: string;
+  widthCm: string;
+  heightCm: string;
+  weightG: string;
+}
 
 interface GradeSlideOutProps {
   unit: (StockUnit & { productName?: string }) | null;
   open: boolean;
   onClose: () => void;
   variants?: ProductVariant[];
+  product?: Product | null;
 }
 
 const GRADE_DESCRIPTIONS: Record<number, string> = {
@@ -26,7 +39,7 @@ const GRADE_DESCRIPTIONS: Record<number, string> = {
   4: "Incomplete, all issues disclosed",
 };
 
-export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlideOutProps) {
+export function GradeSlideOut({ unit, open, onClose, variants = [], product }: GradeSlideOutProps) {
   // Build market price lookup from variants
   const marketPriceByGrade = new Map<number, number>();
   for (const v of variants) {
@@ -40,6 +53,10 @@ export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlide
     new Set(unit?.conditionFlags ?? [])
   );
 
+  const [physical, setPhysical] = useState<PhysicalData>({
+    ean: "", upc: "", isbn: "", ageMark: "", lengthCm: "", widthCm: "", heightCm: "", weightG: "",
+  });
+
   const gradeUnit = useGradeStockUnit();
 
   // Reset state when unit changes
@@ -49,7 +66,29 @@ export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlide
     setLastUnitId(unitId);
     setSelectedGrade((unit?.grade as ConditionGrade) ?? null);
     setSelectedFlags(new Set(unit?.conditionFlags ?? []));
+    // Pre-populate physical fields from product data
+    setPhysical({
+      ean: product?.ean ?? "",
+      upc: (product as Record<string, unknown> | undefined)?.upc as string ?? "",
+      isbn: (product as Record<string, unknown> | undefined)?.isbn as string ?? "",
+      ageMark: product?.ageMark ?? "",
+      lengthCm: product?.dimensionsCm?.split("×")?.[0]?.trim() ?? "",
+      widthCm: product?.dimensionsCm?.split("×")?.[1]?.trim() ?? "",
+      heightCm: product?.dimensionsCm?.split("×")?.[2]?.trim() ?? "",
+      weightG: product?.weightG?.toString() ?? "",
+    });
   }
+
+  const updatePhysical = (field: keyof PhysicalData, value: string) => {
+    setPhysical((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const girthCm = (() => {
+    const l = parseFloat(physical.lengthCm) || 0;
+    const w = parseFloat(physical.widthCm) || 0;
+    const h = parseFloat(physical.heightCm) || 0;
+    return l + w + h;
+  })();
 
   const toggleFlag = (flag: ConditionFlag) => {
     setSelectedFlags((prev) => {
@@ -69,6 +108,25 @@ export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlide
         grade: selectedGrade,
         conditionFlags: Array.from(selectedFlags),
       });
+
+      // Persist physical confirmation fields to product record
+      const productUpdate: Record<string, unknown> = {};
+      if (physical.ean) productUpdate.ean = physical.ean;
+      if (physical.upc) productUpdate.upc = physical.upc;
+      if (physical.isbn) productUpdate.isbn = physical.isbn;
+      if (physical.ageMark) productUpdate.age_range = physical.ageMark;
+      if (physical.lengthCm) productUpdate.length_cm = parseFloat(physical.lengthCm);
+      if (physical.widthCm) productUpdate.width_cm = parseFloat(physical.widthCm);
+      if (physical.heightCm) productUpdate.height_cm = parseFloat(physical.heightCm);
+      if (physical.weightG) productUpdate.weight_kg = parseFloat(physical.weightG) / 1000;
+
+      if (Object.keys(productUpdate).length > 0) {
+        await supabase
+          .from('product')
+          .update(productUpdate as never)
+          .eq('mpn', unit.mpn);
+      }
+
       toast.success(`Unit ${unit.uid} graded as G${selectedGrade}`);
       onClose();
     } catch (err: unknown) {
@@ -159,23 +217,34 @@ export function GradeSlideOut({ unit, open, onClose, variants = [] }: GradeSlide
             <div>
               <SectionHead>Physical Confirmation</SectionHead>
               <div className="grid grid-cols-2 gap-2.5">
-                {[
-                  { label: "EAN", placeholder: "5702017421384" },
-                  { label: "Age Mark", placeholder: "14+" },
-                  { label: "Dimensions (cm)", placeholder: "38 × 26 × 7" },
-                  { label: "Weight (g)", placeholder: "1250" },
-                ].map((f) => (
-                  <div key={f.label}>
+                {([
+                  { label: "EAN", field: "ean" as const, placeholder: "5702017421384" },
+                  { label: "UPC", field: "upc" as const, placeholder: "673419388535" },
+                  { label: "ISBN", field: "isbn" as const, placeholder: "978-87-..." },
+                  { label: "Age Mark", field: "ageMark" as const, placeholder: "14+" },
+                  { label: "Length (cm)", field: "lengthCm" as const, placeholder: "38" },
+                  { label: "Width (cm)", field: "widthCm" as const, placeholder: "26" },
+                  { label: "Height (cm)", field: "heightCm" as const, placeholder: "7" },
+                  { label: "Weight (g)", field: "weightG" as const, placeholder: "1250" },
+                ] as const).map((f) => (
+                  <div key={f.field}>
                     <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                       {f.label}
                     </label>
                     <input
+                      value={physical[f.field]}
+                      onChange={(e) => updatePhysical(f.field, e.target.value)}
                       placeholder={f.placeholder}
                       className="w-full px-2 py-1.5 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
                     />
                   </div>
                 ))}
               </div>
+              {girthCm > 0 && (
+                <div className="mt-2 text-[11px] text-zinc-500">
+                  Girth: <Mono color="default">{girthCm.toFixed(1)} cm</Mono>
+                </div>
+              )}
             </div>
 
             {/* Actions */}

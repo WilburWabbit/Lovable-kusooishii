@@ -189,9 +189,18 @@ export function useGradeStockUnit() {
 
       if (updateErr) throw updateErr;
 
+      // Fire-and-forget: sync SKU to QBO (creates or updates the Item)
+      supabase.functions
+        .invoke('qbo-sync-item', { body: { skuCode } })
+        .then((res) => {
+          if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
+          else console.log(`QBO item sync for ${skuCode}: success`);
+        })
+        .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+
       return { stockUnitId, skuCode };
     },
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
       queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
     },
