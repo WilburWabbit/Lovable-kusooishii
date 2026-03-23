@@ -1,57 +1,38 @@
 
 
-## App Emails: Welcome, Order Confirmation, Order Shipped
+# Add Database Migration Deployment to GitHub Actions
 
-### Scope
+## Overview
 
-Three branded transactional email templates + BCC to contact@kusooishii.com. Emails triggered only for **web storefront** orders (Stripe). No email triggers for eBay orders.
+Add a new workflow (or extend the existing one) so that database migrations in `supabase/migrations/` are automatically applied to the Supabase project when merged to `main`.
 
-### Step 1 — Scaffold transactional email infrastructure
+## Approach
 
-Call `scaffold_transactional_email` to create `send-transactional-email`, `handle-email-unsubscribe`, `handle-email-suppression` edge functions, registry, and sample template.
+Create a separate workflow file dedicated to migrations. Keeping it separate from edge function deployment gives clearer logs and independent trigger paths.
 
-### Step 2 — Create three email templates
+## Changes
 
-All in `supabase/functions/_shared/transactional-email-templates/`, matching existing auth email style (Torii red buttons, Space Grotesk + Noto Sans JP, Kuso Oishii logo, white background, edgy tone).
+### 1. New workflow: `.github/workflows/deploy-migrations.yml`
 
-1. **`welcome.tsx`** — Sent after signup. Subject: "Welcome to the obsession". Brand intro, link to browse catalog.
-2. **`order-confirmation.tsx`** — Sent after Stripe checkout. Subject: "Order confirmed — {orderNumber}". Order number, items, shipping address, total. Props: `orderNumber`, `items`, `shippingName`, `grossTotal`, `currency`.
-3. **`order-shipped.tsx`** — Sent when web order status changes to "shipped" (admin action). Subject: "Your order has shipped — {orderNumber}". Tracking number, carrier. Props: `orderNumber`, `trackingNumber`, `shippingCarrier`.
+- **Trigger**: Push to `main` changing `supabase/migrations/**`, plus `workflow_dispatch` for manual runs
+- **Secrets required**: Same `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_ID` already configured
+- **Steps**:
+  1. Checkout repo
+  2. Validate secrets
+  3. Install Supabase CLI (`supabase/setup-cli@v1`)
+  4. Link project: `supabase link --project-ref "$SUPABASE_PROJECT_ID"`
+  5. Push migrations: `supabase db push --project-ref "$SUPABASE_PROJECT_ID"`
 
-Register all three in `registry.ts`.
+`supabase db push` applies any unapplied migrations from `supabase/migrations/` in order, skipping those already recorded in the remote `supabase_migrations.schema_migrations` table.
 
-### Step 3 — Add BCC support
+### 2. Update `docs/ci-cd.md`
 
-After each primary email is enqueued in `send-transactional-email/index.ts`, enqueue a duplicate to `contact@kusooishii.com` with idempotency key suffixed `-bcc`.
+Add a section documenting the new migrations workflow, triggers, and manual run instructions.
 
-### Step 4 — Wire triggers
+## Technical Notes
 
-**`stripe-webhook/index.ts`** — After order creation (~line 488), invoke `send-transactional-email` with `order-confirmation` template using customer email and order details. Only fires for web/Stripe orders.
-
-**Welcome email** — Invoke from auth-email-hook or client-side after first login/email verification.
-
-**Order shipped** — No eBay trigger. Will be triggered from the admin UI when an order's status is manually updated to "shipped" (future admin action).
-
-### Step 5 — Unsubscribe page
-
-Create `/unsubscribe` route with branded page that validates tokens via `handle-email-unsubscribe`. Add route to `App.tsx`.
-
-### Step 6 — Deploy
-
-Deploy all new/modified edge functions.
-
-### Files Created
-- `supabase/functions/_shared/transactional-email-templates/welcome.tsx`
-- `supabase/functions/_shared/transactional-email-templates/order-confirmation.tsx`
-- `supabase/functions/_shared/transactional-email-templates/order-shipped.tsx`
-- `supabase/functions/_shared/transactional-email-templates/registry.ts`
-- `supabase/functions/send-transactional-email/index.ts` (scaffolded)
-- `supabase/functions/handle-email-unsubscribe/index.ts` (scaffolded)
-- `supabase/functions/handle-email-suppression/index.ts` (scaffolded)
-- `src/pages/UnsubscribePage.tsx`
-
-### Files Modified
-- `supabase/functions/stripe-webhook/index.ts` — order confirmation email trigger
-- `supabase/functions/send-transactional-email/index.ts` — BCC logic
-- `src/App.tsx` — /unsubscribe route
+- No new GitHub secrets needed — reuses the existing `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_ID`
+- The `supabase db push` command is idempotent — safe to run repeatedly
+- Edge functions and migrations deploy independently based on which files changed
+- Be aware: Lovable Cloud also manages migrations, so this workflow is for deployments via GitHub (outside Lovable). Both paths are compatible since they track the same migration history table.
 
