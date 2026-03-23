@@ -5,7 +5,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useGradeStockUnit } from "@/hooks/admin/use-stock-units";
+import { useGradeStockUnit, useBulkGradeStockUnits } from "@/hooks/admin/use-stock-units";
 import { supabase } from "@/integrations/supabase/client";
 import { CONDITION_FLAGS, GRADE_COLORS } from "@/lib/constants/unit-statuses";
 import { GRADE_LABELS_NUMERIC } from "@/lib/grades";
@@ -26,10 +26,14 @@ interface PhysicalData {
 
 interface GradeSlideOutProps {
   unit: (StockUnit & { productName?: string }) | null;
+  /** When provided, applies grade/flags/physical to all units (bulk MPN mode) */
+  bulkUnits?: StockUnit[];
   open: boolean;
   onClose: () => void;
   variants?: ProductVariant[];
   product?: Product | null;
+  /** Raw product row from DB — used for pre-populating physical fields */
+  rawProductData?: Record<string, unknown> | null;
 }
 
 const GRADE_DESCRIPTIONS: Record<number, string> = {
@@ -39,7 +43,8 @@ const GRADE_DESCRIPTIONS: Record<number, string> = {
   4: "Incomplete, all issues disclosed",
 };
 
-export function GradeSlideOut({ unit, open, onClose, variants = [], product }: GradeSlideOutProps) {
+export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], product, rawProductData }: GradeSlideOutProps) {
+  const isBulk = bulkUnits && bulkUnits.length > 1;
   // Build market price lookup from variants
   const marketPriceByGrade = new Map<number, number>();
   for (const v of variants) {
@@ -58,6 +63,8 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
   });
 
   const gradeUnit = useGradeStockUnit();
+  const bulkGrade = useBulkGradeStockUnits();
+  const isSaving = gradeUnit.isPending || bulkGrade.isPending;
 
   // Reset state when unit changes
   const unitId = unit?.id;
@@ -66,16 +73,19 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
     setLastUnitId(unitId);
     setSelectedGrade((unit?.grade as ConditionGrade) ?? null);
     setSelectedFlags(new Set(unit?.conditionFlags ?? []));
-    // Pre-populate physical fields from product data
+    // Pre-populate physical fields from product data (raw DB row or typed product)
+    const raw = rawProductData;
+    const dims = (raw?.dimensions_cm as string) ?? product?.dimensionsCm ?? "";
+    const dimParts = dims.split("×").map((s: string) => s.trim());
     setPhysical({
-      ean: product?.ean ?? "",
-      upc: (product as unknown as Record<string, unknown> | undefined)?.upc as string ?? "",
-      isbn: (product as unknown as Record<string, unknown> | undefined)?.isbn as string ?? "",
-      ageMark: product?.ageMark ?? "",
-      lengthCm: product?.dimensionsCm?.split("×")?.[0]?.trim() ?? "",
-      widthCm: product?.dimensionsCm?.split("×")?.[1]?.trim() ?? "",
-      heightCm: product?.dimensionsCm?.split("×")?.[2]?.trim() ?? "",
-      weightG: product?.weightG?.toString() ?? "",
+      ean: (raw?.ean as string) ?? product?.ean ?? "",
+      upc: (raw?.upc as string) ?? "",
+      isbn: (raw?.isbn as string) ?? "",
+      ageMark: (raw?.age_mark as string) ?? (raw?.age_range as string) ?? product?.ageMark ?? "",
+      lengthCm: (raw?.length_cm != null ? String(raw.length_cm) : "") || dimParts[0] || "",
+      widthCm: (raw?.width_cm != null ? String(raw.width_cm) : "") || dimParts[1] || "",
+      heightCm: (raw?.height_cm != null ? String(raw.height_cm) : "") || dimParts[2] || "",
+      weightG: (raw?.weight_g != null ? String(raw.weight_g) : "") || (product?.weightG != null ? String(product.weightG) : ""),
     });
   }
 
@@ -99,35 +109,57 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
     });
   };
 
+  const persistPhysical = async (mpn: string) => {
+    const productUpdate: Record<string, unknown> = {};
+    if (physical.ean) productUpdate.ean = physical.ean;
+    if (physical.upc) productUpdate.upc = physical.upc;
+    if (physical.isbn) productUpdate.isbn = physical.isbn;
+    if (physical.ageMark) {
+      productUpdate.age_mark = physical.ageMark;
+      productUpdate.age_range = physical.ageMark;
+    }
+    const l = parseFloat(physical.lengthCm) || 0;
+    const w = parseFloat(physical.widthCm) || 0;
+    const h = parseFloat(physical.heightCm) || 0;
+    const wt = parseFloat(physical.weightG) || 0;
+    if (l) productUpdate.length_cm = l;
+    if (w) productUpdate.width_cm = w;
+    if (h) productUpdate.height_cm = h;
+    if (l || w || h) productUpdate.dimensions_cm = `${l || 0} × ${w || 0} × ${h || 0}`;
+    if (wt) {
+      productUpdate.weight_g = Math.round(wt);
+      productUpdate.weight_kg = wt / 1000;
+    }
+
+    if (Object.keys(productUpdate).length > 0) {
+      await supabase
+        .from('product')
+        .update(productUpdate as never)
+        .eq('mpn', mpn);
+    }
+  };
+
   const handleSave = async () => {
     if (!unit || !selectedGrade) return;
 
     try {
-      await gradeUnit.mutateAsync({
-        stockUnitId: unit.id,
-        grade: selectedGrade,
-        conditionFlags: Array.from(selectedFlags),
-      });
-
-      // Persist physical confirmation fields to product record
-      const productUpdate: Record<string, unknown> = {};
-      if (physical.ean) productUpdate.ean = physical.ean;
-      if (physical.upc) productUpdate.upc = physical.upc;
-      if (physical.isbn) productUpdate.isbn = physical.isbn;
-      if (physical.ageMark) productUpdate.age_range = physical.ageMark;
-      if (physical.lengthCm) productUpdate.length_cm = parseFloat(physical.lengthCm);
-      if (physical.widthCm) productUpdate.width_cm = parseFloat(physical.widthCm);
-      if (physical.heightCm) productUpdate.height_cm = parseFloat(physical.heightCm);
-      if (physical.weightG) productUpdate.weight_kg = parseFloat(physical.weightG) / 1000;
-
-      if (Object.keys(productUpdate).length > 0) {
-        await supabase
-          .from('product')
-          .update(productUpdate as never)
-          .eq('mpn', unit.mpn);
+      if (isBulk && bulkUnits) {
+        await bulkGrade.mutateAsync({
+          stockUnitIds: bulkUnits.map((u) => u.id),
+          grade: selectedGrade,
+          conditionFlags: Array.from(selectedFlags),
+        });
+        await persistPhysical(unit.mpn);
+        toast.success(`${bulkUnits.length} units graded as G${selectedGrade}`);
+      } else {
+        await gradeUnit.mutateAsync({
+          stockUnitId: unit.id,
+          grade: selectedGrade,
+          conditionFlags: Array.from(selectedFlags),
+        });
+        await persistPhysical(unit.mpn);
+        toast.success(`Unit ${unit.uid} graded as G${selectedGrade}`);
       }
-
-      toast.success(`Unit ${unit.uid} graded as G${selectedGrade}`);
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Grading failed";
@@ -140,7 +172,7 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
       <SheetContent side="right" className="w-[480px] bg-[#1C1C1E] border-zinc-700/80 p-0 flex flex-col">
         <SheetHeader className="px-5 py-4 border-b border-zinc-700/80">
           <SheetTitle className="text-zinc-50 text-base font-bold">
-            Grade Unit {unit?.uid ?? ""}
+            {isBulk ? `Edit ${bulkUnits!.length} Units — ${unit?.mpn}` : `Grade Unit ${unit?.uid ?? ""}`}
           </SheetTitle>
         </SheetHeader>
 
@@ -250,10 +282,14 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
             <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
               <button
                 onClick={handleSave}
-                disabled={!selectedGrade || gradeUnit.isPending}
+                disabled={!selectedGrade || isSaving}
                 className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2.5 font-bold text-[13px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
               >
-                {gradeUnit.isPending ? "Saving…" : "Save Grade"}
+                {isSaving
+                  ? "Saving…"
+                  : isBulk
+                    ? `Save ${bulkUnits!.length} Units`
+                    : "Save Grade"}
               </button>
               <button
                 onClick={onClose}
