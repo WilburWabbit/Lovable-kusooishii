@@ -186,7 +186,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           <tbody>
             {order.lineItems.map((item) => {
               const isUnallocated = !item.stockUnitId;
-              const itemAny = item as Record<string, unknown>;
+              const itemAny = item as unknown as Record<string, unknown>;
               const unitStatus: StockUnitStatus = isUnallocated
                 ? "needs_allocation"
                 : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");
@@ -287,27 +287,33 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         onClose={() => setSlideItem(null)}
       />
 
-      {order && (
+      {order && showAllocate && (
         <AllocateItemsDialog
           open={showAllocate}
           onClose={() => setShowAllocate(false)}
           orderId={order.id}
           lineItems={order.lineItems}
         />
+      )}
 
+      {order && showShip && (
         <ShipOrderDialog
           open={showShip}
           onClose={() => setShowShip(false)}
           orderId={order.id}
         />
+      )}
 
+      {order && showReturn && (
         <ReturnDialog
           open={showReturn}
           onClose={() => setShowReturn(false)}
           orderId={order.id}
           lineItems={order.lineItems}
         />
+      )}
 
+      {order && showProcessReturn && (
         <ProcessReturnDialog
           open={showProcessReturn}
           onClose={() => setShowProcessReturn(false)}

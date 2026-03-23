@@ -131,12 +131,12 @@ export function useGradeStockUnit() {
       // Look up or create the target SKU for this grade
       const { data: unit, error: fetchErr } = await supabase
         .from('stock_unit')
-        .select('mpn, line_item_id, batch_id')
+        .select('mpn, line_item_id, batch_id' as never)
         .eq('id', stockUnitId)
         .single();
 
       if (fetchErr) throw fetchErr;
-      const mpn = (unit as Record<string, unknown>).mpn as string;
+      const mpn = (unit as unknown as Record<string, unknown>).mpn as string;
       const skuCode = `${mpn}.${grade}`;
 
       // Fetch market data from BrickEconomy for pricing
@@ -159,12 +159,12 @@ export function useGradeStockUnit() {
       let skuId: string;
       const { data: existingSku } = await supabase
         .from('sku')
-        .select('id, market_price')
+        .select('id, market_price' as never)
         .eq('sku_code', skuCode)
         .maybeSingle();
 
       if (existingSku) {
-        skuId = existingSku.id;
+        skuId = (existingSku as unknown as Record<string, unknown>).id as string;
 
         // Update market_price with latest data (preserve user-set sale_price)
         if (gradeMarketPrice != null) {

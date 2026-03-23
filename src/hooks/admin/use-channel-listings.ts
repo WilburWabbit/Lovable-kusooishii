@@ -166,13 +166,13 @@ export function usePublishListing() {
       // Look up SKU + floor price for validation
       const { data: skuRow, error: skuErr } = await supabase
         .from('sku')
-        .select('id, floor_price')
+        .select('id, floor_price' as never)
         .eq('sku_code', skuCode)
         .single();
 
       if (skuErr) throw skuErr;
 
-      const floorPrice = (skuRow as Record<string, unknown>).floor_price as number | null;
+      const floorPrice = (skuRow as unknown as Record<string, unknown>).floor_price as number | null;
       if (floorPrice != null && listingPrice < floorPrice) {
         throw new Error(`Price £${listingPrice.toFixed(2)} is below floor price £${floorPrice.toFixed(2)}`);
       }
@@ -182,7 +182,7 @@ export function usePublishListing() {
         .from('channel_listing')
         .upsert(
           {
-            sku_id: skuRow.id,
+            sku_id: (skuRow as unknown as Record<string, unknown>).id as string,
             channel: channel,
             v2_channel: channel,
             v2_status: 'live',
@@ -210,7 +210,7 @@ export function usePublishListing() {
           v2_status: 'listed',
           listed_at: new Date().toISOString(),
         } as never)
-        .eq('sku_id' as never, skuRow.id)
+        .eq('sku_id' as never, (skuRow as unknown as Record<string, unknown>).id as string)
         .eq('v2_status' as never, 'graded');
 
       // Fire-and-forget: trigger external channel push

@@ -728,7 +728,8 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
 
   try {
     // Use the correct Stripe instance (live vs sandbox determined by caller context)
-    const btList = await stripe.balanceTransactions.list({
+    const stripeClient = isTestEvent ? stripeSandbox : stripeLive;
+    const btList = await stripeClient.balanceTransactions.list({
       payout: payoutId,
       limit: 100,
     });
@@ -741,7 +742,7 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
       if (bt.source && typeof bt.source === "string" && bt.source.startsWith("ch_")) {
         // This is a charge — look up the payment_intent
         try {
-          const charge = await stripe.charges.retrieve(bt.source as string);
+          const charge = await stripeClient.charges.retrieve(bt.source as string);
           if (charge.payment_intent) {
             paymentIntentIds.push(charge.payment_intent as string);
           }

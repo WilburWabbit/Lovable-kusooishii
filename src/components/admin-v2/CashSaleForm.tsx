@@ -87,7 +87,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
         .maybeSingle();
 
       const lastNum = lastOrder
-        ? parseInt((lastOrder as Record<string, unknown>).order_number as string
+        ? parseInt(((lastOrder as Record<string, unknown>).order_number as string)
             .replace("KO-", ""), 10) || 0
         : 0;
       const orderNumber = `KO-${String(lastNum + 1).padStart(4, "0")}`;
@@ -134,10 +134,10 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
         if (skuCode) {
           try {
             const { data: consumed, error: fifoErr } = await supabase
-              .rpc("v2_consume_fifo_unit", { p_sku_code: skuCode } as never);
+              .rpc("v2_consume_fifo_unit" as never, { p_sku_code: skuCode } as never);
 
             if (!fifoErr && consumed) {
-              const unit = consumed as Record<string, unknown>;
+              const unit = consumed as unknown as Record<string, unknown>;
               stockUnitId = unit.id as string;
               cogs = unit.landed_cost as number;
 

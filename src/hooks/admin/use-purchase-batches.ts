@@ -111,14 +111,14 @@ export function useBatchUnitSummaries() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stock_unit')
-        .select('batch_id, mpn, v2_status, condition_grade')
-        .not('batch_id', 'is', null);
+        .select('batch_id, mpn, v2_status, condition_grade' as never)
+        .not('batch_id' as never, 'is', null);
 
       if (error) throw error;
 
       const summaryMap = new Map<string, BatchUnitSummary>();
 
-      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+      for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const batchId = row.batch_id as string;
         if (!batchId) continue;
 
@@ -139,7 +139,7 @@ export function useBatchUnitSummaries() {
 
       // Count distinct MPNs per batch
       const mpnSets = new Map<string, Set<string>>();
-      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+      for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const batchId = row.batch_id as string;
         const mpn = row.mpn as string;
         if (!batchId || !mpn) continue;
@@ -327,7 +327,7 @@ export function useCreatePurchaseBatch() {
 
       // 4. Run cost apportionment
       const { error: apportionErr } = await supabase
-        .rpc('v2_calculate_apportioned_costs', { p_batch_id: batchId } as never);
+        .rpc('v2_calculate_apportioned_costs' as never, { p_batch_id: batchId } as never);
 
       if (apportionErr) throw apportionErr;
 
