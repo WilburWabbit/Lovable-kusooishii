@@ -218,14 +218,14 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
               <SectionHead>Physical Confirmation</SectionHead>
               <div className="grid grid-cols-2 gap-2.5">
                 {([
-                  { label: "EAN", field: "ean" as const, placeholder: "5702017421384" },
-                  { label: "UPC", field: "upc" as const, placeholder: "673419388535" },
-                  { label: "ISBN", field: "isbn" as const, placeholder: "978-87-..." },
-                  { label: "Age Mark", field: "ageMark" as const, placeholder: "14+" },
-                  { label: "Length (cm)", field: "lengthCm" as const, placeholder: "38" },
-                  { label: "Width (cm)", field: "widthCm" as const, placeholder: "26" },
-                  { label: "Height (cm)", field: "heightCm" as const, placeholder: "7" },
-                  { label: "Weight (g)", field: "weightG" as const, placeholder: "1250" },
+                  { label: "EAN", field: "ean" as const },
+                  { label: "UPC", field: "upc" as const },
+                  { label: "ISBN", field: "isbn" as const },
+                  { label: "Age Mark", field: "ageMark" as const },
+                  { label: "Length (cm)", field: "lengthCm" as const },
+                  { label: "Width (cm)", field: "widthCm" as const },
+                  { label: "Height (cm)", field: "heightCm" as const },
+                  { label: "Weight (g)", field: "weightG" as const },
                 ] as const).map((f) => (
                   <div key={f.field}>
                     <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
@@ -234,7 +234,6 @@ export function GradeSlideOut({ unit, open, onClose, variants = [], product }: G
                     <input
                       value={physical[f.field]}
                       onChange={(e) => updatePhysical(f.field, e.target.value)}
-                      placeholder={f.placeholder}
                       className="w-full px-2 py-1.5 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
                     />
                   </div>
