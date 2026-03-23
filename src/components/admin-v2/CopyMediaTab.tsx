@@ -3,10 +3,30 @@ import {
   useUpdateProductCopy,
   useUpdateConditionNotes,
   useUploadProductImage,
+  productKeys,
 } from "@/hooks/admin/use-products";
-import type { ProductDetail, ProductVariant } from "@/lib/types/admin";
+import type { ProductDetail, ProductVariant, ProductImage } from "@/lib/types/admin";
 import { SurfaceCard, SectionHead, Mono, GradeBadge } from "./ui-primitives";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Star, Trash2 } from "lucide-react";
 
 interface CopyMediaTabProps {
   product: ProductDetail;
@@ -28,7 +48,27 @@ export function CopyMediaTab({ product }: CopyMediaTabProps) {
 
 function PhotosSection({ product }: { product: ProductDetail }) {
   const uploadImage = useUploadProductImage();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [images, setImages] = useState(product.images);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Sync local state when product images change from server
+  const [lastImageIds, setLastImageIds] = useState(() => product.images.map((i) => i.id).join(","));
+  const currentImageIds = product.images.map((i) => i.id).join(",");
+  if (currentImageIds !== lastImageIds) {
+    setLastImageIds(currentImageIds);
+    setImages(product.images);
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
+  };
 
   const handleFiles = async (files: FileList) => {
     for (const file of Array.from(files)) {
@@ -42,25 +82,118 @@ function PhotosSection({ product }: { product: ProductDetail }) {
     }
   };
 
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = images.findIndex((i) => i.id === active.id);
+    const newIndex = images.findIndex((i) => i.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(images, oldIndex, newIndex);
+    setImages(reordered);
+
+    try {
+      await invokeWithAuth("admin-data", {
+        action: "reorder-product-media",
+        items: reordered.map((img, idx) => ({ id: img.id, sort_order: idx })),
+      });
+      invalidate();
+    } catch (err: unknown) {
+      setImages(product.images);
+      toast.error(err instanceof Error ? err.message : "Reorder failed");
+    }
+  };
+
+  const handleSetPrimary = async (img: ProductImage) => {
+    if (img.isPrimary || busy) return;
+    setBusy(img.id);
+
+    // Optimistic update
+    setImages((prev) => prev.map((i) => ({ ...i, isPrimary: i.id === img.id })));
+
+    try {
+      await invokeWithAuth("admin-data", {
+        action: "set-primary-media",
+        product_id: product.id,
+        product_media_id: img.id,
+      });
+      invalidate();
+      toast.success("Primary image updated");
+    } catch (err: unknown) {
+      setImages(product.images);
+      toast.error(err instanceof Error ? err.message : "Failed to set primary");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDelete = async (img: ProductImage) => {
+    if (busy) return;
+    setBusy(img.id);
+
+    // Optimistic update
+    setImages((prev) => prev.filter((i) => i.id !== img.id));
+
+    try {
+      await invokeWithAuth("admin-data", {
+        action: "delete-product-media",
+        product_media_id: img.id,
+        media_asset_id: img.mediaAssetId,
+      });
+      invalidate();
+      toast.success("Image deleted");
+    } catch (err: unknown) {
+      setImages(product.images);
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <SurfaceCard>
       <SectionHead>Photos</SectionHead>
 
-      {/* Existing images */}
-      {product.images.length > 0 && (
-        <div className="grid grid-cols-4 gap-2 mb-3">
-          {product.images.map((img) => (
-            <div
-              key={img.id}
-              className="aspect-square bg-zinc-50 rounded overflow-hidden border border-zinc-200"
-            >
-              <img
-                src={img.storagePath}
-                alt={img.altText ?? product.name}
-                className="w-full h-full object-cover"
-              />
+      {/* Sortable image grid */}
+      {images.length > 0 && (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={images.map((i) => i.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {images.map((img) => (
+                <SortableImageThumb
+                  key={img.id}
+                  image={img}
+                  productName={product.name}
+                  onSetPrimary={handleSetPrimary}
+                  onDelete={handleDelete}
+                  isBusy={busy === img.id}
+                />
+              ))}
             </div>
-          ))}
+          </SortableContext>
+        </DndContext>
+      )}
+
+      {/* Catalog image (non-sortable reference) */}
+      {product.catalogImageUrl && product.includeCatalogImg && (
+        <div className="mb-3">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mb-1.5">Catalog Image</div>
+          <div className="inline-block relative aspect-square w-[calc(25%-6px)] bg-zinc-50 rounded-lg overflow-hidden border-2 border-dashed border-zinc-300">
+            <img
+              src={product.catalogImageUrl}
+              alt={`${product.name} catalog`}
+              className="w-full h-full object-contain"
+              draggable={false}
+            />
+            <span className="absolute top-1.5 right-1.5 bg-zinc-500 text-white text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">
+              Catalog
+            </span>
+          </div>
         </div>
       )}
 
@@ -96,6 +229,86 @@ function PhotosSection({ product }: { product: ProductDetail }) {
         }}
       />
     </SurfaceCard>
+  );
+}
+
+// ─── Sortable Image Thumbnail ──────────────────────────────
+
+interface SortableImageThumbProps {
+  image: ProductImage;
+  productName: string;
+  onSetPrimary: (img: ProductImage) => void;
+  onDelete: (img: ProductImage) => void;
+  isBusy: boolean;
+}
+
+function SortableImageThumb({ image, productName, onSetPrimary, onDelete, isBusy }: SortableImageThumbProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: image.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="group relative aspect-square bg-zinc-50 rounded-lg overflow-hidden border border-zinc-200"
+    >
+      <img
+        src={image.storagePath}
+        alt={image.altText ?? productName}
+        className="w-full h-full object-cover"
+        draggable={false}
+      />
+
+      {/* Primary badge */}
+      {image.isPrimary && (
+        <span className="absolute top-1.5 right-1.5 bg-amber-500 text-zinc-900 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">
+          Primary
+        </span>
+      )}
+
+      {/* Drag handle */}
+      <div
+        className="absolute top-1.5 left-1.5 p-1 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="w-3.5 h-3.5" />
+      </div>
+
+      {/* Hover action overlay */}
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 py-1.5 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+        {!image.isPrimary && (
+          <button
+            onClick={() => onSetPrimary(image)}
+            disabled={isBusy}
+            className="p-1.5 rounded bg-white/20 hover:bg-amber-500 text-white transition-colors disabled:opacity-50"
+            title="Set as primary"
+          >
+            <Star className="w-3.5 h-3.5" />
+          </button>
+        )}
+        <button
+          onClick={() => onDelete(image)}
+          disabled={isBusy}
+          className="p-1.5 rounded bg-white/20 hover:bg-red-500 text-white transition-colors disabled:opacity-50"
+          title="Delete image"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
   );
 }
 

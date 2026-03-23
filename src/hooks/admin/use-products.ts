@@ -11,6 +11,8 @@ import type {
   ProductVariant,
   ProductImage,
   ProductDetail,
+  BrickEconomyData,
+  FieldOverride,
   ConditionGrade,
 } from '@/lib/types/admin';
 
@@ -81,10 +83,25 @@ function mapImage(
 ): ProductImage {
   return {
     id: pm.id as string,
+    mediaAssetId: ma.id as string,
     mpn: productMpn,
     storagePath: ma.original_url as string,
     altText: (ma.alt_text as string) ?? null,
     sortOrder: (pm.sort_order as number) ?? 0,
+    isPrimary: (pm.is_primary as boolean) ?? false,
+  };
+}
+
+function mapBrickEconomyData(row: Record<string, unknown>): BrickEconomyData {
+  return {
+    theme: (row.theme as string) ?? null,
+    subtheme: (row.subtheme as string) ?? null,
+    piecesCount: (row.pieces_count as number) ?? null,
+    year: (row.year as number) ?? null,
+    releasedDate: (row.released_date as string) ?? null,
+    retiredDate: (row.retired_date as string) ?? null,
+    retailPrice: (row.retail_price as number) ?? null,
+    minifigsCount: (row.minifigs_count as number) ?? null,
   };
 }
 
@@ -231,7 +248,47 @@ export function useProduct(mpn: string | undefined) {
         return mapImage(pm, ma, mpn!);
       });
 
-      return { ...product, variants, images };
+      // Fetch latest BrickEconomy data for this MPN
+      const setNumber = mpn!.split('-')[0];
+      const { data: beRow } = await supabase
+        .from('brickeconomy_collection')
+        .select('*')
+        .eq('item_number' as never, setNumber)
+        .order('synced_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const brickeconomyData: BrickEconomyData | null = beRow
+        ? mapBrickEconomyData(beRow as Record<string, unknown>)
+        : null;
+
+      // Fetch catalog image if linked
+      let catalogImageUrl: string | null = null;
+      const rawProduct = productRow as Record<string, unknown>;
+      const catalogId = rawProduct.lego_catalog_id as string | null;
+      if (catalogId) {
+        const { data: catRow } = await supabase
+          .from('lego_catalog' as never)
+          .select('img_url' as never)
+          .eq('id' as never, catalogId)
+          .maybeSingle();
+        catalogImageUrl = catRow
+          ? ((catRow as Record<string, unknown>).img_url as string) ?? null
+          : null;
+      }
+
+      const includeCatalogImg = (rawProduct.include_catalog_img as boolean) ?? false;
+      const fieldOverrides = (rawProduct.field_overrides as Record<string, FieldOverride>) ?? {};
+
+      return {
+        ...product,
+        variants,
+        images,
+        brickeconomyData,
+        catalogImageUrl,
+        includeCatalogImg,
+        fieldOverrides,
+      };
     },
   });
 }

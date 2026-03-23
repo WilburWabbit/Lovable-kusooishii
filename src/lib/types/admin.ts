@@ -174,10 +174,12 @@ export interface ProductVariant {
 
 export interface ProductImage {
   id: string;
+  mediaAssetId: string;
   mpn: string;
   storagePath: string;
   altText: string | null;
   sortOrder: number;
+  isPrimary: boolean;
 }
 
 // ─── 2.7 Channel Listing ──────────────────────────────────
@@ -272,10 +274,32 @@ export interface PurchaseBatchDetail extends PurchaseBatch {
   lineItems: (PurchaseLineItem & { units: StockUnit[] })[];
 }
 
+// ─── BrickEconomy Reference Data ─────────────────────────
+
+export interface BrickEconomyData {
+  theme: string | null;
+  subtheme: string | null;
+  piecesCount: number | null;
+  year: number | null;
+  releasedDate: string | null;
+  retiredDate: string | null;
+  retailPrice: number | null;
+  minifigsCount: number | null;
+}
+
+export interface FieldOverride {
+  overridden_at: string;
+  source_value: unknown;
+}
+
 /** Product with its variants */
 export interface ProductDetail extends Product {
   variants: ProductVariant[];
   images: ProductImage[];
+  brickeconomyData: BrickEconomyData | null;
+  catalogImageUrl: string | null;
+  includeCatalogImg: boolean;
+  fieldOverrides: Record<string, FieldOverride>;
 }
 
 /** Order with its line items */
