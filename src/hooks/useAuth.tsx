@@ -87,10 +87,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (pending.action === 'login') trackLogin(pending.method);
             else if (pending.action === 'sign_up') trackSignUp(pending.method);
           }
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-            fetchRoles(session.user.id);
-          }, 0);
+          // Await roles + profile before marking as loaded — prevents
+          // RequireAdmin from redirecting before roles are known
+          await Promise.all([
+            fetchProfile(session.user.id),
+            fetchRoles(session.user.id),
+          ]);
         } else {
           setGTMUserId(null);
           setProfile(null);
@@ -100,13 +102,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         setGTMUserId(session.user.id);
-        fetchProfile(session.user.id);
-        fetchRoles(session.user.id);
+        await Promise.all([
+          fetchProfile(session.user.id),
+          fetchRoles(session.user.id),
+        ]);
       }
       setLoading(false);
     });

@@ -1,8 +1,9 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { loading, user, isStaffOrAdmin } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -13,7 +14,9 @@ export function RequireAdmin({ children }: { children: React.ReactNode }) {
   }
 
   if (!user || !isStaffOrAdmin) {
-    return <Navigate to="/login" replace />;
+    // Preserve the URL the user was trying to reach so login can redirect back
+    const redirectParam = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?redirect=${redirectParam}`} replace />;
   }
 
   return <>{children}</>;
