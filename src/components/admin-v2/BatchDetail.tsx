@@ -23,6 +23,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
   const navigate = useNavigate();
   const { data: batch, isLoading } = usePurchaseBatch(batchId);
   const [gradingUnit, setGradingUnit] = useState<(StockUnit & { productName?: string }) | null>(null);
+  const [bulkGradingUnits, setBulkGradingUnits] = useState<StockUnit[]>([]);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showBulkGrade, setShowBulkGrade] = useState(false);
 
@@ -114,31 +115,29 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           line={line}
           selectedUnitIds={selectedUnitIds}
           onToggleSelect={toggleSelect}
-          onSelectAllUngraded={(unitIds) => {
-            setSelectedUnitIds((prev) => {
-              const next = new Set(prev);
-              // If deselecting (empty array), remove this line's ungraded units
-              if (unitIds.length === 0) {
-                for (const u of line.units) {
-                  if (u.grade === null) next.delete(u.id);
-                }
-              } else {
-                for (const id of unitIds) next.add(id);
-              }
-              return next;
-            });
+          onEditMpn={() => {
+            const firstUnit = line.units[0];
+            if (!firstUnit) return;
+            setGradingUnit({ ...firstUnit, productName: (line as { productName?: string }).productName ?? undefined });
+            setBulkGradingUnits(line.units);
           }}
-          onGradeUnit={(unit) =>
-            setGradingUnit({ ...unit, productName: (line as { productName?: string }).productName ?? undefined })
-          }
+          onGradeUnit={(unit) => {
+            setGradingUnit({ ...unit, productName: (line as { productName?: string }).productName ?? undefined });
+            setBulkGradingUnits([]);
+          }}
         />
       ))}
 
       {/* Grade slide-out */}
       <GradeSlideOut
         unit={gradingUnit}
+        bulkUnits={bulkGradingUnits.length > 1 ? bulkGradingUnits : undefined}
         open={!!gradingUnit}
-        onClose={() => setGradingUnit(null)}
+        onClose={() => {
+          setGradingUnit(null);
+          setBulkGradingUnits([]);
+        }}
+        rawProductData={gradingUnit ? batch.productDataMap?.get(gradingUnit.mpn) ?? null : null}
       />
 
       {/* Bulk grade dialog */}
@@ -160,14 +159,11 @@ interface LineItemCardProps {
   line: PurchaseLineItem & { units: StockUnit[]; productName?: string | null };
   selectedUnitIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  onSelectAllUngraded: (unitIds: string[]) => void;
+  onEditMpn: () => void;
   onGradeUnit: (unit: StockUnit) => void;
 }
 
-function LineItemCard({ line, selectedUnitIds, onToggleSelect, onSelectAllUngraded, onGradeUnit }: LineItemCardProps) {
-  const ungradedIds = line.units.filter((u) => u.grade === null).map((u) => u.id);
-  const allUngradedSelected = ungradedIds.length > 0 && ungradedIds.every((id) => selectedUnitIds.has(id));
-
+function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGradeUnit }: LineItemCardProps) {
   return (
     <SurfaceCard noPadding className="mb-3 overflow-hidden">
       {/* Line header */}
@@ -183,17 +179,12 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onSelectAllUngrad
           <span>
             Unit cost: <Mono>£{line.unitCost.toFixed(2)}</Mono>
           </span>
-          {ungradedIds.length > 1 && (
+          {line.units.length > 1 && (
             <button
-              onClick={() => onSelectAllUngraded(allUngradedSelected ? [] : ungradedIds)}
-              className="ml-1 rounded px-2 py-0.5 text-[11px] cursor-pointer transition-colors border"
-              style={
-                allUngradedSelected
-                  ? { background: "#F59E0B20", color: "#F59E0B", borderColor: "#F59E0B" }
-                  : { background: "transparent", color: "#71717A", borderColor: "#D4D4D8" }
-              }
+              onClick={onEditMpn}
+              className="ml-1 rounded px-2.5 py-1 text-[11px] font-semibold cursor-pointer transition-colors bg-transparent text-zinc-500 border border-zinc-300 hover:text-zinc-900 hover:border-zinc-400"
             >
-              {allUngradedSelected ? "Deselect all" : `Select all ${ungradedIds.length} ungraded`}
+              Edit all {line.units.length}
             </button>
           )}
         </div>

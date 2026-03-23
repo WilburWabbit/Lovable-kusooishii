@@ -128,7 +128,9 @@ export function useProducts() {
 // ─── useProductStockCounts ───────────────────────────────────
 
 export interface ProductStockCounts {
-  listed: number;
+  purchased: number;
+  unlisted: number;
+  unsold: number;
   sold: number;
 }
 
@@ -140,8 +142,7 @@ export function useProductStockCounts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stock_unit')
-        .select('mpn, v2_status' as never)
-        .in('v2_status' as never, ['listed', ...SOLD_STATUSES]);
+        .select('mpn, v2_status' as never);
 
       if (error) throw error;
 
@@ -149,16 +150,18 @@ export function useProductStockCounts() {
 
       for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const mpn = row.mpn as string;
-        const status = row.v2_status as string;
+        const status = (row.v2_status as string) ?? 'purchased';
         if (!mpn) continue;
 
         let entry = counts.get(mpn);
         if (!entry) {
-          entry = { listed: 0, sold: 0 };
+          entry = { purchased: 0, unlisted: 0, unsold: 0, sold: 0 };
           counts.set(mpn, entry);
         }
 
-        if (status === 'listed') entry.listed += 1;
+        entry.purchased += 1;
+        if (status === 'graded') entry.unlisted += 1;
+        else if (status === 'listed') entry.unsold += 1;
         else if (SOLD_STATUSES.includes(status)) entry.sold += 1;
       }
 
