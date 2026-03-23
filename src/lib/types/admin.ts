@@ -190,6 +190,12 @@ export interface ChannelListing {
   externalId: string | null;
   externalUrl: string | null;
   listedAt: string | null;
+  listingTitle: string | null;
+  listingDescription: string | null;
+  listingPrice: number | null;
+  feeAdjustedPrice: number | null;
+  estimatedFees: number | null;
+  estimatedNet: number | null;
 }
 
 // ─── 2.8 Order ────────────────────────────────────────────
