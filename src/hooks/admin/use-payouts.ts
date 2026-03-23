@@ -111,7 +111,7 @@ export function usePayoutSummary() {
         }
 
         const countedOrders = new Set<string>();
-        for (const unit of ((pendingUnits ?? []) as Record<string, unknown>[])) {
+        for (const unit of ((pendingUnits ?? []) as unknown as Record<string, unknown>[])) {
           const orderId = unit.order_id as string;
           if (!orderId) continue;
           const order = orderMap.get(orderId);
