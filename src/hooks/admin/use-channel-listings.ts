@@ -182,7 +182,7 @@ export function usePublishListing() {
         .from('channel_listing')
         .upsert(
           {
-            sku_id: skuRow.id,
+            sku_id: (skuRow as unknown as Record<string, unknown>).id as string,
             channel: channel,
             v2_channel: channel,
             v2_status: 'live',
