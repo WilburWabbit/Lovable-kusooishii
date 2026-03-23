@@ -3,6 +3,7 @@ import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
 import { UnitDetailSlideOut } from "./UnitDetailSlideOut";
+import { WriteOffDialog } from "./WriteOffDialog";
 
 interface StockUnitsTabProps {
   mpn: string;
@@ -12,6 +13,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
   const { data: units = [], isLoading } = useStockUnitsByMPN(mpn);
   const [slideUnit, setSlideUnit] = useState<StockUnit | null>(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
+  const [showWriteOff, setShowWriteOff] = useState(false);
 
   const toggleSelect = (id: string) => {
     setSelectedUnitIds((prev) => {
@@ -28,6 +30,17 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
 
   return (
     <>
+      {selectedUnitIds.size > 0 && (
+        <div className="flex gap-2 mb-3">
+          <button
+            onClick={() => setShowWriteOff(true)}
+            className="bg-red-500/20 text-red-400 border border-red-500/30 rounded-md px-3 py-1.5 text-xs font-semibold cursor-pointer hover:bg-red-500/30 transition-colors"
+          >
+            Write Off {selectedUnitIds.size} Unit{selectedUnitIds.size !== 1 ? "s" : ""}
+          </button>
+        </div>
+      )}
+
       <SurfaceCard noPadding className="overflow-hidden">
         <table className="w-full border-collapse text-xs">
           <thead>
@@ -125,6 +138,15 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
         unit={slideUnit}
         open={!!slideUnit}
         onClose={() => setSlideUnit(null)}
+      />
+
+      <WriteOffDialog
+        open={showWriteOff}
+        onClose={() => {
+          setShowWriteOff(false);
+          setSelectedUnitIds(new Set());
+        }}
+        stockUnitIds={Array.from(selectedUnitIds)}
       />
     </>
   );
