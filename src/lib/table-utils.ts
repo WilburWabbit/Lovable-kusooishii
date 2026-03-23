@@ -15,6 +15,22 @@ export interface TablePrefs {
   visibleColumns: string[];
 }
 
+export function filterRows<T>(
+  rows: T[],
+  filters: Record<string, string>,
+  accessor?: (row: T, key: string) => unknown,
+): T[] {
+  const active = Object.entries(filters).filter(([, v]) => v.length > 0);
+  if (active.length === 0) return rows;
+  return rows.filter((row) =>
+    active.every(([key, term]) => {
+      const val = accessor ? accessor(row, key) : (row as any)[key];
+      if (val == null) return false;
+      return String(val).toLowerCase().includes(term.toLowerCase());
+    }),
+  );
+}
+
 export function sortRows<T>(rows: T[], key: string, dir: SortDir, accessor?: (row: T, key: string) => unknown): T[] {
   return [...rows].sort((a, b) => {
     const d = dir === "asc" ? 1 : -1;
