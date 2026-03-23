@@ -703,7 +703,7 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
   const currency = (payoutObj.currency as string) ?? "gbp";
 
   // Stripe amounts are in smallest currency unit (pence for GBP)
-  const grossAmount = amount / 100;
+  const netAmount = amount / 100; // Stripe payout amount IS the net (after fees)
   const payoutDate = payoutObj.arrival_date
     ? new Date((payoutObj.arrival_date as number) * 1000).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
@@ -720,30 +720,114 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
     return;
   }
 
-  // Stripe payouts don't include fee breakdowns in the payout object itself.
-  // The net amount is what's deposited; fees are deducted from individual charges.
-  // We record the payout amount as net (what arrived in bank).
-  const { error: insertErr } = await supabase
+  // Fetch balance transactions for this payout to get fee breakdown + order matching
+  let totalFees = 0;
+  let grossAmount = netAmount;
+  let orderCount = 0;
+  const matchedOrderIds: string[] = [];
+
+  try {
+    // Use the correct Stripe instance (live vs sandbox determined by caller context)
+    const btList = await stripe.balanceTransactions.list({
+      payout: payoutId,
+      limit: 100,
+    });
+
+    let feeTotal = 0;
+    const paymentIntentIds: string[] = [];
+
+    for (const bt of btList.data) {
+      feeTotal += bt.fee; // in pence
+      if (bt.source && typeof bt.source === "string" && bt.source.startsWith("ch_")) {
+        // This is a charge — look up the payment_intent
+        try {
+          const charge = await stripe.charges.retrieve(bt.source as string);
+          if (charge.payment_intent) {
+            paymentIntentIds.push(charge.payment_intent as string);
+          }
+        } catch { /* best effort */ }
+      }
+    }
+
+    totalFees = feeTotal / 100;
+    grossAmount = netAmount + totalFees;
+
+    // Match payment intents to orders
+    if (paymentIntentIds.length > 0) {
+      const { data: orders } = await supabase
+        .from("sales_order")
+        .select("id")
+        .in("payment_reference", paymentIntentIds);
+
+      if (orders) {
+        for (const o of orders as { id: string }[]) {
+          matchedOrderIds.push(o.id);
+        }
+        orderCount = matchedOrderIds.length;
+      }
+    }
+  } catch (btErr) {
+    console.warn("Failed to fetch balance transactions (proceeding with basic payout):", btErr);
+    grossAmount = netAmount;
+  }
+
+  // Insert payout record
+  const { data: payoutRecord, error: insertErr } = await supabase
     .from("payouts")
     .insert({
       channel: "stripe",
       payout_date: payoutDate,
-      gross_amount: grossAmount,
-      total_fees: 0, // Stripe fees are per-charge, not per-payout
-      net_amount: grossAmount,
-      fee_breakdown: { fvf: 0, promoted_listings: 0, international: 0, processing: 0 },
-      order_count: 0, // Will be reconciled separately
+      gross_amount: Math.round(grossAmount * 100) / 100,
+      total_fees: Math.round(totalFees * 100) / 100,
+      net_amount: Math.round(netAmount * 100) / 100,
+      fee_breakdown: { fvf: 0, promoted_listings: 0, international: 0, processing: Math.round(totalFees * 100) / 100 },
+      order_count: orderCount,
       unit_count: 0,
       qbo_sync_status: "pending",
       external_payout_id: payoutId,
-    });
+    })
+    .select()
+    .single();
 
   if (insertErr) {
     console.error("Failed to insert Stripe payout:", insertErr);
     throw new Error(`Failed to record payout: ${insertErr.message}`);
   }
 
-  console.log(`Stripe payout ${payoutId} recorded: £${grossAmount.toFixed(2)} on ${payoutDate}${isTestEvent ? " (test)" : ""}`);
+  // Link matched orders to payout via join table
+  const localPayoutId = (payoutRecord as Record<string, unknown>)?.id as string;
+  if (localPayoutId && matchedOrderIds.length > 0) {
+    const orderLinks = matchedOrderIds.map((orderId) => ({
+      payout_id: localPayoutId,
+      sales_order_id: orderId,
+    }));
+
+    await supabase
+      .from("payout_orders")
+      .upsert(orderLinks as never, { onConflict: "payout_id,sales_order_id" as never })
+      .then(() => console.log(`Linked ${matchedOrderIds.length} orders to payout ${payoutId}`))
+      .catch((err: unknown) => console.warn("Failed to link orders to payout:", err));
+  }
+
+  // Trigger reconciliation (payout_received transition + QBO sync)
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (supabaseUrl && serviceRoleKey && localPayoutId) {
+    fetch(`${supabaseUrl}/functions/v1/v2-reconcile-payout`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ payoutId: localPayoutId }),
+    }).catch((err) => console.warn("v2-reconcile-payout trigger failed (non-blocking):", err));
+  }
+
+  console.log(
+    `Stripe payout ${payoutId} recorded: gross £${grossAmount.toFixed(2)}, ` +
+    `fees £${totalFees.toFixed(2)}, net £${netAmount.toFixed(2)}, ` +
+    `${orderCount} orders${isTestEvent ? " (test)" : ""}`
+  );
 }
 
 async function findUserByEmail(email: string): Promise<string | null> {

@@ -1,11 +1,24 @@
 import { useState } from "react";
-import { usePayouts, usePayoutSummary } from "@/hooks/admin/use-payouts";
+import {
+  usePayouts,
+  usePayoutSummary,
+  useCreatePayout,
+  useReconcilePayout,
+  useTriggerPayoutQBOSync,
+  useImportEbayPayouts,
+} from "@/hooks/admin/use-payouts";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { Payout } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
@@ -13,11 +26,40 @@ import { toast } from "sonner";
 export function PayoutView() {
   const { data: summary, isLoading: summaryLoading } = usePayoutSummary();
   const [selectedPayout, setSelectedPayout] = useState<Payout | null>(null);
+  const [showCreatePayout, setShowCreatePayout] = useState(false);
+  const importEbay = useImportEbayPayouts();
+  const reconcilePayout = useReconcilePayout();
+  const triggerQBOSync = useTriggerPayoutQBOSync();
   const { data: payouts = [], isLoading: payoutsLoading } = usePayouts();
 
   return (
     <div>
-      <h1 className="text-[22px] font-bold text-zinc-50 mb-1">Payouts</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-[22px] font-bold text-zinc-50">Payouts</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              importEbay.mutate(undefined, {
+                onSuccess: (data) => {
+                  const d = data as Record<string, unknown>;
+                  toast.success(`Imported ${d.imported ?? 0} eBay payouts`);
+                },
+                onError: (err) => toast.error(err instanceof Error ? err.message : "Import failed"),
+              });
+            }}
+            disabled={importEbay.isPending}
+            className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-3 py-1.5 text-xs cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+          >
+            {importEbay.isPending ? "Importing…" : "Import eBay Payouts"}
+          </button>
+          <button
+            onClick={() => setShowCreatePayout(true)}
+            className="bg-amber-500 text-zinc-900 border-none rounded-md px-3 py-1.5 font-bold text-xs cursor-pointer hover:bg-amber-400 transition-colors"
+          >
+            + Record Payout
+          </button>
+        </div>
+      </div>
       <p className="text-zinc-500 text-[13px] mb-5">
         Channel payouts, fee breakdowns, QBO sync.
       </p>
@@ -178,11 +220,206 @@ export function PayoutView() {
                   <Mono color="dim" className="text-xs">{selectedPayout.externalPayoutId}</Mono>
                 </div>
               )}
+
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-3 border-t border-zinc-700/80">
+                <button
+                  onClick={() => {
+                    reconcilePayout.mutate(selectedPayout.id, {
+                      onSuccess: () => toast.success("Payout reconciled"),
+                      onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation failed"),
+                    });
+                  }}
+                  disabled={reconcilePayout.isPending}
+                  className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2 font-bold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-amber-400 transition-colors"
+                >
+                  {reconcilePayout.isPending ? "Reconciling…" : "Reconcile Orders"}
+                </button>
+                {selectedPayout.qboSyncStatus !== "synced" && (
+                  <button
+                    onClick={() => {
+                      triggerQBOSync.mutate(selectedPayout.id, {
+                        onSuccess: () => toast.success("QBO sync triggered"),
+                        onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
+                      });
+                    }}
+                    disabled={triggerQBOSync.isPending}
+                    className="flex-1 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-200 transition-colors"
+                  >
+                    {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Create Payout Dialog */}
+      <CreatePayoutDialog
+        open={showCreatePayout}
+        onClose={() => setShowCreatePayout(false)}
+      />
     </div>
+  );
+}
+
+// ─── Create Payout Dialog ───────────────────────────────────
+
+function CreatePayoutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const createPayout = useCreatePayout();
+  const [channel, setChannel] = useState<"ebay" | "stripe">("ebay");
+  const [payoutDate, setPayoutDate] = useState(new Date().toISOString().slice(0, 10));
+  const [grossAmount, setGrossAmount] = useState("");
+  const [fvf, setFvf] = useState("");
+  const [promotedListings, setPromotedListings] = useState("");
+  const [international, setInternational] = useState("");
+  const [processing, setProcessing] = useState("");
+  const [externalId, setExternalId] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const totalFees =
+    (parseFloat(fvf) || 0) +
+    (parseFloat(promotedListings) || 0) +
+    (parseFloat(international) || 0) +
+    (parseFloat(processing) || 0);
+  const netAmount = (parseFloat(grossAmount) || 0) - totalFees;
+
+  const handleCreate = async () => {
+    if (!grossAmount || parseFloat(grossAmount) <= 0) {
+      toast.error("Gross amount is required");
+      return;
+    }
+
+    try {
+      await createPayout.mutateAsync({
+        channel,
+        payoutDate,
+        grossAmount: parseFloat(grossAmount),
+        totalFees: Math.round(totalFees * 100) / 100,
+        netAmount: Math.round(netAmount * 100) / 100,
+        feeBreakdown: {
+          fvf: parseFloat(fvf) || 0,
+          promoted_listings: parseFloat(promotedListings) || 0,
+          international: parseFloat(international) || 0,
+          processing: parseFloat(processing) || 0,
+        },
+        externalPayoutId: externalId.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+      toast.success("Payout recorded");
+      onClose();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to create payout");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Record Payout</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 mt-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <SectionHead>Channel</SectionHead>
+              <select
+                value={channel}
+                onChange={(e) => setChannel(e.target.value as "ebay" | "stripe")}
+                className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              >
+                <option value="ebay">eBay</option>
+                <option value="stripe">Stripe</option>
+              </select>
+            </div>
+            <div>
+              <SectionHead>Payout Date</SectionHead>
+              <input
+                type="date"
+                value={payoutDate}
+                onChange={(e) => setPayoutDate(e.target.value)}
+                className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <SectionHead>Gross Amount (£)</SectionHead>
+            <input
+              type="number"
+              step="0.01"
+              value={grossAmount}
+              onChange={(e) => setGrossAmount(e.target.value)}
+              className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] font-mono"
+            />
+          </div>
+
+          <SectionHead>Fee Breakdown (£)</SectionHead>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: "FVF", value: fvf, onChange: setFvf },
+              { label: "Promoted Listings", value: promotedListings, onChange: setPromotedListings },
+              { label: "International", value: international, onChange: setInternational },
+              { label: "Processing", value: processing, onChange: setProcessing },
+            ].map((f) => (
+              <div key={f.label}>
+                <label className="text-[10px] text-zinc-500 block mb-0.5">{f.label}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={f.value}
+                  onChange={(e) => f.onChange(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-between text-xs border-t border-zinc-700/80 pt-2">
+            <span className="text-zinc-500">Total Fees: <Mono color="red">£{totalFees.toFixed(2)}</Mono></span>
+            <span className="text-zinc-500">Net: <Mono color="teal">£{netAmount.toFixed(2)}</Mono></span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <SectionHead>External ID</SectionHead>
+              <input
+                value={externalId}
+                onChange={(e) => setExternalId(e.target.value)}
+                placeholder="Optional"
+                className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              />
+            </div>
+            <div>
+              <SectionHead>Notes</SectionHead>
+              <input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Optional"
+                className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+            <button
+              onClick={handleCreate}
+              disabled={createPayout.isPending}
+              className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2.5 font-bold text-[13px] cursor-pointer disabled:opacity-50 hover:bg-amber-400 transition-colors"
+            >
+              {createPayout.isPending ? "Recording…" : "Record Payout"}
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
