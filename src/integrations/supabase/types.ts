@@ -1295,6 +1295,7 @@ export type Database = {
       }
       product: {
         Row: {
+          age_mark: string | null
           age_range: string | null
           brand: string | null
           brickeconomy_id: string | null
@@ -1303,6 +1304,8 @@ export type Database = {
           call_to_action: string | null
           created_at: string
           description: string | null
+          dimensions_cm: string | null
+          ean: string | null
           field_overrides: Json | null
           height_cm: number | null
           highlights: string | null
@@ -1325,15 +1328,18 @@ export type Database = {
           retired_flag: boolean
           seo_description: string | null
           seo_title: string | null
+          set_number: string | null
           status: string
           subtheme_name: string | null
           theme_id: string | null
           updated_at: string
           version_descriptor: string | null
+          weight_g: number | null
           weight_kg: number | null
           width_cm: number | null
         }
         Insert: {
+          age_mark?: string | null
           age_range?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
@@ -1342,6 +1348,8 @@ export type Database = {
           call_to_action?: string | null
           created_at?: string
           description?: string | null
+          dimensions_cm?: string | null
+          ean?: string | null
           field_overrides?: Json | null
           height_cm?: number | null
           highlights?: string | null
@@ -1364,15 +1372,18 @@ export type Database = {
           retired_flag?: boolean
           seo_description?: string | null
           seo_title?: string | null
+          set_number?: string | null
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
         }
         Update: {
+          age_mark?: string | null
           age_range?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
@@ -1381,6 +1392,8 @@ export type Database = {
           call_to_action?: string | null
           created_at?: string
           description?: string | null
+          dimensions_cm?: string | null
+          ean?: string | null
           field_overrides?: Json | null
           height_cm?: number | null
           highlights?: string | null
@@ -1403,11 +1416,13 @@ export type Database = {
           retired_flag?: boolean
           seo_description?: string | null
           seo_title?: string | null
+          set_number?: string | null
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
         }
@@ -1499,6 +1514,89 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      purchase_batches: {
+        Row: {
+          created_at: string
+          id: string
+          purchase_date: string
+          reference: string | null
+          shared_costs: Json
+          status: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_name: string
+          supplier_vat_registered: boolean
+          total_shared_costs: number
+          unit_counter: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          purchase_date?: string
+          reference?: string | null
+          shared_costs?: Json
+          status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_name: string
+          supplier_vat_registered?: boolean
+          total_shared_costs?: number
+          unit_counter?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          purchase_date?: string
+          reference?: string | null
+          shared_costs?: Json
+          status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_name?: string
+          supplier_vat_registered?: boolean
+          total_shared_costs?: number
+          unit_counter?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      purchase_line_items: {
+        Row: {
+          apportioned_cost: number
+          batch_id: string
+          created_at: string
+          id: string
+          landed_cost_per_unit: number
+          mpn: string
+          quantity: number
+          unit_cost: number
+        }
+        Insert: {
+          apportioned_cost?: number
+          batch_id: string
+          created_at?: string
+          id?: string
+          landed_cost_per_unit?: number
+          mpn: string
+          quantity: number
+          unit_cost: number
+        }
+        Update: {
+          apportioned_cost?: number
+          batch_id?: string
+          created_at?: string
+          id?: string
+          landed_cost_per_unit?: number
+          mpn?: string
+          quantity?: number
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_line_items_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       qbo_connection: {
         Row: {
@@ -1861,42 +1959,63 @@ export type Database = {
       sku: {
         Row: {
           active_flag: boolean
+          avg_cost: number | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
+          condition_notes: string | null
+          cost_range: string | null
           created_at: string
+          floor_price: number | null
           id: string
+          market_price: number | null
+          mpn: string | null
           name: string | null
           price: number | null
           product_id: string | null
           qbo_item_id: string | null
           qbo_parent_item_id: string | null
+          sale_price: number | null
           saleable_flag: boolean
           sku_code: string
           updated_at: string
         }
         Insert: {
           active_flag?: boolean
+          avg_cost?: number | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
+          condition_notes?: string | null
+          cost_range?: string | null
           created_at?: string
+          floor_price?: number | null
           id?: string
+          market_price?: number | null
+          mpn?: string | null
           name?: string | null
           price?: number | null
           product_id?: string | null
           qbo_item_id?: string | null
           qbo_parent_item_id?: string | null
+          sale_price?: number | null
           saleable_flag?: boolean
           sku_code: string
           updated_at?: string
         }
         Update: {
           active_flag?: boolean
+          avg_cost?: number | null
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
+          condition_notes?: string | null
+          cost_range?: string | null
           created_at?: string
+          floor_price?: number | null
           id?: string
+          market_price?: number | null
+          mpn?: string | null
           name?: string | null
           price?: number | null
           product_id?: string | null
           qbo_item_id?: string | null
           qbo_parent_item_id?: string | null
+          sale_price?: number | null
           saleable_flag?: boolean
           sku_code?: string
           updated_at?: string
@@ -1914,64 +2033,117 @@ export type Database = {
       stock_unit: {
         Row: {
           accumulated_impairment: number
+          batch_id: string | null
           carrying_value: number | null
+          completed_at: string | null
+          condition_flags: Json | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at: string
+          delivered_at: string | null
+          graded_at: string | null
           id: string
           inbound_receipt_line_id: string | null
           landed_cost: number | null
+          line_item_id: string | null
+          listed_at: string | null
           location_id: string | null
           mpn: string
           notes: string | null
+          order_id: string | null
+          payout_id: string | null
           reservation_id: string | null
           serial_or_internal_mark: string | null
+          shipped_at: string | null
           sku_id: string
+          sold_at: string | null
           status: Database["public"]["Enums"]["stock_unit_status"]
           supplier_id: string | null
+          uid: string | null
           updated_at: string
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
         }
         Insert: {
           accumulated_impairment?: number
+          batch_id?: string | null
           carrying_value?: number | null
+          completed_at?: string | null
+          condition_flags?: Json | null
           condition_grade: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
+          delivered_at?: string | null
+          graded_at?: string | null
           id?: string
           inbound_receipt_line_id?: string | null
           landed_cost?: number | null
+          line_item_id?: string | null
+          listed_at?: string | null
           location_id?: string | null
           mpn: string
           notes?: string | null
+          order_id?: string | null
+          payout_id?: string | null
           reservation_id?: string | null
           serial_or_internal_mark?: string | null
+          shipped_at?: string | null
           sku_id: string
+          sold_at?: string | null
           status?: Database["public"]["Enums"]["stock_unit_status"]
           supplier_id?: string | null
+          uid?: string | null
           updated_at?: string
+          v2_status?: Database["public"]["Enums"]["v2_unit_status"] | null
         }
         Update: {
           accumulated_impairment?: number
+          batch_id?: string | null
           carrying_value?: number | null
+          completed_at?: string | null
+          condition_flags?: Json | null
           condition_grade?: Database["public"]["Enums"]["condition_grade"]
           created_at?: string
+          delivered_at?: string | null
+          graded_at?: string | null
           id?: string
           inbound_receipt_line_id?: string | null
           landed_cost?: number | null
+          line_item_id?: string | null
+          listed_at?: string | null
           location_id?: string | null
           mpn?: string
           notes?: string | null
+          order_id?: string | null
+          payout_id?: string | null
           reservation_id?: string | null
           serial_or_internal_mark?: string | null
+          shipped_at?: string | null
           sku_id?: string
+          sold_at?: string | null
           status?: Database["public"]["Enums"]["stock_unit_status"]
           supplier_id?: string | null
+          uid?: string | null
           updated_at?: string
+          v2_status?: Database["public"]["Enums"]["v2_unit_status"] | null
         }
         Relationships: [
+          {
+            foreignKeyName: "stock_unit_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "stock_unit_inbound_receipt_line_id_fkey"
             columns: ["inbound_receipt_line_id"]
             isOneToOne: false
             referencedRelation: "inbound_receipt_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_unit_line_item_id_fkey"
+            columns: ["line_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_line_items"
             referencedColumns: ["id"]
           },
           {
@@ -2399,6 +2571,7 @@ export type Database = {
         | "partially_refunded"
         | "refunded"
         | "exception"
+      purchase_batch_status: "draft" | "recorded"
       receipt_status: "pending" | "processed" | "error"
       stock_unit_status:
         | "pending_receipt"
@@ -2418,6 +2591,19 @@ export type Database = {
         | "part_out"
         | "written_off"
         | "closed"
+      v2_unit_status:
+        | "purchased"
+        | "graded"
+        | "listed"
+        | "sold"
+        | "shipped"
+        | "delivered"
+        | "payout_received"
+        | "complete"
+        | "return_pending"
+        | "refunded"
+        | "restocked"
+        | "needs_allocation"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2575,6 +2761,7 @@ export const Constants = {
         "refunded",
         "exception",
       ],
+      purchase_batch_status: ["draft", "recorded"],
       receipt_status: ["pending", "processed", "error"],
       stock_unit_status: [
         "pending_receipt",
@@ -2594,6 +2781,20 @@ export const Constants = {
         "part_out",
         "written_off",
         "closed",
+      ],
+      v2_unit_status: [
+        "purchased",
+        "graded",
+        "listed",
+        "sold",
+        "shipped",
+        "delivered",
+        "payout_received",
+        "complete",
+        "return_pending",
+        "refunded",
+        "restocked",
+        "needs_allocation",
       ],
     },
   },
