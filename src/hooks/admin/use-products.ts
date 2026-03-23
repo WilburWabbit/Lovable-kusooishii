@@ -318,14 +318,14 @@ export function useUploadProductImage() {
       const path = `products/${mpn}/${Date.now()}.${ext}`;
 
       const { error: uploadErr } = await supabase.storage
-        .from('product-images')
+        .from('media')
         .upload(path, file, { contentType: file.type });
 
       if (uploadErr) throw uploadErr;
 
       // 2. Get public URL
       const { data: urlData } = supabase.storage
-        .from('product-images')
+        .from('media')
         .getPublicUrl(path);
 
       // 3. Create media_asset record

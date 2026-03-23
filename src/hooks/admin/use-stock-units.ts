@@ -128,83 +128,90 @@ export function useGradeStockUnit() {
 
   return useMutation({
     mutationFn: async ({ stockUnitId, grade, conditionFlags = [] }: GradeInput) => {
-      // Look up or create the target SKU for this grade
+      // Fetch the unit including its current SKU assignment
       const { data: unit, error: fetchErr } = await supabase
         .from('stock_unit')
-        .select('mpn, line_item_id, batch_id' as never)
+        .select('mpn, line_item_id, batch_id, sku_id' as never)
         .eq('id', stockUnitId)
         .single();
 
       if (fetchErr) throw fetchErr;
-      const mpn = (unit as unknown as Record<string, unknown>).mpn as string;
+      const unitData = unit as unknown as Record<string, unknown>;
+      const mpn = unitData.mpn as string;
+      const existingSkuId = unitData.sku_id as string | null;
       const skuCode = `${mpn}.${grade}`;
 
-      // Fetch market data from BrickEconomy for pricing
-      const setNumber = mpn.split('-')[0];
-      const { data: beData } = await supabase
-        .from('brickeconomy_collection')
-        .select('current_value')
-        .eq('item_number', setNumber)
-        .order('synced_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // If the unit already has a SKU, keep it — never change an existing SKU assignment.
+      // Only create/assign a SKU during initial grading (no existing sku_id).
+      let skuId: string | null = existingSkuId;
 
-      const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4 };
-      const baseMarketPrice = (beData as Record<string, unknown> | null)?.current_value as number | null;
-      const gradeMarketPrice = baseMarketPrice
-        ? Math.round(baseMarketPrice * (GRADE_RATIOS[grade] ?? 0.5) * 100) / 100
-        : null;
+      if (!existingSkuId) {
+        // Fetch market data from BrickEconomy for pricing
+        const setNumber = mpn.split('-')[0];
+        const { data: beData } = await supabase
+          .from('brickeconomy_collection')
+          .select('current_value')
+          .eq('item_number', setNumber)
+          .order('synced_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      // Find or create the SKU
-      let skuId: string;
-      const { data: existingSku } = await supabase
-        .from('sku')
-        .select('id, market_price' as never)
-        .eq('sku_code', skuCode)
-        .maybeSingle();
+        const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4 };
+        const baseMarketPrice = (beData as Record<string, unknown> | null)?.current_value as number | null;
+        const gradeMarketPrice = baseMarketPrice
+          ? Math.round(baseMarketPrice * (GRADE_RATIOS[grade] ?? 0.5) * 100) / 100
+          : null;
 
-      if (existingSku) {
-        skuId = (existingSku as unknown as Record<string, unknown>).id as string;
-
-        // Update market_price with latest data (preserve user-set sale_price)
-        if (gradeMarketPrice != null) {
-          await supabase
-            .from('sku')
-            .update({ market_price: gradeMarketPrice } as never)
-            .eq('id', skuId);
-        }
-      } else {
-        // Look up the product
-        const { data: product } = await supabase
-          .from('product')
-          .select('id')
-          .eq('mpn', mpn)
-          .single();
-
-        if (!product) throw new Error(`Product not found for MPN ${mpn}`);
-
-        // Create SKU with market_price and initial sale_price from market data
-        const skuInsert: Record<string, unknown> = {
-          sku_code: skuCode,
-          product_id: product.id,
-          condition_grade: String(grade),
-          active_flag: true,
-          saleable_flag: grade <= 4,
-          mpn,
-        };
-        if (gradeMarketPrice != null) {
-          skuInsert.market_price = gradeMarketPrice;
-          skuInsert.price = gradeMarketPrice; // Initial sale_price = market_price
-        }
-
-        const { data: newSku, error: skuErr } = await supabase
+        // Find or create the SKU
+        const { data: existingSku } = await supabase
           .from('sku')
-          .insert(skuInsert as never)
-          .select()
-          .single();
+          .select('id, market_price' as never)
+          .eq('sku_code', skuCode)
+          .maybeSingle();
 
-        if (skuErr) throw skuErr;
-        skuId = (newSku as Record<string, unknown>).id as string;
+        if (existingSku) {
+          skuId = (existingSku as unknown as Record<string, unknown>).id as string;
+
+          // Update market_price with latest data (preserve user-set sale_price)
+          if (gradeMarketPrice != null) {
+            await supabase
+              .from('sku')
+              .update({ market_price: gradeMarketPrice } as never)
+              .eq('id', skuId);
+          }
+        } else {
+          // Look up the product
+          const { data: product } = await supabase
+            .from('product')
+            .select('id')
+            .eq('mpn', mpn)
+            .single();
+
+          if (!product) throw new Error(`Product not found for MPN ${mpn}`);
+
+          // Create SKU with market_price and initial sale_price from market data
+          const skuInsert: Record<string, unknown> = {
+            sku_code: skuCode,
+            product_id: product.id,
+            condition_grade: String(grade),
+            active_flag: true,
+            saleable_flag: grade <= 4,
+            mpn,
+          };
+          if (gradeMarketPrice != null) {
+            skuInsert.market_price = gradeMarketPrice;
+            skuInsert.price = gradeMarketPrice; // Initial sale_price = market_price
+          }
+
+          const { data: newSku, error: skuErr } = await supabase
+            .from('sku')
+            .insert(skuInsert as never)
+            .select()
+            .single();
+
+          if (skuErr) throw skuErr;
+          skuId = (newSku as Record<string, unknown>).id as string;
+        }
       }
 
       // Fetch current unit status to avoid regressing lifecycle state
@@ -222,14 +229,17 @@ export function useGradeStockUnit() {
       const shouldUpdateStatus = earlyStatuses.includes(currentStatus ?? null);
 
       // Check if this SKU already has live channel listings
-      const { data: liveListings } = await supabase
-        .from('channel_listing')
-        .select('id')
-        .eq('sku_id' as never, skuId)
-        .eq('v2_status' as never, 'live')
-        .limit(1);
+      let hasLiveListings = false;
+      if (skuId) {
+        const { data: liveListings } = await supabase
+          .from('channel_listing')
+          .select('id')
+          .eq('sku_id' as never, skuId)
+          .eq('v2_status' as never, 'live')
+          .limit(1);
 
-      const hasLiveListings = (liveListings ?? []).length > 0;
+        hasLiveListings = (liveListings ?? []).length > 0;
+      }
 
       // Update the stock unit — only change status if still in early lifecycle
       const now = new Date().toISOString();
@@ -240,26 +250,33 @@ export function useGradeStockUnit() {
         if (hasLiveListings) statusFields.listed_at = now;
       }
 
+      // Only set sku_id on initial grading (when unit had no SKU)
+      const unitUpdate: Record<string, unknown> = {
+        condition_grade: String(grade),
+        condition_flags: conditionFlags,
+        ...statusFields,
+      };
+      if (!existingSkuId && skuId) {
+        unitUpdate.sku_id = skuId;
+      }
+
       const { error: updateErr } = await supabase
         .from('stock_unit')
-        .update({
-          condition_grade: String(grade),
-          sku_id: skuId,
-          condition_flags: conditionFlags,
-          ...statusFields,
-        } as never)
+        .update(unitUpdate as never)
         .eq('id', stockUnitId);
 
       if (updateErr) throw updateErr;
 
       // Fire-and-forget: sync SKU to QBO (creates or updates the Item)
-      supabase.functions
-        .invoke('qbo-sync-item', { body: { skuCode } })
-        .then((res) => {
-          if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
-          else console.log(`QBO item sync for ${skuCode}: success`);
-        })
-        .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+      if (!existingSkuId) {
+        supabase.functions
+          .invoke('qbo-sync-item', { body: { skuCode } })
+          .then((res) => {
+            if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
+            else console.log(`QBO item sync for ${skuCode}: success`);
+          })
+          .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+      }
 
       return { stockUnitId, skuCode, autoListed: hasLiveListings };
     },
