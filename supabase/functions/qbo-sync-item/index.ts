@@ -73,7 +73,9 @@ Deno.serve(async (req) => {
     }
 
     // ─── 3. Build QBO Item payload ──────────────────────────
-    const salePrice = (sku as Record<string, unknown>).price as number | null;
+    // Read price from either `price` (v1) or `sale_price` (v2) column
+    const skuRow = sku as Record<string, unknown>;
+    const salePrice = (skuRow.price as number | null) ?? (skuRow.sale_price as number | null);
 
     const itemPayload: Record<string, unknown> = {
       Name: skuCode,

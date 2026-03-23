@@ -139,16 +139,40 @@ export function useGradeStockUnit() {
       const mpn = (unit as Record<string, unknown>).mpn as string;
       const skuCode = `${mpn}.${grade}`;
 
+      // Fetch market data from BrickEconomy for pricing
+      const setNumber = mpn.split('-')[0];
+      const { data: beData } = await supabase
+        .from('brickeconomy_collection')
+        .select('current_value')
+        .eq('item_number', setNumber)
+        .order('synced_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4 };
+      const baseMarketPrice = (beData as Record<string, unknown> | null)?.current_value as number | null;
+      const gradeMarketPrice = baseMarketPrice
+        ? Math.round(baseMarketPrice * (GRADE_RATIOS[grade] ?? 0.5) * 100) / 100
+        : null;
+
       // Find or create the SKU
       let skuId: string;
       const { data: existingSku } = await supabase
         .from('sku')
-        .select('id')
+        .select('id, market_price')
         .eq('sku_code', skuCode)
         .maybeSingle();
 
       if (existingSku) {
         skuId = existingSku.id;
+
+        // Update market_price with latest data (preserve user-set sale_price)
+        if (gradeMarketPrice != null) {
+          await supabase
+            .from('sku')
+            .update({ market_price: gradeMarketPrice } as never)
+            .eq('id', skuId);
+        }
       } else {
         // Look up the product
         const { data: product } = await supabase
@@ -159,15 +183,23 @@ export function useGradeStockUnit() {
 
         if (!product) throw new Error(`Product not found for MPN ${mpn}`);
 
+        // Create SKU with market_price and initial sale_price from market data
+        const skuInsert: Record<string, unknown> = {
+          sku_code: skuCode,
+          product_id: product.id,
+          condition_grade: String(grade),
+          active_flag: true,
+          saleable_flag: grade <= 4,
+          mpn,
+        };
+        if (gradeMarketPrice != null) {
+          skuInsert.market_price = gradeMarketPrice;
+          skuInsert.price = gradeMarketPrice; // Initial sale_price = market_price
+        }
+
         const { data: newSku, error: skuErr } = await supabase
           .from('sku')
-          .insert({
-            sku_code: skuCode,
-            product_id: product.id,
-            condition_grade: String(grade),
-            active_flag: true,
-            saleable_flag: grade <= 4,
-          } as never)
+          .insert(skuInsert as never)
           .select()
           .single();
 
