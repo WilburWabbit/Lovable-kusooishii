@@ -43,7 +43,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1.5">
-            <h1 className="text-[22px] font-bold text-zinc-50">{product.name}</h1>
+            <h1 className="text-[22px] font-bold text-zinc-900">{product.name}</h1>
             <Mono color="amber" className="text-sm">{product.mpn}</Mono>
           </div>
           <div className="text-zinc-500 text-[13px]">
@@ -106,7 +106,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-zinc-700/80 mb-5">
+      <div className="flex gap-0 border-b border-zinc-200 mb-5">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -114,13 +114,13 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
             className="px-4 py-2.5 bg-transparent border-none text-[13px] cursor-pointer flex items-center gap-1.5 transition-colors"
             style={{
               borderBottom: activeTab === t.key ? "2px solid #F59E0B" : "2px solid transparent",
-              color: activeTab === t.key ? "#FAFAFA" : "#71717A",
+              color: activeTab === t.key ? "#18181B" : "#71717A",
               fontWeight: activeTab === t.key ? 600 : 400,
             }}
           >
             {t.label}
             {t.count !== undefined && (
-              <span className="text-[11px] text-zinc-500 bg-[#3F3F46] px-1.5 py-px rounded-full">
+              <span className="text-[11px] text-zinc-500 bg-zinc-200 px-1.5 py-px rounded-full">
                 {t.count}
               </span>
             )}

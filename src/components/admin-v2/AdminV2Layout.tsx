@@ -24,12 +24,12 @@ export function AdminV2Layout({ children }: AdminV2LayoutProps) {
   }, [orders]);
 
   return (
-    <div className="flex h-screen bg-[#1C1C1E] font-sans text-zinc-50">
+    <div className="flex h-screen font-sans">
       <AdminV2Sidebar
         ungradedCount={ungradedCount}
         actionNeededCount={actionNeededCount}
       />
-      <main className="flex-1 overflow-auto px-8 py-6">
+      <main className="flex-1 overflow-auto bg-stone-100 px-8 py-6 text-zinc-900">
         {children}
       </main>
     </div>

@@ -14,7 +14,7 @@ export function ProductList() {
 
   return (
     <div>
-      <h1 className="text-[22px] font-bold text-zinc-50 mb-1">Products</h1>
+      <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Products</h1>
       <p className="text-zinc-500 text-[13px] mb-5">
         {products.length} products (MPN level)
       </p>
@@ -22,7 +22,7 @@ export function ProductList() {
       <SurfaceCard noPadding className="overflow-hidden">
         <table className="w-full border-collapse text-[13px]">
           <thead>
-            <tr className="border-b border-zinc-700/80">
+            <tr className="border-b border-zinc-200">
               {["MPN", "Product", "Theme", "Variants", "Total Units", "Listed", "Sold", "Status"].map((h) => (
                 <th
                   key={h}
@@ -70,13 +70,13 @@ function ProductRow({
   return (
     <tr
       onClick={onClick}
-      className="border-b border-zinc-700/80 cursor-pointer hover:bg-[#35353A] transition-colors"
+      className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
     >
       <td className="px-3 py-2.5">
         <Mono color="amber">{product.mpn}</Mono>
       </td>
-      <td className="px-3 py-2.5 text-zinc-50 font-medium">{product.name}</td>
-      <td className="px-3 py-2.5 text-zinc-400">{product.theme ?? "—"}</td>
+      <td className="px-3 py-2.5 text-zinc-900 font-medium">{product.name}</td>
+      <td className="px-3 py-2.5 text-zinc-600">{product.theme ?? "—"}</td>
       <td className="px-3 py-2.5">
         <div className="flex gap-1">
           {variants.length > 0 ? (

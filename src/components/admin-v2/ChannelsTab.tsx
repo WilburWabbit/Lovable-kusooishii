@@ -146,12 +146,12 @@ function VariantChannelsCard({
           return (
             <div
               key={ch.key}
-              className="p-3.5 bg-[#35353A] rounded-lg border border-zinc-700/80"
+              className="p-3.5 bg-zinc-50 rounded-lg border border-zinc-200"
             >
               {/* Channel header */}
               <div className="flex justify-between items-center mb-2.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-zinc-50">{ch.label}</span>
+                  <span className="text-xs font-semibold text-zinc-900">{ch.label}</span>
                   <Badge label={statusInfo.label} color={statusInfo.color} small />
                   {liveAndBelowFloor && (
                     <Badge label="Below floor" color="#EF4444" small />
@@ -170,7 +170,7 @@ function VariantChannelsCard({
                   onChange={(e) => updateField(ch.key, "title", e.target.value)}
                   maxLength={ch.titleLimit}
                   placeholder={`${ch.label} listing title`}
-                  className="w-full px-2 py-1.5 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-xs"
+                  className="w-full px-2 py-1.5 bg-white border border-zinc-200 rounded text-zinc-900 text-xs"
                 />
               </div>
 
@@ -184,7 +184,7 @@ function VariantChannelsCard({
                   onChange={(e) => updateField(ch.key, "description", e.target.value)}
                   rows={2}
                   placeholder="Leave blank to use mastered copy"
-                  className="w-full px-2 py-1.5 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-xs resize-y font-sans"
+                  className="w-full px-2 py-1.5 bg-white border border-zinc-200 rounded text-zinc-900 text-xs resize-y font-sans"
                 />
               </div>
 
@@ -200,8 +200,8 @@ function VariantChannelsCard({
                     min="0"
                     value={state.price}
                     onChange={(e) => updateField(ch.key, "price", e.target.value)}
-                    className={`w-full px-2 py-1.5 bg-[#2A2A2E] border rounded text-xs font-mono ${
-                      belowFloor ? "border-red-500 text-red-400" : "border-zinc-700/80 text-zinc-50"
+                    className={`w-full px-2 py-1.5 bg-white border rounded text-xs font-mono ${
+                      belowFloor ? "border-red-500 text-red-400" : "border-zinc-200 text-zinc-900"
                     }`}
                   />
                 </div>
@@ -244,9 +244,9 @@ function VariantChannelsCard({
                 disabled={!canPublish || publishListing.isPending}
                 className="w-full py-1.5 rounded text-[11px] font-semibold cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
-                  background: canPublish ? "#22C55E" : "#3F3F46",
+                  background: canPublish ? "#22C55E" : "#E4E4E7",
                   color: canPublish ? "#18181B" : "#71717A",
-                  border: canPublish ? "none" : "1px solid #3F3F46",
+                  border: canPublish ? "none" : "1px solid #D4D4D8",
                 }}
               >
                 {publishListing.isPending ? "Publishing…" : status === "live" ? "Update Listing" : "Publish"}

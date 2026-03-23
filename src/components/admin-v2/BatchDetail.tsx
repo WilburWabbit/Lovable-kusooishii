@@ -70,7 +70,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[22px] font-bold text-zinc-50">{batch.id}</h1>
+            <h1 className="text-[22px] font-bold text-zinc-900">{batch.id}</h1>
             {ungradedCount > 0 ? (
               <Badge label={`${ungradedCount} ungraded`} color="#F59E0B" />
             ) : (
@@ -153,7 +153,7 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onGradeUnit }: Li
   return (
     <SurfaceCard noPadding className="mb-3 overflow-hidden">
       {/* Line header */}
-      <div className="px-4 py-3 border-b border-zinc-700/80 flex justify-between items-center">
+      <div className="px-4 py-3 border-b border-zinc-200 flex justify-between items-center">
         <div className="flex items-center gap-2.5">
           <Mono color="amber">{line.mpn}</Mono>
         </div>
@@ -168,7 +168,7 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onGradeUnit }: Li
       {/* Units table */}
       <table className="w-full text-xs border-collapse">
         <thead>
-          <tr className="border-b border-zinc-700/80">
+          <tr className="border-b border-zinc-200">
             <th className="w-8 px-3 py-2" />
             {["Unit ID", "Grade", "Status", "Landed Cost", ""].map((h) => (
               <th
@@ -184,7 +184,7 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onGradeUnit }: Li
           {line.units.map((u) => (
             <tr
               key={u.id}
-              className="border-b border-zinc-700/80"
+              className="border-b border-zinc-200"
               style={{
                 background: u.grade === null ? "rgba(245,158,11,0.03)" : "transparent",
               }}
@@ -232,7 +232,7 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onGradeUnit }: Li
                       : {
                           background: "transparent",
                           color: "#71717A",
-                          border: "1px solid #3F3F46",
+                          border: "1px solid #D4D4D8",
                         }
                   }
                 >

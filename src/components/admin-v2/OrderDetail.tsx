@@ -101,7 +101,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[22px] font-bold text-zinc-50">{order.orderNumber}</h1>
+            <h1 className="text-[22px] font-bold text-zinc-900">{order.orderNumber}</h1>
             <OrderStatusBadge status={order.status} />
           </div>
           <div className="flex gap-4 text-zinc-500 text-[13px]">
@@ -138,7 +138,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               <button
                 onClick={() => markComplete.mutate()}
                 disabled={markComplete.isPending}
-                className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+                className="bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-800 transition-colors disabled:opacity-50"
               >
                 {markComplete.isPending ? "Completing…" : "Mark Complete"}
               </button>
@@ -165,12 +165,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
 
       {/* Line items table */}
       <SurfaceCard noPadding className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-700/80">
+        <div className="px-4 py-3 border-b border-zinc-200">
           <SectionHead>Line Items → Stock Units</SectionHead>
         </div>
         <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="border-b border-zinc-700/80">
+            <tr className="border-b border-zinc-200">
               {["SKU", "Unit ID", "Unit Price", "COGS", "Status", "Tracking", "Payout", ""].map(
                 (h) => (
                   <th
@@ -204,7 +204,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               return (
                 <tr
                   key={item.id}
-                  className="border-b border-zinc-700/80"
+                  className="border-b border-zinc-200"
                   style={{
                     background: isUnallocated
                       ? "rgba(245,158,11,0.03)"
@@ -260,7 +260,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                             payoutStatus,
                           })
                         }
-                        className="bg-transparent text-zinc-500 border border-zinc-700/80 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-300 transition-colors"
+                        className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
                       >
                         View Unit
                       </button>

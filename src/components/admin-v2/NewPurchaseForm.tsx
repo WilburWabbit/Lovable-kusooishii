@@ -119,7 +119,7 @@ export function NewPurchaseForm() {
   return (
     <div>
       <BackButton onClick={() => navigate("/admin/v2/purchases")} label="Back to purchases" />
-      <h1 className="text-[22px] font-bold text-zinc-50 mb-5">New Purchase</h1>
+      <h1 className="text-[22px] font-bold text-zinc-900 mb-5">New Purchase</h1>
 
       {/* Batch header */}
       <SurfaceCard className="mb-4">
@@ -150,7 +150,7 @@ export function NewPurchaseForm() {
             />
           </FormField>
           <FormField label="Supplier VAT registered?">
-            <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer mt-1">
+            <label className="flex items-center gap-2 text-sm text-zinc-700 cursor-pointer mt-1">
               <input
                 type="checkbox"
                 checked={vatRegistered}
@@ -213,7 +213,7 @@ export function NewPurchaseForm() {
 
       {/* Line items */}
       <SurfaceCard noPadding className="mb-4 overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-700/80 flex justify-between items-center">
+        <div className="px-4 py-3 border-b border-zinc-200 flex justify-between items-center">
           <SectionHead>Line Items</SectionHead>
           <button
             onClick={addLine}
@@ -224,7 +224,7 @@ export function NewPurchaseForm() {
         </div>
         <table className="w-full text-xs border-collapse">
           <thead>
-            <tr className="border-b border-zinc-700/80">
+            <tr className="border-b border-zinc-200">
               {["MPN", "Qty", "Unit Cost (£)", "Line Total", "Apport./Unit", "Landed/Unit", ""].map(
                 (h) => (
                   <th
@@ -244,7 +244,7 @@ export function NewPurchaseForm() {
               const landedPerUnit = li.unitCost + apportPerUnit;
 
               return (
-                <tr key={li.key} className="border-b border-zinc-700/80">
+                <tr key={li.key} className="border-b border-zinc-200">
                   <td className="px-3 py-2">
                     <MpnAutocomplete
                       value={li.mpn}
@@ -259,7 +259,7 @@ export function NewPurchaseForm() {
                       onChange={(e) =>
                         updateLine(li.key, "quantity", Math.max(1, parseInt(e.target.value) || 1))
                       }
-                      className="w-16 px-2 py-1 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs text-center"
+                      className="w-16 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs text-center"
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -271,7 +271,7 @@ export function NewPurchaseForm() {
                       onChange={(e) =>
                         updateLine(li.key, "unitCost", Number(e.target.value) || 0)
                       }
-                      className="w-20 px-2 py-1 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs"
+                      className="w-20 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs"
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -302,7 +302,7 @@ export function NewPurchaseForm() {
             })}
           </tbody>
         </table>
-        <div className="px-4 py-3 border-t border-zinc-700/80 flex justify-between text-xs text-zinc-500">
+        <div className="px-4 py-3 border-t border-zinc-200 flex justify-between text-xs text-zinc-500">
           <span>
             {lineItems.length} line{lineItems.length !== 1 ? "s" : ""} ·{" "}
             {lineItems.reduce((s, li) => s + li.quantity, 0)} units
@@ -328,7 +328,7 @@ export function NewPurchaseForm() {
         </button>
         <button
           onClick={() => navigate("/admin/v2/purchases")}
-          className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+          className="px-4 py-2.5 bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-800 transition-colors"
         >
           Cancel
         </button>
@@ -385,15 +385,15 @@ function MpnAutocomplete({
         onFocus={() => setFocused(true)}
         onBlur={() => setTimeout(() => setFocused(false), 150)}
         placeholder="e.g. 75348-1"
-        className="w-32 px-2 py-1 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+        className="w-32 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs font-mono"
       />
       {focused && suggestions.length > 0 && (
-        <div className="absolute z-20 top-full left-0 w-56 mt-1 bg-[#2A2A2E] border border-zinc-700/80 rounded-md shadow-lg max-h-40 overflow-auto">
+        <div className="absolute z-20 top-full left-0 w-56 mt-1 bg-white border border-zinc-200 rounded-md shadow-lg max-h-40 overflow-auto">
           {suggestions.map((p) => (
             <button
               key={p.mpn}
               onMouseDown={() => onChange(p.mpn)}
-              className="w-full text-left px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-[#35353A] transition-colors border-none bg-transparent cursor-pointer"
+              className="w-full text-left px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 transition-colors border-none bg-transparent cursor-pointer"
             >
               <span className="font-mono text-amber-500">{p.mpn}</span>{" "}
               <span className="text-zinc-500">{p.name}</span>
@@ -439,10 +439,10 @@ function FormField({
         .form-input {
           width: 100%;
           padding: 7px 9px;
-          background: #35353A;
-          border: 1px solid rgba(63,63,70,0.8);
+          background: #F9FAFB;
+          border: 1px solid #E4E4E7;
           border-radius: 4px;
-          color: #FAFAFA;
+          color: #18181B;
           font-size: 13px;
           box-sizing: border-box;
         }

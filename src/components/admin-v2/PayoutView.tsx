@@ -35,7 +35,7 @@ export function PayoutView() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-[22px] font-bold text-zinc-50">Payouts</h1>
+        <h1 className="text-[22px] font-bold text-zinc-900">Payouts</h1>
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -48,7 +48,7 @@ export function PayoutView() {
               });
             }}
             disabled={importEbay.isPending}
-            className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-3 py-1.5 text-xs cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+            className="bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md px-3 py-1.5 text-xs cursor-pointer hover:text-zinc-800 transition-colors disabled:opacity-50"
           >
             {importEbay.isPending ? "Importing…" : "Import eBay Payouts"}
           </button>
@@ -102,7 +102,7 @@ export function PayoutView() {
               {summary.blueBellCommission.owedSinceLastPayment > 0 && (
                 <button
                   onClick={() => toast.info("Record Payment — QBO expense integration coming soon")}
-                  className="mt-2.5 w-full py-1.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded text-[11px] cursor-pointer hover:text-zinc-200 transition-colors"
+                  className="mt-2.5 w-full py-1.5 bg-zinc-200 text-zinc-600 border border-zinc-200 rounded text-[11px] cursor-pointer hover:text-zinc-800 transition-colors"
                 >
                   Record Payment
                 </button>
@@ -114,7 +114,7 @@ export function PayoutView() {
 
       {/* Recent payouts table */}
       <SurfaceCard noPadding className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-700/80">
+        <div className="px-4 py-3 border-b border-zinc-200">
           <SectionHead>Recent Payouts</SectionHead>
         </div>
         {payoutsLoading ? (
@@ -122,7 +122,7 @@ export function PayoutView() {
         ) : (
           <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr className="border-b border-zinc-700/80">
+              <tr className="border-b border-zinc-200">
                 {["Date", "Channel", "Gross", "Fees", "Net", "Orders", "Units", "QBO"].map(
                   (h) => (
                     <th
@@ -443,9 +443,9 @@ function PayoutRow({ payout, onClick }: { payout: Payout; onClick: () => void })
       : "Pending";
 
   return (
-    <tr onClick={onClick} className="border-b border-zinc-700/80 cursor-pointer hover:bg-[#35353A] transition-colors">
-      <td className="px-3 py-2.5 text-zinc-400">{formattedDate}</td>
-      <td className="px-3 py-2.5 text-zinc-50">{payout.channel}</td>
+    <tr onClick={onClick} className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors">
+      <td className="px-3 py-2.5 text-zinc-600">{formattedDate}</td>
+      <td className="px-3 py-2.5 text-zinc-900">{payout.channel}</td>
       <td className="px-3 py-2.5">
         <Mono>£{payout.grossAmount.toFixed(2)}</Mono>
       </td>
@@ -455,10 +455,10 @@ function PayoutRow({ payout, onClick }: { payout: Payout; onClick: () => void })
       <td className="px-3 py-2.5">
         <Mono color="teal">£{payout.netAmount.toFixed(2)}</Mono>
       </td>
-      <td className="px-3 py-2.5 text-zinc-400 text-center">
+      <td className="px-3 py-2.5 text-zinc-600 text-center">
         {payout.orderCount}
       </td>
-      <td className="px-3 py-2.5 text-zinc-400 text-center">
+      <td className="px-3 py-2.5 text-zinc-600 text-center">
         {payout.unitCount}
       </td>
       <td className="px-3 py-2.5">

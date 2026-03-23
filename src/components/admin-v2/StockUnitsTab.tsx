@@ -44,7 +44,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
       <SurfaceCard noPadding className="overflow-hidden">
         <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="border-b border-zinc-700/80">
+            <tr className="border-b border-zinc-200">
               <th className="w-8 px-2.5 py-2" />
               {["Unit ID", "Grade", "Batch", "Landed Cost", "Status", "Order", "Payout", ""].map((h) => (
                 <th
@@ -60,7 +60,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
             {units.map((u) => (
               <tr
                 key={u.id}
-                className="border-b border-zinc-700/80"
+                className="border-b border-zinc-200"
                 style={{
                   background:
                     u.status === "return_pending"
@@ -116,7 +116,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                 <td className="px-2.5 py-2">
                   <button
                     onClick={() => setSlideUnit(u)}
-                    className="bg-transparent text-zinc-500 border border-zinc-700/80 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-300 transition-colors"
+                    className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
                   >
                     View
                   </button>

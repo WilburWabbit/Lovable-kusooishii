@@ -52,7 +52,7 @@ function PhotosSection({ product }: { product: ProductDetail }) {
           {product.images.map((img) => (
             <div
               key={img.id}
-              className="aspect-square bg-[#35353A] rounded overflow-hidden border border-zinc-700/80"
+              className="aspect-square bg-zinc-50 rounded overflow-hidden border border-zinc-200"
             >
               <img
                 src={img.storagePath}
@@ -66,7 +66,7 @@ function PhotosSection({ product }: { product: ProductDetail }) {
 
       {/* Upload zone */}
       <div
-        className="border-2 border-dashed border-zinc-700/80 rounded-lg p-10 text-center text-zinc-500 text-[13px] cursor-pointer hover:border-amber-500/40 transition-colors"
+        className="border-2 border-dashed border-zinc-200 rounded-lg p-10 text-center text-zinc-500 text-[13px] cursor-pointer hover:border-amber-500/40 transition-colors"
         onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
@@ -146,7 +146,7 @@ function CopySection({ product }: { product: ProductDetail }) {
               rows={f.rows}
               value={f.value}
               onChange={(e) => f.onChange(e.target.value)}
-              className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 resize-y font-sans box-border"
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 resize-y font-sans box-border"
             />
           </div>
         ))}
@@ -159,7 +159,7 @@ function CopySection({ product }: { product: ProductDetail }) {
             value={seoTitle}
             onChange={(e) => setSeoTitle(e.target.value)}
             maxLength={60}
-            className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 font-sans box-border"
+            className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
           />
         </div>
         <div>
@@ -171,7 +171,7 @@ function CopySection({ product }: { product: ProductDetail }) {
             value={seoDescription}
             onChange={(e) => setSeoDescription(e.target.value)}
             maxLength={160}
-            className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 resize-y font-sans box-border"
+            className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 resize-y font-sans box-border"
           />
         </div>
         <button
@@ -217,7 +217,7 @@ function ConditionNotesSection({ variant }: { variant: ProductVariant }) {
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         placeholder="AI-drafted from grade + flags + photos"
-        className="w-full bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px] p-2.5 resize-y font-sans box-border mb-2"
+        className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 resize-y font-sans box-border mb-2"
       />
       <button
         onClick={handleSave}

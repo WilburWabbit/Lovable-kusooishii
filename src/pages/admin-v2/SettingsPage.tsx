@@ -31,7 +31,7 @@ export default function SettingsPage() {
   return (
     <AdminV2Layout>
       <div>
-        <h1 className="text-[22px] font-bold text-zinc-50 mb-1">Settings</h1>
+        <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Settings</h1>
         <p className="text-zinc-500 text-[13px] mb-5">
           Configuration, integrations, and credentials.
         </p>
@@ -44,7 +44,7 @@ export default function SettingsPage() {
               <SurfaceCard key={int.key}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-zinc-50 font-medium text-sm">{int.name}</div>
+                    <div className="text-zinc-900 font-medium text-sm">{int.name}</div>
                     <div className="text-zinc-500 text-xs mt-0.5">{int.description}</div>
                   </div>
                   <Badge
@@ -60,7 +60,7 @@ export default function SettingsPage() {
         <div className="mt-6">
           <SectionHead>System</SectionHead>
           <SurfaceCard>
-            <div className="text-zinc-400 text-xs">
+            <div className="text-zinc-600 text-xs">
               Admin V2 build. Edge functions require manual deployment via{" "}
               <code className="text-amber-500">npx supabase functions deploy</code>.
             </div>

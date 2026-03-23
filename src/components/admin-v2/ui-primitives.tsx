@@ -14,7 +14,7 @@ const colorMap: Record<string, string> = {
   amber: "text-amber-500",
   teal: "text-teal-500",
   dim: "text-zinc-500",
-  default: "text-zinc-400",
+  default: "text-zinc-600",
   green: "text-green-500",
   red: "text-red-500",
 };
@@ -107,8 +107,8 @@ export function SurfaceCard({ children, className, onClick, noPadding }: Surface
     <div
       onClick={onClick}
       className={cn(
-        "bg-[#2A2A2E] border border-zinc-700/80 rounded-lg transition-all",
-        onClick && "cursor-pointer hover:border-amber-500/25 hover:-translate-y-px",
+        "bg-white border border-zinc-200 rounded-lg shadow-sm transition-all",
+        onClick && "cursor-pointer hover:border-amber-500/40 hover:-translate-y-px",
         !noPadding && "p-4",
         className
       )}
@@ -126,7 +126,7 @@ interface SummaryCardProps {
   color?: string;
 }
 
-export function SummaryCard({ label, value, color = "#FAFAFA" }: SummaryCardProps) {
+export function SummaryCard({ label, value, color = "#18181B" }: SummaryCardProps) {
   return (
     <SurfaceCard className="p-3">
       <div className="text-[11px] text-zinc-500 mb-1">{label}</div>
@@ -158,7 +158,7 @@ export function BackButton({ onClick, label = "Back" }: BackButtonProps) {
   return (
     <button
       onClick={onClick}
-      className="text-zinc-500 text-[13px] mb-3 flex items-center gap-1 hover:text-zinc-300 transition-colors bg-transparent border-none cursor-pointer p-0"
+      className="text-zinc-500 text-[13px] mb-3 flex items-center gap-1 hover:text-zinc-700 transition-colors bg-transparent border-none cursor-pointer p-0"
     >
       ← {label}
     </button>
@@ -193,7 +193,7 @@ export function UnitLifecycle({ status }: { status: StockUnitStatus }) {
                   ? "bg-green-500/10 border-green-500 text-green-500"
                   : active
                   ? "bg-amber-500/10 border-amber-500 text-amber-500"
-                  : "bg-zinc-700 border-zinc-600 text-zinc-500"
+                  : "bg-zinc-200 border-zinc-300 text-zinc-400"
               )}
             >
               {done ? "✓" : ""}
@@ -201,7 +201,7 @@ export function UnitLifecycle({ status }: { status: StockUnitStatus }) {
             <span
               className={cn(
                 "text-xs",
-                done ? "text-zinc-50" : active ? "text-amber-500 font-semibold" : "text-zinc-500"
+                done ? "text-zinc-900" : active ? "text-amber-600 font-semibold" : "text-zinc-400"
               )}
             >
               {step}
