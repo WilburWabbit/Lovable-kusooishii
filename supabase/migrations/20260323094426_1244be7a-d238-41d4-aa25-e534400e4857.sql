@@ -1,0 +1,1 @@
+ALTER VIEW public.v2_variant_stock_summary SET (security_invoker = on);
