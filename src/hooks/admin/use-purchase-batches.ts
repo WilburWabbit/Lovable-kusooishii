@@ -111,14 +111,14 @@ export function useBatchUnitSummaries() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stock_unit')
-        .select('batch_id, mpn, v2_status, condition_grade')
-        .not('batch_id', 'is', null);
+        .select('batch_id, mpn, v2_status, condition_grade' as never)
+        .not('batch_id' as never, 'is', null);
 
       if (error) throw error;
 
       const summaryMap = new Map<string, BatchUnitSummary>();
 
-      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+      for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const batchId = row.batch_id as string;
         if (!batchId) continue;
 
