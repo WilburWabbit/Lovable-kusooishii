@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 // ============================================================
 // Generate Condition Notes
 // Uses Claude API to draft condition notes from grade + flags.

@@ -74,34 +74,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Set up listener BEFORE getSession
+    let initialLoadDone = false;
+
+    // Set up listener BEFORE getSession.
+    // IMPORTANT: This callback must NOT be async — GoTrue holds an internal
+    // navigator.locks lock during the callback. Awaiting Supabase queries
+    // inside it causes a 5s lock timeout → "Lock was stolen" AbortError
+    // that breaks ALL subsequent Supabase client operations.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
           setGTMUserId(session.user.id);
-          // Check for a stashed OAuth auth action (login or sign_up)
           const pending = consumeAuthAction();
           if (pending) {
             if (pending.action === 'login') trackLogin(pending.method);
             else if (pending.action === 'sign_up') trackSignUp(pending.method);
           }
-          // Await roles + profile before marking as loaded — prevents
-          // RequireAdmin from redirecting before roles are known
-          await Promise.all([
-            fetchProfile(session.user.id),
-            fetchRoles(session.user.id),
-          ]);
+          // Fire-and-forget — never await inside this callback
+          fetchProfile(session.user.id);
+          fetchRoles(session.user.id);
         } else {
           setGTMUserId(null);
           setProfile(null);
           setRoles([]);
         }
-        setLoading(false);
+        // Only set loading=false for subsequent auth events (login/logout),
+        // not the initial session (handled by getSession below which awaits roles)
+        if (initialLoadDone) {
+          setLoading(false);
+        }
       }
     );
 
+    // getSession doesn't hold a GoTrue lock, so we can safely await here.
+    // This ensures roles are loaded before RequireAdmin checks isStaffOrAdmin.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -112,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           fetchRoles(session.user.id),
         ]);
       }
+      initialLoadDone = true;
       setLoading(false);
     });
 

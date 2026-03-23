@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 // ============================================================
 // QBO Sync Item
 // Creates or updates a QBO Item when a new SKU variant is created.

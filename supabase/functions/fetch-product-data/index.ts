@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 // ============================================================
 // Fetch Product Data
 // On MPN add, fetches product specs and market prices from

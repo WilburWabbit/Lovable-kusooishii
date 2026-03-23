@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 // ============================================================
 // Generate Alt Text
 // Uses Claude API with vision to describe a product image.

@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 // ============================================================
 // Auto-Markdown Prices
 // Cron job: Applies automated price reductions to stale listings.
