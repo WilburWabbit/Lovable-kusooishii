@@ -179,6 +179,24 @@ function PhotosSection({ product }: { product: ProductDetail }) {
         </DndContext>
       )}
 
+      {/* Catalog image (non-sortable reference) */}
+      {product.catalogImageUrl && product.includeCatalogImg && (
+        <div className="mb-3">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mb-1.5">Catalog Image</div>
+          <div className="inline-block relative aspect-square w-[calc(25%-6px)] bg-zinc-50 rounded-lg overflow-hidden border-2 border-dashed border-zinc-300">
+            <img
+              src={product.catalogImageUrl}
+              alt={`${product.name} catalog`}
+              className="w-full h-full object-contain"
+              draggable={false}
+            />
+            <span className="absolute top-1.5 right-1.5 bg-zinc-500 text-white text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">
+              Catalog
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Upload zone */}
       <div
         className="border-2 border-dashed border-zinc-200 rounded-lg p-10 text-center text-zinc-500 text-[13px] cursor-pointer hover:border-amber-500/40 transition-colors"

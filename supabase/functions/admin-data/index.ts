@@ -366,8 +366,9 @@ Deno.serve(async (req) => {
       const { product_id, ...fields } = params;
       const allowed = [
         "product_hook", "description", "highlights", "call_to_action",
-        "seo_title", "seo_description", "age_range",
-        "length_cm", "width_cm", "height_cm", "weight_kg", "include_catalog_img",
+        "seo_title", "seo_description", "age_range", "age_mark",
+        "length_cm", "width_cm", "height_cm", "weight_kg", "weight_g",
+        "include_catalog_img", "ean", "set_number", "dimensions_cm",
         "name", "piece_count", "minifigs_count", "retail_price", "product_type",
         "retired_flag", "retired_date", "released_date", "release_year",
         "version_descriptor", "brand", "subtheme_name",
