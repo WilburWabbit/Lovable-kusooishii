@@ -728,7 +728,8 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
 
   try {
     // Use the correct Stripe instance (live vs sandbox determined by caller context)
-    const btList = await stripe.balanceTransactions.list({
+    const stripeClient = isTestEvent ? stripeSandbox : stripeLive;
+    const btList = await stripeClient.balanceTransactions.list({
       payout: payoutId,
       limit: 100,
     });
