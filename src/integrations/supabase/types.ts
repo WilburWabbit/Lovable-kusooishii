@@ -1615,7 +1615,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          id: string
+          id?: string
           purchase_date?: string
           reference?: string | null
           shared_costs?: Json
@@ -2549,6 +2549,19 @@ export type Database = {
         }
         Relationships: []
       }
+      v2_variant_stock_summary: {
+        Row: {
+          avg_cost: number | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          floor_price: number | null
+          market_price: number | null
+          mpn: string | null
+          qty_on_hand: number | null
+          sale_price: number | null
+          sku_code: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       admin_list_users: {
@@ -2662,6 +2675,65 @@ export type Database = {
           subtheme_name: string
           theme_name: string
         }[]
+      }
+      v2_calculate_apportioned_costs: {
+        Args: { p_batch_id: string }
+        Returns: undefined
+      }
+      v2_compute_vat: {
+        Args: { gross: number }
+        Returns: {
+          net: number
+          vat: number
+        }[]
+      }
+      v2_consume_fifo_unit: {
+        Args: { p_sku_code: string }
+        Returns: {
+          accumulated_impairment: number
+          batch_id: string | null
+          carrying_value: number | null
+          completed_at: string | null
+          condition_flags: Json | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"]
+          created_at: string
+          delivered_at: string | null
+          graded_at: string | null
+          id: string
+          inbound_receipt_line_id: string | null
+          landed_cost: number | null
+          line_item_id: string | null
+          listed_at: string | null
+          location_id: string | null
+          mpn: string
+          notes: string | null
+          order_id: string | null
+          payout_id: string | null
+          reservation_id: string | null
+          serial_or_internal_mark: string | null
+          shipped_at: string | null
+          sku_id: string
+          sold_at: string | null
+          status: Database["public"]["Enums"]["stock_unit_status"]
+          supplier_id: string | null
+          uid: string | null
+          updated_at: string
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "stock_unit"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      v2_reallocate_costs_by_grade: {
+        Args: { p_line_item_id: string }
+        Returns: undefined
+      }
+      v2_recalculate_variant_stats: {
+        Args: { p_sku_code: string }
+        Returns: undefined
       }
     }
     Enums: {
