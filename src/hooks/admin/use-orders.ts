@@ -166,8 +166,8 @@ export function useOrder(orderId: string | undefined) {
           if (li.stockUnitId) {
             const unit = unitMap.get(li.stockUnitId);
             if (unit) {
-              (li as Record<string, unknown>)._unitStatus = unit.status;
-              (li as Record<string, unknown>)._unitUid = unit.uid;
+              (li as unknown as Record<string, unknown>)._unitStatus = unit.status;
+              (li as unknown as Record<string, unknown>)._unitUid = unit.uid;
             }
           }
         }
