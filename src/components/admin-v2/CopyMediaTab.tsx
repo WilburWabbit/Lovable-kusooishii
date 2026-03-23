@@ -66,7 +66,7 @@ function PhotosSection({ product }: { product: ProductDetail }) {
 
       {/* Upload zone */}
       <div
-        className="border-2 border-dashed border-zinc-200 rounded-lg p-10 text-center text-zinc-9000 text-[13px] cursor-pointer hover:border-amber-500/40 transition-colors"
+        className="border-2 border-dashed border-zinc-200 rounded-lg p-10 text-center text-zinc-500 text-[13px] cursor-pointer hover:border-amber-500/40 transition-colors"
         onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
@@ -139,7 +139,7 @@ function CopySection({ product }: { product: ProductDetail }) {
           { label: "CTA", rows: 1, value: cta, onChange: setCta },
         ].map((f) => (
           <div key={f.label}>
-            <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-1">
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
               {f.label}
             </label>
             <textarea
@@ -152,7 +152,7 @@ function CopySection({ product }: { product: ProductDetail }) {
         ))}
         <SectionHead>SEO</SectionHead>
         <div>
-          <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-1">
+          <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
             SEO Title <span className="text-zinc-600 font-normal">({seoTitle.length}/60)</span>
           </label>
           <input
@@ -163,7 +163,7 @@ function CopySection({ product }: { product: ProductDetail }) {
           />
         </div>
         <div>
-          <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-1">
+          <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
             SEO Description <span className="text-zinc-600 font-normal">({seoDescription.length}/160)</span>
           </label>
           <textarea

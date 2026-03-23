@@ -206,7 +206,7 @@ export function NewPurchaseForm() {
             />
           </FormField>
         </div>
-        <div className="mt-2 text-right text-xs text-zinc-9000">
+        <div className="mt-2 text-right text-xs text-zinc-500">
           Total shared costs: <Mono color="teal">£{totalSharedCosts.toFixed(2)}</Mono>
         </div>
       </SurfaceCard>
@@ -229,7 +229,7 @@ export function NewPurchaseForm() {
                 (h) => (
                   <th
                     key={h}
-                    className="px-3 py-2 text-left text-zinc-9000 font-medium text-[10px] uppercase tracking-wider"
+                    className="px-3 py-2 text-left text-zinc-500 font-medium text-[10px] uppercase tracking-wider"
                   >
                     {h}
                   </th>
@@ -291,7 +291,7 @@ export function NewPurchaseForm() {
                     {lineItems.length > 1 && (
                       <button
                         onClick={() => removeLine(li.key)}
-                        className="text-zinc-9000 hover:text-red-500 text-xs cursor-pointer bg-transparent border-none transition-colors"
+                        className="text-zinc-500 hover:text-red-500 text-xs cursor-pointer bg-transparent border-none transition-colors"
                       >
                         ✕
                       </button>
@@ -302,7 +302,7 @@ export function NewPurchaseForm() {
             })}
           </tbody>
         </table>
-        <div className="px-4 py-3 border-t border-zinc-200 flex justify-between text-xs text-zinc-9000">
+        <div className="px-4 py-3 border-t border-zinc-200 flex justify-between text-xs text-zinc-500">
           <span>
             {lineItems.length} line{lineItems.length !== 1 ? "s" : ""} ·{" "}
             {lineItems.reduce((s, li) => s + li.quantity, 0)} units
@@ -396,13 +396,13 @@ function MpnAutocomplete({
               className="w-full text-left px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 transition-colors border-none bg-transparent cursor-pointer"
             >
               <span className="font-mono text-amber-500">{p.mpn}</span>{" "}
-              <span className="text-zinc-9000">{p.name}</span>
+              <span className="text-zinc-500">{p.name}</span>
             </button>
           ))}
         </div>
       )}
       {value && matchedProduct && (
-        <div className="text-[10px] text-zinc-9000 mt-0.5">
+        <div className="text-[10px] text-zinc-500 mt-0.5">
           {totalOnHand > 0 ? (
             <span>
               {totalOnHand} on hand at £{avgCost.toFixed(2)} avg
@@ -430,7 +430,7 @@ function FormField({
 }) {
   return (
     <div>
-      <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-1">
+      <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
         {label}
         {required && <span className="text-amber-500 ml-0.5">*</span>}
       </label>

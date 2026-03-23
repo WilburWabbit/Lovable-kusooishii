@@ -119,7 +119,7 @@ function VariantChannelsCard({
             {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
           </Mono>
           {variant.floorPrice && (
-            <span className="text-[10px] text-zinc-9000">
+            <span className="text-[10px] text-zinc-500">
               Floor: <Mono color="red" className="text-[10px]">£{variant.floorPrice.toFixed(2)}</Mono>
             </span>
           )}
@@ -161,7 +161,7 @@ function VariantChannelsCard({
 
               {/* Title */}
               <div className="mb-2">
-                <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-0.5">
+                <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                   Title <span className="text-zinc-600 font-normal">({state.title.length}/{ch.titleLimit})</span>
                   {titleEmpty && <span className="text-red-500 ml-1">*required</span>}
                 </label>
@@ -176,7 +176,7 @@ function VariantChannelsCard({
 
               {/* Description override */}
               <div className="mb-2">
-                <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-0.5">
+                <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                   Description <span className="text-zinc-600 font-normal">(override)</span>
                 </label>
                 <textarea
@@ -191,7 +191,7 @@ function VariantChannelsCard({
               {/* Price + fees */}
               <div className="grid grid-cols-3 gap-2 mb-2">
                 <div>
-                  <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-0.5">
+                  <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                     Price (£)
                   </label>
                   <input
@@ -206,7 +206,7 @@ function VariantChannelsCard({
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-0.5">
+                  <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                     Est. Fees
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-red-400">
@@ -214,7 +214,7 @@ function VariantChannelsCard({
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-9000 font-semibold uppercase tracking-wider block mb-0.5">
+                  <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                     Net
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-teal-500">
