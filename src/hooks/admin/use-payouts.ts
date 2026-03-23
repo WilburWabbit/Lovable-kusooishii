@@ -80,7 +80,7 @@ export function usePayoutSummary() {
       // grouped by the order's channel — these represent pending payouts
       const { data: pendingUnits, error: unitErr } = await supabase
         .from('stock_unit')
-        .select('id, order_id, landed_cost, v2_status')
+        .select('id, order_id, landed_cost, v2_status' as never)
         .in('v2_status' as never, ['delivered', 'sold', 'shipped']);
 
       if (unitErr) throw unitErr;
@@ -88,7 +88,7 @@ export function usePayoutSummary() {
       // Get the orders for these units to determine channel
       const orderIds = [
         ...new Set(
-          ((pendingUnits ?? []) as Record<string, unknown>[])
+          ((pendingUnits ?? []) as unknown as Record<string, unknown>[])
             .map((u) => u.order_id as string)
             .filter(Boolean),
         ),
