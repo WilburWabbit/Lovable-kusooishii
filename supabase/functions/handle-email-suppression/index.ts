@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { WebhookError, verifyWebhookRequest } from 'npm:@lovable.dev/webhooks-js'
 

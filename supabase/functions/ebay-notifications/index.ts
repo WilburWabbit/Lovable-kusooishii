@@ -1,3 +1,4 @@
+// Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 import { createVerify } from "node:crypto";
 
