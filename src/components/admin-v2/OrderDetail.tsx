@@ -17,6 +17,9 @@ import {
 } from "./ui-primitives";
 import { OrderUnitSlideOut } from "./OrderUnitSlideOut";
 import { AllocateItemsDialog } from "./AllocateItemsDialog";
+import { ShipOrderDialog } from "./ShipOrderDialog";
+import { ReturnDialog } from "./ReturnDialog";
+import { ProcessReturnDialog } from "./ProcessReturnDialog";
 import { toast } from "sonner";
 
 interface OrderDetailProps {
@@ -28,6 +31,9 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const queryClient = useQueryClient();
   const { data: order, isLoading } = useOrder(orderId);
   const [showAllocate, setShowAllocate] = useState(false);
+  const [showShip, setShowShip] = useState(false);
+  const [showReturn, setShowReturn] = useState(false);
+  const [showProcessReturn, setShowProcessReturn] = useState(false);
   const [slideItem, setSlideItem] = useState<(OrderLineItem & {
     unitUid?: string;
     unitStatus?: StockUnitStatus;
@@ -113,13 +119,37 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               Allocate Items
             </button>
           )}
-          {(order.status === "shipped" || order.status === "delivered") && (
+          {(order.status === "new" || order.status === "awaiting_shipment") && (
             <button
-              onClick={() => markComplete.mutate()}
-              disabled={markComplete.isPending}
-              className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+              onClick={() => setShowShip(true)}
+              className="bg-teal-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-teal-400 transition-colors"
             >
-              {markComplete.isPending ? "Completing…" : "Mark Complete"}
+              Ship Order
+            </button>
+          )}
+          {(order.status === "shipped" || order.status === "delivered") && (
+            <>
+              <button
+                onClick={() => setShowReturn(true)}
+                className="bg-red-500/20 text-red-400 border border-red-500/30 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:bg-red-500/30 transition-colors"
+              >
+                Initiate Return
+              </button>
+              <button
+                onClick={() => markComplete.mutate()}
+                disabled={markComplete.isPending}
+                className="bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+              >
+                {markComplete.isPending ? "Completing…" : "Mark Complete"}
+              </button>
+            </>
+          )}
+          {order.status === "return_pending" && (
+            <button
+              onClick={() => setShowProcessReturn(true)}
+              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
+            >
+              Process Return
             </button>
           )}
         </div>
@@ -261,6 +291,26 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         <AllocateItemsDialog
           open={showAllocate}
           onClose={() => setShowAllocate(false)}
+          orderId={order.id}
+          lineItems={order.lineItems}
+        />
+
+        <ShipOrderDialog
+          open={showShip}
+          onClose={() => setShowShip(false)}
+          orderId={order.id}
+        />
+
+        <ReturnDialog
+          open={showReturn}
+          onClose={() => setShowReturn(false)}
+          orderId={order.id}
+          lineItems={order.lineItems}
+        />
+
+        <ProcessReturnDialog
+          open={showProcessReturn}
+          onClose={() => setShowProcessReturn(false)}
           orderId={order.id}
           lineItems={order.lineItems}
         />

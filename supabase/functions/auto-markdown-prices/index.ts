@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
       // Skip if price wouldn't actually change
       if (newPrice >= currentPrice) continue;
 
-      // Apply markdown
+      // Apply markdown to SKU price
       const { error: updateErr } = await admin
         .from("sku")
         .update({
@@ -142,6 +142,39 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Cascade: update all live channel listings for this SKU
+      const { data: liveListings } = await admin
+        .from("channel_listing")
+        .update({
+          listed_price: newPrice,
+          fee_adjusted_price: newPrice,
+        } as never)
+        .eq("sku_id", skuId)
+        .eq("v2_status" as never, "live")
+        .select("id, channel");
+
+      // Push price update to external channels (fire-and-forget)
+      if (liveListings) {
+        for (const listing of liveListings as { id: string; channel: string }[]) {
+          if (listing.channel === "ebay") {
+            fetch(`${supabaseUrl}/functions/v1/ebay-push-listing`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${serviceRoleKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                listingId: listing.id,
+                action: "update_price",
+                newPrice,
+              }),
+            }).catch((err) =>
+              console.warn(`eBay price push for listing ${listing.id} failed (non-blocking):`, err),
+            );
+          }
+        }
+      }
+
       markdowns.push({
         skuId,
         type: markdownType,
@@ -151,7 +184,9 @@ Deno.serve(async (req) => {
       });
 
       console.log(
-        `Markdown ${markdownType}: SKU ${skuId} £${currentPrice.toFixed(2)} → £${newPrice.toFixed(2)} (floor: £${floorPrice.toFixed(2)}, ${oldestListedDays} days listed)`,
+        `Markdown ${markdownType}: SKU ${skuId} £${currentPrice.toFixed(2)} → £${newPrice.toFixed(2)} ` +
+        `(floor: £${floorPrice.toFixed(2)}, ${oldestListedDays} days listed, ` +
+        `${(liveListings ?? []).length} channel listings updated)`,
       );
     }
 

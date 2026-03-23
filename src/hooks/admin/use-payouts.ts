@@ -3,7 +3,7 @@
 // Covers: usePayouts, usePayoutSummary
 // ============================================================
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type {
   Payout,
@@ -148,6 +148,114 @@ export function usePayoutSummary() {
           qualifyingOrderCount: (bbOrders ?? []).length,
         },
       };
+    },
+  });
+}
+
+// ─── useCreatePayout ────────────────────────────────────────
+
+interface CreatePayoutInput {
+  channel: PayoutChannel;
+  payoutDate: string;
+  grossAmount: number;
+  totalFees: number;
+  netAmount: number;
+  feeBreakdown: FeeBreakdown;
+  externalPayoutId?: string;
+  notes?: string;
+}
+
+export function useCreatePayout() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: CreatePayoutInput) => {
+      const { data, error } = await supabase
+        .from('payouts')
+        .insert({
+          channel: input.channel,
+          payout_date: input.payoutDate,
+          gross_amount: input.grossAmount,
+          total_fees: input.totalFees,
+          net_amount: input.netAmount,
+          fee_breakdown: input.feeBreakdown,
+          order_count: 0,
+          unit_count: 0,
+          qbo_sync_status: 'pending',
+          external_payout_id: input.externalPayoutId ?? null,
+          notes: input.notes ?? null,
+        } as never)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
+    },
+  });
+}
+
+// ─── useReconcilePayout ─────────────────────────────────────
+
+export function useReconcilePayout() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payoutId: string) => {
+      const { data, error } = await supabase.functions.invoke('v2-reconcile-payout', {
+        body: { payoutId },
+      });
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
+    },
+  });
+}
+
+// ─── useTriggerPayoutQBOSync ────────────────────────────────
+
+export function useTriggerPayoutQBOSync() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payoutId: string) => {
+      const { data, error } = await supabase.functions.invoke('qbo-sync-payout', {
+        body: { payoutId },
+      });
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+    },
+  });
+}
+
+// ─── useImportEbayPayouts ───────────────────────────────────
+
+export function useImportEbayPayouts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params?: { dateFrom?: string; dateTo?: string }) => {
+      const { data, error } = await supabase.functions.invoke('ebay-import-payouts', {
+        body: params ?? {},
+      });
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
     },
   });
 }

@@ -1235,6 +1235,20 @@ Deno.serve(async (req) => {
       } catch { /* best effort */ }
     }
 
+    // ── Step 15: Trigger v2 order processing (FIFO, COGS, variant stats) ──
+    try {
+      const v2Url = Deno.env.get("SUPABASE_URL")!;
+      fetch(`${v2Url}/functions/v1/v2-process-order`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ orderId: newOrder.id }),
+      }).catch(() => console.warn("v2-process-order trigger failed (non-blocking)"));
+      console.log(`v2-process-order triggered for eBay order ${newOrder.id}`);
+    } catch { /* best effort */ }
+
     console.log(`Pipeline complete for ${orderId}: qbo_sync_status=${qboSyncStatus}`);
 
     return new Response(
