@@ -217,9 +217,9 @@ export function useGradeStockUnit() {
       if (currentErr) throw currentErr;
       const currentStatus = (currentUnit as unknown as Record<string, unknown>).v2_status as string;
 
-      // Only advance status if the unit is in an early lifecycle state
-      const earlyStatuses = ['purchased', 'graded'];
-      const shouldUpdateStatus = earlyStatuses.includes(currentStatus);
+      // Only advance status if the unit is in an early lifecycle state (or null from legacy import)
+      const earlyStatuses: Array<string | null> = ['purchased', 'graded', null];
+      const shouldUpdateStatus = earlyStatuses.includes(currentStatus ?? null);
 
       // Check if this SKU already has live channel listings
       const { data: liveListings } = await supabase
