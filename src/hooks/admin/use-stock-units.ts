@@ -207,15 +207,27 @@ export function useGradeStockUnit() {
         skuId = (newSku as Record<string, unknown>).id as string;
       }
 
-      // Update the stock unit
+      // Check if this SKU already has live channel listings
+      const { data: liveListings } = await supabase
+        .from('channel_listing')
+        .select('id')
+        .eq('sku_id' as never, skuId)
+        .eq('v2_status' as never, 'live')
+        .limit(1);
+
+      const hasLiveListings = (liveListings ?? []).length > 0;
+
+      // Update the stock unit — auto-promote to 'listed' if SKU already has live listings
+      const now = new Date().toISOString();
       const { error: updateErr } = await supabase
         .from('stock_unit')
         .update({
           condition_grade: String(grade),
           sku_id: skuId,
           condition_flags: conditionFlags,
-          v2_status: 'graded',
-          graded_at: new Date().toISOString(),
+          v2_status: hasLiveListings ? 'listed' : 'graded',
+          graded_at: now,
+          ...(hasLiveListings ? { listed_at: now } : {}),
         } as never)
         .eq('id', stockUnitId);
 
@@ -230,7 +242,7 @@ export function useGradeStockUnit() {
         })
         .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
 
-      return { stockUnitId, skuCode };
+      return { stockUnitId, skuCode, autoListed: hasLiveListings };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
