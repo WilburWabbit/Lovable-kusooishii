@@ -207,6 +207,20 @@ export function useGradeStockUnit() {
         skuId = (newSku as Record<string, unknown>).id as string;
       }
 
+      // Fetch current unit status to avoid regressing lifecycle state
+      const { data: currentUnit, error: currentErr } = await supabase
+        .from('stock_unit')
+        .select('v2_status' as never)
+        .eq('id', stockUnitId)
+        .single();
+
+      if (currentErr) throw currentErr;
+      const currentStatus = (currentUnit as unknown as Record<string, unknown>).v2_status as string;
+
+      // Only advance status if the unit is in an early lifecycle state
+      const earlyStatuses = ['purchased', 'graded'];
+      const shouldUpdateStatus = earlyStatuses.includes(currentStatus);
+
       // Check if this SKU already has live channel listings
       const { data: liveListings } = await supabase
         .from('channel_listing')
@@ -217,17 +231,22 @@ export function useGradeStockUnit() {
 
       const hasLiveListings = (liveListings ?? []).length > 0;
 
-      // Update the stock unit — auto-promote to 'listed' if SKU already has live listings
+      // Update the stock unit — only change status if still in early lifecycle
       const now = new Date().toISOString();
+      const statusFields: Record<string, unknown> = {};
+      if (shouldUpdateStatus) {
+        statusFields.v2_status = hasLiveListings ? 'listed' : 'graded';
+        statusFields.graded_at = now;
+        if (hasLiveListings) statusFields.listed_at = now;
+      }
+
       const { error: updateErr } = await supabase
         .from('stock_unit')
         .update({
           condition_grade: String(grade),
           sku_id: skuId,
           condition_flags: conditionFlags,
-          v2_status: hasLiveListings ? 'listed' : 'graded',
-          graded_at: now,
-          ...(hasLiveListings ? { listed_at: now } : {}),
+          ...statusFields,
         } as never)
         .eq('id', stockUnitId);
 
