@@ -34,9 +34,9 @@ export function OrderUnitSlideOut({ lineItem, open, onClose }: OrderUnitSlideOut
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-[480px] bg-[#1C1C1E] border-zinc-700/80 p-0 flex flex-col">
-        <SheetHeader className="px-5 py-4 border-b border-zinc-700/80">
-          <SheetTitle className="text-zinc-50 text-base font-bold">
+      <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
+        <SheetHeader className="px-5 py-4 border-b border-zinc-200">
+          <SheetTitle className="text-zinc-900 text-base font-bold">
             Unit {lineItem?.unitUid ?? "—"}
           </SheetTitle>
         </SheetHeader>

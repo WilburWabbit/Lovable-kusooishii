@@ -59,9 +59,9 @@ export function UnitDetailSlideOut({ unit, open, onClose }: UnitDetailSlideOutPr
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-[480px] bg-[#1C1C1E] border-zinc-700/80 p-0 flex flex-col">
-        <SheetHeader className="px-5 py-4 border-b border-zinc-700/80">
-          <SheetTitle className="text-zinc-50 text-base font-bold">
+      <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
+        <SheetHeader className="px-5 py-4 border-b border-zinc-200">
+          <SheetTitle className="text-zinc-900 text-base font-bold">
             Unit {unit?.uid ?? ""}
           </SheetTitle>
         </SheetHeader>
@@ -102,8 +102,8 @@ export function UnitDetailSlideOut({ unit, open, onClose }: UnitDetailSlideOutPr
                         onClick={() => setSelectedGrade(g)}
                         className="p-2 rounded-md cursor-pointer text-center font-mono text-sm font-extrabold border-2 transition-colors"
                         style={{
-                          background: selected ? `${color}20` : "#3F3F46",
-                          borderColor: selected ? color : "#3F3F46",
+                          background: selected ? `${color}20` : "#F4F4F5",
+                          borderColor: selected ? color : "#E4E4E7",
                           color,
                         }}
                       >
@@ -119,7 +119,7 @@ export function UnitDetailSlideOut({ unit, open, onClose }: UnitDetailSlideOutPr
             )}
 
             {/* Save */}
-            <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+            <div className="flex gap-2 pt-2 border-t border-zinc-200">
               <button
                 onClick={handleSave}
                 disabled={!selectedGrade || gradeUnit.isPending}

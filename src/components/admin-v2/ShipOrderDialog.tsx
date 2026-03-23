@@ -67,7 +67,7 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-md">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-md">
         <DialogHeader>
           <DialogTitle>Ship Order</DialogTitle>
         </DialogHeader>
@@ -78,7 +78,7 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
             <select
               value={carrier}
               onChange={(e) => setCarrier(e.target.value)}
-              className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              className="w-full px-2.5 py-2 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
             >
               {CARRIERS.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -92,11 +92,11 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
               value={trackingNumber}
               onChange={(e) => setTrackingNumber(e.target.value)}
               placeholder="e.g. JD001234567GB"
-              className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              className="w-full px-2.5 py-2 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
             />
           </div>
 
-          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+          <div className="flex gap-2 pt-2 border-t border-zinc-200">
             <button
               onClick={() => shipOrder.mutate()}
               disabled={shipOrder.isPending}
@@ -106,7 +106,7 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>

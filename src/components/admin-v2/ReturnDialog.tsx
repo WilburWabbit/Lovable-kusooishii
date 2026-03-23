@@ -97,7 +97,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-lg">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-lg">
         <DialogHeader>
           <DialogTitle>Initiate Return</DialogTitle>
         </DialogHeader>
@@ -108,7 +108,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
             <select
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="w-full px-2.5 py-2 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              className="w-full px-2.5 py-2 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
             >
               {RETURN_REASONS.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -122,7 +122,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
               {allocatedLines.map((li) => (
                 <label
                   key={li.id}
-                  className="flex items-center gap-2.5 p-2 bg-[#35353A] rounded border border-zinc-700/80 cursor-pointer text-xs"
+                  className="flex items-center gap-2.5 p-2 bg-zinc-50 rounded border border-zinc-200 cursor-pointer text-xs"
                 >
                   <input
                     type="checkbox"
@@ -140,7 +140,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
             </div>
           </div>
 
-          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+          <div className="flex gap-2 pt-2 border-t border-zinc-200">
             <button
               onClick={() => initiateReturn.mutate()}
               disabled={initiateReturn.isPending || selectedLineIds.size === 0}
@@ -150,7 +150,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>

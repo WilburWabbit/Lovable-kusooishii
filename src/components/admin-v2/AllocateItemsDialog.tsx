@@ -59,7 +59,7 @@ export function AllocateItemsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-lg">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-lg">
         <DialogHeader>
           <DialogTitle>Allocate Items</DialogTitle>
         </DialogHeader>
@@ -74,7 +74,7 @@ export function AllocateItemsDialog({
               {unallocated.map((li) => (
                 <div
                   key={li.id}
-                  className="flex items-center gap-3 p-2.5 bg-[#35353A] rounded border border-zinc-700/80"
+                  className="flex items-center gap-3 p-2.5 bg-zinc-50 rounded border border-zinc-200"
                 >
                   <div className="flex-1">
                     <div className="text-xs text-zinc-500">
@@ -87,14 +87,14 @@ export function AllocateItemsDialog({
                       setSkuCodes((prev) => ({ ...prev, [li.id]: e.target.value }))
                     }
                     placeholder="e.g. 75367-1.1"
-                    className="w-36 px-2 py-1.5 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+                    className="w-36 px-2 py-1.5 bg-white border border-zinc-200 rounded text-zinc-900 text-xs font-mono"
                   />
                 </div>
               ))}
             </div>
           )}
 
-          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+          <div className="flex gap-2 pt-2 border-t border-zinc-200">
             <button
               onClick={handleAllocate}
               disabled={allocate.isPending || unallocated.length === 0}
@@ -104,7 +104,7 @@ export function AllocateItemsDialog({
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>
