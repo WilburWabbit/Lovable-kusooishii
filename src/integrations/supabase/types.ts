@@ -253,9 +253,14 @@ export type Database = {
           channel: string
           confidence_score: number | null
           created_at: string
+          estimated_fees: number | null
+          estimated_net: number | null
           external_listing_id: string | null
           external_sku: string
+          external_url: string | null
+          fee_adjusted_price: number | null
           id: string
+          listed_at: string | null
           listed_price: number | null
           listed_quantity: number | null
           listing_description: string | null
@@ -270,14 +275,23 @@ export type Database = {
           sku_id: string | null
           synced_at: string
           updated_at: string
+          v2_channel: Database["public"]["Enums"]["v2_channel"] | null
+          v2_status:
+            | Database["public"]["Enums"]["v2_channel_listing_status"]
+            | null
         }
         Insert: {
           channel?: string
           confidence_score?: number | null
           created_at?: string
+          estimated_fees?: number | null
+          estimated_net?: number | null
           external_listing_id?: string | null
           external_sku: string
+          external_url?: string | null
+          fee_adjusted_price?: number | null
           id?: string
+          listed_at?: string | null
           listed_price?: number | null
           listed_quantity?: number | null
           listing_description?: string | null
@@ -292,14 +306,23 @@ export type Database = {
           sku_id?: string | null
           synced_at?: string
           updated_at?: string
+          v2_channel?: Database["public"]["Enums"]["v2_channel"] | null
+          v2_status?:
+            | Database["public"]["Enums"]["v2_channel_listing_status"]
+            | null
         }
         Update: {
           channel?: string
           confidence_score?: number | null
           created_at?: string
+          estimated_fees?: number | null
+          estimated_net?: number | null
           external_listing_id?: string | null
           external_sku?: string
+          external_url?: string | null
+          fee_adjusted_price?: number | null
           id?: string
+          listed_at?: string | null
           listed_price?: number | null
           listed_quantity?: number | null
           listing_description?: string | null
@@ -314,6 +337,10 @@ export type Database = {
           sku_id?: string | null
           synced_at?: string
           updated_at?: string
+          v2_channel?: Database["public"]["Enums"]["v2_channel"] | null
+          v2_status?:
+            | Database["public"]["Enums"]["v2_channel_listing_status"]
+            | null
         }
         Relationships: [
           {
@@ -409,6 +436,8 @@ export type Database = {
           billing_line_1: string | null
           billing_line_2: string | null
           billing_postcode: string | null
+          blue_bell_member: boolean
+          channel_ids: Json | null
           created_at: string
           display_name: string
           email: string | null
@@ -428,6 +457,8 @@ export type Database = {
           billing_line_1?: string | null
           billing_line_2?: string | null
           billing_postcode?: string | null
+          blue_bell_member?: boolean
+          channel_ids?: Json | null
           created_at?: string
           display_name: string
           email?: string | null
@@ -447,6 +478,8 @@ export type Database = {
           billing_line_1?: string | null
           billing_line_2?: string | null
           billing_postcode?: string | null
+          blue_bell_member?: boolean
+          channel_ids?: Json | null
           created_at?: string
           display_name?: string
           email?: string | null
@@ -1293,6 +1326,57 @@ export type Database = {
           },
         ]
       }
+      payouts: {
+        Row: {
+          channel: Database["public"]["Enums"]["payout_channel"]
+          created_at: string
+          external_payout_id: string | null
+          fee_breakdown: Json | null
+          gross_amount: number
+          id: string
+          net_amount: number
+          order_count: number
+          payout_date: string
+          qbo_deposit_id: string | null
+          qbo_expense_id: string | null
+          qbo_sync_status: string | null
+          total_fees: number
+          unit_count: number
+        }
+        Insert: {
+          channel: Database["public"]["Enums"]["payout_channel"]
+          created_at?: string
+          external_payout_id?: string | null
+          fee_breakdown?: Json | null
+          gross_amount: number
+          id?: string
+          net_amount: number
+          order_count?: number
+          payout_date: string
+          qbo_deposit_id?: string | null
+          qbo_expense_id?: string | null
+          qbo_sync_status?: string | null
+          total_fees?: number
+          unit_count?: number
+        }
+        Update: {
+          channel?: Database["public"]["Enums"]["payout_channel"]
+          created_at?: string
+          external_payout_id?: string | null
+          fee_breakdown?: Json | null
+          gross_amount?: number
+          id?: string
+          net_amount?: number
+          order_count?: number
+          payout_date?: string
+          qbo_deposit_id?: string | null
+          qbo_expense_id?: string | null
+          qbo_sync_status?: string | null
+          total_fees?: number
+          unit_count?: number
+        }
+        Relationships: []
+      }
       product: {
         Row: {
           age_mark: string | null
@@ -1630,6 +1714,8 @@ export type Database = {
       }
       sales_order: {
         Row: {
+          blue_bell_club: boolean
+          carrier: string | null
           club_commission_amount: number
           club_discount_amount: number
           club_id: string | null
@@ -1638,6 +1724,7 @@ export type Database = {
           customer_id: string | null
           discount_total: number
           doc_number: string | null
+          external_order_id: string | null
           global_tax_calculation: string | null
           gross_total: number
           guest_email: string | null
@@ -1645,10 +1732,12 @@ export type Database = {
           id: string
           is_test: boolean
           merchandise_subtotal: number
+          net_amount: number | null
           notes: string | null
           order_number: string
           origin_channel: string
           origin_reference: string | null
+          payment_method: string | null
           payment_reference: string | null
           qbo_customer_id: string | null
           qbo_last_attempt_at: string | null
@@ -1672,8 +1761,12 @@ export type Database = {
           txn_date: string | null
           updated_at: string
           user_id: string | null
+          v2_status: Database["public"]["Enums"]["v2_order_status"] | null
+          vat_amount: number | null
         }
         Insert: {
+          blue_bell_club?: boolean
+          carrier?: string | null
           club_commission_amount?: number
           club_discount_amount?: number
           club_id?: string | null
@@ -1682,6 +1775,7 @@ export type Database = {
           customer_id?: string | null
           discount_total?: number
           doc_number?: string | null
+          external_order_id?: string | null
           global_tax_calculation?: string | null
           gross_total: number
           guest_email?: string | null
@@ -1689,10 +1783,12 @@ export type Database = {
           id?: string
           is_test?: boolean
           merchandise_subtotal: number
+          net_amount?: number | null
           notes?: string | null
           order_number?: string
           origin_channel?: string
           origin_reference?: string | null
+          payment_method?: string | null
           payment_reference?: string | null
           qbo_customer_id?: string | null
           qbo_last_attempt_at?: string | null
@@ -1716,8 +1812,12 @@ export type Database = {
           txn_date?: string | null
           updated_at?: string
           user_id?: string | null
+          v2_status?: Database["public"]["Enums"]["v2_order_status"] | null
+          vat_amount?: number | null
         }
         Update: {
+          blue_bell_club?: boolean
+          carrier?: string | null
           club_commission_amount?: number
           club_discount_amount?: number
           club_id?: string | null
@@ -1726,6 +1826,7 @@ export type Database = {
           customer_id?: string | null
           discount_total?: number
           doc_number?: string | null
+          external_order_id?: string | null
           global_tax_calculation?: string | null
           gross_total?: number
           guest_email?: string | null
@@ -1733,10 +1834,12 @@ export type Database = {
           id?: string
           is_test?: boolean
           merchandise_subtotal?: number
+          net_amount?: number | null
           notes?: string | null
           order_number?: string
           origin_channel?: string
           origin_reference?: string | null
+          payment_method?: string | null
           payment_reference?: string | null
           qbo_customer_id?: string | null
           qbo_last_attempt_at?: string | null
@@ -1760,6 +1863,8 @@ export type Database = {
           txn_date?: string | null
           updated_at?: string
           user_id?: string | null
+          v2_status?: Database["public"]["Enums"]["v2_order_status"] | null
+          vat_amount?: number | null
         }
         Relationships: [
           {
@@ -1787,6 +1892,7 @@ export type Database = {
       }
       sales_order_line: {
         Row: {
+          cogs: number | null
           created_at: string
           id: string
           line_discount: number
@@ -1801,6 +1907,7 @@ export type Database = {
           vat_rate_id: string | null
         }
         Insert: {
+          cogs?: number | null
           created_at?: string
           id?: string
           line_discount?: number
@@ -1815,6 +1922,7 @@ export type Database = {
           vat_rate_id?: string | null
         }
         Update: {
+          cogs?: number | null
           created_at?: string
           id?: string
           line_discount?: number
@@ -2125,6 +2233,20 @@ export type Database = {
           v2_status?: Database["public"]["Enums"]["v2_unit_status"] | null
         }
         Relationships: [
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_payout"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "stock_unit_batch_id_fkey"
             columns: ["batch_id"]
@@ -2571,6 +2693,7 @@ export type Database = {
         | "partially_refunded"
         | "refunded"
         | "exception"
+      payout_channel: "ebay" | "stripe"
       purchase_batch_status: "draft" | "recorded"
       receipt_status: "pending" | "processed" | "error"
       stock_unit_status:
@@ -2591,6 +2714,16 @@ export type Database = {
         | "part_out"
         | "written_off"
         | "closed"
+      v2_channel: "ebay" | "website" | "bricklink" | "brickowl" | "in_person"
+      v2_channel_listing_status: "draft" | "live" | "paused" | "ended"
+      v2_order_status:
+        | "needs_allocation"
+        | "new"
+        | "awaiting_shipment"
+        | "shipped"
+        | "delivered"
+        | "complete"
+        | "return_pending"
       v2_unit_status:
         | "purchased"
         | "graded"
@@ -2761,6 +2894,7 @@ export const Constants = {
         "refunded",
         "exception",
       ],
+      payout_channel: ["ebay", "stripe"],
       purchase_batch_status: ["draft", "recorded"],
       receipt_status: ["pending", "processed", "error"],
       stock_unit_status: [
@@ -2781,6 +2915,17 @@ export const Constants = {
         "part_out",
         "written_off",
         "closed",
+      ],
+      v2_channel: ["ebay", "website", "bricklink", "brickowl", "in_person"],
+      v2_channel_listing_status: ["draft", "live", "paused", "ended"],
+      v2_order_status: [
+        "needs_allocation",
+        "new",
+        "awaiting_shipment",
+        "shipped",
+        "delivered",
+        "complete",
+        "return_pending",
       ],
       v2_unit_status: [
         "purchased",
