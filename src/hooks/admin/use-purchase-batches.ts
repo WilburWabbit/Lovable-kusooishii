@@ -139,7 +139,7 @@ export function useBatchUnitSummaries() {
 
       // Count distinct MPNs per batch
       const mpnSets = new Map<string, Set<string>>();
-      for (const row of ((data ?? []) as Record<string, unknown>[])) {
+      for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
         const batchId = row.batch_id as string;
         const mpn = row.mpn as string;
         if (!batchId || !mpn) continue;
