@@ -120,7 +120,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-lg">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-lg">
         <DialogHeader>
           <DialogTitle>Process Return</DialogTitle>
         </DialogHeader>
@@ -132,7 +132,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
             {returnableLines.map((li) => (
               <div
                 key={li.id}
-                className="flex items-center justify-between p-2.5 bg-[#35353A] rounded border border-zinc-700/80"
+                className="flex items-center justify-between p-2.5 bg-zinc-50 rounded border border-zinc-200"
               >
                 <div className="flex items-center gap-2 text-xs">
                   <Mono color="amber">{li.sku ?? "—"}</Mono>
@@ -144,7 +144,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
                     className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors ${
                       actions[li.id] === "refund"
                         ? "bg-red-500/20 border-red-500 text-red-400"
-                        : "bg-transparent border-zinc-700/80 text-zinc-500"
+                        : "bg-transparent border-zinc-200 text-zinc-500"
                     }`}
                   >
                     Refund
@@ -154,7 +154,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
                     className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors ${
                       actions[li.id] === "restock"
                         ? "bg-green-500/20 border-green-500 text-green-400"
-                        : "bg-transparent border-zinc-700/80 text-zinc-500"
+                        : "bg-transparent border-zinc-200 text-zinc-500"
                     }`}
                   >
                     Restock
@@ -164,7 +164,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
             ))}
           </div>
 
-          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+          <div className="flex gap-2 pt-2 border-t border-zinc-200">
             <button
               onClick={() => processReturn.mutate()}
               disabled={processReturn.isPending}
@@ -174,7 +174,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>

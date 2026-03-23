@@ -229,7 +229,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-lg">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-lg">
         <DialogHeader>
           <DialogTitle>New Cash Sale</DialogTitle>
         </DialogHeader>
@@ -242,7 +242,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="Leave blank for Cash Sales"
-              className="w-full mt-1 px-2.5 py-2 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+              className="w-full mt-1 px-2.5 py-2 bg-white border border-zinc-200 rounded text-zinc-900 text-[13px]"
             />
           </div>
 
@@ -257,7 +257,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
                   className={`flex-1 px-3 py-2 rounded text-[13px] font-medium border transition-colors ${
                     paymentMethod === pm.value
                       ? "bg-amber-500 text-zinc-900 border-amber-500"
-                      : "bg-[#35353A] text-zinc-400 border-zinc-700/80 hover:text-zinc-200"
+                      : "bg-zinc-50 text-zinc-500 border-zinc-200 hover:text-zinc-700"
                   }`}
                 >
                   {pm.label}
@@ -273,13 +273,13 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
               {lineItems.map((li, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-2 p-2.5 bg-[#35353A] rounded border border-zinc-700/80"
+                  className="flex items-center gap-2 p-2.5 bg-zinc-50 rounded border border-zinc-200"
                 >
                   <input
                     value={li.skuCode}
                     onChange={(e) => updateLine(idx, "skuCode", e.target.value)}
                     placeholder="SKU e.g. 75367-1.1"
-                    className="flex-1 px-2 py-1.5 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono"
+                    className="flex-1 px-2 py-1.5 bg-white border border-zinc-200 rounded text-zinc-900 text-xs font-mono"
                   />
                   <div className="flex items-center gap-1">
                     <span className="text-zinc-500 text-xs">£</span>
@@ -290,7 +290,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
                       type="number"
                       step="0.01"
                       min="0"
-                      className="w-20 px-2 py-1.5 bg-[#2A2A2E] border border-zinc-700/80 rounded text-zinc-50 text-xs font-mono text-right"
+                      className="w-20 px-2 py-1.5 bg-white border border-zinc-200 rounded text-zinc-900 text-xs font-mono text-right"
                     />
                   </div>
                   {lineItems.length > 1 && (
@@ -314,7 +314,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           </div>
 
           {/* Total */}
-          <div className="flex items-center justify-between pt-2 border-t border-zinc-700/80">
+          <div className="flex items-center justify-between pt-2 border-t border-zinc-200">
             <span className="text-zinc-500 text-[13px]">Total</span>
             <Mono color="teal">£{total.toFixed(2)}</Mono>
           </div>
@@ -330,7 +330,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>

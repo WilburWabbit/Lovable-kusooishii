@@ -169,9 +169,9 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-[480px] bg-[#1C1C1E] border-zinc-700/80 p-0 flex flex-col">
-        <SheetHeader className="px-5 py-4 border-b border-zinc-700/80">
-          <SheetTitle className="text-zinc-50 text-base font-bold">
+      <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
+        <SheetHeader className="px-5 py-4 border-b border-zinc-200">
+          <SheetTitle className="text-zinc-900 text-base font-bold">
             {isBulk ? `Edit ${bulkUnits!.length} Units — ${unit?.mpn}` : `Grade Unit ${unit?.uid ?? ""}`}
           </SheetTitle>
         </SheetHeader>
@@ -197,8 +197,8 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
                       onClick={() => setSelectedGrade(g)}
                       className="p-3.5 rounded-lg text-left cursor-pointer border-2 transition-colors"
                       style={{
-                        background: selected ? `${color}15` : "#35353A",
-                        borderColor: selected ? color : "#3F3F46",
+                        background: selected ? `${color}15` : "#F4F4F5",
+                        borderColor: selected ? color : "#E4E4E7",
                       }}
                     >
                       <div
@@ -207,7 +207,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
                       >
                         G{g}
                       </div>
-                      <div className="text-xs text-zinc-50 font-semibold mt-0.5">
+                      <div className="text-xs text-zinc-900 font-semibold mt-0.5">
                         {GRADE_LABELS_NUMERIC[g]}
                       </div>
                       <div className="text-[11px] text-zinc-500 mt-0.5">
@@ -231,7 +231,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
                 {CONDITION_FLAGS.map((f) => (
                   <label
                     key={f.value}
-                    className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer py-1"
+                    className="flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer py-1"
                   >
                     <input
                       type="checkbox"
@@ -266,7 +266,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
                     <input
                       value={physical[f.field]}
                       onChange={(e) => updatePhysical(f.field, e.target.value)}
-                      className="w-full px-2 py-1.5 bg-[#35353A] border border-zinc-700/80 rounded text-zinc-50 text-[13px]"
+                      className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
                     />
                   </div>
                 ))}
@@ -279,7 +279,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+            <div className="flex gap-2 pt-2 border-t border-zinc-200">
               <button
                 onClick={handleSave}
                 disabled={!selectedGrade || isSaving}
@@ -293,7 +293,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+                className="px-4 py-2.5 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
               >
                 Cancel
               </button>

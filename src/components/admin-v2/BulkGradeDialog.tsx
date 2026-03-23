@@ -53,7 +53,7 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#1C1C1E] border-zinc-700/80 text-zinc-50 max-w-md">
+      <DialogContent className="bg-white border-zinc-200 text-zinc-900 max-w-md">
         <DialogHeader>
           <DialogTitle>Bulk Grade {stockUnitIds.length} Units</DialogTitle>
         </DialogHeader>
@@ -72,14 +72,14 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
                     onClick={() => setSelectedGrade(g)}
                     className="p-3 rounded-lg text-left cursor-pointer border-2 transition-colors"
                     style={{
-                      background: selected ? `${color}15` : "#35353A",
-                      borderColor: selected ? color : "#3F3F46",
+                      background: selected ? `${color}15` : "#F4F4F5",
+                      borderColor: selected ? color : "#E4E4E7",
                     }}
                   >
                     <div className="text-lg font-extrabold font-mono" style={{ color }}>
                       G{g}
                     </div>
-                    <div className="text-xs text-zinc-50 font-semibold mt-0.5">
+                    <div className="text-xs text-zinc-900 font-semibold mt-0.5">
                       {GRADE_LABELS_NUMERIC[g]}
                     </div>
                   </button>
@@ -95,7 +95,7 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
               {CONDITION_FLAGS.map((f) => (
                 <label
                   key={f.value}
-                  className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer py-1"
+                  className="flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer py-1"
                 >
                   <input
                     type="checkbox"
@@ -110,7 +110,7 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2 pt-2 border-t border-zinc-700/80">
+          <div className="flex gap-2 pt-2 border-t border-zinc-200">
             <button
               onClick={handleSave}
               disabled={!selectedGrade || bulkGrade.isPending}
@@ -122,7 +122,7 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 bg-[#3F3F46] text-zinc-400 border border-zinc-700/80 rounded-md text-[13px] cursor-pointer hover:text-zinc-200 transition-colors"
+              className="px-4 py-2.5 bg-zinc-100 text-zinc-400 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-700 transition-colors"
             >
               Cancel
             </button>
