@@ -1,14 +1,19 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePurchaseBatches, useBatchUnitSummaries } from "@/hooks/admin/use-purchase-batches";
 import type { BatchUnitSummary } from "@/hooks/admin/use-purchase-batches";
 import { UNIT_STATUSES } from "@/lib/constants/unit-statuses";
 import type { PurchaseBatch, StockUnitStatus } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
+import { supabase } from "@/integrations/supabase/client";
+import { Download } from "lucide-react";
+import { toast } from "sonner";
 
 export function PurchaseList() {
   const navigate = useNavigate();
   const { data: batches = [], isLoading } = usePurchaseBatches();
   const { data: summaryMap } = useBatchUnitSummaries();
+  const [exporting, setExporting] = useState(false);
 
   const totalUngraded = summaryMap
     ? Array.from(summaryMap.values()).reduce((s, b) => s + b.ungradedCount, 0)
@@ -22,12 +27,22 @@ export function PurchaseList() {
     <div>
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-[22px] font-bold text-zinc-900">Purchases</h1>
-        <button
-          onClick={() => navigate("/admin/v2/purchases/new")}
-          className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
-        >
-          + New Purchase
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleExportCsv(batches, setExporting)}
+            disabled={exporting || batches.length === 0}
+            className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {exporting ? "Exporting…" : "CSV"}
+          </button>
+          <button
+            onClick={() => navigate("/admin/v2/purchases/new")}
+            className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
+          >
+            + New Purchase
+          </button>
+        </div>
       </div>
       <p className="text-zinc-500 text-[13px] mb-5">
         Purchase batches and goods-in grading.
@@ -124,4 +139,168 @@ function BatchCard({
       )}
     </SurfaceCard>
   );
+}
+
+// ─── CSV Export ─────────────────────────────────────────────
+
+function csvEscape(value: unknown): string {
+  const s = value == null ? "" : String(value);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+const CSV_COLUMNS = [
+  "Batch ID",
+  "Supplier",
+  "Purchase Date",
+  "Supplier VAT Reg",
+  "Shared Shipping",
+  "Shared Broker Fee",
+  "Shared Other",
+  "MPN",
+  "Product Name",
+  "Line Qty",
+  "Unit Cost",
+  "Apportioned Cost",
+  "Landed Cost/Unit",
+  "Unit ID",
+  "Unit UID",
+  "Grade",
+  "SKU",
+  "Status",
+  "Condition Flags",
+  "Landed Cost",
+  "Graded At",
+  "Listed At",
+  "Sold At",
+  "Order ID",
+];
+
+async function handleExportCsv(
+  batches: PurchaseBatch[],
+  setExporting: (v: boolean) => void,
+) {
+  setExporting(true);
+  try {
+    const batchIds = batches.map((b) => b.id);
+
+    // Fetch all line items across all batches
+    const { data: lineRows, error: lineErr } = await supabase
+      .from("purchase_line_items" as never)
+      .select("*")
+      .in("batch_id", batchIds)
+      .order("created_at", { ascending: true });
+
+    if (lineErr) throw lineErr;
+
+    // Fetch all stock units across all batches
+    const { data: unitRows, error: unitErr } = await supabase
+      .from("stock_unit")
+      .select("*")
+      .in("batch_id" as never, batchIds);
+
+    if (unitErr) throw unitErr;
+
+    // Fetch product names for all MPNs
+    const mpns = [...new Set((lineRows as Record<string, unknown>[]).map((r) => r.mpn as string))];
+    const nameMap = new Map<string, string>();
+    if (mpns.length > 0) {
+      const { data: products } = await supabase
+        .from("product")
+        .select("mpn, name")
+        .in("mpn", mpns);
+      for (const p of (products ?? []) as Record<string, unknown>[]) {
+        nameMap.set(p.mpn as string, (p.name as string) ?? "");
+      }
+    }
+
+    // Index batches and line items
+    const batchMap = new Map(batches.map((b) => [b.id, b]));
+    const lineMap = new Map<string, Record<string, unknown>>();
+    for (const r of (lineRows ?? []) as Record<string, unknown>[]) {
+      lineMap.set(r.id as string, r);
+    }
+
+    // Group units by line_item_id
+    const unitsByLine = new Map<string, Record<string, unknown>[]>();
+    for (const u of (unitRows ?? []) as Record<string, unknown>[]) {
+      const lineId = u.line_item_id as string;
+      if (!lineId) continue;
+      const list = unitsByLine.get(lineId) ?? [];
+      list.push(u);
+      unitsByLine.set(lineId, list);
+    }
+
+    // Build CSV rows — one per stock unit
+    const rows: string[] = [];
+    for (const lineRow of (lineRows ?? []) as Record<string, unknown>[]) {
+      const batch = batchMap.get(lineRow.batch_id as string);
+      if (!batch) continue;
+
+      const mpn = lineRow.mpn as string;
+      const units = unitsByLine.get(lineRow.id as string) ?? [];
+
+      // If no stock units exist for this line, still emit one row
+      if (units.length === 0) {
+        rows.push(buildCsvRow(batch, lineRow, mpn, nameMap.get(mpn) ?? "", null));
+      } else {
+        for (const unit of units) {
+          rows.push(buildCsvRow(batch, lineRow, mpn, nameMap.get(mpn) ?? "", unit));
+        }
+      }
+    }
+
+    const csv = [CSV_COLUMNS.map(csvEscape).join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `purchases-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${rows.length} records`);
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : "Export failed");
+  } finally {
+    setExporting(false);
+  }
+}
+
+function buildCsvRow(
+  batch: PurchaseBatch,
+  line: Record<string, unknown>,
+  mpn: string,
+  productName: string,
+  unit: Record<string, unknown> | null,
+): string {
+  const vals = [
+    batch.id,
+    batch.supplierName,
+    batch.purchaseDate,
+    batch.supplierVatRegistered ? "Yes" : "No",
+    batch.sharedCosts.shipping,
+    batch.sharedCosts.broker_fee,
+    batch.sharedCosts.other,
+    mpn,
+    productName,
+    line.quantity,
+    line.unit_cost,
+    line.apportioned_cost,
+    line.landed_cost_per_unit,
+    unit?.id ?? "",
+    unit?.uid ?? "",
+    unit?.condition_grade ?? "",
+    unit?.condition_grade ? `${mpn}.${unit.condition_grade}` : "",
+    unit?.v2_status ?? "",
+    unit?.condition_flags ? (unit.condition_flags as string[]).join("; ") : "",
+    unit?.landed_cost ?? "",
+    unit?.graded_at ?? "",
+    unit?.listed_at ?? "",
+    unit?.sold_at ?? "",
+    unit?.order_id ?? "",
+  ];
+  return vals.map(csvEscape).join(",");
 }
