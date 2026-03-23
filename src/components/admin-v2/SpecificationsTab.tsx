@@ -25,13 +25,13 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
         {specs.map(([label, value]) => (
           <div
             key={label}
-            className="flex justify-between py-2 border-b border-zinc-700/80 mr-4"
+            className="flex justify-between py-2 border-b border-zinc-200 mr-4"
           >
             <span className="text-zinc-500 text-[13px]">{label}</span>
             <span
               className="text-[13px]"
               style={{
-                color: value ? "#FAFAFA" : "rgba(245,158,11,0.56)",
+                color: value ? "#18181B" : "rgba(245,158,11,0.56)",
               }}
             >
               {value ?? "To be confirmed"}

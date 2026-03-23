@@ -21,7 +21,7 @@ export function PurchaseList() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-[22px] font-bold text-zinc-50">Purchases</h1>
+        <h1 className="text-[22px] font-bold text-zinc-900">Purchases</h1>
         <button
           onClick={() => navigate("/admin/v2/purchases/new")}
           className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
@@ -82,7 +82,7 @@ function BatchCard({
       <div className="px-4 py-3.5 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <Mono color="amber" className="text-sm">{batch.id}</Mono>
-          <span className="text-zinc-50 font-medium text-sm">{batch.supplierName}</span>
+          <span className="text-zinc-900 font-medium text-sm">{batch.supplierName}</span>
           <span className="text-zinc-500 text-xs">{formattedDate}</span>
         </div>
         <div className="flex items-center gap-3">
