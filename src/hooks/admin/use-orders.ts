@@ -151,11 +151,11 @@ export function useOrder(orderId: string | undefined) {
       if (allocatedUnitIds.length > 0) {
         const { data: unitRows } = await supabase
           .from('stock_unit')
-          .select('id, uid, v2_status')
+          .select('id, uid, v2_status' as never)
           .in('id', allocatedUnitIds);
 
         const unitMap = new Map<string, { uid: string | null; status: string }>();
-        for (const u of ((unitRows ?? []) as Record<string, unknown>[])) {
+        for (const u of ((unitRows ?? []) as unknown as Record<string, unknown>[])) {
           unitMap.set(u.id as string, {
             uid: (u.uid as string) ?? null,
             status: (u.v2_status as string) ?? 'sold',
