@@ -238,6 +238,15 @@ export function useAllocateOrderItems() {
 
         if (unitErr) throw unitErr;
       }
+
+      // Transition order status from needs_allocation → new
+      const { error: statusErr } = await supabase
+        .from('sales_order')
+        .update({ v2_status: 'new' } as never)
+        .eq('id', orderId)
+        .eq('v2_status' as never, 'needs_allocation');
+
+      if (statusErr) throw statusErr;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.orderId) });

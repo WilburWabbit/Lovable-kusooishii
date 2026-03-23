@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOrders } from "@/hooks/admin/use-orders";
 import type { OrderDetail } from "@/lib/types/admin";
 import { SurfaceCard, Mono, OrderStatusBadge } from "./ui-primitives";
+import { CashSaleForm } from "./CashSaleForm";
 
 export function OrderList() {
   const navigate = useNavigate();
   const { data: orders = [], isLoading } = useOrders();
+  const [cashSaleOpen, setCashSaleOpen] = useState(false);
 
   const actionNeeded = orders.filter(
     (o) => o.status === "needs_allocation" || o.status === "return_pending"
@@ -17,7 +20,15 @@ export function OrderList() {
 
   return (
     <div>
-      <h1 className="text-[22px] font-bold text-zinc-50 mb-1">Orders</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-[22px] font-bold text-zinc-50">Orders</h1>
+        <button
+          onClick={() => setCashSaleOpen(true)}
+          className="px-4 py-2 bg-amber-500 text-zinc-900 rounded-md font-bold text-[13px] hover:bg-amber-400 transition-colors"
+        >
+          New Cash Sale
+        </button>
+      </div>
       <p className="text-zinc-500 text-[13px] mb-5">
         {orders.length} orders
         {actionNeeded > 0 && (
@@ -26,6 +37,8 @@ export function OrderList() {
           </span>
         )}
       </p>
+
+      <CashSaleForm open={cashSaleOpen} onClose={() => setCashSaleOpen(false)} />
 
       <SurfaceCard noPadding className="overflow-hidden">
         <table className="w-full border-collapse text-[13px]">
