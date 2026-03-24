@@ -399,6 +399,177 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
     exportOrderBy: 'received_at',
     allowDelete: true,
   },
+
+  // ── 13. Channel Fee Schedule ────────────────────────────
+  channel_fee_schedule: {
+    tableName: 'channel_fee_schedule',
+    displayName: 'Channel Fees',
+    primaryKey: 'id',
+    naturalKeys: ['channel', 'fee_name'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'channel', csvHeader: 'channel', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'fee_name', csvHeader: 'fee_name', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'rate_percent', csvHeader: 'rate_percent', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'fixed_amount', csvHeader: 'fixed_amount', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'min_amount', csvHeader: 'min_amount', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'max_amount', csvHeader: 'max_amount', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'applies_to', csvHeader: 'applies_to', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'active', csvHeader: 'active', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'notes', csvHeader: 'notes', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'updated_at', csvHeader: 'updated_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [],
+    exportOrderBy: 'channel',
+    allowDelete: true,
+  },
+
+  // ── 14. Shipping Rate Table ─────────────────────────────
+  shipping_rate_table: {
+    tableName: 'shipping_rate_table',
+    displayName: 'Shipping Rates',
+    primaryKey: 'id',
+    naturalKeys: ['channel', 'carrier', 'service_name'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'channel', csvHeader: 'channel', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'carrier', csvHeader: 'carrier', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'service_name', csvHeader: 'service_name', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'max_weight_kg', csvHeader: 'max_weight_kg', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'max_length_cm', csvHeader: 'max_length_cm', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'cost', csvHeader: 'cost', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'active', csvHeader: 'active', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'updated_at', csvHeader: 'updated_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [],
+    exportOrderBy: 'carrier',
+    allowDelete: true,
+  },
+
+  // ── 15. VAT Rates ──────────────────────────────────────
+  vat_rate: {
+    tableName: 'vat_rate',
+    displayName: 'VAT Rates',
+    primaryKey: 'id',
+    naturalKeys: ['qbo_tax_rate_id'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'qbo_tax_rate_id', csvHeader: 'qbo_tax_rate_id', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'name', csvHeader: 'name', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'description', csvHeader: 'description', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'rate_percent', csvHeader: 'rate_percent', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'agency_ref', csvHeader: 'agency_ref', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'active', csvHeader: 'active', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'synced_at', csvHeader: 'synced_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [],
+    exportOrderBy: 'name',
+    allowDelete: false,
+  },
+
+  // ── 16. Themes ─────────────────────────────────────────
+  theme: {
+    tableName: 'theme',
+    displayName: 'Themes',
+    primaryKey: 'id',
+    naturalKeys: ['slug'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'name', csvHeader: 'name', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'slug', csvHeader: 'slug', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'parent_theme_id', csvHeader: 'parent_theme_id', type: 'string', mode: 'fk', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'updated_at', csvHeader: 'updated_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [
+      { fkColumn: 'parent_theme_id', csvLookupColumn: 'parent_theme_id', targetTable: 'theme', targetLookupColumn: 'slug', targetPkColumn: 'id' },
+    ],
+    exportOrderBy: 'name',
+    allowDelete: false,
+  },
+
+  // ── 17. LEGO Catalog ───────────────────────────────────
+  lego_catalog: {
+    tableName: 'lego_catalog',
+    displayName: 'LEGO Catalog',
+    primaryKey: 'id',
+    naturalKeys: ['mpn'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'mpn', csvHeader: 'mpn', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'name', csvHeader: 'name', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'product_type', csvHeader: 'product_type', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'theme_id', csvHeader: 'theme_id', type: 'string', mode: 'fk', required: false },
+      { dbColumn: 'retired_flag', csvHeader: 'retired_flag', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'release_year', csvHeader: 'release_year', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'version_descriptor', csvHeader: 'version_descriptor', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'piece_count', csvHeader: 'piece_count', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'rebrickable_id', csvHeader: 'rebrickable_id', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'brickeconomy_id', csvHeader: 'brickeconomy_id', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'bricklink_item_no', csvHeader: 'bricklink_item_no', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'brickowl_boid', csvHeader: 'brickowl_boid', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'status', csvHeader: 'status', type: 'enum', mode: 'editable', required: false, enumValues: ['active', 'draft', 'archived'] },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'updated_at', csvHeader: 'updated_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [
+      { fkColumn: 'theme_id', csvLookupColumn: 'theme_id', targetTable: 'theme', targetLookupColumn: 'name', targetPkColumn: 'id' },
+    ],
+    exportOrderBy: 'mpn',
+    allowDelete: false,
+  },
+
+  // ── 18. Inbound Receipts ───────────────────────────────
+  inbound_receipt: {
+    tableName: 'inbound_receipt',
+    displayName: 'Inbound Receipts',
+    primaryKey: 'id',
+    naturalKeys: ['qbo_purchase_id'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'qbo_purchase_id', csvHeader: 'qbo_purchase_id', type: 'string', mode: 'editable', required: true },
+      { dbColumn: 'vendor_name', csvHeader: 'vendor_name', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'txn_date', csvHeader: 'txn_date', type: 'date', mode: 'editable', required: false },
+      { dbColumn: 'total_amount', csvHeader: 'total_amount', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'currency', csvHeader: 'currency', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'raw_payload', csvHeader: 'raw_payload', type: 'json', mode: 'readonly', required: false },
+      { dbColumn: 'status', csvHeader: 'status', type: 'enum', mode: 'editable', required: false, enumValues: ['pending', 'processed', 'error'] },
+      { dbColumn: 'processed_at', csvHeader: 'processed_at', type: 'date', mode: 'readonly', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [],
+    exportOrderBy: 'created_at',
+    allowDelete: false,
+  },
+
+  // ── 19. Inbound Receipt Lines ──────────────────────────
+  inbound_receipt_line: {
+    tableName: 'inbound_receipt_line',
+    displayName: 'Inbound Receipt Lines',
+    primaryKey: 'id',
+    naturalKeys: ['inbound_receipt_id', 'mpn'],
+    columns: [
+      { dbColumn: 'id', csvHeader: 'id', type: 'string', mode: 'readonly', required: false },
+      { dbColumn: 'inbound_receipt_id', csvHeader: 'inbound_receipt_id', type: 'string', mode: 'fk', required: true },
+      { dbColumn: 'description', csvHeader: 'description', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'quantity', csvHeader: 'quantity', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'unit_cost', csvHeader: 'unit_cost', type: 'number', mode: 'editable', required: true },
+      { dbColumn: 'line_total', csvHeader: 'line_total', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'qbo_item_id', csvHeader: 'qbo_item_id', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'mpn', csvHeader: 'mpn', type: 'string', mode: 'editable', required: false },
+      { dbColumn: 'is_stock_line', csvHeader: 'is_stock_line', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
+    ],
+    fkResolvers: [
+      { fkColumn: 'inbound_receipt_id', csvLookupColumn: 'inbound_receipt_id', targetTable: 'inbound_receipt', targetLookupColumn: 'qbo_purchase_id', targetPkColumn: 'id' },
+    ],
+    exportOrderBy: 'created_at',
+    allowDelete: true,
+    parentTable: 'inbound_receipt',
+  },
 };
 
 /** Get config for a table, throwing if not found */

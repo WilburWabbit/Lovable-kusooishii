@@ -80,6 +80,13 @@ const TABLE_CONFIG: Record<string, { allowDelete: boolean }> = {
   payouts: { allowDelete: false },
   payout_orders: { allowDelete: true },
   landing_raw_ebay_payout: { allowDelete: true },
+  channel_fee_schedule: { allowDelete: true },
+  shipping_rate_table: { allowDelete: true },
+  vat_rate: { allowDelete: false },
+  theme: { allowDelete: false },
+  lego_catalog: { allowDelete: false },
+  inbound_receipt: { allowDelete: false },
+  inbound_receipt_line: { allowDelete: true },
 };
 
 const VALID_TABLES = Object.keys(TABLE_CONFIG);
