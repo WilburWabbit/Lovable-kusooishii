@@ -195,9 +195,14 @@ serve(async (req) => {
       });
     }
 
-    const origin =
-      req.headers.get("origin") ||
-      "https://workspace-charm-market.lovable.app";
+    const ALLOWED_ORIGINS = new Set([
+      "https://kusooishii.lovable.app",
+      "https://id-preview--e9e56bf8-712f-4db2-b9c5-218d31eb8596.lovable.app",
+    ]);
+    const requestOrigin = req.headers.get("origin") ?? "";
+    const origin = ALLOWED_ORIGINS.has(requestOrigin)
+      ? requestOrigin
+      : "https://kusooishii.lovable.app";
 
     // --- Build session params ---
     // Encode SKU items into metadata so the webhook can create order lines.
