@@ -8,6 +8,7 @@ import {
   Zap,
   BarChart3,
   Settings,
+  ArrowUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
@@ -143,6 +144,12 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           label="Analytics"
           to="/admin/v2/analytics"
           active={isActive("/admin/v2/analytics")}
+        />
+        <SidebarItem
+          icon={ArrowUpDown}
+          label="Data Sync"
+          to="/admin/v2/data-sync"
+          active={isActive("/admin/v2/data-sync")}
         />
         <SidebarItem
           icon={Settings}
