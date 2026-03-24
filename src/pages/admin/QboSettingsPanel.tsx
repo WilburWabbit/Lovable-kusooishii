@@ -98,6 +98,9 @@ export function QboSettingsPanel() {
         title: cancelPurchasesRef.current ? "Sync stopped" : "Purchases landed",
         description: `${totalLanded} landed, ${totalSkipped} unchanged.`,
       });
+      if (!cancelPurchasesRef.current && totalLanded > 0) {
+        await drainPendingFromUi();
+      }
     } catch (err) {
       toast({ title: "Sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
