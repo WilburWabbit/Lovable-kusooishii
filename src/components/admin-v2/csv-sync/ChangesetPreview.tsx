@@ -12,6 +12,7 @@ interface ChangesetPreviewProps {
   onApply: () => void;
   onCancel: () => void;
   applying: boolean;
+  readOnly?: boolean;
 }
 
 const ACTION_COLORS: Record<ChangesetAction, string> = {
@@ -31,6 +32,7 @@ export function ChangesetPreview({
   onApply,
   onCancel,
   applying,
+  readOnly,
 }: ChangesetPreviewProps) {
   const [filter, setFilter] = useState<FilterTab>('all');
 
@@ -191,27 +193,34 @@ export function ChangesetPreview({
       )}
 
       {/* Actions */}
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={onApply}
-          disabled={hasErrors || applying}
-          className={cn(
-            'px-4 py-2 rounded text-sm font-medium transition-colors',
-            hasErrors
-              ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
-              : 'bg-amber-500 text-white hover:bg-amber-400',
-          )}
-        >
-          {applying ? 'Applying...' : `Apply ${changeset.length} changes`}
-        </button>
-        <button
-          onClick={onCancel}
-          disabled={applying}
-          className="px-4 py-2 rounded text-sm text-zinc-600 hover:text-zinc-900 border border-zinc-300 hover:border-zinc-400 transition-colors"
-        >
-          Cancel
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-3 pt-2">
+          <button
+            onClick={onApply}
+            disabled={hasErrors || applying}
+            className={cn(
+              'px-4 py-2 rounded text-sm font-medium transition-colors',
+              hasErrors
+                ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                : 'bg-amber-500 text-white hover:bg-amber-400',
+            )}
+          >
+            {applying ? 'Applying...' : `Apply ${changeset.length} changes`}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={applying}
+            className="px-4 py-2 rounded text-sm text-zinc-600 hover:text-zinc-900 border border-zinc-300 hover:border-zinc-400 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {readOnly && (
+        <p className="text-xs text-zinc-500 pt-2">
+          This session has already been {changeset.length > 0 ? 'applied' : 'processed'} — read only.
+        </p>
+      )}
     </div>
   );
 }

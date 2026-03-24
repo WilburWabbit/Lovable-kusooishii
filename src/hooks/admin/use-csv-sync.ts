@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import type {
   CsvSyncSession,
+  ChangesetRow,
   DiffResult,
   ApplyResult,
   RollbackResult,
@@ -150,6 +151,25 @@ export function useSyncHistory(tableName?: string) {
         sessions: Record<string, unknown>[];
       }>('csv-sync', { action: 'history', tableName });
       return (result.sessions ?? []).map(mapSession);
+    },
+  });
+}
+
+// ─── Session Detail (changeset) ─────────────────────────────
+
+export function useSessionChangeset(sessionId: string | null) {
+  return useQuery({
+    queryKey: csvSyncKeys.session(sessionId ?? ''),
+    enabled: !!sessionId,
+    queryFn: async () => {
+      const result = await invokeWithAuth<{
+        session: Record<string, unknown>;
+        changeset: ChangesetRow[];
+      }>('csv-sync', { action: 'get-changeset', sessionId });
+      return {
+        session: mapSession(result.session),
+        changeset: result.changeset,
+      };
     },
   });
 }

@@ -1,23 +1,24 @@
 // Main CSV Sync page — orchestrates the full export/upload/preview/apply workflow.
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Download, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
-import { SurfaceCard, SectionHead } from '@/components/admin-v2/ui-primitives';
+import { SurfaceCard, SectionHead, Badge } from '@/components/admin-v2/ui-primitives';
 import { getSyncableTableNames, getTableConfig, rowsToCsv, downloadCsv, makeExportFilename } from '@/lib/csv-sync';
-import type { ChangesetRow, DiffResult } from '@/lib/csv-sync/types';
+import type { ChangesetRow, DiffResult, CsvSyncSession } from '@/lib/csv-sync/types';
 import {
   useCsvExport,
   useCsvStage,
   useCsvDiff,
   useCsvApply,
   useCsvRollback,
+  useSessionChangeset,
 } from '@/hooks/admin/use-csv-sync';
 import { CsvUploadZone } from './CsvUploadZone';
 import { ChangesetPreview } from './ChangesetPreview';
 import { SyncHistory } from './SyncHistory';
 
-type Step = 'select' | 'upload' | 'preview' | 'done';
+type Step = 'select' | 'upload' | 'preview' | 'review-history' | 'done';
 
 export function CsvSyncPage() {
   const [selectedTable, setSelectedTable] = useState('');
@@ -25,12 +26,25 @@ export function CsvSyncPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [changeset, setChangeset] = useState<ChangesetRow[]>([]);
   const [diffSummary, setDiffSummary] = useState<DiffResult | null>(null);
+  const [reviewSession, setReviewSession] = useState<CsvSyncSession | null>(null);
 
   const exportMutation = useCsvExport();
   const stageMutation = useCsvStage();
   const diffMutation = useCsvDiff();
   const applyMutation = useCsvApply();
   const rollbackMutation = useCsvRollback();
+
+  // Load changeset when reviewing a historical session
+  const { data: sessionDetail } = useSessionChangeset(
+    step === 'review-history' ? reviewSession?.id ?? null : null,
+  );
+
+  // Update changeset when session detail loads
+  useEffect(() => {
+    if (sessionDetail?.changeset) {
+      setChangeset(sessionDetail.changeset);
+    }
+  }, [sessionDetail]);
 
   const tables = getSyncableTableNames();
 
@@ -40,6 +54,7 @@ export function CsvSyncPage() {
     setSessionId(null);
     setChangeset([]);
     setDiffSummary(null);
+    setReviewSession(null);
   }, []);
 
   // Handle table selection
@@ -65,7 +80,6 @@ export function CsvSyncPage() {
   // Handle CSV upload → stage → diff
   const handleParsed = async (rows: Record<string, string>[], filename: string) => {
     try {
-      // Stage
       const stageResult = await stageMutation.mutateAsync({
         tableName: selectedTable,
         filename,
@@ -74,7 +88,6 @@ export function CsvSyncPage() {
       setSessionId(stageResult.sessionId);
       toast.success(`Staged ${stageResult.rowCount} rows`);
 
-      // Diff
       const diffResult = await diffMutation.mutateAsync({
         sessionId: stageResult.sessionId,
       });
@@ -88,9 +101,10 @@ export function CsvSyncPage() {
 
   // Apply changeset
   const handleApply = async () => {
-    if (!sessionId) return;
+    const sid = sessionId ?? reviewSession?.id;
+    if (!sid) return;
     try {
-      const result = await applyMutation.mutateAsync({ sessionId });
+      const result = await applyMutation.mutateAsync({ sessionId: sid });
       toast.success(
         `Applied: ${result.insertCount} inserts, ${result.updateCount} updates, ${result.deleteCount} deletes`,
       );
@@ -110,8 +124,20 @@ export function CsvSyncPage() {
     }
   };
 
+  // Open a historical session
+  const handleOpenSession = (session: CsvSyncSession) => {
+    setReviewSession(session);
+    setSelectedTable(session.tableName);
+    setSessionId(session.id);
+    setChangeset([]);
+    setStep('review-history');
+  };
+
   const isProcessing =
     stageMutation.isPending || diffMutation.isPending || exportMutation.isPending;
+
+  const canApplyReview =
+    reviewSession?.status === 'previewed' && reviewSession.errorCount === 0;
 
   return (
     <div className="space-y-6">
@@ -221,7 +247,7 @@ export function CsvSyncPage() {
         </SurfaceCard>
       )}
 
-      {/* Step 3: Preview changeset */}
+      {/* Step 3: Preview changeset (new upload) */}
       {step === 'preview' && changeset.length > 0 && (
         <SurfaceCard>
           <SectionHead>
@@ -246,6 +272,71 @@ export function CsvSyncPage() {
               The uploaded CSV matches the current data exactly.
             </p>
           </div>
+        </SurfaceCard>
+      )}
+
+      {/* Step 3b: Review historical session */}
+      {step === 'review-history' && reviewSession && (
+        <SurfaceCard>
+          <div className="flex items-center justify-between">
+            <SectionHead>
+              Session — {reviewSession.filename}
+            </SectionHead>
+            <Badge
+              label={reviewSession.status.replace('_', ' ')}
+              color={
+                reviewSession.status === 'applied' ? '#22c55e' :
+                reviewSession.status === 'previewed' ? '#f59e0b' :
+                reviewSession.status === 'rolled_back' ? '#a855f7' :
+                reviewSession.status === 'error' ? '#ef4444' : '#71717a'
+              }
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="bg-zinc-50 rounded px-3 py-2">
+              <div className="text-zinc-500">Table</div>
+              <div className="font-mono text-zinc-900">{reviewSession.tableName}</div>
+            </div>
+            <div className="bg-zinc-50 rounded px-3 py-2">
+              <div className="text-zinc-500">Uploaded</div>
+              <div className="text-zinc-900">{new Date(reviewSession.createdAt).toLocaleString()}</div>
+            </div>
+            <div className="bg-zinc-50 rounded px-3 py-2">
+              <div className="text-zinc-500">Rows</div>
+              <div className="font-mono text-zinc-900">{reviewSession.rowCount}</div>
+            </div>
+            <div className="bg-zinc-50 rounded px-3 py-2">
+              <div className="text-zinc-500">Changes</div>
+              <div className="font-mono text-zinc-900">
+                <span className="text-green-600">{reviewSession.insertCount}i</span>
+                {' / '}
+                <span className="text-amber-600">{reviewSession.updateCount}u</span>
+                {' / '}
+                <span className="text-red-600">{reviewSession.deleteCount}d</span>
+              </div>
+            </div>
+          </div>
+
+          {changeset.length > 0 && (
+            <div className="mt-4">
+              <ChangesetPreview
+                changeset={changeset}
+                onApply={handleApply}
+                onCancel={reset}
+                applying={applyMutation.isPending}
+                readOnly={reviewSession.status !== 'previewed'}
+              />
+            </div>
+          )}
+
+          {changeset.length === 0 && !sessionDetail && (
+            <p className="text-xs text-zinc-500 py-4 mt-3">Loading changeset...</p>
+          )}
+
+          {changeset.length === 0 && sessionDetail && (
+            <p className="text-xs text-zinc-500 py-4 mt-3">No changes in this session.</p>
+          )}
         </SurfaceCard>
       )}
 
@@ -277,6 +368,7 @@ export function CsvSyncPage() {
           <SyncHistory
             tableName={selectedTable || undefined}
             onRollback={handleRollback}
+            onOpenSession={handleOpenSession}
           />
         </div>
       </SurfaceCard>

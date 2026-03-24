@@ -145,6 +145,8 @@ Deno.serve(async (req) => {
         return await handleRollback(admin, params);
       case "history":
         return await handleHistory(admin, params);
+      case "get-changeset":
+        return await handleGetChangeset(admin, params);
       default:
         return errorResponse(`Unknown action: ${action}`);
     }
@@ -254,18 +256,20 @@ async function handleDiff(
 
   const tableName = session.table_name;
 
-  // Load staged rows
+  // Load staged rows (override default 1000 row limit)
   const { data: staged, error: stageErr } = await admin
     .from("csv_sync_staging")
     .select("*")
     .eq("session_id", sessionId)
-    .order("row_number");
+    .order("row_number")
+    .limit(50000);
   throwIfError(stageErr, "load staging");
 
-  // Load current canonical data
+  // Load current canonical data (override default 1000 row limit)
   const { data: canonical, error: canErr } = await admin
     .from(tableName)
-    .select("*");
+    .select("*")
+    .limit(50000);
   throwIfError(canErr, `load ${tableName}`);
 
   // Build lookup maps for canonical data by id
@@ -362,6 +366,7 @@ async function handleDiff(
   }
 
   // ── Delete detection: canonical rows not in CSV ─────
+  console.log(`csv-sync diff: ${tableName} — ${(staged ?? []).length} staged, ${(canonical ?? []).length} canonical, ${seenIds.size} matched, allowDelete=${TABLE_CONFIG[tableName]?.allowDelete}`);
   const tableConf = TABLE_CONFIG[tableName];
   if (tableConf?.allowDelete) {
     // Pre-fetch dependency data for delete safeguards
@@ -497,13 +502,80 @@ async function handleApply(
 ) {
   const { sessionId } = params;
 
+  // Load session to check for stale-session safeguard
+  const { data: session, error: sessErr } = await admin
+    .from("csv_sync_session")
+    .select("id, table_name, status, created_at")
+    .eq("id", sessionId)
+    .single();
+  throwIfError(sessErr, "load session");
+  if (!session) return errorResponse("Session not found", 404);
+  if (session.status !== "previewed") {
+    return errorResponse(`Session status must be "previewed", got "${session.status}"`);
+  }
+
+  // Stale-session safeguard: block if a newer session exists for the same table
+  const { data: newer } = await admin
+    .from("csv_sync_session")
+    .select("id, filename, created_at")
+    .eq("table_name", session.table_name)
+    .gt("created_at", session.created_at)
+    .in("status", ["staged", "previewed", "applied"])
+    .limit(1);
+
+  if (newer && newer.length > 0) {
+    return errorResponse(
+      `Cannot apply: a newer sync for "${session.table_name}" was uploaded at ${newer[0].created_at} (${newer[0].filename}). Review or discard it first.`,
+    );
+  }
+
   // Call the atomic SQL function
   const { data, error } = await admin.rpc("csv_sync_apply_changeset", {
     p_session_id: sessionId,
   });
-  throwIfError(error, "query");
+  throwIfError(error, "apply");
 
   return jsonResponse(data);
+}
+
+// ─── Get Changeset (for re-opening a session) ──────────────
+
+async function handleGetChangeset(
+  admin: ReturnType<typeof createClient>,
+  params: { sessionId: string },
+) {
+  const { sessionId } = params;
+
+  const { data: session, error: sessErr } = await admin
+    .from("csv_sync_session")
+    .select("*")
+    .eq("id", sessionId)
+    .single();
+  throwIfError(sessErr, "load session");
+  if (!session) return errorResponse("Session not found", 404);
+
+  const { data: changeset, error: csErr } = await admin
+    .from("csv_sync_changeset")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("created_at")
+    .limit(50000);
+  throwIfError(csErr, "load changeset");
+
+  return jsonResponse({
+    session,
+    changeset: (changeset ?? []).map((c: Record<string, unknown>) => ({
+      id: c.id,
+      action: c.action,
+      rowId: c.row_id,
+      naturalKey: c.natural_key,
+      beforeData: c.before_data,
+      afterData: c.after_data,
+      changedFields: c.changed_fields ?? [],
+      warnings: c.warnings ?? [],
+      errors: c.errors ?? [],
+    })),
+  });
 }
 
 // ─── Rollback ───────────────────────────────────────────────
