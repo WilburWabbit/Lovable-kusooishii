@@ -53,13 +53,10 @@ export function CsvSyncPage() {
     if (!selectedTable) return;
     try {
       const result = await exportMutation.mutateAsync({ tableName: selectedTable });
-      if (!result.rows || result.rows.length === 0) {
-        toast.info('No data to export');
-        return;
-      }
-      const csv = rowsToCsv(selectedTable, result.rows);
+      const rows = result.rows ?? [];
+      const csv = rowsToCsv(selectedTable, rows);
       downloadCsv(csv, makeExportFilename(selectedTable));
-      toast.success(`Exported ${result.rows.length} rows`);
+      toast.success(rows.length > 0 ? `Exported ${rows.length} rows` : 'Exported template (headers only)');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Export failed');
     }
