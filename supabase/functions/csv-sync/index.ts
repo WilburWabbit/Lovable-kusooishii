@@ -66,22 +66,23 @@ interface TableConfig {
   allowDelete: boolean;
 }
 
-// We load the table config from a shared constant rather than duplicating all 12
-// table definitions. The client sends tableName and we validate against this list.
-const VALID_TABLES = [
-  "purchase_batches",
-  "purchase_line_items",
-  "stock_unit",
-  "product",
-  "sku",
-  "channel_listing",
-  "sales_order",
-  "sales_order_line",
-  "customer",
-  "payouts",
-  "payout_orders",
-  "landing_raw_ebay_payout",
-];
+// Per-table config: allowDelete controls whether rows missing from CSV are flagged as deletes.
+const TABLE_CONFIG: Record<string, { allowDelete: boolean }> = {
+  purchase_batches: { allowDelete: false },
+  purchase_line_items: { allowDelete: true },
+  stock_unit: { allowDelete: false },
+  product: { allowDelete: false },
+  sku: { allowDelete: false },
+  channel_listing: { allowDelete: true },
+  sales_order: { allowDelete: false },
+  sales_order_line: { allowDelete: true },
+  customer: { allowDelete: false },
+  payouts: { allowDelete: false },
+  payout_orders: { allowDelete: true },
+  landing_raw_ebay_payout: { allowDelete: true },
+};
+
+const VALID_TABLES = Object.keys(TABLE_CONFIG);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -354,9 +355,23 @@ async function handleDiff(
   }
 
   // ── Delete detection: canonical rows not in CSV ─────
-  // Only check for tables that allow delete
-  // For now, skip delete detection — it requires the full registry which
-  // would make this function too large. Delete detection can be added later.
+  const tableConf = TABLE_CONFIG[tableName];
+  if (tableConf?.allowDelete) {
+    for (const [canonId, canonRow] of canonicalById) {
+      if (!seenIds.has(canonId)) {
+        changeset.push({
+          action: "delete",
+          row_id: canonId,
+          natural_key: null,
+          before_data: canonRow,
+          after_data: null,
+          changed_fields: [],
+          warnings: [],
+          errors: [],
+        });
+      }
+    }
+  }
 
   // Write changeset to DB
   if (changeset.length > 0) {
