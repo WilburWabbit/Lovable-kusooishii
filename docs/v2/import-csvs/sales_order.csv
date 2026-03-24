@@ -1,4 +1,4 @@
-id,v2_status,payment_method,vat_amount,net_amount,blue_bell_club,external_order_id,carrier
-,new,stripe,15.00,74.99,false,,
-,shipped,paypal,33.33,166.66,false,12-34567-89012,Royal Mail Tracked 48
-,complete,stripe,15.00,74.99,true,,DPD
+id,order_number,origin_channel,origin_reference,user_id,guest_email,guest_name,status,currency,merchandise_subtotal,discount_total,shipping_total,tax_total,gross_total,club_id,club_discount_amount,club_commission_amount,payment_reference,shipping_name,shipping_line_1,shipping_line_2,shipping_city,shipping_county,shipping_postcode,shipping_country,notes,created_at,updated_at,customer_id,qbo_customer_id,qbo_sales_receipt_id,qbo_sync_status,doc_number,global_tax_calculation,txn_date,is_test,qbo_retry_count,qbo_last_attempt_at,qbo_last_error,shipped_date,shipped_via,tracking_number,v2_status,payment_method,vat_amount,net_amount,blue_bell_club,external_order_id,carrier
+,,web,,,,Jane Smith,paid,GBP,89.99,0,4.99,0,94.98,,,0,pi_abc123,Jane Smith,123 High Street,,London,,SW1A 1AA,GB,,,,,,,,,,,false,,,,,,new,stripe,15.83,79.15,false,,
+,,ebay,12-34567-89012,,buyer@email.com,John Doe,shipped,GBP,199.99,0,0,0,199.99,,,,,,John Doe,456 Oak Lane,,Manchester,,M1 1AA,GB,,,,,,,,,,,false,,,,2026-03-22,Royal Mail,RM123456789GB,shipped,paypal,33.33,166.66,false,12-34567-89012,Royal Mail Tracked 48
+,,web,,,,,complete,GBP,149.99,15.00,4.99,0,139.98,,15.00,7.00,pi_xyz789,Bob Builder,789 Elm Road,,Birmingham,,B1 1AA,GB,Blue Bell member,,,,,,,,,,,false,,,,,DPD,DPD987654,complete,stripe,23.33,116.65,true,,DPD

@@ -1,4 +1,4 @@
-id,cogs
-,50.17
-,127.75
-,93.99
+id,sales_order_id,sku_id,stock_unit_id,quantity,unit_price,line_discount,line_total,created_at,qbo_tax_code_ref,tax_code_id,vat_rate_id,cogs
+,,,,,89.99,0,89.99,,,,,50.17
+,,,,,199.99,0,199.99,,,,,127.75
+,,,,,149.99,15.00,134.99,,,,,93.99

@@ -1,4 +1,4 @@
-id,mpn,sale_price,floor_price,avg_cost,cost_range,condition_notes,market_price,v2_markdown_applied
-,75367-1,89.99,65.00,50.17,45.00-55.00,Minor shelf wear on most units,92.50,
-,42151-1,199.99,150.00,127.75,120.00-135.00,,210.00,
-,10312-1,149.99,110.00,93.99,,Sun fade on one unit,155.00,auto_5pct
+id,product_id,sku_code,condition_grade,saleable_flag,qbo_item_id,active_flag,created_at,updated_at,price,name,sale_price,floor_price,avg_cost,cost_range,condition_notes,market_price,mpn,qbo_parent_item_id,v2_markdown_applied
+,,75367-1.3,3,true,,true,,,89.99,,89.99,65.00,50.17,45.00-55.00,Minor shelf wear on most units,92.50,75367-1,,
+,,42151-1.1,1,true,,true,,,199.99,,199.99,150.00,127.75,120.00-135.00,,210.00,42151-1,,
+,,10312-1.2,2,true,,true,,,149.99,,149.99,110.00,93.99,,Sun fade on one unit,155.00,10312-1,,auto_5pct
