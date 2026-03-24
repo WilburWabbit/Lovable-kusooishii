@@ -1,4 +1,4 @@
-id,channel_ids,blue_bell_member
-,"{""ebay"":""buyer_jane_123"",""website"":""cust_abc""}",true
-,"{""ebay"":""bricks4days""}",false
-,"{""website"":""cust_xyz""}",false
+id,qbo_customer_id,display_name,email,phone,mobile,billing_line_1,billing_line_2,billing_city,billing_county,billing_postcode,billing_country,notes,active,synced_at,created_at,updated_at,channel_ids,blue_bell_member
+,QBO-001,Jane Smith,jane@example.com,020 1234 5678,07700 900000,123 High Street,,London,,SW1A 1AA,GB,,true,,,,"{""ebay"":""buyer_jane_123"",""website"":""cust_abc""}",true
+,QBO-002,John Doe,john@example.com,,07700 900001,456 Oak Lane,,Manchester,,M1 1AA,GB,,true,,,,"{""ebay"":""bricks4days""}",false
+,QBO-003,Bob Builder,bob@example.com,,,789 Elm Road,,Birmingham,,B1 1AA,GB,Blue Bell founding member,true,,,,"{""website"":""cust_xyz""}",true
