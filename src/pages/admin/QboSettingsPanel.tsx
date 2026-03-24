@@ -154,6 +154,7 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-customers");
       if (data?.error) throw new Error(data.error);
       toast({ title: "Customers landed", description: `${data.landed ?? 0} landed, ${data.skipped ?? 0} unchanged.` });
+      if ((data.landed ?? 0) > 0) await drainPendingFromUi();
     } catch (err) {
       toast({ title: "Customer sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
