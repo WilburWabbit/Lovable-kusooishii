@@ -3,6 +3,7 @@ import {
   ShoppingCart,
   Package,
   ClipboardList,
+  Users,
   Wallet,
   Zap,
   BarChart3,
@@ -66,6 +67,9 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
     if (path === "/admin/v2/orders") {
       return location.pathname === "/admin/v2/orders" || location.pathname.startsWith("/admin/v2/orders/");
     }
+    if (path === "/admin/v2/customers") {
+      return location.pathname === "/admin/v2/customers" || location.pathname.startsWith("/admin/v2/customers/");
+    }
     return location.pathname.startsWith(path);
   };
 
@@ -108,6 +112,12 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/v2/orders"
           active={isActive("/admin/v2/orders")}
           count={actionNeededCount > 0 ? actionNeededCount : undefined}
+        />
+        <SidebarItem
+          icon={Users}
+          label="Customers"
+          to="/admin/v2/customers"
+          active={isActive("/admin/v2/customers")}
         />
         <SidebarItem
           icon={Wallet}

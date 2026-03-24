@@ -247,6 +247,21 @@ export interface Customer {
   createdAt: string;
 }
 
+export interface CustomerRow extends Customer {
+  phone: string | null;
+  mobile: string | null;
+  notes: string | null;
+  active: boolean;
+  billingLine1: string | null;
+  billingLine2: string | null;
+  billingCity: string | null;
+  billingCounty: string | null;
+  billingPostcode: string | null;
+  billingCountry: string | null;
+  orderCount: number;
+  totalSpend: number;
+}
+
 // ─── 2.11 Payout ──────────────────────────────────────────
 
 export interface Payout {

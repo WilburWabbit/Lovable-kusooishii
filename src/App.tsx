@@ -62,6 +62,8 @@ import V2ProductDetailPage from "./pages/admin-v2/ProductDetailPage";
 import OrderListPage from "./pages/admin-v2/OrderListPage";
 import OrderDetailPage from "./pages/admin-v2/OrderDetailPage";
 import PayoutListPage from "./pages/admin-v2/PayoutListPage";
+import CustomerListPage from "./pages/admin-v2/CustomerListPage";
+import CustomerDetailPage from "./pages/admin-v2/CustomerDetailPage";
 import V2SettingsPage from "./pages/admin-v2/SettingsPage";
 
 const queryClient = new QueryClient();
@@ -136,6 +138,8 @@ const App = () => (
             <Route path="/admin/v2/products/:mpn" element={<RequireAdmin><V2ProductDetailPage /></RequireAdmin>} />
             <Route path="/admin/v2/orders" element={<RequireAdmin><OrderListPage /></RequireAdmin>} />
             <Route path="/admin/v2/orders/:orderId" element={<RequireAdmin><OrderDetailPage /></RequireAdmin>} />
+            <Route path="/admin/v2/customers" element={<RequireAdmin><CustomerListPage /></RequireAdmin>} />
+            <Route path="/admin/v2/customers/:customerId" element={<RequireAdmin><CustomerDetailPage /></RequireAdmin>} />
             <Route path="/admin/v2/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
             <Route path="/admin/v2/settings" element={<RequireAdmin><V2SettingsPage /></RequireAdmin>} />
 
