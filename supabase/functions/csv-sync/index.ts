@@ -23,6 +23,18 @@ function errorResponse(msg: string, status = 400) {
   return jsonResponse({ error: msg }, status);
 }
 
+/** Wrap a Supabase PostgrestError (plain object) into a real Error */
+function throwIfError(error: unknown, context?: string): void {
+  if (!error) return;
+  const msg =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message)
+        : JSON.stringify(error);
+  throw new Error(context ? `${context}: ${msg}` : msg);
+}
+
 // ─── Table registry (server-side subset) ────────────────────
 // Mirrors the client registry for column definitions, modes, and FK resolvers.
 // Duplicated here because edge functions can't import from src/.
@@ -128,9 +140,16 @@ Deno.serve(async (req) => {
       default:
         return errorResponse(`Unknown action: ${action}`);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Internal error";
-    console.error("csv-sync error:", msg);
+  } catch (err: unknown) {
+    let msg = "Internal error";
+    if (err instanceof Error) {
+      msg = err.message;
+    } else if (err && typeof err === "object" && "message" in err) {
+      msg = String((err as { message: unknown }).message);
+    } else if (typeof err === "string") {
+      msg = err;
+    }
+    console.error("csv-sync error:", msg, JSON.stringify(err));
     return errorResponse(msg, 500);
   }
 });
@@ -156,7 +175,7 @@ async function handleExport(
   }
 
   const { data, error } = await query.order("created_at", { ascending: false });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse({ rows: data ?? [], tableName });
 }
@@ -188,7 +207,7 @@ async function handleStage(
     })
     .select("id")
     .single();
-  if (sessErr) throw sessErr;
+  throwIfError(sessErr, "create session");
 
   // Stage rows in batches of 500
   const BATCH_SIZE = 500;
@@ -200,7 +219,7 @@ async function handleStage(
       status: "pending",
     }));
     const { error: stageErr } = await admin.from("csv_sync_staging").insert(batch);
-    if (stageErr) throw stageErr;
+    throwIfError(stageErr, "stage rows");
   }
 
   return jsonResponse({ sessionId: session.id, rowCount: rows.length });
@@ -233,13 +252,13 @@ async function handleDiff(
     .select("*")
     .eq("session_id", sessionId)
     .order("row_number");
-  if (stageErr) throw stageErr;
+  throwIfError(stageErr, "load staging");
 
   // Load current canonical data
   const { data: canonical, error: canErr } = await admin
     .from(tableName)
     .select("*");
-  if (canErr) throw canErr;
+  throwIfError(canErr, `load ${tableName}`);
 
   // Build lookup maps for canonical data by id
   const canonicalById = new Map<string, Record<string, unknown>>();
@@ -350,7 +369,7 @@ async function handleDiff(
       const { error: csErr } = await admin
         .from("csv_sync_changeset")
         .insert(batch);
-      if (csErr) throw csErr;
+      throwIfError(csErr, "write changeset");
     }
   }
 
@@ -402,7 +421,7 @@ async function handleApply(
   const { data, error } = await admin.rpc("csv_sync_apply_changeset", {
     p_session_id: sessionId,
   });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse(data);
 }
@@ -418,7 +437,7 @@ async function handleRollback(
   const { data, error } = await admin.rpc("csv_sync_rollback_session", {
     p_session_id: sessionId,
   });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse(data);
 }
@@ -442,7 +461,7 @@ async function handleHistory(
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse({ sessions: data ?? [] });
 }
