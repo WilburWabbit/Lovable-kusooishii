@@ -121,42 +121,6 @@ async function fetchQboItem(itemId: string, cache: Map<string, any>, baseUrl: st
   } catch { cache.set(itemId, null); return null; }
 }
 
-async function drainPendingQbo(
-  supabaseUrl: string,
-  serviceRoleKey: string,
-): Promise<{ iterations: number; totalCommitted: number; totalRemaining: number }> {
-  let iterations = 0;
-  let totalCommitted = 0;
-  let totalRemaining = 0;
-
-  for (let i = 0; i < 25; i++) {
-    const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-process-pending`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-        "Content-Type": "application/json",
-        "x-webhook-trigger": "true",
-      },
-      body: JSON.stringify({ batch_size: 50 }),
-    }, 60_000);
-
-    if (!res.ok) {
-      throw new Error(`qbo-process-pending failed [${res.status}]`);
-    }
-
-    const data = await res.json();
-    const r = data?.results ?? {};
-    totalCommitted += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-      (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
-    totalRemaining = data?.total_remaining ?? 0;
-    iterations++;
-
-    if (!data?.has_more) break;
-  }
-
-  return { iterations, totalCommitted, totalRemaining };
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
