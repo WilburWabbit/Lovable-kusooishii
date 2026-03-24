@@ -434,6 +434,195 @@ export type Database = {
         }
         Relationships: []
       }
+      csv_sync_audit: {
+        Row: {
+          action: string
+          after_data: Json | null
+          before_data: Json | null
+          id: string
+          performed_at: string
+          performed_by: string
+          row_id: string
+          session_id: string
+          table_name: string
+        }
+        Insert: {
+          action: string
+          after_data?: Json | null
+          before_data?: Json | null
+          id?: string
+          performed_at?: string
+          performed_by: string
+          row_id: string
+          session_id: string
+          table_name: string
+        }
+        Update: {
+          action?: string
+          after_data?: Json | null
+          before_data?: Json | null
+          id?: string
+          performed_at?: string
+          performed_by?: string
+          row_id?: string
+          session_id?: string
+          table_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "csv_sync_audit_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "csv_sync_session"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      csv_sync_changeset: {
+        Row: {
+          action: string
+          after_data: Json | null
+          before_data: Json | null
+          changed_fields: string[] | null
+          created_at: string
+          errors: string[] | null
+          id: string
+          natural_key: Json | null
+          row_id: string | null
+          session_id: string
+          warnings: string[] | null
+        }
+        Insert: {
+          action: string
+          after_data?: Json | null
+          before_data?: Json | null
+          changed_fields?: string[] | null
+          created_at?: string
+          errors?: string[] | null
+          id?: string
+          natural_key?: Json | null
+          row_id?: string | null
+          session_id: string
+          warnings?: string[] | null
+        }
+        Update: {
+          action?: string
+          after_data?: Json | null
+          before_data?: Json | null
+          changed_fields?: string[] | null
+          created_at?: string
+          errors?: string[] | null
+          id?: string
+          natural_key?: Json | null
+          row_id?: string | null
+          session_id?: string
+          warnings?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "csv_sync_changeset_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "csv_sync_session"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      csv_sync_session: {
+        Row: {
+          applied_at: string | null
+          changeset_summary: Json | null
+          created_at: string
+          delete_count: number
+          error_count: number
+          error_message: string | null
+          filename: string
+          id: string
+          insert_count: number
+          performed_by: string
+          rolled_back_at: string | null
+          row_count: number
+          status: string
+          table_name: string
+          update_count: number
+          warning_count: number
+        }
+        Insert: {
+          applied_at?: string | null
+          changeset_summary?: Json | null
+          created_at?: string
+          delete_count?: number
+          error_count?: number
+          error_message?: string | null
+          filename: string
+          id?: string
+          insert_count?: number
+          performed_by: string
+          rolled_back_at?: string | null
+          row_count?: number
+          status?: string
+          table_name: string
+          update_count?: number
+          warning_count?: number
+        }
+        Update: {
+          applied_at?: string | null
+          changeset_summary?: Json | null
+          created_at?: string
+          delete_count?: number
+          error_count?: number
+          error_message?: string | null
+          filename?: string
+          id?: string
+          insert_count?: number
+          performed_by?: string
+          rolled_back_at?: string | null
+          row_count?: number
+          status?: string
+          table_name?: string
+          update_count?: number
+          warning_count?: number
+        }
+        Relationships: []
+      }
+      csv_sync_staging: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          raw_data: Json
+          row_number: number
+          session_id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          raw_data: Json
+          row_number: number
+          session_id: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          raw_data?: Json
+          row_number?: number
+          session_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "csv_sync_staging_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "csv_sync_session"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer: {
         Row: {
           active: boolean
@@ -2790,6 +2979,14 @@ export type Database = {
           themes: string[]
           years: number[]
         }[]
+      }
+      csv_sync_apply_changeset: {
+        Args: { p_session_id: string }
+        Returns: Json
+      }
+      csv_sync_rollback_session: {
+        Args: { p_session_id: string }
+        Returns: Json
       }
       delete_email: {
         Args: { message_id: number; queue_name: string }
