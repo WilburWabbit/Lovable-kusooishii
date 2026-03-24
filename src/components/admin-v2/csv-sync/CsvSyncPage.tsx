@@ -117,7 +117,7 @@ export function CsvSyncPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-zinc-100">Data Sync</h1>
+          <h1 className="text-lg font-bold text-zinc-900">Data Sync</h1>
           <p className="text-xs text-zinc-500 mt-1">
             Export, edit, and re-import CSV data across all tables
           </p>
@@ -125,7 +125,7 @@ export function CsvSyncPage() {
         {step !== 'select' && (
           <button
             onClick={reset}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-700 transition-colors"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Start over
@@ -144,29 +144,29 @@ export function CsvSyncPage() {
                 <button
                   key={t}
                   onClick={() => handleSelectTable(t)}
-                  className="px-3 py-3 rounded border border-zinc-700/80 hover:border-amber-500/50 hover:bg-amber-500/5 text-left transition-colors group"
+                  className="px-3 py-3 rounded border border-zinc-200 hover:border-amber-400 hover:bg-amber-50 text-left transition-colors group"
                 >
-                  <div className="text-sm text-zinc-200 font-medium group-hover:text-amber-500 transition-colors">
+                  <div className="text-sm text-zinc-900 font-medium group-hover:text-amber-600 transition-colors">
                     {config.displayName}
                   </div>
                   <div className="text-[10px] text-zinc-500 font-mono mt-0.5">{t}</div>
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {config.allowDelete ? (
-                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-red-50 text-red-600 border border-red-200">
                         DELETE
                       </span>
                     ) : (
-                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-zinc-700/50 text-zinc-500 border border-zinc-600/30">
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-zinc-100 text-zinc-500 border border-zinc-200">
                         NO DELETE
                       </span>
                     )}
                     {config.fkResolvers.length > 0 && (
-                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-blue-50 text-blue-600 border border-blue-200">
                         {config.fkResolvers.length} FK{config.fkResolvers.length > 1 ? 's' : ''}
                       </span>
                     )}
                     {config.parentTable && (
-                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-purple-50 text-purple-600 border border-purple-200">
                         child
                       </span>
                     )}
@@ -186,7 +186,7 @@ export function CsvSyncPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
             {/* Export */}
             <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                 Export current data
               </h3>
               <p className="text-xs text-zinc-500">
@@ -195,7 +195,7 @@ export function CsvSyncPage() {
               <button
                 onClick={handleExport}
                 disabled={exportMutation.isPending}
-                className="flex items-center gap-2 px-4 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 hover:bg-zinc-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded bg-white border border-zinc-300 text-sm text-zinc-700 hover:bg-zinc-50 transition-colors"
               >
                 <Download className="h-4 w-4" />
                 {exportMutation.isPending ? 'Exporting...' : 'Export CSV'}
@@ -204,7 +204,7 @@ export function CsvSyncPage() {
 
             {/* Upload */}
             <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                 Upload edited CSV
               </h3>
               <p className="text-xs text-zinc-500">
@@ -212,7 +212,7 @@ export function CsvSyncPage() {
               </p>
               <CsvUploadZone onParsed={handleParsed} disabled={isProcessing} />
               {isProcessing && (
-                <p className="text-xs text-amber-500 animate-pulse">
+                <p className="text-xs text-amber-600 animate-pulse">
                   Processing...
                 </p>
               )}
@@ -241,8 +241,8 @@ export function CsvSyncPage() {
       {step === 'preview' && changeset.length === 0 && (
         <SurfaceCard>
           <div className="py-8 text-center">
-            <p className="text-sm text-zinc-400">No changes detected</p>
-            <p className="text-xs text-zinc-600 mt-1">
+            <p className="text-sm text-zinc-600">No changes detected</p>
+            <p className="text-xs text-zinc-500 mt-1">
               The uploaded CSV matches the current data exactly.
             </p>
           </div>
@@ -254,7 +254,7 @@ export function CsvSyncPage() {
         <SurfaceCard>
           <div className="py-8 text-center space-y-3">
             <div className="text-2xl">&#10003;</div>
-            <p className="text-sm text-green-400 font-medium">Changes applied successfully</p>
+            <p className="text-sm text-green-600 font-medium">Changes applied successfully</p>
             {diffSummary && (
               <p className="text-xs text-zinc-500 font-mono">
                 {diffSummary.inserts} inserts, {diffSummary.updates} updates, {diffSummary.deletes} deletes
@@ -262,7 +262,7 @@ export function CsvSyncPage() {
             )}
             <button
               onClick={reset}
-              className="text-xs text-amber-500 hover:text-amber-400 transition-colors"
+              className="text-xs text-amber-600 hover:text-amber-500 transition-colors"
             >
               Start another sync
             </button>
