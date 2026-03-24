@@ -2715,6 +2715,19 @@ export type Database = {
         Args: { payload: Json; queue_name: string }
         Returns: number
       }
+      ensure_product_exists: {
+        Args: {
+          p_img_url?: string
+          p_mpn: string
+          p_name?: string
+          p_piece_count?: number
+          p_release_year?: number
+          p_retired?: boolean
+          p_subtheme?: string
+          p_theme_id?: string
+        }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
