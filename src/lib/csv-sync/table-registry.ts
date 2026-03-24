@@ -322,7 +322,7 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
     ],
     fkResolvers: [],
     exportOrderBy: 'display_name',
-    allowDelete: false,
+    allowDelete: true,
   },
 
   // ── 10. Payouts ─────────────────────────────────────────

@@ -76,7 +76,7 @@ const TABLE_CONFIG: Record<string, { allowDelete: boolean }> = {
   channel_listing: { allowDelete: true },
   sales_order: { allowDelete: false },
   sales_order_line: { allowDelete: true },
-  customer: { allowDelete: false },
+  customer: { allowDelete: true },
   payouts: { allowDelete: false },
   payout_orders: { allowDelete: true },
   landing_raw_ebay_payout: { allowDelete: true },
@@ -357,8 +357,15 @@ async function handleDiff(
   // ── Delete detection: canonical rows not in CSV ─────
   const tableConf = TABLE_CONFIG[tableName];
   if (tableConf?.allowDelete) {
+    // Pre-fetch dependency data for delete safeguards
+    const deleteBlockers = await getDeleteBlockers(admin, tableName, canonicalById, seenIds);
+
     for (const [canonId, canonRow] of canonicalById) {
       if (!seenIds.has(canonId)) {
+        const blocker = deleteBlockers.get(canonId);
+        const rowErrors: string[] = blocker ? [blocker] : [];
+        if (blocker) errorCount++;
+
         changeset.push({
           action: "delete",
           row_id: canonId,
@@ -367,7 +374,7 @@ async function handleDiff(
           after_data: null,
           changed_fields: [],
           warnings: [],
-          errors: [],
+          errors: rowErrors,
         });
       }
     }
@@ -422,6 +429,57 @@ async function handleDiff(
       afterData: c.after_data,
     })),
   });
+}
+
+// ─── Delete Safeguards ──────────────────────────────────────
+
+/**
+ * Check for dependency blockers before allowing deletes.
+ * Returns a map of row_id → error message for rows that cannot be deleted.
+ */
+async function getDeleteBlockers(
+  admin: ReturnType<typeof createClient>,
+  tableName: string,
+  canonicalById: Map<string, Record<string, unknown>>,
+  seenIds: Set<string>,
+): Promise<Map<string, string>> {
+  const blockers = new Map<string, string>();
+
+  // Collect IDs that are candidates for deletion
+  const deleteIds: string[] = [];
+  for (const [id] of canonicalById) {
+    if (!seenIds.has(id)) deleteIds.push(id);
+  }
+  if (deleteIds.length === 0) return blockers;
+
+  // Table-specific dependency checks
+  if (tableName === "customer") {
+    // Block delete if customer has any sales orders
+    const { data: orders } = await admin
+      .from("sales_order")
+      .select("id, customer_id")
+      .in("customer_id", deleteIds);
+
+    if (orders && orders.length > 0) {
+      // Group by customer_id to get counts
+      const orderCounts = new Map<string, number>();
+      for (const o of orders) {
+        const cid = o.customer_id as string;
+        orderCounts.set(cid, (orderCounts.get(cid) ?? 0) + 1);
+      }
+      for (const [custId, count] of orderCounts) {
+        blockers.set(
+          custId,
+          `Cannot delete: customer has ${count} order${count > 1 ? "s" : ""}`,
+        );
+      }
+    }
+  }
+
+  // Add more table-specific checks here as needed
+  // e.g. purchase_line_items → check for stock_units referencing them
+
+  return blockers;
 }
 
 // ─── Apply ──────────────────────────────────────────────────
