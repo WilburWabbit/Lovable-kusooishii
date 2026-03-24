@@ -1005,7 +1005,7 @@ Deno.serve(async (req) => {
 
     // Parse optional params
     let entityType: string | null = null;
-    let batchSize = 50;
+    let batchSize = 15;
     try {
       const body = await req.json();
       if (body?.entity_type) entityType = body.entity_type;
