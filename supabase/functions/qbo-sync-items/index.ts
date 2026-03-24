@@ -23,42 +23,6 @@ function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutM
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-async function drainPendingQbo(
-  supabaseUrl: string,
-  serviceRoleKey: string,
-): Promise<{ iterations: number; totalCommitted: number; totalRemaining: number }> {
-  let iterations = 0;
-  let totalCommitted = 0;
-  let totalRemaining = 0;
-
-  for (let i = 0; i < 25; i++) {
-    const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-process-pending`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-        "Content-Type": "application/json",
-        "x-webhook-trigger": "true",
-      },
-      body: JSON.stringify({ batch_size: 50 }),
-    }, 60_000);
-
-    if (!res.ok) {
-      throw new Error(`qbo-process-pending failed [${res.status}]`);
-    }
-
-    const data = await res.json();
-    const r = data?.results ?? {};
-    totalCommitted += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-      (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
-    totalRemaining = data?.total_remaining ?? 0;
-    iterations++;
-
-    if (!data?.has_more) break;
-  }
-
-  return { iterations, totalCommitted, totalRemaining };
-}
 
 async function ensureValidToken(admin: any, realmId: string, clientId: string, clientSecret: string) {
   const { data: conn, error } = await admin.from("qbo_connection").select("*").eq("realm_id", realmId).single();
@@ -190,16 +154,10 @@ Deno.serve(async (req) => {
       from += pageSize;
     }
 
-    let autoProcess: { iterations: number; totalCommitted: number; totalRemaining: number } | null = null;
-    if (landed > 0) {
-      autoProcess = await drainPendingQbo(supabaseUrl, serviceRoleKey);
-    }
-
     return new Response(
       JSON.stringify({
         success: true, total: qboItems.length,
         landed, skipped, deactivated,
-        auto_processed: autoProcess,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

@@ -287,6 +287,7 @@ export interface Payout {
 /** Purchase batch with its line items and stock units */
 export interface PurchaseBatchDetail extends PurchaseBatch {
   lineItems: (PurchaseLineItem & { units: StockUnit[] })[];
+  productDataMap?: Map<string, any>;
 }
 
 // ─── BrickEconomy Reference Data ─────────────────────────

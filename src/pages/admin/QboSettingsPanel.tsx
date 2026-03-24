@@ -98,6 +98,9 @@ export function QboSettingsPanel() {
         title: cancelPurchasesRef.current ? "Sync stopped" : "Purchases landed",
         description: `${totalLanded} landed, ${totalSkipped} unchanged.`,
       });
+      if (!cancelPurchasesRef.current && totalLanded > 0) {
+        await drainPendingFromUi();
+      }
     } catch (err) {
       toast({ title: "Sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
@@ -130,6 +133,9 @@ export function QboSettingsPanel() {
         title: cancelSalesRef.current ? "Sales sync stopped" : "Sales landed",
         description: `${totalLanded} landed, ${totalSkipped} unchanged.`,
       });
+      if (!cancelSalesRef.current && totalLanded > 0) {
+        await drainPendingFromUi();
+      }
     } catch (err) {
       toast({ title: "Sales sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
@@ -148,6 +154,7 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-customers");
       if (data?.error) throw new Error(data.error);
       toast({ title: "Customers landed", description: `${data.landed ?? 0} landed, ${data.skipped ?? 0} unchanged.` });
+      if ((data.landed ?? 0) > 0) await drainPendingFromUi();
     } catch (err) {
       toast({ title: "Customer sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
@@ -165,10 +172,37 @@ export function QboSettingsPanel() {
       const data = await invokeWithAuth<Record<string, any>>("qbo-sync-items");
       if (data?.error) throw new Error(data.error);
       toast({ title: "Items landed", description: `${data.landed ?? 0} landed, ${data.skipped ?? 0} unchanged.` });
+      if ((data.landed ?? 0) > 0) await drainPendingFromUi();
     } catch (err) {
       toast({ title: "Item sync failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setSyncingItems(false);
+    }
+  };
+
+  /** Client-side drain loop — called automatically after landing completes */
+  const drainPendingFromUi = async () => {
+    setProcessing(true);
+    let totalProcessed = 0;
+    try {
+      for (let i = 0; i < 100; i++) {
+        setProcessProgress(`Auto-processing… (${totalProcessed} committed so far)`);
+        const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", { batch_size: 50 });
+        if (data?.error) throw new Error(data.error);
+        const r = data.results ?? {};
+        const committed = (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
+          (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+        totalProcessed += committed;
+        if (!data.has_more) break;
+      }
+      if (totalProcessed > 0) {
+        toast({ title: "Auto-processing complete", description: `${totalProcessed} records committed.` });
+      }
+    } catch (err) {
+      toast({ title: "Auto-processing failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProcessing(false);
+      setProcessProgress(null);
     }
   };
 
