@@ -1,0 +1,4 @@
+id,v2_status,payment_method,vat_amount,net_amount,blue_bell_club,external_order_id,carrier
+,new,stripe,15.00,74.99,false,,
+,shipped,paypal,33.33,166.66,false,12-34567-89012,Royal Mail Tracked 48
+,complete,stripe,15.00,74.99,true,,DPD

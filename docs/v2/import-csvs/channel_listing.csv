@@ -1,0 +1,4 @@
+id,external_url,v2_status,v2_channel,fee_adjusted_price,estimated_fees,estimated_net,listed_at
+,https://www.ebay.co.uk/itm/123456789,live,ebay,89.99,11.70,78.29,2026-03-21T14:30:00Z
+,,draft,website,,,,
+,https://store.bricklink.com/item/456,live,bricklink,85.00,7.65,77.35,2026-03-19T11:00:00Z
