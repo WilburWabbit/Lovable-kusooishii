@@ -350,6 +350,13 @@ export type Database = {
             referencedRelation: "sku"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "channel_listing_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       channel_pricing_config: {
@@ -2039,6 +2046,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "sales_order_line_stock_unit_id_fkey"
             columns: ["stock_unit_id"]
             isOneToOne: false
@@ -2365,6 +2379,13 @@ export type Database = {
             referencedRelation: "sku"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "stock_unit_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       suppressed_emails: {
@@ -2638,6 +2659,69 @@ export type Database = {
           slug?: string | null
         }
         Relationships: []
+      }
+      sku_public: {
+        Row: {
+          active_flag: boolean | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          condition_notes: string | null
+          created_at: string | null
+          id: string | null
+          market_price: number | null
+          mpn: string | null
+          name: string | null
+          price: number | null
+          product_id: string | null
+          sale_price: number | null
+          saleable_flag: boolean | null
+          sku_code: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          active_flag?: boolean | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          condition_notes?: string | null
+          created_at?: string | null
+          id?: string | null
+          market_price?: number | null
+          mpn?: string | null
+          name?: string | null
+          price?: number | null
+          product_id?: string | null
+          sale_price?: number | null
+          saleable_flag?: boolean | null
+          sku_code?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          active_flag?: boolean | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          condition_notes?: string | null
+          created_at?: string | null
+          id?: string | null
+          market_price?: number | null
+          mpn?: string | null
+          name?: string | null
+          price?: number | null
+          product_id?: string | null
+          sale_price?: number | null
+          saleable_flag?: boolean | null
+          sku_code?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sku_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       v2_variant_stock_summary: {
         Row: {
