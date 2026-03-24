@@ -1,4 +1,4 @@
-// Drag-and-drop CSV upload zone with client-side parsing via papaparse.
+// Drag-and-drop CSV upload zone with client-side parsing.
 
 import { useCallback, useRef, useState } from 'react';
 import { Upload, FileText } from 'lucide-react';
@@ -56,8 +56,8 @@ export function CsvUploadZone({ onParsed, disabled }: CsvUploadZoneProps) {
       className={cn(
         'border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors',
         dragOver
-          ? 'border-amber-500 bg-amber-500/5'
-          : 'border-zinc-700 hover:border-zinc-500',
+          ? 'border-amber-400 bg-amber-50'
+          : 'border-zinc-300 hover:border-zinc-400',
         disabled && 'opacity-50 cursor-not-allowed',
       )}
     >
@@ -70,17 +70,17 @@ export function CsvUploadZone({ onParsed, disabled }: CsvUploadZoneProps) {
         disabled={disabled}
       />
       {filename ? (
-        <div className="flex items-center justify-center gap-2 text-zinc-300">
+        <div className="flex items-center justify-center gap-2 text-zinc-700">
           <FileText className="h-5 w-5 text-amber-500" />
           <span className="font-mono text-sm">{filename}</span>
         </div>
       ) : (
         <div className="space-y-2">
-          <Upload className="h-8 w-8 mx-auto text-zinc-500" />
-          <p className="text-sm text-zinc-400">
+          <Upload className="h-8 w-8 mx-auto text-zinc-400" />
+          <p className="text-sm text-zinc-600">
             Drop a CSV file here or click to browse
           </p>
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-zinc-500">
             Must be a CSV exported from this tool or matching the template format
           </p>
         </div>

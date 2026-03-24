@@ -8,6 +8,7 @@ import type { CsvSyncSession } from '@/lib/csv-sync/types';
 interface SyncHistoryProps {
   tableName?: string;
   onRollback?: (sessionId: string) => void;
+  onOpenSession?: (session: CsvSyncSession) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -18,7 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
   error: '#ef4444',
 };
 
-export function SyncHistory({ tableName, onRollback }: SyncHistoryProps) {
+export function SyncHistory({ tableName, onRollback, onOpenSession }: SyncHistoryProps) {
   const { data: sessions, isLoading } = useSyncHistory(tableName);
 
   if (isLoading) {
@@ -30,10 +31,10 @@ export function SyncHistory({ tableName, onRollback }: SyncHistoryProps) {
   }
 
   return (
-    <div className="overflow-x-auto rounded border border-zinc-700/80">
+    <div className="overflow-x-auto rounded border border-zinc-200">
       <table className="w-full text-xs">
         <thead>
-          <tr className="bg-zinc-800/50">
+          <tr className="bg-zinc-50">
             <th className="px-3 py-2 text-left text-zinc-500 font-medium">Date</th>
             <th className="px-3 py-2 text-left text-zinc-500 font-medium">Table</th>
             <th className="px-3 py-2 text-left text-zinc-500 font-medium">File</th>
@@ -41,21 +42,23 @@ export function SyncHistory({ tableName, onRollback }: SyncHistoryProps) {
             <th className="px-3 py-2 text-right text-zinc-500 font-medium">Ins</th>
             <th className="px-3 py-2 text-right text-zinc-500 font-medium">Upd</th>
             <th className="px-3 py-2 text-right text-zinc-500 font-medium">Del</th>
-            {onRollback && (
-              <th className="px-3 py-2 text-right text-zinc-500 font-medium">Actions</th>
-            )}
+            <th className="px-3 py-2 text-right text-zinc-500 font-medium">Actions</th>
           </tr>
         </thead>
         <tbody>
           {sessions.map((s: CsvSyncSession) => (
-            <tr key={s.id} className="border-t border-zinc-800">
-              <td className="px-3 py-2 text-zinc-400">
+            <tr
+              key={s.id}
+              className="border-t border-zinc-100 hover:bg-zinc-50 cursor-pointer transition-colors"
+              onClick={() => onOpenSession?.(s)}
+            >
+              <td className="px-3 py-2 text-zinc-600">
                 <Mono>{new Date(s.createdAt).toLocaleString()}</Mono>
               </td>
               <td className="px-3 py-2">
                 <Mono color="amber">{s.tableName}</Mono>
               </td>
-              <td className="px-3 py-2 text-zinc-400 max-w-[200px] truncate">
+              <td className="px-3 py-2 text-zinc-600 max-w-[200px] truncate">
                 {s.filename}
               </td>
               <td className="px-3 py-2">
@@ -74,18 +77,21 @@ export function SyncHistory({ tableName, onRollback }: SyncHistoryProps) {
               <td className="px-3 py-2 text-right">
                 <Mono color="red">{s.deleteCount || '-'}</Mono>
               </td>
-              {onRollback && (
-                <td className="px-3 py-2 text-right">
-                  {s.status === 'applied' && (
-                    <button
-                      onClick={() => onRollback(s.id)}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >
-                      Rollback
-                    </button>
-                  )}
-                </td>
-              )}
+              <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                {s.status === 'previewed' && (
+                  <span className="text-xs text-amber-600 font-medium">
+                    Pending
+                  </span>
+                )}
+                {s.status === 'applied' && onRollback && (
+                  <button
+                    onClick={() => onRollback(s.id)}
+                    className="text-xs text-red-500 hover:text-red-700 transition-colors"
+                  >
+                    Rollback
+                  </button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

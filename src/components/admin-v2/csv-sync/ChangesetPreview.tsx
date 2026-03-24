@@ -12,6 +12,7 @@ interface ChangesetPreviewProps {
   onApply: () => void;
   onCancel: () => void;
   applying: boolean;
+  readOnly?: boolean;
 }
 
 const ACTION_COLORS: Record<ChangesetAction, string> = {
@@ -31,6 +32,7 @@ export function ChangesetPreview({
   onApply,
   onCancel,
   applying,
+  readOnly,
 }: ChangesetPreviewProps) {
   const [filter, setFilter] = useState<FilterTab>('all');
 
@@ -68,16 +70,16 @@ export function ChangesetPreview({
     <div className="space-y-4">
       {/* Summary bar */}
       <div className="flex items-center gap-3 text-xs">
-        <span className="text-green-500 font-mono">{inserts.length} inserts</span>
-        <span className="text-amber-500 font-mono">{updates.length} updates</span>
-        <span className="text-red-500 font-mono">{deletes.length} deletes</span>
+        <span className="text-green-600 font-mono">{inserts.length} inserts</span>
+        <span className="text-amber-600 font-mono">{updates.length} updates</span>
+        <span className="text-red-600 font-mono">{deletes.length} deletes</span>
         {errors.length > 0 && (
-          <span className="text-red-400 font-mono">{errors.length} errors</span>
+          <span className="text-red-500 font-mono">{errors.length} errors</span>
         )}
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-zinc-700/80">
+      <div className="flex gap-1 border-b border-zinc-200">
         {(
           [
             ['all', `All (${changeset.length})`],
@@ -93,8 +95,8 @@ export function ChangesetPreview({
             className={cn(
               'px-3 py-2 text-xs transition-colors border-b-2 -mb-px',
               filter === tab
-                ? 'border-amber-500 text-zinc-200'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300',
+                ? 'border-amber-500 text-zinc-900'
+                : 'border-transparent text-zinc-500 hover:text-zinc-700',
             )}
           >
             {label}
@@ -103,10 +105,10 @@ export function ChangesetPreview({
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded border border-zinc-700/80">
+      <div className="overflow-x-auto rounded border border-zinc-200">
         <table className="w-full text-xs">
           <thead>
-            <tr className="bg-zinc-800/50">
+            <tr className="bg-zinc-50">
               <th className="px-3 py-2 text-left text-zinc-500 font-medium w-20">Action</th>
               <th className="px-3 py-2 text-left text-zinc-500 font-medium w-28">ID</th>
               {sortedFields.map((f) => (
@@ -114,7 +116,7 @@ export function ChangesetPreview({
                   key={f}
                   className={cn(
                     'px-3 py-2 text-left font-medium',
-                    changedFieldSet.has(f) ? 'text-amber-500' : 'text-zinc-500',
+                    changedFieldSet.has(f) ? 'text-amber-600' : 'text-zinc-500',
                   )}
                 >
                   {f}
@@ -127,17 +129,17 @@ export function ChangesetPreview({
               <tr
                 key={row.id || i}
                 className={cn(
-                  'border-t border-zinc-800',
-                  row.action === 'insert' && 'bg-green-500/[0.04]',
-                  row.action === 'update' && 'bg-amber-500/[0.04]',
-                  row.action === 'delete' && 'bg-red-500/[0.04]',
-                  row.errors.length > 0 && 'ring-1 ring-inset ring-red-500/30',
+                  'border-t border-zinc-100',
+                  row.action === 'insert' && 'bg-green-50/60',
+                  row.action === 'update' && 'bg-amber-50/60',
+                  row.action === 'delete' && 'bg-red-50/60',
+                  row.errors.length > 0 && 'ring-1 ring-inset ring-red-300',
                 )}
               >
                 <td className="px-3 py-2">
                   <Badge label={ACTION_LABELS[row.action]} color={ACTION_COLORS[row.action]} small />
                 </td>
-                <td className="px-3 py-2 font-mono text-zinc-400">
+                <td className="px-3 py-2 font-mono text-zinc-500">
                   {row.rowId ? row.rowId.slice(0, 8) : 'new'}
                 </td>
                 {sortedFields.map((f) => {
@@ -149,13 +151,13 @@ export function ChangesetPreview({
                     <td key={f} className="px-3 py-2 max-w-[200px] truncate">
                       {isChanged && row.action === 'update' ? (
                         <span>
-                          <span className="text-red-400 line-through mr-1">
+                          <span className="text-red-500 line-through mr-1">
                             {formatCell(before)}
                           </span>
-                          <span className="text-green-400">{formatCell(after)}</span>
+                          <span className="text-green-600">{formatCell(after)}</span>
                         </span>
                       ) : (
-                        <span className="text-zinc-400">{formatCell(display)}</span>
+                        <span className="text-zinc-600">{formatCell(display)}</span>
                       )}
                     </td>
                   );
@@ -178,12 +180,12 @@ export function ChangesetPreview({
 
       {/* Error details */}
       {errors.length > 0 && (
-        <div className="rounded border border-red-500/30 bg-red-500/5 p-3 space-y-1">
-          <p className="text-xs font-semibold text-red-400">
+        <div className="rounded border border-red-200 bg-red-50 p-3 space-y-1">
+          <p className="text-xs font-semibold text-red-700">
             Errors must be fixed before applying:
           </p>
           {errors.map((e, i) => (
-            <p key={i} className="text-xs text-red-300 font-mono">
+            <p key={i} className="text-xs text-red-600 font-mono">
               Row {e.rowId ?? 'new'}: {e.errors.join(', ')}
             </p>
           ))}
@@ -191,27 +193,34 @@ export function ChangesetPreview({
       )}
 
       {/* Actions */}
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={onApply}
-          disabled={hasErrors || applying}
-          className={cn(
-            'px-4 py-2 rounded text-sm font-medium transition-colors',
-            hasErrors
-              ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
-              : 'bg-amber-500 text-zinc-900 hover:bg-amber-400',
-          )}
-        >
-          {applying ? 'Applying...' : `Apply ${changeset.length} changes`}
-        </button>
-        <button
-          onClick={onCancel}
-          disabled={applying}
-          className="px-4 py-2 rounded text-sm text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500 transition-colors"
-        >
-          Cancel
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-3 pt-2">
+          <button
+            onClick={onApply}
+            disabled={hasErrors || applying}
+            className={cn(
+              'px-4 py-2 rounded text-sm font-medium transition-colors',
+              hasErrors
+                ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                : 'bg-amber-500 text-white hover:bg-amber-400',
+            )}
+          >
+            {applying ? 'Applying...' : `Apply ${changeset.length} changes`}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={applying}
+            className="px-4 py-2 rounded text-sm text-zinc-600 hover:text-zinc-900 border border-zinc-300 hover:border-zinc-400 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {readOnly && (
+        <p className="text-xs text-zinc-500 pt-2">
+          This session has already been {changeset.length > 0 ? 'applied' : 'processed'} — read only.
+        </p>
+      )}
     </div>
   );
 }
