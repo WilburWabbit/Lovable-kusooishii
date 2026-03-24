@@ -1,0 +1,4 @@
+id,channel_ids,blue_bell_member
+,"{""ebay"":""buyer_jane_123"",""website"":""cust_abc""}",true
+,"{""ebay"":""bricks4days""}",false
+,"{""website"":""cust_xyz""}",false

@@ -1,0 +1,3 @@
+channel,payout_date,gross_amount,total_fees,net_amount,fee_breakdown,order_count,unit_count,qbo_deposit_id,qbo_expense_id,qbo_sync_status,external_payout_id,notes,reconciliation_status
+ebay,2026-03-20,450.00,58.50,391.50,"{""final_value_fee"":45.00,""promoted_listing"":9.00,""intl_fee"":4.50}",5,7,,,pending,PAY-EB-001,,pending
+stripe,2026-03-21,189.98,5.80,184.18,"{""stripe_fee"":5.80}",2,3,,,pending,py_abc123,,pending

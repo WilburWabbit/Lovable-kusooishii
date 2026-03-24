@@ -1,0 +1,4 @@
+uid,sku_id,batch_id,line_item_id,condition_flags,v2_status,order_id,payout_id,graded_at,listed_at,sold_at,shipped_at,delivered_at,completed_at
+,,PO-001,,"[""shelf_wear"",""creased_corner""]",graded,,,2026-03-20T10:00:00Z,,,,,
+,,PO-001,,"[]",listed,,,2026-03-20T10:00:00Z,2026-03-21T14:30:00Z,,,,
+,,PO-002,,"[""sun_fade""]",sold,,,2026-03-18T09:00:00Z,2026-03-19T11:00:00Z,2026-03-22T16:00:00Z,,,
