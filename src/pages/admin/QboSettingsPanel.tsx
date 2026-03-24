@@ -180,6 +180,32 @@ export function QboSettingsPanel() {
     }
   };
 
+  /** Client-side drain loop — called automatically after landing completes */
+  const drainPendingFromUi = async () => {
+    setProcessing(true);
+    let totalProcessed = 0;
+    try {
+      for (let i = 0; i < 100; i++) {
+        setProcessProgress(`Auto-processing… (${totalProcessed} committed so far)`);
+        const data = await invokeWithAuth<Record<string, any>>("qbo-process-pending", { batch_size: 50 });
+        if (data?.error) throw new Error(data.error);
+        const r = data.results ?? {};
+        const committed = (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
+          (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+        totalProcessed += committed;
+        if (!data.has_more) break;
+      }
+      if (totalProcessed > 0) {
+        toast({ title: "Auto-processing complete", description: `${totalProcessed} records committed.` });
+      }
+    } catch (err) {
+      toast({ title: "Auto-processing failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProcessing(false);
+      setProcessProgress(null);
+    }
+  };
+
   // ── Process pending (centralized processor) ──
 
   const processPending = async (entityType?: string) => {
