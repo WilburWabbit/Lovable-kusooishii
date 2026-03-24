@@ -44,3 +44,12 @@ export {
 } from './use-payouts';
 
 export type { PayoutSummary } from './use-payouts';
+
+export {
+  useCustomers,
+  useCustomer,
+  useCustomerOrders,
+  customerKeys,
+} from './use-customers';
+
+export type { CustomerOrderSummary } from './use-customers';
