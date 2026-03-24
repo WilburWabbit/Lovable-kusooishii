@@ -26,13 +26,10 @@ export function ExportButton({
   const handleExport = async () => {
     try {
       const result = await exportMutation.mutateAsync({ tableName, filters });
-      if (!result.rows || result.rows.length === 0) {
-        toast.info('No data to export');
-        return;
-      }
-      const csv = rowsToCsv(tableName, result.rows);
+      const rows = result.rows ?? [];
+      const csv = rowsToCsv(tableName, rows);
       downloadCsv(csv, makeExportFilename(tableName));
-      toast.success(`Exported ${result.rows.length} rows`);
+      toast.success(rows.length > 0 ? `Exported ${rows.length} rows` : 'Exported template (headers only)');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Export failed');
     }

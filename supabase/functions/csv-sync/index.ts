@@ -23,6 +23,18 @@ function errorResponse(msg: string, status = 400) {
   return jsonResponse({ error: msg }, status);
 }
 
+/** Wrap a Supabase PostgrestError (plain object) into a real Error */
+function throwIfError(error: unknown, context?: string): void {
+  if (!error) return;
+  const msg =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message)
+        : JSON.stringify(error);
+  throw new Error(context ? `${context}: ${msg}` : msg);
+}
+
 // ─── Table registry (server-side subset) ────────────────────
 // Mirrors the client registry for column definitions, modes, and FK resolvers.
 // Duplicated here because edge functions can't import from src/.
@@ -54,22 +66,30 @@ interface TableConfig {
   allowDelete: boolean;
 }
 
-// We load the table config from a shared constant rather than duplicating all 12
-// table definitions. The client sends tableName and we validate against this list.
-const VALID_TABLES = [
-  "purchase_batches",
-  "purchase_line_items",
-  "stock_unit",
-  "product",
-  "sku",
-  "channel_listing",
-  "sales_order",
-  "sales_order_line",
-  "customer",
-  "payouts",
-  "payout_orders",
-  "landing_raw_ebay_payout",
-];
+// Per-table config: allowDelete controls whether rows missing from CSV are flagged as deletes.
+const TABLE_CONFIG: Record<string, { allowDelete: boolean }> = {
+  purchase_batches: { allowDelete: false },
+  purchase_line_items: { allowDelete: true },
+  stock_unit: { allowDelete: false },
+  product: { allowDelete: false },
+  sku: { allowDelete: false },
+  channel_listing: { allowDelete: true },
+  sales_order: { allowDelete: false },
+  sales_order_line: { allowDelete: true },
+  customer: { allowDelete: true },
+  payouts: { allowDelete: false },
+  payout_orders: { allowDelete: true },
+  landing_raw_ebay_payout: { allowDelete: true },
+  channel_fee_schedule: { allowDelete: true },
+  shipping_rate_table: { allowDelete: true },
+  vat_rate: { allowDelete: false },
+  theme: { allowDelete: false },
+  lego_catalog: { allowDelete: false },
+  inbound_receipt: { allowDelete: false },
+  inbound_receipt_line: { allowDelete: true },
+};
+
+const VALID_TABLES = Object.keys(TABLE_CONFIG);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -128,9 +148,16 @@ Deno.serve(async (req) => {
       default:
         return errorResponse(`Unknown action: ${action}`);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Internal error";
-    console.error("csv-sync error:", msg);
+  } catch (err: unknown) {
+    let msg = "Internal error";
+    if (err instanceof Error) {
+      msg = err.message;
+    } else if (err && typeof err === "object" && "message" in err) {
+      msg = String((err as { message: unknown }).message);
+    } else if (typeof err === "string") {
+      msg = err;
+    }
+    console.error("csv-sync error:", msg, JSON.stringify(err));
     return errorResponse(msg, 500);
   }
 });
@@ -156,7 +183,7 @@ async function handleExport(
   }
 
   const { data, error } = await query.order("created_at", { ascending: false });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse({ rows: data ?? [], tableName });
 }
@@ -188,7 +215,7 @@ async function handleStage(
     })
     .select("id")
     .single();
-  if (sessErr) throw sessErr;
+  throwIfError(sessErr, "create session");
 
   // Stage rows in batches of 500
   const BATCH_SIZE = 500;
@@ -200,7 +227,7 @@ async function handleStage(
       status: "pending",
     }));
     const { error: stageErr } = await admin.from("csv_sync_staging").insert(batch);
-    if (stageErr) throw stageErr;
+    throwIfError(stageErr, "stage rows");
   }
 
   return jsonResponse({ sessionId: session.id, rowCount: rows.length });
@@ -233,13 +260,13 @@ async function handleDiff(
     .select("*")
     .eq("session_id", sessionId)
     .order("row_number");
-  if (stageErr) throw stageErr;
+  throwIfError(stageErr, "load staging");
 
   // Load current canonical data
   const { data: canonical, error: canErr } = await admin
     .from(tableName)
     .select("*");
-  if (canErr) throw canErr;
+  throwIfError(canErr, `load ${tableName}`);
 
   // Build lookup maps for canonical data by id
   const canonicalById = new Map<string, Record<string, unknown>>();
@@ -335,9 +362,30 @@ async function handleDiff(
   }
 
   // ── Delete detection: canonical rows not in CSV ─────
-  // Only check for tables that allow delete
-  // For now, skip delete detection — it requires the full registry which
-  // would make this function too large. Delete detection can be added later.
+  const tableConf = TABLE_CONFIG[tableName];
+  if (tableConf?.allowDelete) {
+    // Pre-fetch dependency data for delete safeguards
+    const deleteBlockers = await getDeleteBlockers(admin, tableName, canonicalById, seenIds);
+
+    for (const [canonId, canonRow] of canonicalById) {
+      if (!seenIds.has(canonId)) {
+        const blocker = deleteBlockers.get(canonId);
+        const rowErrors: string[] = blocker ? [blocker] : [];
+        if (blocker) errorCount++;
+
+        changeset.push({
+          action: "delete",
+          row_id: canonId,
+          natural_key: null,
+          before_data: canonRow,
+          after_data: null,
+          changed_fields: [],
+          warnings: [],
+          errors: rowErrors,
+        });
+      }
+    }
+  }
 
   // Write changeset to DB
   if (changeset.length > 0) {
@@ -350,7 +398,7 @@ async function handleDiff(
       const { error: csErr } = await admin
         .from("csv_sync_changeset")
         .insert(batch);
-      if (csErr) throw csErr;
+      throwIfError(csErr, "write changeset");
     }
   }
 
@@ -390,6 +438,57 @@ async function handleDiff(
   });
 }
 
+// ─── Delete Safeguards ──────────────────────────────────────
+
+/**
+ * Check for dependency blockers before allowing deletes.
+ * Returns a map of row_id → error message for rows that cannot be deleted.
+ */
+async function getDeleteBlockers(
+  admin: ReturnType<typeof createClient>,
+  tableName: string,
+  canonicalById: Map<string, Record<string, unknown>>,
+  seenIds: Set<string>,
+): Promise<Map<string, string>> {
+  const blockers = new Map<string, string>();
+
+  // Collect IDs that are candidates for deletion
+  const deleteIds: string[] = [];
+  for (const [id] of canonicalById) {
+    if (!seenIds.has(id)) deleteIds.push(id);
+  }
+  if (deleteIds.length === 0) return blockers;
+
+  // Table-specific dependency checks
+  if (tableName === "customer") {
+    // Block delete if customer has any sales orders
+    const { data: orders } = await admin
+      .from("sales_order")
+      .select("id, customer_id")
+      .in("customer_id", deleteIds);
+
+    if (orders && orders.length > 0) {
+      // Group by customer_id to get counts
+      const orderCounts = new Map<string, number>();
+      for (const o of orders) {
+        const cid = o.customer_id as string;
+        orderCounts.set(cid, (orderCounts.get(cid) ?? 0) + 1);
+      }
+      for (const [custId, count] of orderCounts) {
+        blockers.set(
+          custId,
+          `Cannot delete: customer has ${count} order${count > 1 ? "s" : ""}`,
+        );
+      }
+    }
+  }
+
+  // Add more table-specific checks here as needed
+  // e.g. purchase_line_items → check for stock_units referencing them
+
+  return blockers;
+}
+
 // ─── Apply ──────────────────────────────────────────────────
 
 async function handleApply(
@@ -402,7 +501,7 @@ async function handleApply(
   const { data, error } = await admin.rpc("csv_sync_apply_changeset", {
     p_session_id: sessionId,
   });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse(data);
 }
@@ -418,7 +517,7 @@ async function handleRollback(
   const { data, error } = await admin.rpc("csv_sync_rollback_session", {
     p_session_id: sessionId,
   });
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse(data);
 }
@@ -442,7 +541,7 @@ async function handleHistory(
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  throwIfError(error, "query");
 
   return jsonResponse({ sessions: data ?? [] });
 }

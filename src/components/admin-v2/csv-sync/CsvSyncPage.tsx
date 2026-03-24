@@ -53,13 +53,10 @@ export function CsvSyncPage() {
     if (!selectedTable) return;
     try {
       const result = await exportMutation.mutateAsync({ tableName: selectedTable });
-      if (!result.rows || result.rows.length === 0) {
-        toast.info('No data to export');
-        return;
-      }
-      const csv = rowsToCsv(selectedTable, result.rows);
+      const rows = result.rows ?? [];
+      const csv = rowsToCsv(selectedTable, rows);
       downloadCsv(csv, makeExportFilename(selectedTable));
-      toast.success(`Exported ${result.rows.length} rows`);
+      toast.success(rows.length > 0 ? `Exported ${rows.length} rows` : 'Exported template (headers only)');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Export failed');
     }
@@ -153,6 +150,27 @@ export function CsvSyncPage() {
                     {config.displayName}
                   </div>
                   <div className="text-[10px] text-zinc-500 font-mono mt-0.5">{t}</div>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {config.allowDelete ? (
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                        DELETE
+                      </span>
+                    ) : (
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-zinc-700/50 text-zinc-500 border border-zinc-600/30">
+                        NO DELETE
+                      </span>
+                    )}
+                    {config.fkResolvers.length > 0 && (
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        {config.fkResolvers.length} FK{config.fkResolvers.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {config.parentTable && (
+                      <span className="inline-block px-1.5 py-px text-[9px] font-medium rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        child
+                      </span>
+                    )}
+                  </div>
                 </button>
               );
             })}
