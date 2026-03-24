@@ -24,12 +24,18 @@ Deno.serve(async (req) => {
     // Verify this is called with service role (from cron or admin)
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.includes(serviceRoleKey) && authHeader !== `Bearer ${serviceRoleKey}`) {
-      // Also accept if called by an authenticated admin user
+      // Also accept if called by an authenticated admin/staff user
       if (authHeader?.startsWith("Bearer ")) {
         const token = authHeader.replace("Bearer ", "");
         const { data: { user }, error } = await admin.auth.getUser(token);
         if (error || !user) {
           return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+        }
+        // Enforce admin/staff role
+        const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+        const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+        if (!hasAccess) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
         }
       } else {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });

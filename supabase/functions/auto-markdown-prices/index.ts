@@ -35,6 +35,12 @@ Deno.serve(async (req) => {
         if (error || !user) {
           return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
         }
+        // Enforce admin/staff role
+        const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+        const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+        if (!hasAccess) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+        }
       } else {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
       }
