@@ -194,17 +194,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    let autoProcess: { iterations: number; totalCommitted: number; totalRemaining: number } | null = null;
-    if (landed > 0 || itemCache.size > 0) {
-      autoProcess = await drainPendingQbo(supabaseUrl, serviceRoleKey);
-    }
-
     return new Response(
       JSON.stringify({
         success: true, month: targetMonth,
         total: purchases.length, landed, skipped_existing: skippedExisting,
         items_landed: itemCache.size,
-        auto_processed: autoProcess,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

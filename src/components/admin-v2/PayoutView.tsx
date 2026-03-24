@@ -44,7 +44,7 @@ function getValue(row: PayoutRow, key: string): unknown {
     case "processingFee":
       return row.feeBreakdown.processing;
     default:
-      return (row as Record<string, unknown>)[key];
+      return (row as unknown as Record<string, unknown>)[key];
   }
 }
 

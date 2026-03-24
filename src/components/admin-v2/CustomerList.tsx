@@ -17,7 +17,7 @@ function getValue(row: CustomerRow, key: string): unknown {
     case "channels":
       return Object.keys(row.channelIds).join(", ");
     default:
-      return (row as Record<string, unknown>)[key];
+      return (row as unknown as Record<string, unknown>)[key];
   }
 }
 

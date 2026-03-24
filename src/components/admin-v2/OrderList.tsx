@@ -24,7 +24,7 @@ function getValue(row: OrderRow, key: string): unknown {
     case "items":
       return row.lineItems.length;
     default:
-      return (row as Record<string, unknown>)[key];
+      return (row as unknown as Record<string, unknown>)[key];
   }
 }
 

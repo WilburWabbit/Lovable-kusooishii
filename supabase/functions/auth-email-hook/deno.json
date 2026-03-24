@@ -3,10 +3,5 @@
     "jsx": "react-jsx",
     "jsxImportSource": "npm:react@18.3.1",
     "types": ["npm:@types/react@18.3.1"]
-  },
-  "imports": {
-    "npm:@lovable.dev/webhooks-js": "npm:@lovable.dev/webhooks-js@latest",
-    "npm:@lovable.dev/email-js": "npm:@lovable.dev/email-js@latest"
-  },
-  "nodeModulesDir": "auto"
+  }
 }
