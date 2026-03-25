@@ -3014,6 +3014,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      allocate_stock_units: {
+        Args: {
+          p_order_line_ids?: string[]
+          p_quantity: number
+          p_sku_id: string
+        }
+        Returns: string[]
+      }
       browse_catalog: {
         Args: {
           filter_grade?: string
@@ -3069,6 +3077,15 @@ export type Database = {
         | {
             Args: {
               p_brand?: string
+              p_item_type?: string
+              p_mpn: string
+              p_name?: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_brand?: string
               p_img_url?: string
               p_item_type?: string
               p_mpn: string
@@ -3109,6 +3126,13 @@ export type Database = {
           source_queue: string
         }
         Returns: number
+      }
+      parse_sku_code: {
+        Args: { p_sku_code: string }
+        Returns: {
+          condition_grade: string
+          mpn: string
+        }[]
       }
       product_detail_offers: {
         Args: { p_mpn: string }
