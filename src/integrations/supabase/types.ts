@@ -1660,6 +1660,75 @@ export type Database = {
         }
         Relationships: []
       }
+      price_audit_log: {
+        Row: {
+          created_at: string
+          id: string
+          new_price: number | null
+          old_price: number | null
+          performed_by: string | null
+          reason: string
+          sku_code: string
+          sku_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          new_price?: number | null
+          old_price?: number | null
+          performed_by?: string | null
+          reason: string
+          sku_code: string
+          sku_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          new_price?: number | null
+          old_price?: number | null
+          performed_by?: string | null
+          reason?: string
+          sku_code?: string
+          sku_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_audit_log_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_audit_log_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_settings: {
+        Row: {
+          key: string
+          label: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          key: string
+          label: string
+          updated_at?: string
+          value: number
+        }
+        Update: {
+          key?: string
+          label?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: []
+      }
       product: {
         Row: {
           age_mark: string | null
