@@ -10,11 +10,14 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
-const FIRST_MARKDOWN_DAYS = 30;
-const FIRST_MARKDOWN_PCT = 0.10;
-const CLEARANCE_MARKDOWN_DAYS = 45;
-const CLEARANCE_MARKDOWN_PCT = 0.20;
-const DEFAULT_MARGIN_TARGET = 0.25;
+// Defaults — overridden by pricing_settings table if rows exist
+const DEFAULTS = {
+  first_markdown_days: 30,
+  first_markdown_pct: 0.10,
+  clearance_markdown_days: 45,
+  clearance_markdown_pct: 0.20,
+  minimum_margin_target: 0.25,
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -47,6 +50,26 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
+
+    // Load configurable thresholds from pricing_settings table
+    const { data: settingsRows } = await admin
+      .from("pricing_settings")
+      .select("key, value");
+
+    const cfg = { ...DEFAULTS };
+    for (const row of ((settingsRows ?? []) as { key: string; value: number }[])) {
+      if (row.key in cfg) {
+        (cfg as Record<string, number>)[row.key] = row.value;
+      }
+    }
+
+    const FIRST_MARKDOWN_DAYS = cfg.first_markdown_days;
+    const FIRST_MARKDOWN_PCT = cfg.first_markdown_pct;
+    const CLEARANCE_MARKDOWN_DAYS = cfg.clearance_markdown_days;
+    const CLEARANCE_MARKDOWN_PCT = cfg.clearance_markdown_pct;
+    const MARGIN_TARGET = cfg.minimum_margin_target;
+
+    console.log(`auto-markdown config: first=${FIRST_MARKDOWN_PCT*100}% at ${FIRST_MARKDOWN_DAYS}d, clearance=${CLEARANCE_MARKDOWN_PCT*100}% at ${CLEARANCE_MARKDOWN_DAYS}d, margin=${MARGIN_TARGET*100}%`);
 
     // Find listed stock units with their SKU and landed cost
     const { data: listedUnits, error: queryErr } = await admin
@@ -121,7 +144,7 @@ Deno.serve(async (req) => {
       if (!currentPrice || currentPrice <= 0) continue;
 
       // Calculate floor price
-      const floorPrice = Math.round(group.highestCost * (1 + DEFAULT_MARGIN_TARGET) * 100) / 100;
+      const floorPrice = Math.round(group.highestCost * (1 + MARGIN_TARGET) * 100) / 100;
 
       // Calculate new price
       const reduction = Math.round(currentPrice * markdownPct * 100) / 100;
