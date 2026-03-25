@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useProduct } from "@/hooks/admin/use-products";
+import { useProduct, useUpdateSKUPrice } from "@/hooks/admin/use-products";
 import { SurfaceCard, Mono, GradeBadge, BackButton } from "./ui-primitives";
 import { StockUnitsTab } from "./StockUnitsTab";
 import { CopyMediaTab } from "./CopyMediaTab";
 import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
+import { toast } from "sonner";
+import type { ProductVariant } from "@/lib/types/admin";
 
 interface ProductDetailProps {
   mpn: string;
@@ -13,13 +15,117 @@ interface ProductDetailProps {
 
 type TabKey = "stock" | "copy" | "channels" | "specs";
 
+// ─── Inline editable price cell ──────────────────────────────
+
+function PriceCell({ variant, mpn }: { variant: ProductVariant; mpn: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const updatePrice = useUpdateSKUPrice();
+
+  const startEdit = () => {
+    setValue(variant.salePrice?.toFixed(2) ?? "");
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const num = parseFloat(value);
+    if (isNaN(num) || num <= 0) {
+      toast.error("Enter a valid price");
+      return;
+    }
+    try {
+      await updatePrice.mutateAsync({
+        skuId: variant.id,
+        mpn,
+        price: num,
+        floorPrice: variant.floorPrice,
+      });
+      toast.success(`${variant.sku} price set to £${num.toFixed(2)}`);
+      setEditing(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update price");
+    }
+  };
+
+  const cancel = () => setEditing(false);
+
+  const belowFloor =
+    editing &&
+    variant.floorPrice != null &&
+    parseFloat(value) > 0 &&
+    parseFloat(value) < variant.floorPrice;
+
+  if (editing) {
+    return (
+      <div>
+        <div className="text-[10px] text-zinc-500">Price</div>
+        <div className="flex items-center gap-1 mt-0.5">
+          <span className="text-xs text-zinc-400">£</span>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") cancel();
+            }}
+            autoFocus
+            className={`w-16 px-1.5 py-0.5 text-xs font-mono border rounded bg-white text-right focus:outline-none focus:ring-1 ${
+              belowFloor
+                ? "border-red-400 focus:ring-red-400 text-red-600"
+                : "border-amber-300 focus:ring-amber-400"
+            }`}
+          />
+        </div>
+        {belowFloor && (
+          <div className="text-[9px] text-red-500 mt-0.5">
+            Below floor £{variant.floorPrice!.toFixed(2)}
+          </div>
+        )}
+        <div className="flex gap-1 mt-1">
+          <button
+            onClick={save}
+            disabled={updatePrice.isPending || !!belowFloor}
+            className="text-[9px] text-amber-600 hover:text-amber-500 font-medium disabled:text-zinc-400"
+          >
+            {updatePrice.isPending ? "..." : "Save"}
+          </button>
+          <button
+            onClick={cancel}
+            className="text-[9px] text-zinc-400 hover:text-zinc-600"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-500">Price</div>
+      <button
+        onClick={startEdit}
+        className="bg-transparent border-none cursor-pointer p-0 hover:opacity-70 transition-opacity"
+        title="Click to edit price"
+      >
+        <Mono color="teal" className="text-sm">
+          {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
+        </Mono>
+      </button>
+    </div>
+  );
+}
+
+// ─── ProductDetail ───────────────────────────────────────────
+
 export function ProductDetail({ mpn }: ProductDetailProps) {
   const navigate = useNavigate();
   const { data: product, isLoading } = useProduct(mpn);
   const [activeTab, setActiveTab] = useState<TabKey>("stock");
 
   if (isLoading) {
-    return <p className="text-zinc-500 text-sm">Loading product…</p>;
+    return <p className="text-zinc-500 text-sm">Loading product...</p>;
   }
 
   if (!product) {
@@ -47,7 +153,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
             <Mono color="amber" className="text-sm">{product.mpn}</Mono>
           </div>
           <div className="text-zinc-500 text-[13px]">
-            Theme: {product.theme ?? "—"}
+            Theme: {product.theme ?? "\u2014"}
           </div>
         </div>
       </div>
@@ -67,22 +173,17 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 <GradeBadge grade={v.grade} size="md" />
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <div className="text-[10px] text-zinc-500">Price</div>
-                  <Mono color="teal" className="text-sm">
-                    {v.salePrice ? `£${v.salePrice.toFixed(2)}` : "—"}
-                  </Mono>
-                </div>
+                <PriceCell variant={v} mpn={mpn} />
                 <div>
                   <div className="text-[10px] text-zinc-500">Avg Cost</div>
                   <Mono className="text-sm">
-                    {v.avgCost ? `£${v.avgCost.toFixed(2)}` : "—"}
+                    {v.avgCost ? `£${v.avgCost.toFixed(2)}` : "\u2014"}
                   </Mono>
                 </div>
                 <div>
                   <div className="text-[10px] text-zinc-500">Floor</div>
                   <Mono color="red" className="text-sm">
-                    {v.floorPrice ? `£${v.floorPrice.toFixed(2)}` : "—"}
+                    {v.floorPrice ? `£${v.floorPrice.toFixed(2)}` : "\u2014"}
                   </Mono>
                 </div>
                 <div>
@@ -91,12 +192,12 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 </div>
                 <div>
                   <div className="text-[10px] text-zinc-500">Cost Range</div>
-                  <Mono className="text-[11px]">{v.costRange ?? "—"}</Mono>
+                  <Mono className="text-[11px]">{v.costRange ?? "\u2014"}</Mono>
                 </div>
                 <div>
                   <div className="text-[10px] text-zinc-500">Market</div>
                   <Mono className="text-sm">
-                    {v.marketPrice ? `£${v.marketPrice.toFixed(2)}` : "—"}
+                    {v.marketPrice ? `£${v.marketPrice.toFixed(2)}` : "\u2014"}
                   </Mono>
                 </div>
               </div>

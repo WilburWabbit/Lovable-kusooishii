@@ -440,3 +440,40 @@ export function useUploadProductImage() {
     },
   });
 }
+
+// ─── useUpdateSKUPrice ──────────────────────────────────────
+
+interface UpdatePriceInput {
+  skuId: string;
+  mpn: string;
+  price: number;
+  floorPrice: number | null;
+}
+
+export function useUpdateSKUPrice() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ skuId, price, floorPrice }: UpdatePriceInput) => {
+      if (floorPrice != null && price < floorPrice) {
+        throw new Error(
+          `Price £${price.toFixed(2)} is below floor £${floorPrice.toFixed(2)}`,
+        );
+      }
+
+      const { error } = await supabase
+        .from('sku')
+        .update({
+          price,
+          v2_markdown_applied: null,
+        } as never)
+        .eq('id', skuId);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.mpn) });
+      queryClient.invalidateQueries({ queryKey: productKeys.all });
+    },
+  });
+}

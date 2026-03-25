@@ -1,6 +1,7 @@
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
 import { SurfaceCard, SectionHead, Badge } from "@/components/admin-v2/ui-primitives";
+import { PricingSettingsCard } from "@/components/admin-v2/PricingSettingsCard";
 
 export default function SettingsPage() {
   const { data: status, isLoading } = useConnectionStatus();
@@ -55,6 +56,10 @@ export default function SettingsPage() {
               </SurfaceCard>
             );
           })}
+        </div>
+
+        <div className="mt-6">
+          <PricingSettingsCard />
         </div>
 
         <div className="mt-6">
