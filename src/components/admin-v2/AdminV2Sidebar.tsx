@@ -5,7 +5,7 @@ import {
   ClipboardList,
   Users,
   Wallet,
-  Zap,
+  Inbox,
   BarChart3,
   Settings,
   ArrowUpDown,
@@ -134,10 +134,10 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           System
         </div>
         <SidebarItem
-          icon={Zap}
-          label="QBO Sync"
-          to="/admin/v2/qbo-sync"
-          active={isActive("/admin/v2/qbo-sync")}
+          icon={Inbox}
+          label="Intake"
+          to="/admin/v2/intake"
+          active={isActive("/admin/v2/intake")}
         />
         <SidebarItem
           icon={BarChart3}
