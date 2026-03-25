@@ -77,42 +77,6 @@ async function fetchQboEntity(baseUrl: string, accessToken: string, entityPath: 
   return await res.json();
 }
 
-async function drainPendingQbo(
-  supabaseUrl: string,
-  serviceRoleKey: string,
-): Promise<{ iterations: number; totalCommitted: number; totalRemaining: number }> {
-  let iterations = 0;
-  let totalCommitted = 0;
-  let totalRemaining = 0;
-
-  for (let i = 0; i < 25; i++) {
-    const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-process-pending`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-        "Content-Type": "application/json",
-        "x-webhook-trigger": "true",
-      },
-      body: JSON.stringify({ batch_size: 50 }),
-    }, 60_000);
-
-    if (!res.ok) {
-      throw new Error(`qbo-process-pending failed [${res.status}]`);
-    }
-
-    const data = await res.json();
-    const r = data?.results ?? {};
-    totalCommitted += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-      (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
-    totalRemaining = data?.total_remaining ?? 0;
-    iterations++;
-
-    if (!data?.has_more) break;
-  }
-
-  return { iterations, totalCommitted, totalRemaining };
-}
 
 // ────────────────────────────────────────────────────────────
 // Signature verification
@@ -366,16 +330,7 @@ Deno.serve(async (req) => {
   }
 
   if (landedAny) {
-    try {
-      const autoProcess = await drainPendingQbo(supabaseUrl, serviceRoleKey);
-      log.info("Auto processed pending QBO records", {
-        iterations: autoProcess.iterations,
-        committed: autoProcess.totalCommitted,
-        remaining: autoProcess.totalRemaining,
-      });
-    } catch (err: any) {
-      log.error("Auto processing failed", { error: err.message });
-    }
+    log.info("Entities landed successfully — processing deferred to client-side drain loop");
   }
 
   return new Response("OK", { status: 200, headers: corsHeaders });
