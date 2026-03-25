@@ -66,6 +66,7 @@ import CustomerListPage from "./pages/admin-v2/CustomerListPage";
 import CustomerDetailPage from "./pages/admin-v2/CustomerDetailPage";
 import V2SettingsPage from "./pages/admin-v2/SettingsPage";
 import DataSyncPage from "./pages/admin-v2/DataSyncPage";
+import V2IntakePage from "./pages/admin-v2/IntakePage";
 
 const queryClient = new QueryClient();
 
@@ -144,6 +145,7 @@ const App = () => (
             <Route path="/admin/v2/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
             <Route path="/admin/v2/settings" element={<RequireAdmin><V2SettingsPage /></RequireAdmin>} />
             <Route path="/admin/v2/data-sync" element={<RequireAdmin><DataSyncPage /></RequireAdmin>} />
+            <Route path="/admin/v2/intake" element={<RequireAdmin><V2IntakePage /></RequireAdmin>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
