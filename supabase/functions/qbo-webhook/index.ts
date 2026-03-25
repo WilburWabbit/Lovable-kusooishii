@@ -330,16 +330,7 @@ Deno.serve(async (req) => {
   }
 
   if (landedAny) {
-    try {
-      const autoProcess = await drainPendingQbo(supabaseUrl, serviceRoleKey);
-      log.info("Auto processed pending QBO records", {
-        iterations: autoProcess.iterations,
-        committed: autoProcess.totalCommitted,
-        remaining: autoProcess.totalRemaining,
-      });
-    } catch (err: any) {
-      log.error("Auto processing failed", { error: err.message });
-    }
+    log.info("Entities landed successfully — processing deferred to client-side drain loop");
   }
 
   return new Response("OK", { status: 200, headers: corsHeaders });
