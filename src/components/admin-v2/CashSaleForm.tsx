@@ -99,6 +99,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           order_number: orderNumber,
           customer_id: customerId,
           origin_channel: "in_person",
+          guest_email: `cash-sale-${orderNumber}@internal.local`,
           v2_status: "new",
           gross_total: grossTotal,
           tax_total: vatAmount,

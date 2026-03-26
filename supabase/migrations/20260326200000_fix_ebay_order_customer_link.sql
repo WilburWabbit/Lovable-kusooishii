@@ -9,6 +9,10 @@
 
 BEGIN;
 
+-- Step 0: Ensure qbo_customer_id is nullable (may not have been applied yet)
+ALTER TABLE public.customer
+  ALTER COLUMN qbo_customer_id DROP NOT NULL;
+
 -- Step 1: Create customer records for eBay buyers that don't exist yet
 INSERT INTO public.customer (display_name, email, channel_ids)
 SELECT DISTINCT
