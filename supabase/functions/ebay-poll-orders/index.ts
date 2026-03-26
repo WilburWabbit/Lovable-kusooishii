@@ -284,7 +284,7 @@ Deno.serve(async (req) => {
       if (existingCustomer) {
         customerId = (existingCustomer as Record<string, unknown>).id as string;
       } else {
-        const { data: newCustomer } = await admin
+        const { data: newCustomer, error: custErr } = await admin
           .from("customer")
           .insert({
             display_name: buyerUsername,
@@ -294,9 +294,14 @@ Deno.serve(async (req) => {
           .select("id")
           .single();
 
-        if (newCustomer) {
+        if (custErr) {
+          console.error(`Customer insert FAILED for "${buyerUsername}": ${custErr.message} (code: ${custErr.code})`);
+        } else if (newCustomer) {
           customerId = (newCustomer as Record<string, unknown>).id as string;
         }
+      }
+      if (!customerId) {
+        console.warn(`eBay order ${ebayOrderId} will have no customer link (buyer: ${buyerUsername})`);
       }
 
       // ─── Create sales order ────────────────────────────
