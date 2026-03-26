@@ -518,6 +518,7 @@ Deno.serve(async (req) => {
           tracking_number: trackingNumber,
           shipped_date: shippedDate,
           status: "shipped",
+          v2_status: "shipped",
           updated_at: new Date().toISOString(),
         })
         .eq("id", localOrder.id);
@@ -527,6 +528,22 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update sales_order: ${updateErr.message}`);
       }
       console.log(`Local order ${localOrder.id} updated to shipped`);
+
+      // ── Update linked stock units to shipped ──
+      const { error: unitShipErr } = await admin
+        .from("stock_unit")
+        .update({
+          v2_status: "shipped",
+          shipped_at: shippedDate || new Date().toISOString(),
+        } as never)
+        .eq("order_id", localOrder.id)
+        .in("v2_status" as never, ["sold", "listed", "graded"]);
+
+      if (unitShipErr) {
+        console.warn(`Failed to update stock units to shipped: ${unitShipErr.message}`);
+      } else {
+        console.log(`Stock units for order ${localOrder.id} marked as shipped`);
+      }
 
       // ── Update QBO SalesReceipt with shipping metadata ──
       let qboUpdated = false;
