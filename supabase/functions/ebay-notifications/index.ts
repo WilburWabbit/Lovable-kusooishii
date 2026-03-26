@@ -100,7 +100,7 @@ async function verifyEbaySignature(rawBody: string, signatureHeader: string): Pr
   }
 
   const publicKey = await getEbayPublicKey(header.kid);
-  const verifier = createVerify("sha1");
+  const verifier = createVerify("sha256");
   verifier.update(rawBody);
   verifier.end();
 
