@@ -425,6 +425,17 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ orderId: localOrderId }),
       }).catch(() => {});
 
+      // ─── Fire-and-forget: v2 post-order processing ────
+      // FIFO stock consumption, COGS recording, variant stats
+      fetch(`${supabaseUrl}/functions/v1/v2-process-order`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ orderId: localOrderId }),
+      }).catch(() => {});
+
       imported++;
     }
 
