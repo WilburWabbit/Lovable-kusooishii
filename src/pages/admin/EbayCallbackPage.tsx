@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { BackOfficeLayout } from "@/components/BackOfficeLayout";
+import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 export default function EbayCallbackPage() {
