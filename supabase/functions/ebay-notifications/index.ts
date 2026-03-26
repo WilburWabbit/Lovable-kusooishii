@@ -96,15 +96,32 @@ async function getEbayPublicKey(kid: string): Promise<string> {
 async function verifyEbaySignature(rawBody: string, signatureHeader: string): Promise<boolean> {
   const header = decodeSignatureHeader(signatureHeader);
   if (!header?.kid || !header?.signature) {
+    console.error("eBay sig header missing kid or signature", JSON.stringify(header));
+    return false;
+  }
+
+  // eBay signs the SHA-256 digest of the body, not the raw body itself.
+  // Compute the digest and verify the signature over it.
+  const encoder = new TextEncoder();
+  const bodyBytes = encoder.encode(rawBody);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", bodyBytes);
+  const digestBase64 = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+
+  // If the header includes a digest field, verify it matches our computed digest
+  if (header.digest && header.digest !== digestBase64) {
+    console.error("eBay digest mismatch: header digest does not match computed digest");
     return false;
   }
 
   const publicKey = await getEbayPublicKey(header.kid);
+  const pemKey = formatPublicKey(publicKey);
+
+  // The signature is over the digest bytes
   const verifier = createVerify("sha256");
-  verifier.update(rawBody);
+  verifier.update(Buffer.from(digestBase64));
   verifier.end();
 
-  return verifier.verify(formatPublicKey(publicKey), header.signature, "base64");
+  return verifier.verify(pemKey, header.signature, "base64");
 }
 
 /**
