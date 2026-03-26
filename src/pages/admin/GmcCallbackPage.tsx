@@ -50,7 +50,7 @@ export default function GmcCallbackPage() {
   }, [searchParams, navigate]);
 
   return (
-    <BackOfficeLayout title="Google Merchant Centre Connection">
+    <AdminV2Layout>
       <div className="flex h-[60vh] items-center justify-center animate-fade-in">
         <div className="text-center space-y-4">
           {status === "loading" && <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />}
@@ -59,6 +59,6 @@ export default function GmcCallbackPage() {
           <p className="font-body text-sm text-muted-foreground">{message}</p>
         </div>
       </div>
-    </BackOfficeLayout>
+    </AdminV2Layout>
   );
 }
