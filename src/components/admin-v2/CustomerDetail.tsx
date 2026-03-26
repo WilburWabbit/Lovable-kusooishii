@@ -42,7 +42,7 @@ export function CustomerDetail() {
 
   return (
     <div>
-      <BackButton onClick={() => navigate("/admin/v2/customers")} label="Customers" />
+      <BackButton onClick={() => navigate("/admin/customers")} label="Customers" />
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
@@ -104,7 +104,7 @@ export function CustomerDetail() {
                 <CustomerOrderRow
                   key={o.id}
                   order={o}
-                  onClick={() => navigate(`/admin/v2/orders/${o.id}`)}
+                  onClick={() => navigate(`/admin/orders/${o.id}`)}
                 />
               ))}
             </tbody>

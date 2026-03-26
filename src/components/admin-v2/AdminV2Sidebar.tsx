@@ -59,17 +59,17 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
   const location = useLocation();
 
   const isActive = (path: string) => {
-    if (path === "/admin/v2/purchases") {
-      return location.pathname === "/admin/v2/purchases" || location.pathname.startsWith("/admin/v2/purchases/");
+    if (path === "/admin/purchases") {
+      return location.pathname === "/admin/purchases" || location.pathname.startsWith("/admin/purchases/");
     }
-    if (path === "/admin/v2/products") {
-      return location.pathname === "/admin/v2/products" || location.pathname.startsWith("/admin/v2/products/");
+    if (path === "/admin/products") {
+      return location.pathname === "/admin/products" || location.pathname.startsWith("/admin/products/");
     }
-    if (path === "/admin/v2/orders") {
-      return location.pathname === "/admin/v2/orders" || location.pathname.startsWith("/admin/v2/orders/");
+    if (path === "/admin/orders") {
+      return location.pathname === "/admin/orders" || location.pathname.startsWith("/admin/orders/");
     }
-    if (path === "/admin/v2/customers") {
-      return location.pathname === "/admin/v2/customers" || location.pathname.startsWith("/admin/v2/customers/");
+    if (path === "/admin/customers") {
+      return location.pathname === "/admin/customers" || location.pathname.startsWith("/admin/customers/");
     }
     return location.pathname.startsWith(path);
   };
@@ -78,7 +78,7 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
     <aside className="w-[220px] shrink-0 bg-[#18181B] border-r border-zinc-700/80 flex flex-col h-full">
       {/* Brand */}
       <div className="px-4 py-5 border-b border-zinc-700/80">
-        <Link to="/admin/v2/purchases" className="flex items-center gap-2">
+        <Link to="/admin/purchases" className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-sm font-extrabold text-zinc-900">
             K
           </div>
@@ -97,34 +97,34 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
         <SidebarItem
           icon={ShoppingCart}
           label="Purchases"
-          to="/admin/v2/purchases"
-          active={isActive("/admin/v2/purchases")}
+          to="/admin/purchases"
+          active={isActive("/admin/purchases")}
           count={ungradedCount > 0 ? ungradedCount : undefined}
         />
         <SidebarItem
           icon={Package}
           label="Products"
-          to="/admin/v2/products"
-          active={isActive("/admin/v2/products")}
+          to="/admin/products"
+          active={isActive("/admin/products")}
         />
         <SidebarItem
           icon={ClipboardList}
           label="Orders"
-          to="/admin/v2/orders"
-          active={isActive("/admin/v2/orders")}
+          to="/admin/orders"
+          active={isActive("/admin/orders")}
           count={actionNeededCount > 0 ? actionNeededCount : undefined}
         />
         <SidebarItem
           icon={Users}
           label="Customers"
-          to="/admin/v2/customers"
-          active={isActive("/admin/v2/customers")}
+          to="/admin/customers"
+          active={isActive("/admin/customers")}
         />
         <SidebarItem
           icon={Wallet}
           label="Payouts"
-          to="/admin/v2/payouts"
-          active={isActive("/admin/v2/payouts")}
+          to="/admin/payouts"
+          active={isActive("/admin/payouts")}
         />
       </div>
 
@@ -136,26 +136,26 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
         <SidebarItem
           icon={Inbox}
           label="Intake"
-          to="/admin/v2/intake"
-          active={isActive("/admin/v2/intake")}
+          to="/admin/intake"
+          active={isActive("/admin/intake")}
         />
         <SidebarItem
           icon={BarChart3}
           label="Analytics"
-          to="/admin/v2/analytics"
-          active={isActive("/admin/v2/analytics")}
+          to="/admin/analytics"
+          active={isActive("/admin/analytics")}
         />
         <SidebarItem
           icon={ArrowUpDown}
           label="Data Sync"
-          to="/admin/v2/data-sync"
-          active={isActive("/admin/v2/data-sync")}
+          to="/admin/data-sync"
+          active={isActive("/admin/data-sync")}
         />
         <SidebarItem
           icon={Settings}
           label="Settings"
-          to="/admin/v2/settings"
-          active={isActive("/admin/v2/settings")}
+          to="/admin/settings"
+          active={isActive("/admin/settings")}
         />
       </div>
 

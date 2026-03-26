@@ -143,7 +143,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
 
   return (
     <div>
-      <BackButton onClick={() => navigate("/admin/v2/products")} label="Back to products" />
+      <BackButton onClick={() => navigate("/admin/products")} label="Back to products" />
 
       {/* Header */}
       <div className="flex items-start justify-between mb-5">
