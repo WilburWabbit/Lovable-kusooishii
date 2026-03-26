@@ -13,13 +13,17 @@ const PUBLIC_KEY_CACHE_TTL_MS = 15 * 60 * 1000;
 const publicKeyCache = new Map<string, { key: string; expiresAt: number }>();
 
 function formatPublicKey(key: string): string {
-  const trimmed = key.trim();
-  if (trimmed.includes("BEGIN PUBLIC KEY")) {
-    return trimmed
-      .replace(/-----BEGIN PUBLIC KEY-----\s*/g, "-----BEGIN PUBLIC KEY-----\n")
-      .replace(/\s*-----END PUBLIC KEY-----/g, "\n-----END PUBLIC KEY-----");
+  // Strip any existing PEM headers/footers and whitespace to get raw base64
+  let b64 = key.trim()
+    .replace(/-----BEGIN PUBLIC KEY-----/g, "")
+    .replace(/-----END PUBLIC KEY-----/g, "")
+    .replace(/\s+/g, "");
+  // Chunk into 64-char lines — required by Deno's node:crypto PEM parser
+  const lines: string[] = [];
+  for (let i = 0; i < b64.length; i += 64) {
+    lines.push(b64.substring(i, i + 64));
   }
-  return `-----BEGIN PUBLIC KEY-----\n${trimmed}\n-----END PUBLIC KEY-----`;
+  return `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
 }
 
 function decodeSignatureHeader(signatureHeader: string): { alg?: string; kid?: string; signature?: string; digest?: string } {
