@@ -776,7 +776,7 @@ Deno.serve(async (req) => {
       if (existingCust) {
         localCustomerId = existingCust.id;
       } else {
-        const { data: newCust } = await admin
+        const { data: newCust, error: custInsertErr } = await admin
           .from("customer")
           .insert({
             display_name: buyerName,
@@ -785,13 +785,23 @@ Deno.serve(async (req) => {
             billing_city: shippingAddr?.city || null,
             billing_postcode: shippingAddr?.postalCode || null,
             billing_country: shippingAddr?.countryCode || "GB",
+            channel_ids: { ebay: order.buyer?.username || buyerName },
           })
           .select("id")
           .single();
-        localCustomerId = newCust?.id ?? null;
+        if (custInsertErr) {
+          console.error(`Customer insert FAILED for "${buyerName}": ${custInsertErr.message} (code: ${custInsertErr.code}, details: ${custInsertErr.details})`);
+        } else {
+          localCustomerId = newCust?.id ?? null;
+        }
       }
     } catch (custErr: any) {
-      console.warn(`Failed to create local customer (non-fatal): ${custErr.message}`);
+      console.error(`Customer creation exception for "${buyerName}": ${custErr.message}`);
+    }
+    if (localCustomerId) {
+      console.log(`Customer linked: ${localCustomerId} (${buyerName})`);
+    } else {
+      console.warn(`Order ${orderId} will have no customer link (buyer: ${buyerName})`);
     }
 
     // ── Step 6: Insert local sales_order (qbo_sync_status = 'pending') ──
