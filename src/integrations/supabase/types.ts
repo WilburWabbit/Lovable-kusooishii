@@ -634,6 +634,7 @@ export type Database = {
           billing_postcode: string | null
           blue_bell_member: boolean
           channel_ids: Json | null
+          company_name: string | null
           created_at: string
           display_name: string
           email: string | null
@@ -641,9 +642,11 @@ export type Database = {
           mobile: string | null
           notes: string | null
           phone: string | null
-          qbo_customer_id: string
+          qbo_customer_id: string | null
           synced_at: string
           updated_at: string
+          user_id: string | null
+          web_addr: string | null
         }
         Insert: {
           active?: boolean
@@ -655,6 +658,7 @@ export type Database = {
           billing_postcode?: string | null
           blue_bell_member?: boolean
           channel_ids?: Json | null
+          company_name?: string | null
           created_at?: string
           display_name: string
           email?: string | null
@@ -662,9 +666,11 @@ export type Database = {
           mobile?: string | null
           notes?: string | null
           phone?: string | null
-          qbo_customer_id: string
+          qbo_customer_id?: string | null
           synced_at?: string
           updated_at?: string
+          user_id?: string | null
+          web_addr?: string | null
         }
         Update: {
           active?: boolean
@@ -676,6 +682,7 @@ export type Database = {
           billing_postcode?: string | null
           blue_bell_member?: boolean
           channel_ids?: Json | null
+          company_name?: string | null
           created_at?: string
           display_name?: string
           email?: string | null
@@ -683,9 +690,11 @@ export type Database = {
           mobile?: string | null
           notes?: string | null
           phone?: string | null
-          qbo_customer_id?: string
+          qbo_customer_id?: string | null
           synced_at?: string
           updated_at?: string
+          user_id?: string | null
+          web_addr?: string | null
         }
         Relationships: []
       }
@@ -1473,6 +1482,7 @@ export type Database = {
       }
       member_address: {
         Row: {
+          address_type: string
           city: string
           country: string
           county: string | null
@@ -1487,6 +1497,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          address_type?: string
           city: string
           country?: string
           county?: string | null
@@ -1501,6 +1512,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          address_type?: string
           city?: string
           country?: string
           county?: string | null
@@ -1924,29 +1936,83 @@ export type Database = {
       profile: {
         Row: {
           avatar_url: string | null
+          company_name: string | null
           created_at: string
           display_name: string | null
+          ebay_username: string | null
+          facebook_handle: string | null
+          first_name: string | null
           id: string
+          instagram_handle: string | null
+          last_name: string | null
+          mobile: string | null
           phone: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           avatar_url?: string | null
+          company_name?: string | null
           created_at?: string
           display_name?: string | null
+          ebay_username?: string | null
+          facebook_handle?: string | null
+          first_name?: string | null
           id?: string
+          instagram_handle?: string | null
+          last_name?: string | null
+          mobile?: string | null
           phone?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           avatar_url?: string | null
+          company_name?: string | null
           created_at?: string
           display_name?: string | null
+          ebay_username?: string | null
+          facebook_handle?: string | null
+          first_name?: string | null
           id?: string
+          instagram_handle?: string | null
+          last_name?: string | null
+          mobile?: string | null
           phone?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profile_change_log: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          effective_date: string
+          field_name: string
+          id: string
+          new_value: string | null
+          old_value: string | null
+          user_id: string
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          effective_date?: string
+          field_name: string
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
+          user_id: string
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          effective_date?: string
+          field_name?: string
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
           user_id?: string
         }
         Relationships: []
@@ -3003,6 +3069,26 @@ export type Database = {
           display_name: string
           email: string
           roles: Database["public"]["Enums"]["app_role"][]
+          user_id: string
+        }[]
+      }
+      admin_list_users_detailed: {
+        Args: never
+        Returns: {
+          avatar_url: string
+          company_name: string
+          display_name: string
+          ebay_username: string
+          email: string
+          facebook_handle: string
+          first_name: string
+          instagram_handle: string
+          last_name: string
+          mobile: string
+          order_count: number
+          phone: string
+          roles: string[]
+          total_order_value: number
           user_id: string
         }[]
       }
