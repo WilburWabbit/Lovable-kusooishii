@@ -155,7 +155,7 @@ export function StorefrontHeader() {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild className="font-body text-sm cursor-pointer">
-                      <Link to="/admin"><Shield className="mr-2 h-3.5 w-3.5" /> Admin</Link>
+                      <Link to="/admin/purchases"><Shield className="mr-2 h-3.5 w-3.5" /> Admin</Link>
                     </DropdownMenuItem>
                   </>
                 )}
@@ -203,7 +203,7 @@ export function StorefrontHeader() {
                   Store
                 </Link>
                 {isStaffOrAdmin && (
-                  <Link to="/admin" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
+                  <Link to="/admin/purchases" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
                     Admin
                   </Link>
                 )}

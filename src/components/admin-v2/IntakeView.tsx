@@ -49,7 +49,7 @@ export function IntakeView() {
           onBack={() => setSelectedId(null)}
           onProcessed={(batchId) => {
             setSelectedId(null);
-            navigate(`/admin/v2/purchases/${batchId}`);
+            navigate(`/admin/purchases/${batchId}`);
           }}
         />
       ) : (

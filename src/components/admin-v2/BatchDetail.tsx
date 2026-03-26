@@ -65,7 +65,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
 
   return (
     <div>
-      <BackButton onClick={() => navigate("/admin/v2/purchases")} label="Back to purchases" />
+      <BackButton onClick={() => navigate("/admin/purchases")} label="Back to purchases" />
 
       {/* Header */}
       <div className="flex items-start justify-between mb-5">

@@ -385,7 +385,7 @@ export function OrderList() {
               return (
                 <tr
                   key={row.id}
-                  onClick={() => navigate(`/admin/v2/orders/${row.id}`)}
+                  onClick={() => navigate(`/admin/orders/${row.id}`)}
                   className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
                   style={{
                     background: alert ? "rgba(245,158,11,0.025)" : "transparent",

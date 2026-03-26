@@ -365,7 +365,7 @@ export function ProductList() {
             {processedRows.map((row) => (
               <tr
                 key={row.mpn}
-                onClick={() => navigate(`/admin/v2/products/${row.mpn}`)}
+                onClick={() => navigate(`/admin/products/${row.mpn}`)}
                 className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
               >
                 {visibleCols.map((col) => (

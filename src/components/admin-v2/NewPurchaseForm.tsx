@@ -109,7 +109,7 @@ export function NewPurchaseForm() {
         })),
       });
       toast.success("Purchase batch created");
-      navigate(`/admin/v2/purchases/${batchId}`);
+      navigate(`/admin/purchases/${batchId}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create batch";
       toast.error(message);
@@ -118,7 +118,7 @@ export function NewPurchaseForm() {
 
   return (
     <div>
-      <BackButton onClick={() => navigate("/admin/v2/purchases")} label="Back to purchases" />
+      <BackButton onClick={() => navigate("/admin/purchases")} label="Back to purchases" />
       <h1 className="text-[22px] font-bold text-zinc-900 mb-5">New Purchase</h1>
 
       {/* Batch header */}
@@ -327,7 +327,7 @@ export function NewPurchaseForm() {
           {createBatch.isPending ? "Creating…" : "Create Purchase Batch"}
         </button>
         <button
-          onClick={() => navigate("/admin/v2/purchases")}
+          onClick={() => navigate("/admin/purchases")}
           className="px-4 py-2.5 bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md text-[13px] cursor-pointer hover:text-zinc-800 transition-colors"
         >
           Cancel

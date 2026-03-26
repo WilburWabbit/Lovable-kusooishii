@@ -95,7 +95,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
 
   return (
     <div>
-      <BackButton onClick={() => navigate("/admin/v2/orders")} label="Back to orders" />
+      <BackButton onClick={() => navigate("/admin/orders")} label="Back to orders" />
 
       {/* Header */}
       <div className="flex items-start justify-between mb-5">

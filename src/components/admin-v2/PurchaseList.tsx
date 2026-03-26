@@ -37,7 +37,7 @@ export function PurchaseList() {
             {exporting ? "Exporting…" : "CSV"}
           </button>
           <button
-            onClick={() => navigate("/admin/v2/purchases/new")}
+            onClick={() => navigate("/admin/purchases/new")}
             className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
           >
             + New Purchase
@@ -57,7 +57,7 @@ export function PurchaseList() {
             key={b.id}
             batch={b}
             summary={summaryMap?.get(b.id)}
-            onClick={() => navigate(`/admin/v2/purchases/${b.id}`)}
+            onClick={() => navigate(`/admin/purchases/${b.id}`)}
           />
         ))}
         {batches.length === 0 && (

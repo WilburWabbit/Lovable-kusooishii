@@ -312,7 +312,7 @@ export function CustomerList() {
             {processedRows.map((row) => (
               <tr
                 key={row.id}
-                onClick={() => navigate(`/admin/v2/customers/${row.id}`)}
+                onClick={() => navigate(`/admin/customers/${row.id}`)}
                 className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
               >
                 {visibleCols.map((col) => (
