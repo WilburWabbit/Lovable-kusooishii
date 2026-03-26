@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { BackOfficeLayout } from "@/components/BackOfficeLayout";
+import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 export default function QboCallbackPage() {
@@ -44,7 +44,7 @@ export default function QboCallbackPage() {
   }, [searchParams, navigate]);
 
   return (
-    <BackOfficeLayout title="QBO Connection">
+    <AdminV2Layout>
       <div className="flex h-[60vh] items-center justify-center animate-fade-in">
         <div className="text-center space-y-4">
           {status === "loading" && <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />}
@@ -53,6 +53,6 @@ export default function QboCallbackPage() {
           <p className="font-body text-sm text-muted-foreground">{message}</p>
         </div>
       </div>
-    </BackOfficeLayout>
+    </AdminV2Layout>
   );
 }
