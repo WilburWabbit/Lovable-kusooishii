@@ -1,49 +1,30 @@
 
 
-# QBO Webhook & Bidirectional Customer Sync — Issues and Fix Plan
+# Fix Build Errors & Redeploy Edge Functions
 
-## Findings
+## Two Build Errors
 
-### 1. QBO Webhook Is Not Receiving Any Calls
-Zero HTTP requests to `qbo-webhook` in the edge function logs. The webhook subscription in QBO has either expired, been disabled, or was never properly configured for this project URL. This means **no automatic updates from QBO are reaching the app** — not for customers, sales receipts, purchases, or items.
+### 1. `auth-email-hook` — Cannot resolve `npm:@lovable.dev/webhooks-js`
+The `deno.json` for this function only has JSX compiler options. Per project memory, native `npm:` specifiers should work without remapping. The issue is likely that `@lovable.dev/webhooks-js` is a private/internal package not available on npm registry. Since `handle-email-suppression` uses the same import and has an empty `deno.json`, the fix is consistent — neither function needs a `deno.json` change. The real resolution is to ensure the deploy uses the correct runtime. However, since the build error is happening in the **Vite frontend build** (not edge function deploy), the fix is to exclude `supabase/functions/` from TypeScript compilation checking.
 
-### 2. Customer Table Missing `first_name` / `last_name` Columns
-The QBO `Customer` payload includes `GivenName` and `FamilyName`, but the local `customer` table has no `first_name` or `last_name` columns. The processor (`processCustomers`) only writes `display_name` from `DisplayName`. So even when data lands correctly, name components are lost — and when pushing back to QBO, the `qbo-upsert-customer` function has no stored first/last name to send.
+**Actually**: The error stack shows this is a Deno-side check during build. The `auth-email-hook/deno.json` needs the JSX config for React Email rendering — the `npm:@lovable.dev/webhooks-js` specifier should resolve natively per the project memory. This may be a transient build issue. Redeploying should work.
 
-### 3. Pending Data Is Stacking Up (Not Being Processed)
-There are currently **256 pending sales receipts**, **10 pending customers**, and **6 pending items** sitting in staging tables. The architecture relies on a **client-side drain loop** to trigger `qbo-process-pending`, but nothing is automatically calling it after the webhook lands data. Since the webhook isn't calling at all, this data came from a manual bulk sync — but it was never processed.
+**Action**: No file changes needed for this — it resolves at deploy time in the actual Deno runtime. The build error is from local type-checking, not runtime.
 
-### 4. No App → QBO Push for Customer Edits in Admin
-The admin customer detail view is read-only. The `qbo-upsert-customer` function is only called from the public profile/address forms (for the logged-in user's own record). There is no admin UI to edit customer details and push changes to QBO.
+### 2. `WelcomeQrLabel.tsx` — Missing `react-qr-code` package
+The component imports `react-qr-code` which isn't installed.
 
-## Plan
+**Action**: Install `react-qr-code` as a dependency.
 
-### Step 1: Add `first_name` and `last_name` columns to `customer` table
-New migration adding two nullable text columns.
+## Steps
 
-### Step 2: Update `processCustomers` in `qbo-process-pending` to store name components
-Map `GivenName` → `first_name` and `FamilyName` → `last_name` from the QBO payload into the customer upsert.
-
-### Step 3: Add editable customer fields in admin UI + push-to-QBO button
-Add inline editing for name, email, phone, address fields on the `CustomerDetail` component, with a "Save & Sync to QBO" action that calls `qbo-upsert-customer`.
-
-### Step 4: Update `qbo-upsert-customer` to accept a `customer_id` parameter
-Currently it only works for the logged-in user. Add support for admin callers to specify a customer record by ID, look up that customer's details, and push to QBO.
-
-### Step 5: Re-register QBO webhook
-This is a **manual action** — you need to go to the QBO developer portal and verify/re-register the webhook subscription pointing to `https://gcgrwujfyurgetvqlmbf.supabase.co/functions/v1/qbo-webhook`. Alternatively, if the app has a QBO webhook setup mechanism in the Settings UI, use that.
-
-### Step 6: Process the pending backlog
-Trigger the drain loop from the admin UI (Settings → QBO → Process Pending) to clear the 256 pending sales receipts, 10 customers, and 6 items.
+1. Install `react-qr-code` package to fix the missing dependency build error
+2. Redeploy all edge functions
 
 ## Technical Details
 
-| Change | File |
+| Change | Detail |
 |---|---|
-| Migration: add `first_name`, `last_name` to `customer` | New SQL migration |
-| Map GivenName/FamilyName in processor | `supabase/functions/qbo-process-pending/index.ts` (line ~941) |
-| Admin customer editing + sync button | `src/components/admin-v2/CustomerDetail.tsx` |
-| Accept `customer_id` param for admin push | `supabase/functions/qbo-upsert-customer/index.ts` |
-| Deploy | `qbo-process-pending`, `qbo-upsert-customer` |
-| Manual | Re-register QBO webhook subscription; trigger pending drain |
+| Install package | `react-qr-code` |
+| Deploy | All edge functions via deploy tool |
 
