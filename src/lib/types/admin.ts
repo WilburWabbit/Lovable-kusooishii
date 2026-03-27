@@ -248,6 +248,8 @@ export interface Customer {
 }
 
 export interface CustomerRow extends Customer {
+  firstName: string | null;
+  lastName: string | null;
   phone: string | null;
   mobile: string | null;
   notes: string | null;
