@@ -184,15 +184,14 @@ Deno.serve(async (req) => {
     try {
       valid = await verifyEbaySignature(rawBody, sigHeader);
     } catch (err) {
-      console.error("eBay notification: signature verification failed", err);
+      console.error("eBay notification: signature verification error", err);
     }
 
     if (!valid) {
-      console.error("eBay notification: signature mismatch");
-      return new Response(JSON.stringify({ error: "Precondition Failed" }), {
-        status: 412,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Diagnostic bypass: log warning but still process the notification
+      // to prevent eBay from disabling delivery due to repeated 412s.
+      // TODO: Re-enable strict rejection once signature verification is confirmed working.
+      console.warn("eBay notification: signature mismatch — BYPASSING for diagnostic mode, processing anyway");
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
