@@ -12,15 +12,47 @@ import { toast } from 'sonner';
 export default function ContactPage() {
   usePageSeo({ title: 'Contact Us', description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO® sets?', path: '/contact' });
   const [submitting, setSubmitting] = useState(false);
+  const [subject, setSubject] = useState('');
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmitting(true);
-    setTimeout(() => {
+
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const payload = {
+      name: formData.get('name') as string,
+      email: formData.get('email') as string,
+      subject: subject,
+      message: formData.get('message') as string,
+    };
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/submit-contact-form`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Something went wrong.');
+      }
+
       toast.success("Message sent — we'll get back to you within 1 working day.");
+      form.reset();
+      setSubject('');
+    } catch (err: any) {
+      toast.error(err.message || "Couldn't send your message. Try emailing hello@kusooishii.com directly.");
+    } finally {
       setSubmitting(false);
-      (e.target as HTMLFormElement).reset();
-    }, 800);
+    }
   };
 
   return (
@@ -60,16 +92,16 @@ export default function ContactPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block font-display text-sm font-medium text-foreground mb-1.5">Name</label>
-                      <Input placeholder="Your name" required className="font-body" />
+                      <Input name="name" placeholder="Your name" required className="font-body" />
                     </div>
                     <div>
                       <label className="block font-display text-sm font-medium text-foreground mb-1.5">Email</label>
-                      <Input type="email" placeholder="you@example.com" required className="font-body" />
+                      <Input name="email" type="email" placeholder="you@example.com" required className="font-body" />
                     </div>
                   </div>
                   <div>
                     <label className="block font-display text-sm font-medium text-foreground mb-1.5">Subject</label>
-                    <Select required>
+                    <Select required value={subject} onValueChange={setSubject}>
                       <SelectTrigger className="font-body"><SelectValue placeholder="What's this about?" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="order">Order issue</SelectItem>
@@ -81,7 +113,7 @@ export default function ContactPage() {
                   </div>
                   <div>
                     <label className="block font-display text-sm font-medium text-foreground mb-1.5">Message</label>
-                    <Textarea placeholder="Tell us what's up..." rows={6} required className="font-body" />
+                    <Textarea name="message" placeholder="Tell us what's up..." rows={6} required className="font-body" />
                   </div>
                   <Button type="submit" className="w-full font-display" size="lg" disabled={submitting}>
                     {submitting ? 'Sending...' : 'Send Message'}

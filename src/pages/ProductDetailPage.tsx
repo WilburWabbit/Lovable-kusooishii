@@ -239,14 +239,19 @@ export default function ProductDetailPage() {
   if (!isLoading && !product) {
     return (
       <StorefrontLayout>
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="font-display text-2xl font-bold text-foreground">Set not found</p>
+        <div className="flex flex-col items-center justify-center py-20 text-center max-w-md mx-auto">
+          <p className="font-display text-2xl font-bold text-foreground">This isn't in stock right now.</p>
           <p className="mt-2 font-body text-sm text-muted-foreground">
-            We couldn't find a product with MPN "{mpn}".
+            {mpn} might have sold out or been delisted. Try browsing our current stock or add it to your wishlist — we'll ping you if it comes back.
           </p>
-          <Button asChild variant="outline" className="mt-6 font-display text-xs">
-            <Link to="/browse"><ArrowLeft className="mr-1.5 h-3.5 w-3.5" /> Back to browse</Link>
-          </Button>
+          <div className="mt-6 flex gap-3">
+            <Button asChild className="font-display text-xs">
+              <Link to="/browse">Browse Stock</Link>
+            </Button>
+            <Button asChild variant="outline" className="font-display text-xs">
+              <Link to="/signup">Create Account</Link>
+            </Button>
+          </div>
         </div>
       </StorefrontLayout>
     );

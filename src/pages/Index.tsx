@@ -40,14 +40,14 @@ export default function HomePage() {
         <div className="container relative z-10 py-24 lg:py-36">
           <div className="max-w-xl">
             <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-              LEGO® for F'king Grown-Ups
+              LEGO® for Obsessive Grown-Ups
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold leading-tight text-primary-foreground lg:text-6xl">
               Sets worth<br />
               obsessing over<span className="text-primary">.</span>
             </h1>
             <p className="mt-6 font-body text-base leading-relaxed text-primary-foreground/70 lg:text-lg">
-              Handpicked sets, obsessive condition grading, and zero corporate bollocks. Every set inspected by hand before it ships. If it's in the shop, it's f'king delicious.
+              Handpicked sets, obsessive condition grading, and none of the usual corporate fluff. Every set inspected by hand before it's listed. If it's in the shop, it's the real deal.
             </p>
             <div className="mt-8 flex gap-3">
               <Button asChild size="lg" className="font-display font-semibold">
@@ -69,7 +69,7 @@ export default function HomePage() {
       <section className="border-b border-border bg-background">
         <div className="container grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
-            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and graded 1–4. No vague listings. No surprises.", iconClass: "text-primary", to: "/grading" },
+            { icon: Shield, title: "Condition Graded", desc: "Every set inspected and graded 1–5. No vague listings. No surprises.", iconClass: "text-primary", to: "/grading" },
             { icon: Truck, title: "Free UK Shipping", desc: "Standard on every order. Express available if you can't wait.", iconClass: "text-primary", to: "/shipping-policy" },
             { icon: Bell, title: "Blue Bell LEGO® Club", desc: "5% off for you. 5% donated to the Blue Bell.", iconClass: "text-blue-500", to: "/bluebell" },
           ].map(({ icon: Icon, title, desc, iconClass, to }) => (

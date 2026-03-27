@@ -36,7 +36,7 @@ export function StorefrontFooter() {
               KUSO OISHII
             </span>
             <p className="font-body text-sm text-primary-foreground/60">
-              LEGO® from someone who actually gives a shit. Rescued stock, honest grading, fair prices.
+              LEGO® from someone who actually gives a damn. Rescued stock, honest grading, fair prices.
             </p>
             <div className="flex items-center gap-2 text-primary-foreground/50 text-sm">
               <MapPin className="h-4 w-4" />
@@ -99,7 +99,7 @@ export function StorefrontFooter() {
                 className="bg-primary-foreground/10 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/40 flex-1 font-body"
               />
               <Button type="submit" className="font-display whitespace-nowrap">
-                <ArrowRight className="h-4 w-4 mr-2" /> Get Started
+                <ArrowRight className="h-4 w-4 mr-2" /> Create Account
               </Button>
             </form>
             <p className="font-body text-xs text-primary-foreground/40">

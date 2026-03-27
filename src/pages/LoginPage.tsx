@@ -60,7 +60,7 @@ export default function LoginPage() {
           <div className="text-center">
             <h1 className="font-display text-2xl font-bold text-foreground">Sign in</h1>
             <p className="mt-2 font-body text-sm text-muted-foreground">
-              Welcome back. Your bricks missed you.
+              Sign in. You know the drill.
             </p>
           </div>
 
