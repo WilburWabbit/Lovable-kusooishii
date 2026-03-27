@@ -131,6 +131,41 @@ async function landReferencedItems(admin: any, baseUrl: string, accessToken: str
 }
 
 // ────────────────────────────────────────────────────────────
+// CloudEvents v1.0 types and parser
+// ────────────────────────────────────────────────────────────
+
+interface CloudEvent {
+  specversion: string;
+  id: string;           // event UUID — dedup key
+  source: string;
+  type: string;         // e.g. "qbo.customer.created.v1"
+  datacontenttype: string;
+  time: string;         // ISO 8601 — echo detection timestamp
+  intuitentityid: string;
+  intuitaccountid: string;
+  data: Record<string, unknown>;
+}
+
+function parseEventType(type: string): { entityName: string; operation: string } | null {
+  // "qbo.customer.created.v1" → { entityName: "Customer", operation: "Create" }
+  const match = type.match(/^qbo\.(\w+)\.(created|updated|deleted|merged|voided)\.v\d+$/);
+  if (!match) return null;
+  const entityMap: Record<string, string> = {
+    customer: "Customer", item: "Item", purchase: "Purchase",
+    salesreceipt: "SalesReceipt", refundreceipt: "RefundReceipt",
+    vendor: "Vendor", deposit: "Deposit",
+  };
+  const operationMap: Record<string, string> = {
+    created: "Create", updated: "Update", deleted: "Delete",
+    merged: "Merge", voided: "Void",
+  };
+  return {
+    entityName: entityMap[match[1]] ?? match[1],
+    operation: operationMap[match[2]] ?? match[2],
+  };
+}
+
+// ────────────────────────────────────────────────────────────
 // Entity handlers
 // ────────────────────────────────────────────────────────────
 
