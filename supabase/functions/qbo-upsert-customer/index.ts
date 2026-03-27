@@ -93,6 +93,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const {
+      customer_id,     // admin mode: push an existing customer record
       first_name,
       last_name,
       company_name,
@@ -103,55 +104,79 @@ Deno.serve(async (req) => {
       billing_address,
     } = body;
 
-    // Get user email from auth
-    const userEmail = user.email;
+    let customer: any = null;
+    let userEmail: string | undefined;
 
     // --- Step 1: Find or create local customer record ---
-    // Look up by user_id first
-    let { data: customer } = await admin
-      .from("customer")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    // If not found by user_id, try matching by email
-    if (!customer && userEmail) {
-      const { data: byEmail } = await admin
+    if (customer_id) {
+      // Admin mode — look up the specified customer
+      const { data: existing } = await admin
         .from("customer")
         .select("*")
-        .eq("email", userEmail)
+        .eq("id", customer_id)
+        .maybeSingle();
+      if (!existing) throw new Error("Customer not found");
+      customer = existing;
+      userEmail = customer.email ?? undefined;
+    } else {
+      // Self-service mode — look up by user_id
+      userEmail = user.email;
+
+      let { data: byUser } = await admin
+        .from("customer")
+        .select("*")
+        .eq("user_id", user.id)
         .maybeSingle();
 
-      if (byEmail) {
-        // Link this customer to the user
-        await admin
+      if (!byUser && userEmail) {
+        const { data: byEmail } = await admin
           .from("customer")
-          .update({ user_id: user.id })
-          .eq("id", byEmail.id);
-        customer = { ...byEmail, user_id: user.id };
+          .select("*")
+          .eq("email", userEmail)
+          .maybeSingle();
+
+        if (byEmail) {
+          await admin
+            .from("customer")
+            .update({ user_id: user.id })
+            .eq("id", byEmail.id);
+          byUser = { ...byEmail, user_id: user.id };
+        }
       }
+      customer = byUser;
     }
+
+    // Use provided fields, falling back to existing customer record
+    const effectiveFirstName = first_name ?? customer?.first_name ?? null;
+    const effectiveLastName = last_name ?? customer?.last_name ?? null;
+    const effectiveEmail = (customer_id ? (body.email ?? customer?.email) : userEmail) ?? null;
 
     // Build the display name
     const effectiveDisplayName =
       display_name ||
-      [first_name, last_name].filter(Boolean).join(" ") ||
+      [effectiveFirstName, effectiveLastName].filter(Boolean).join(" ") ||
       company_name ||
-      userEmail ||
+      effectiveEmail ||
       "Unknown";
 
     // Prepare local customer data
     const customerData: Record<string, any> = {
       display_name: effectiveDisplayName,
-      email: userEmail,
-      phone: phone || null,
-      mobile: mobile || null,
-      company_name: company_name || null,
-      web_addr: ebay_url || null,
-      user_id: user.id,
+      first_name: effectiveFirstName,
+      last_name: effectiveLastName,
+      email: effectiveEmail,
+      phone: phone ?? customer?.phone ?? null,
+      mobile: mobile ?? customer?.mobile ?? null,
+      company_name: company_name ?? customer?.company_name ?? null,
+      web_addr: ebay_url ?? customer?.web_addr ?? null,
       active: true,
       synced_at: new Date().toISOString(),
     };
+
+    // Only set user_id in self-service mode
+    if (!customer_id) {
+      customerData.user_id = user.id;
+    }
 
     // Add billing address if provided
     if (billing_address) {
