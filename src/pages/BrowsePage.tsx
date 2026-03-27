@@ -217,7 +217,7 @@ export default function BrowsePage() {
   const pageSubtitle = isNewMode
     ? "Newest arrivals, sorted by release year"
     : isDealsMode
-    ? "Retired sets and minifigs - collectible bargins"
+    ? "Retired sets and minifigs - collectible bargains"
     : `${filteredProducts?.length ?? 0} items · graded · priced · ready to ship`;
 
   const filterContent = (

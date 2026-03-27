@@ -71,7 +71,7 @@ export default function SignupPage() {
           <div className="text-center">
             <h1 className="font-display text-2xl font-bold text-foreground">Create account</h1>
             <p className="mt-2 font-body text-sm text-muted-foreground">
-              Join the LEGO® fetish. Wishlists, stock alerts, and club perks — all yours.
+              Join the obsession. Wishlists, stock alerts, and club perks — all yours.
             </p>
           </div>
 

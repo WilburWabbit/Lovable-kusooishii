@@ -34,9 +34,10 @@ const CookieConsent = () => {
                 No third-party advertising cookies. Ever. Read our{' '}
                 <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link> for the full picture.
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" onClick={handleAccept}>Accept All</Button>
                 <Button size="sm" variant="outline" onClick={handleReject}>Essential Only</Button>
+                <Link to="/privacy" className="font-body text-xs text-muted-foreground hover:text-foreground transition-colors ml-1">Manage Cookies</Link>
               </div>
             </div>
           </div>

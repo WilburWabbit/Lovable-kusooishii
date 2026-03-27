@@ -94,7 +94,7 @@ export default function CartPage() {
       }
     } catch (err: any) {
       console.error('Checkout error:', err);
-      toast.error(err.message || 'Checkout failed. Please try again.');
+      toast.error(err.message || 'Something went sideways. Your card hasn\'t been charged — give it another go.');
     } finally {
       setIsCheckingOut(false);
     }

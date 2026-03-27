@@ -36,7 +36,7 @@ export default function OrderTrackingPage() {
     <StorefrontLayout>
       <div className="container py-12 max-w-4xl">
         <h1 className="font-display text-4xl font-bold text-center mb-4 text-foreground">Track Your Order</h1>
-        <p className="font-body text-muted-foreground text-center mb-8">Pop in your order number and email. We'll tell you where your bricks are.</p>
+        <p className="font-body text-muted-foreground text-center mb-8">Enter your order number and email to track your bricks.</p>
 
         <Card className="mb-8">
           <CardHeader>
