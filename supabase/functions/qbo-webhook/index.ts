@@ -239,16 +239,16 @@ const ENTITY_HANDLERS: Record<string, EntityHandler> = {
 async function processWebhookInBackground(body: string, correlationId: string) {
   const log = makeLogger(correlationId);
 
-  let payload: any;
+  let events: CloudEvent[];
   try {
-    payload = JSON.parse(body);
+    const parsed = JSON.parse(body);
+    events = Array.isArray(parsed) ? parsed : [];
   } catch {
     log.error("Failed to parse webhook body");
     return;
   }
 
-  const notifications = payload?.eventNotifications ?? [];
-  if (notifications.length === 0) return;
+  if (events.length === 0) return;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -256,13 +256,16 @@ async function processWebhookInBackground(body: string, correlationId: string) {
   const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
   const admin = createClient(supabaseUrl, serviceRoleKey);
 
-  for (const notification of notifications) {
-    const realmId = notification.realmId;
-    if (!realmId) continue;
+  // Group events by realm (intuitaccountid) for token efficiency
+  const byRealm = new Map<string, CloudEvent[]>();
+  for (const event of events) {
+    const realm = event.intuitaccountid;
+    if (!realm) continue;
+    if (!byRealm.has(realm)) byRealm.set(realm, []);
+    byRealm.get(realm)!.push(event);
+  }
 
-    const entities = notification.dataChangeEvent?.entities ?? [];
-    if (entities.length === 0) continue;
-
+  for (const [realmId, realmEvents] of byRealm) {
     let accessToken: string;
     try {
       accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
@@ -273,22 +276,60 @@ async function processWebhookInBackground(body: string, correlationId: string) {
 
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
-    for (const entity of entities) {
-      const entityName = entity.name;
-      const entityId = entity.id;
-      const operation = entity.operation ?? "Create";
+    for (const event of realmEvents) {
+      const parsed = parseEventType(event.type);
+      if (!parsed) {
+        log.info("Ignoring unknown event type", { type: event.type });
+        continue;
+      }
 
+      const { entityName, operation } = parsed;
+      const entityId = event.intuitentityid;
+
+      // Echo suppression: skip events that match a recent outbound push
+      const { data: recentPush } = await admin
+        .from("qbo_outbound_queue")
+        .select("pushed_at")
+        .eq("entity_type", entityName.toLowerCase())
+        .eq("entity_id_external", entityId)
+        .eq("status", "pushed")
+        .order("pushed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (recentPush?.pushed_at) {
+        const pushTime = new Date(recentPush.pushed_at).getTime();
+        const eventTime = new Date(event.time).getTime();
+        if (Math.abs(eventTime - pushTime) < 10_000) {
+          log.info("Echo suppressed", {
+            entity: entityName, id: entityId,
+            event_time: event.time, pushed_at: recentPush.pushed_at,
+          });
+          continue;
+        }
+      }
+
+      // Delegate to existing entity handlers
       const handler = ENTITY_HANDLERS[entityName];
       if (!handler) {
-        log.info("Ignoring unhandled entity type", { entity_name: entityName, entity_id: entityId });
+        log.info("Ignoring unhandled entity type", { entity_name: entityName });
         continue;
       }
 
       try {
-        const result = await handler(admin, baseUrl, accessToken, entityId, operation, correlationId);
-        log.info("Entity landed", { entity_name: entityName, entity_id: entityId, operation, result });
+        const result = await handler(
+          admin, baseUrl, accessToken, entityId, operation, correlationId,
+          event.id, event.time,
+        );
+        log.info("Entity landed", {
+          entity_name: entityName, entity_id: entityId,
+          operation, cloud_event_id: event.id, result,
+        });
       } catch (err: any) {
-        log.error("Entity landing failed", { entity_name: entityName, entity_id: entityId, operation, error: err.message });
+        log.error("Entity landing failed", {
+          entity_name: entityName, entity_id: entityId,
+          operation, error: err.message,
+        });
       }
     }
   }
