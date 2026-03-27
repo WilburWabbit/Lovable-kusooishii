@@ -47,7 +47,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     mutationFn: async () => {
       const { error } = await supabase
         .from("sales_order")
-        .update({ status: "complete" } as never)
+        .update({ v2_status: "complete" } as never)
         .eq("id", orderId);
       if (error) throw error;
 
