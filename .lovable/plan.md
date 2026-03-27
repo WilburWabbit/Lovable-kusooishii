@@ -1,88 +1,49 @@
 
 
-# Fix eBay Automatic Order Processing Pipeline
+# QBO Webhook & Bidirectional Customer Sync — Issues and Fix Plan
 
-## Root Causes
+## Findings
 
-### 1. Order ID extraction path is wrong
-The eBay notification payload structure is:
-```
-notification.data.order.orderId  ← actual path
-```
-But the code checks:
-```
-resource.orderId     ← never matches
-data.orderId         ← never matches  
-orderId              ← never matches
-```
-This means even when notifications arrive, the order ID is never extracted, and the function falls back to a debounced bulk sync instead of processing the specific order.
+### 1. QBO Webhook Is Not Receiving Any Calls
+Zero HTTP requests to `qbo-webhook` in the edge function logs. The webhook subscription in QBO has either expired, been disabled, or was never properly configured for this project URL. This means **no automatic updates from QBO are reaching the app** — not for customers, sales receipts, purchases, or items.
 
-### 2. Notification ID extraction is wrong
-The payload has `notification.notificationId`, but the code checks `payload.notificationId` and `metadata.notificationId`. All stored notifications have `notification_id: null`, breaking idempotency.
+### 2. Customer Table Missing `first_name` / `last_name` Columns
+The QBO `Customer` payload includes `GivenName` and `FamilyName`, but the local `customer` table has no `first_name` or `last_name` columns. The processor (`processCustomers`) only writes `display_name` from `DisplayName`. So even when data lands correctly, name components are lost — and when pushing back to QBO, the `qbo-upsert-customer` function has no stored first/last name to send.
 
-### 3. No notifications received since March 12
-Zero edge function logs for `ebay-notifications` means eBay stopped calling. The previous 412 signature failures likely caused eBay to disable delivery. The subscriptions need to be re-registered.
+### 3. Pending Data Is Stacking Up (Not Being Processed)
+There are currently **256 pending sales receipts**, **10 pending customers**, and **6 pending items** sitting in staging tables. The architecture relies on a **client-side drain loop** to trigger `qbo-process-pending`, but nothing is automatically calling it after the webhook lands data. Since the webhook isn't calling at all, this data came from a manual bulk sync — but it was never processed.
 
-### 4. Signature verification may still be failing
-The current verification logic was patched iteratively. If eBay is still sending and getting 412s, notifications are silently rejected.
+### 4. No App → QBO Push for Customer Edits in Admin
+The admin customer detail view is read-only. The `qbo-upsert-customer` function is only called from the public profile/address forms (for the logged-in user's own record). There is no admin UI to edit customer details and push changes to QBO.
 
-## Fix Plan
+## Plan
 
-### Step 1: Fix payload extraction paths in `ebay-notifications`
+### Step 1: Add `first_name` and `last_name` columns to `customer` table
+New migration adding two nullable text columns.
 
-In `supabase/functions/ebay-notifications/index.ts`, update:
+### Step 2: Update `processCustomers` in `qbo-process-pending` to store name components
+Map `GivenName` → `first_name` and `FamilyName` → `last_name` from the QBO payload into the customer upsert.
 
-**Order ID extraction** (around line 275-279):
-```typescript
-// Current (wrong):
-payload?.resource?.orderId
-payload?.data?.orderId
-payload?.orderId
+### Step 3: Add editable customer fields in admin UI + push-to-QBO button
+Add inline editing for name, email, phone, address fields on the `CustomerDetail` component, with a "Save & Sync to QBO" action that calls `qbo-upsert-customer`.
 
-// Fixed — add the correct nested path first:
-payload?.notification?.data?.order?.orderId
-payload?.resource?.orderId
-payload?.data?.orderId
-payload?.orderId
-```
+### Step 4: Update `qbo-upsert-customer` to accept a `customer_id` parameter
+Currently it only works for the logged-in user. Add support for admin callers to specify a customer record by ID, look up that customer's details, and push to QBO.
 
-**Notification ID extraction** (around line 221-223):
-```typescript
-// Current (wrong):
-payload?.notificationId
-payload?.metadata?.notificationId
+### Step 5: Re-register QBO webhook
+This is a **manual action** — you need to go to the QBO developer portal and verify/re-register the webhook subscription pointing to `https://gcgrwujfyurgetvqlmbf.supabase.co/functions/v1/qbo-webhook`. Alternatively, if the app has a QBO webhook setup mechanism in the Settings UI, use that.
 
-// Fixed — add the correct nested path first:
-payload?.notification?.notificationId
-payload?.notificationId
-payload?.metadata?.notificationId
-```
-
-### Step 2: Add bypass mode for signature verification
-
-Add a temporary diagnostic mode: if signature verification fails, log the full error details but still process the notification (log a warning). This prevents eBay from disabling delivery while we debug the exact signature algorithm. Once confirmed working, re-enable strict verification.
-
-Alternatively, add a `try/catch` around verification that logs but does not reject, controlled by an environment variable flag.
-
-### Step 3: Redeploy `ebay-notifications`
-
-Deploy the updated function so eBay's next delivery attempt succeeds.
-
-### Step 4: Re-register eBay notification subscriptions
-
-The user must trigger "Setup Notifications" from the admin UI (Settings → eBay) to re-register the destination and subscriptions, since this requires a user JWT for the eBay connection token.
+### Step 6: Process the pending backlog
+Trigger the drain loop from the admin UI (Settings → QBO → Process Pending) to clear the 256 pending sales receipts, 10 customers, and 6 items.
 
 ## Technical Details
 
-| File | Change |
+| Change | File |
 |---|---|
-| `supabase/functions/ebay-notifications/index.ts` | Fix order ID extraction to check `notification.data.order.orderId`; fix notification ID extraction to check `notification.notificationId`; add signature verification fallback logging |
-| Deploy | `ebay-notifications` |
-| Manual action | User triggers "Setup Notifications" in admin UI |
-
-## What this fixes in the pipeline
-
-Once notifications arrive and the order ID is correctly extracted:
-1. `ebay-notifications` stores the notification and calls `ebay-process-order` with the correct order ID
-2. `ebay-process-order` fetches the order from eBay, creates local `sales_order` + `sales_order_line`, allocates stock, pushes to QBO, and updates channel inventory — all in one pipeline (already implemented and working)
+| Migration: add `first_name`, `last_name` to `customer` | New SQL migration |
+| Map GivenName/FamilyName in processor | `supabase/functions/qbo-process-pending/index.ts` (line ~941) |
+| Admin customer editing + sync button | `src/components/admin-v2/CustomerDetail.tsx` |
+| Accept `customer_id` param for admin push | `supabase/functions/qbo-upsert-customer/index.ts` |
+| Deploy | `qbo-process-pending`, `qbo-upsert-customer` |
+| Manual | Re-register QBO webhook subscription; trigger pending drain |
 
