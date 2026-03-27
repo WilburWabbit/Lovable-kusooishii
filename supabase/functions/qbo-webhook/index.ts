@@ -291,26 +291,30 @@ async function processWebhookInBackground(body: string, correlationId: string) {
       const entityId = event.intuitentityid;
 
       // Echo suppression: skip events that match a recent outbound push
-      const { data: recentPush } = await admin
-        .from("qbo_outbound_queue")
-        .select("pushed_at")
-        .eq("entity_type", entityName.toLowerCase())
-        .eq("entity_id_external", entityId)
-        .eq("status", "pushed")
-        .order("pushed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      try {
+        const { data: recentPush } = await admin
+          .from("qbo_outbound_queue")
+          .select("pushed_at")
+          .eq("entity_type", entityName.toLowerCase())
+          .eq("entity_id_external", entityId)
+          .eq("status", "pushed")
+          .order("pushed_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (recentPush?.pushed_at) {
-        const pushTime = new Date(recentPush.pushed_at).getTime();
-        const eventTime = new Date(event.time).getTime();
-        if (Math.abs(eventTime - pushTime) < 10_000) {
-          log.info("Echo suppressed", {
-            entity: entityName, id: entityId,
-            event_time: event.time, pushed_at: recentPush.pushed_at,
-          });
-          continue;
+        if (recentPush?.pushed_at) {
+          const pushTime = new Date(recentPush.pushed_at).getTime();
+          const eventTime = new Date(event.time).getTime();
+          if (Math.abs(eventTime - pushTime) < 10_000) {
+            log.info("Echo suppressed", {
+              entity: entityName, id: entityId,
+              event_time: event.time, pushed_at: recentPush.pushed_at,
+            });
+            continue;
+          }
         }
+      } catch {
+        // qbo_outbound_queue may not exist yet — skip echo suppression
       }
 
       // Delegate to existing entity handlers
