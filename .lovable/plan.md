@@ -1,34 +1,88 @@
 
 
-# Fix Build Errors and Redeploy
+# Fix eBay Automatic Order Processing Pipeline
 
-## Problem
+## Root Causes
 
-Two categories of build errors:
+### 1. Order ID extraction path is wrong
+The eBay notification payload structure is:
+```
+notification.data.order.orderId  ← actual path
+```
+But the code checks:
+```
+resource.orderId     ← never matches
+data.orderId         ← never matches  
+orderId              ← never matches
+```
+This means even when notifications arrive, the order ID is never extracted, and the function falls back to a debounced bulk sync instead of processing the specific order.
 
-1. **Missing `BackOfficeLayout` component** — Three callback pages (`EbayCallbackPage.tsx`, `GmcCallbackPage.tsx`, `QboCallbackPage.tsx`) import `@/components/BackOfficeLayout` which doesn't exist. This breaks the Vite build.
+### 2. Notification ID extraction is wrong
+The payload has `notification.notificationId`, but the code checks `payload.notificationId` and `metadata.notificationId`. All stored notifications have `notification_id: null`, breaking idempotency.
 
-2. **Edge function `npm:@lovable.dev/webhooks-js` resolution** — The `auth-email-hook` deno.json doesn't declare the npm dependency, causing deploy failures. (Per memory: do NOT add imports/nodeModulesDir to deno.json.)
+### 3. No notifications received since March 12
+Zero edge function logs for `ebay-notifications` means eBay stopped calling. The previous 412 signature failures likely caused eBay to disable delivery. The subscriptions need to be re-registered.
 
-## Changes
+### 4. Signature verification may still be failing
+The current verification logic was patched iteratively. If eBay is still sending and getting 412s, notifications are silently rejected.
 
-### 1. Fix callback page imports (3 files)
-Replace `import { BackOfficeLayout } from "@/components/BackOfficeLayout"` with `import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout"` in:
-- `src/pages/admin/EbayCallbackPage.tsx`
-- `src/pages/admin/GmcCallbackPage.tsx`  
-- `src/pages/admin/QboCallbackPage.tsx`
+## Fix Plan
 
-Also replace `<BackOfficeLayout>` / `</BackOfficeLayout>` JSX tags with `<AdminV2Layout>` / `</AdminV2Layout>` in each file.
+### Step 1: Fix payload extraction paths in `ebay-notifications`
 
-### 2. Redeploy all edge functions
-Deploy all 49 edge functions after the build fix. The `npm:@lovable.dev/webhooks-js` specifier should resolve natively in Deno without deno.json remapping (per project memory).
+In `supabase/functions/ebay-notifications/index.ts`, update:
 
-## Files Modified
+**Order ID extraction** (around line 275-279):
+```typescript
+// Current (wrong):
+payload?.resource?.orderId
+payload?.data?.orderId
+payload?.orderId
+
+// Fixed — add the correct nested path first:
+payload?.notification?.data?.order?.orderId
+payload?.resource?.orderId
+payload?.data?.orderId
+payload?.orderId
+```
+
+**Notification ID extraction** (around line 221-223):
+```typescript
+// Current (wrong):
+payload?.notificationId
+payload?.metadata?.notificationId
+
+// Fixed — add the correct nested path first:
+payload?.notification?.notificationId
+payload?.notificationId
+payload?.metadata?.notificationId
+```
+
+### Step 2: Add bypass mode for signature verification
+
+Add a temporary diagnostic mode: if signature verification fails, log the full error details but still process the notification (log a warning). This prevents eBay from disabling delivery while we debug the exact signature algorithm. Once confirmed working, re-enable strict verification.
+
+Alternatively, add a `try/catch` around verification that logs but does not reject, controlled by an environment variable flag.
+
+### Step 3: Redeploy `ebay-notifications`
+
+Deploy the updated function so eBay's next delivery attempt succeeds.
+
+### Step 4: Re-register eBay notification subscriptions
+
+The user must trigger "Setup Notifications" from the admin UI (Settings → eBay) to re-register the destination and subscriptions, since this requires a user JWT for the eBay connection token.
+
+## Technical Details
 
 | File | Change |
 |---|---|
-| `src/pages/admin/EbayCallbackPage.tsx` | Replace BackOfficeLayout → AdminV2Layout |
-| `src/pages/admin/GmcCallbackPage.tsx` | Replace BackOfficeLayout → AdminV2Layout |
-| `src/pages/admin/QboCallbackPage.tsx` | Replace BackOfficeLayout → AdminV2Layout |
-| Edge functions | Redeploy all |
+| `supabase/functions/ebay-notifications/index.ts` | Fix order ID extraction to check `notification.data.order.orderId`; fix notification ID extraction to check `notification.notificationId`; add signature verification fallback logging |
+| Deploy | `ebay-notifications` |
+| Manual action | User triggers "Setup Notifications" in admin UI |
+
+## What this fixes in the pipeline
+
+Once notifications arrive and the order ID is correctly extracted:
+1. `ebay-notifications` stores the notification and calls `ebay-process-order` with the correct order ID
+2. `ebay-process-order` fetches the order from eBay, creates local `sales_order` + `sales_order_line`, allocates stock, pushes to QBO, and updates channel inventory — all in one pipeline (already implemented and working)
 
