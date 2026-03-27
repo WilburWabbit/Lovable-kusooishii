@@ -215,8 +215,9 @@ Deno.serve(async (req) => {
     );
 
     const topic =
-      payload?.metadata?.topic || payload?.topic || "UNKNOWN";
+      payload?.metadata?.topic || payload?.topic || payload?.notification?.topic || "UNKNOWN";
     const notificationId =
+      payload?.notification?.notificationId ||
       payload?.notificationId ||
       payload?.metadata?.notificationId ||
       null;
