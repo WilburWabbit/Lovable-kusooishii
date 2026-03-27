@@ -177,43 +177,43 @@ type EntityHandler = (
   cloudEventId?: string, eventTime?: string,
 ) => Promise<string>;
 
-async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation);
+async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation, cloudEventId, eventTime);
   const data = await fetchQboEntity(baseUrl, accessToken, `purchase/${entityId}`);
   const purchase = data?.Purchase;
   if (!purchase) return "could not fetch purchase from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, purchase.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_purchase", entityId, purchase, correlationId, operation);
+  return await landEntity(admin, "landing_raw_qbo_purchase", entityId, purchase, correlationId, operation, cloudEventId, eventTime);
 }
 
-async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_sales_receipt", entityId, null, correlationId, operation);
+async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_sales_receipt", entityId, null, correlationId, operation, cloudEventId, eventTime);
   const data = await fetchQboEntity(baseUrl, accessToken, `salesreceipt/${entityId}`);
   const receipt = data?.SalesReceipt;
   if (!receipt) return "could not fetch SalesReceipt from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_sales_receipt", String(receipt.Id), receipt, correlationId, operation);
+  return await landEntity(admin, "landing_raw_qbo_sales_receipt", String(receipt.Id), receipt, correlationId, operation, cloudEventId, eventTime);
 }
 
-async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_refund_receipt", entityId, null, correlationId, operation);
+async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_refund_receipt", entityId, null, correlationId, operation, cloudEventId, eventTime);
   const data = await fetchQboEntity(baseUrl, accessToken, `refundreceipt/${entityId}`);
   const receipt = data?.RefundReceipt;
   if (!receipt) return "could not fetch RefundReceipt from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_refund_receipt", String(receipt.Id), receipt, correlationId, operation);
+  return await landEntity(admin, "landing_raw_qbo_refund_receipt", String(receipt.Id), receipt, correlationId, operation, cloudEventId, eventTime);
 }
 
-async function handleCustomer(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_customer", entityId, null, correlationId, operation);
+async function handleCustomer(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_customer", entityId, null, correlationId, operation, cloudEventId, eventTime);
   const data = await fetchQboEntity(baseUrl, accessToken, `customer/${entityId}`);
   const customer = data?.Customer;
   if (!customer) return "could not fetch customer from QBO";
-  return await landEntity(admin, "landing_raw_qbo_customer", String(customer.Id), customer, correlationId, operation);
+  return await landEntity(admin, "landing_raw_qbo_customer", String(customer.Id), customer, correlationId, operation, cloudEventId, eventTime);
 }
 
-async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_item", entityId, null, correlationId, operation);
+async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_item", entityId, null, correlationId, operation, cloudEventId, eventTime);
   const res = await fetch(`${baseUrl}/item/${entityId}?minorversion=65`, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
@@ -221,7 +221,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const data = await res.json();
   const item = data?.Item;
   if (!item) return `item ${entityId} — not found`;
-  return await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, operation);
+  return await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, operation, cloudEventId, eventTime);
 }
 
 const ENTITY_HANDLERS: Record<string, EntityHandler> = {
