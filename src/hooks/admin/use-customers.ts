@@ -129,6 +129,7 @@ export interface CustomerOrderSummary {
   status: string;
   total: number;
   itemCount: number;
+  orderDate: string;
   createdAt: string;
 }
 
@@ -140,7 +141,7 @@ export function useCustomerOrders(customerId: string | undefined) {
       const { data, error } = await supabase
         .from('sales_order')
         .select(`
-          id, order_number, origin_channel, v2_status, gross_total, created_at,
+          id, order_number, origin_channel, v2_status, gross_total, txn_date, created_at,
           sales_order_line(id)
         `)
         .eq('customer_id', customerId!)
@@ -155,6 +156,7 @@ export function useCustomerOrders(customerId: string | undefined) {
         status: (row.v2_status as string) ?? 'new',
         total: (row.gross_total as number) ?? 0,
         itemCount: ((row.sales_order_line as unknown[]) ?? []).length,
+        orderDate: (row.txn_date as string) ?? (row.created_at as string),
         createdAt: row.created_at as string,
       }));
     },

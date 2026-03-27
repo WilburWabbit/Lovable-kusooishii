@@ -315,7 +315,7 @@ function CustomerOrderRow({
   order: CustomerOrderSummary;
   onClick: () => void;
 }) {
-  const formattedDate = new Date(order.createdAt).toLocaleDateString("en-GB", {
+  const formattedDate = new Date(order.orderDate).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",

@@ -112,11 +112,11 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     render: (r) => <OrderStatusBadge status={r.status} />,
   },
   {
-    key: "createdAt",
+    key: "orderDate",
     label: "Date",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <span className="text-zinc-500">{formatDate(r.createdAt)}</span>,
+    render: (r) => <span className="text-zinc-500">{formatDate(r.orderDate)}</span>,
   },
   {
     key: "paymentMethod",
@@ -253,7 +253,7 @@ export function OrderList() {
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
     "v2-orders",
     DEFAULT_VISIBLE,
-    { key: "createdAt", dir: "desc" },
+    { key: "orderDate", dir: "desc" },
   );
 
   const actionNeeded = orders.filter(
