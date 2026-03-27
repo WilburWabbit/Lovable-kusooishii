@@ -1,14 +1,18 @@
-// Redeployed: 2026-03-27 — Async-first architecture
+// Redeployed: 2026-XX-XX — CloudEvents v1.0 migration
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 /**
- * QBO Webhook Receiver — Immediate-ACK Architecture
+ * QBO Webhook Receiver — CloudEvents v1.0
  *
- * Receives POST from Intuit, verifies HMAC signature, lands the raw
- * notification metadata into a staging table, responds 200 immediately,
- * then fires off async processing via EdgeRuntime.waitUntil.
+ * Receives POST from Intuit in CloudEvents format (flat array of events),
+ * verifies HMAC signature, responds 200 immediately, then fetches full
+ * entity data from QBO and lands it into staging tables via
+ * EdgeRuntime.waitUntil.
  *
- * This ensures Intuit never times out waiting for a response.
+ * Echo suppression: checks qbo_outbound_queue to skip webhook events
+ * triggered by our own outbound pushes (prevents infinite sync loops).
+ *
+ * Intuit migration deadline: 15 May 2026.
  */
 
 const corsHeaders = {
