@@ -199,23 +199,23 @@ Deno.serve(async (req) => {
 
     // --- Step 3: Build QBO Customer payload ---
     const qboPayload: Record<string, any> = {
-      GivenName: first_name || undefined,
-      FamilyName: last_name || undefined,
-      CompanyName: company_name || undefined,
+      GivenName: effectiveFirstName || undefined,
+      FamilyName: effectiveLastName || undefined,
+      CompanyName: company_name ?? customer?.company_name ?? undefined,
       DisplayName: effectiveDisplayName,
     };
 
-    if (userEmail) {
-      qboPayload.PrimaryEmailAddr = { Address: userEmail };
+    if (effectiveEmail) {
+      qboPayload.PrimaryEmailAddr = { Address: effectiveEmail };
     }
-    if (phone) {
-      qboPayload.PrimaryPhone = { FreeFormNumber: phone };
+    if (customerData.phone) {
+      qboPayload.PrimaryPhone = { FreeFormNumber: customerData.phone };
     }
-    if (mobile) {
-      qboPayload.Mobile = { FreeFormNumber: mobile };
+    if (customerData.mobile) {
+      qboPayload.Mobile = { FreeFormNumber: customerData.mobile };
     }
-    if (ebay_url) {
-      qboPayload.WebAddr = { URI: ebay_url };
+    if (customerData.web_addr) {
+      qboPayload.WebAddr = { URI: customerData.web_addr };
     }
 
     // Add billing address to QBO payload
