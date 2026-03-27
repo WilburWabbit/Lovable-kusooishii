@@ -171,7 +171,11 @@ function parseEventType(type: string): { entityName: string; operation: string }
 // Entity handlers
 // ────────────────────────────────────────────────────────────
 
-type EntityHandler = (admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string) => Promise<string>;
+type EntityHandler = (
+  admin: any, baseUrl: string, accessToken: string,
+  entityId: string, operation: string, correlationId: string,
+  cloudEventId?: string, eventTime?: string,
+) => Promise<string>;
 
 async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
   if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation);
