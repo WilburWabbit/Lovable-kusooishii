@@ -86,20 +86,22 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
 
 type LandingTable = "landing_raw_qbo_purchase" | "landing_raw_qbo_sales_receipt" | "landing_raw_qbo_refund_receipt" | "landing_raw_qbo_customer" | "landing_raw_qbo_item";
 
-async function landEntity(admin: any, table: LandingTable, externalId: string, rawPayload: any, correlationId: string, operation: string): Promise<string> {
-  if (operation === "Delete") {
-    const tombstone = { _deleted: true, _entity_id: externalId };
-    const { error } = await admin.from(table).upsert({
-      external_id: externalId, raw_payload: tombstone, status: "pending",
-      processed_at: null, correlation_id: correlationId, received_at: new Date().toISOString(),
-    }, { onConflict: "external_id" });
-    return error ? `land error: ${error.message}` : `landed delete tombstone`;
-  }
-
-  const { error } = await admin.from(table).upsert({
-    external_id: externalId, raw_payload: rawPayload, status: "pending",
-    processed_at: null, correlation_id: correlationId, received_at: new Date().toISOString(),
-  }, { onConflict: "external_id" });
+async function landEntity(
+  admin: any, table: LandingTable, externalId: string,
+  rawPayload: any, correlationId: string, operation: string,
+  cloudEventId?: string, eventTime?: string,
+): Promise<string> {
+  const row: Record<string, any> = {
+    external_id: externalId,
+    raw_payload: operation === "Delete" ? { _deleted: true, _entity_id: externalId } : rawPayload,
+    status: "pending",
+    processed_at: null,
+    correlation_id: correlationId,
+    received_at: new Date().toISOString(),
+  };
+  if (cloudEventId) row.cloud_event_id = cloudEventId;
+  if (eventTime) row.event_time = eventTime;
+  const { error } = await admin.from(table).upsert(row, { onConflict: "external_id" });
   return error ? `land error: ${error.message}` : `landed`;
 }
 
@@ -169,7 +171,11 @@ function parseEventType(type: string): { entityName: string; operation: string }
 // Entity handlers
 // ────────────────────────────────────────────────────────────
 
-type EntityHandler = (admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string) => Promise<string>;
+type EntityHandler = (
+  admin: any, baseUrl: string, accessToken: string,
+  entityId: string, operation: string, correlationId: string,
+  cloudEventId?: string, eventTime?: string,
+) => Promise<string>;
 
 async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
   if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation);
