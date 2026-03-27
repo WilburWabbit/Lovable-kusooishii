@@ -24,6 +24,8 @@ function mapCustomerRow(
   return {
     id: row.id as string,
     name: (row.display_name as string) ?? '',
+    firstName: (row.first_name as string) ?? null,
+    lastName: (row.last_name as string) ?? null,
     email: (row.email as string) ?? '',
     channelIds: (row.channel_ids as Record<string, string>) ?? {},
     qboCustomerId: (row.qbo_customer_id as string) ?? null,

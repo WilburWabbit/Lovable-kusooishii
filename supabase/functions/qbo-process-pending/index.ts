@@ -941,6 +941,8 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
       const { error } = await admin.from("customer").upsert({
         qbo_customer_id: qboId,
         display_name: c.DisplayName ?? c.FullyQualifiedName ?? "Unknown",
+        first_name: c.GivenName ?? null,
+        last_name: c.FamilyName ?? null,
         email: c.PrimaryEmailAddr?.Address ?? null,
         phone: c.PrimaryPhone?.FreeFormNumber ?? null,
         mobile: c.Mobile?.FreeFormNumber ?? null,
