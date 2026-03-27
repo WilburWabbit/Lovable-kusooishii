@@ -1,30 +1,25 @@
 
 
-# Fix Build Errors & Redeploy Edge Functions
+# Add CloudEvent Interface & Event Type Parser to QBO Webhook
 
-## Two Build Errors
+## What changes
 
-### 1. `auth-email-hook` — Cannot resolve `npm:@lovable.dev/webhooks-js`
-The `deno.json` for this function only has JSX compiler options. Per project memory, native `npm:` specifiers should work without remapping. The issue is likely that `@lovable.dev/webhooks-js` is a private/internal package not available on npm registry. Since `handle-email-suppression` uses the same import and has an empty `deno.json`, the fix is consistent — neither function needs a `deno.json` change. The real resolution is to ensure the deploy uses the correct runtime. However, since the build error is happening in the **Vite frontend build** (not edge function deploy), the fix is to exclude `supabase/functions/` from TypeScript compilation checking.
+Insert a new block of code at line 132 (between the `landReferencedItems` function and the "Entity handlers" section comment). The block contains:
 
-**Actually**: The error stack shows this is a Deno-side check during build. The `auth-email-hook/deno.json` needs the JSX config for React Email rendering — the `npm:@lovable.dev/webhooks-js` specifier should resolve natively per the project memory. This may be a transient build issue. Redeploying should work.
+1. A section comment: `// CloudEvents v1.0 types and parser`
+2. A `CloudEvent` interface with all specified fields
+3. A `parseEventType()` function that converts CloudEvents `type` strings (e.g. `"qbo.customer.created.v1"`) into `{ entityName, operation }` objects
 
-**Action**: No file changes needed for this — it resolves at deploy time in the actual Deno runtime. The build error is from local type-checking, not runtime.
+## No other changes
 
-### 2. `WelcomeQrLabel.tsx` — Missing `react-qr-code` package
-The component imports `react-qr-code` which isn't installed.
-
-**Action**: Install `react-qr-code` as a dependency.
-
-## Steps
-
-1. Install `react-qr-code` package to fix the missing dependency build error
-2. Redeploy all edge functions
+All existing code — functions, types, the main `Deno.serve` handler — remains untouched. This is a pure additive insertion between lines 131 and 133.
 
 ## Technical Details
 
-| Change | Detail |
+| Detail | Value |
 |---|---|
-| Install package | `react-qr-code` |
-| Deploy | All edge functions via deploy tool |
+| File | `supabase/functions/qbo-webhook/index.ts` |
+| Insertion point | After line 131, before line 133 |
+| Lines added | ~30 |
+| Lines modified | 0 |
 
