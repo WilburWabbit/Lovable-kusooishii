@@ -1,0 +1,705 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Customer
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Customer entity.
+    Includes create, update, read, and query endpoints with full response
+    envelopes, fault handling, metadata, and OAuth2 security. Supports sparse
+    updates for efficient record modifications.
+
+externalDocs:
+  description: Official Intuit Customer documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/customer
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Customer
+    description: Customer resource operations
+
+paths:
+  /v3/company/{realmId}/customer:
+    post:
+      tags:
+        - Customer
+      summary: Create or update a customer
+      operationId: createOrUpdateCustomer
+      description: |
+        Create a new Customer or update an existing one.
+        When updating, include the Id and SyncToken. Sparse updates are supported
+        by setting the sparse flag to true.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/CustomerCreateRequest'
+                - $ref: '#/components/schemas/CustomerUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/CustomerOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/customer/{customerId}:
+    get:
+      tags:
+        - Customer
+      summary: Read a customer by ID
+      operationId: getCustomerById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/CustomerId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/CustomerOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Customer
+      summary: Query customers using GET
+      operationId: queryCustomersGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/CustomerQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/CustomerQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Customer
+      summary: Query customers using POST
+      operationId: queryCustomersPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/CustomerQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/CustomerQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "37"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    CustomerQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/CustomerQueryStatement'
+
+  responses:
+    CustomerOrFault:
+      description: Customer response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/CustomerEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    CustomerQueryOrFault:
+      description: Customer query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/CustomerQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    CustomerQueryStatement:
+      type: string
+      example: SELECT * FROM Customer STARTPOSITION 1 MAXRESULTS 10
+
+    ReferenceType:
+      type: object
+      description: Reference to another entity
+      properties:
+        value:
+          type: string
+          description: The unique identifier value
+        name:
+          type: string
+          description: The name of the referenced entity
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      description: Currency reference
+      properties:
+        value:
+          type: string
+          description: ISO 4217 currency code
+          example: USD
+        name:
+          type: string
+          description: Currency name
+      required:
+        - value
+
+    MetaData:
+      type: object
+      description: Metadata containing audit information
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+          description: Timestamp when the record was created
+        LastUpdatedTime:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent update
+
+    TelephoneNumber:
+      type: object
+      description: Telephone number object
+      properties:
+        FreeFormNumber:
+          type: string
+          description: Unformatted telephone number
+          example: "4155551212"
+
+    EmailAddress:
+      type: object
+      description: Email address object
+      properties:
+        Address:
+          type: string
+          format: email
+          description: Email address
+          example: "john@example.com"
+
+    WebSiteAddress:
+      type: object
+      description: Website address object
+      properties:
+        URI:
+          type: string
+          format: uri
+          description: Website URI
+          example: "https://www.example.com"
+
+    PhysicalAddress:
+      type: object
+      description: Physical address with geographical information
+      properties:
+        Id:
+          type: string
+          description: The ID of the address
+        Line1:
+          type: string
+          description: Address line 1
+          example: "123 Main Street"
+        Line2:
+          type: string
+          description: Address line 2
+          example: "Suite 100"
+        Line3:
+          type: string
+          description: Address line 3
+        Line4:
+          type: string
+          description: Address line 4
+        Line5:
+          type: string
+          description: Address line 5
+        City:
+          type: string
+          description: City or town name
+          example: "San Francisco"
+        Country:
+          type: string
+          description: Country name
+          example: "United States"
+        CountrySubDivisionCode:
+          type: string
+          description: State, province, or region code
+          example: "CA"
+        PostalCode:
+          type: string
+          description: Postal code or ZIP code
+          example: "94102"
+        Lat:
+          type: number
+          format: double
+          description: Latitude coordinate
+        Long:
+          type: number
+          format: double
+          description: Longitude coordinate
+
+    CustomerWrite:
+      type: object
+      description: Customer entity for creation and updates
+      properties:
+        Id:
+          type: string
+          description: Unique identifier (read-only after creation)
+        SyncToken:
+          type: string
+          description: Version number for optimistic concurrency control (required for updates)
+        sparse:
+          type: boolean
+          description: |
+            When true, performs a sparse update sending only changed fields.
+            Required for updates, ignored for creates.
+        DisplayName:
+          type: string
+          maxLength: 500
+          description: The name of the customer as displayed on forms and reports
+          example: "Acme Corporation"
+        Title:
+          type: string
+          description: Title or salutation (e.g., Mr., Ms., Dr.)
+        GivenName:
+          type: string
+          description: First name
+        MiddleName:
+          type: string
+          description: Middle name
+        FamilyName:
+          type: string
+          description: Last name or family name
+        Suffix:
+          type: string
+          description: Name suffix (e.g., Jr., Sr., III)
+        CompanyName:
+          type: string
+          description: Legal company name
+        PrintOnCheckName:
+          type: string
+          description: Name to print on cheques
+        Active:
+          type: boolean
+          default: true
+          description: Indicates whether the customer is active
+        PrimaryPhone:
+          $ref: '#/components/schemas/TelephoneNumber'
+          description: Primary telephone number
+        AlternatePhone:
+          $ref: '#/components/schemas/TelephoneNumber'
+          description: Alternate telephone number
+        Mobile:
+          $ref: '#/components/schemas/TelephoneNumber'
+          description: Mobile telephone number
+        Fax:
+          $ref: '#/components/schemas/TelephoneNumber'
+          description: Facsimile number
+        PrimaryEmailAddr:
+          $ref: '#/components/schemas/EmailAddress'
+          description: Primary email address
+        WebAddr:
+          $ref: '#/components/schemas/WebSiteAddress'
+          description: Website address
+        BillAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+          description: Billing address
+        ShipAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+          description: Shipping address
+        Notes:
+          type: string
+          maxLength: 2000
+          description: Additional notes or comments about the customer
+        Job:
+          type: boolean
+          description: Indicates whether this customer is a job or sub-customer
+        BillWithParent:
+          type: boolean
+          description: Bill the parent customer instead of this job or sub-customer
+        ParentRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to parent customer (for job or sub-customer records)
+        SalesTermRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the default sales term
+        PaymentMethodRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the default payment method
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+          description: Reference to the currency used for transactions with this customer
+        PreferredDeliveryMethod:
+          type: string
+          enum:
+            - Print
+            - Email
+            - None
+          description: Customer's preferred method for receiving invoices
+        Taxable:
+          type: boolean
+          description: Indicates whether the customer is subject to tax
+        DefaultTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the default tax code
+        TaxExemptionReasonId:
+          type: string
+          description: Reason ID for tax exemption
+        OpenBalanceDate:
+          type: string
+          format: date
+          description: Date of the opening balance
+        ResaleNum:
+          type: string
+          description: Resale number for the customer
+        BusinessNumber:
+          type: string
+          description: Business registration number
+        GSTIN:
+          type: string
+          description: Goods and Services Tax Identification Number (India only)
+        PrimaryTaxIdentifier:
+          type: string
+          description: Primary tax identifier
+        GSTRegistrationType:
+          type: string
+          enum:
+            - GST_REG_REG
+            - GST_REG_COMP
+            - GST_UNREG
+            - CONSUMER
+            - OVERSEAS
+            - SEZ
+            - DEEMED
+          description: |
+            GST registration type (India only). 
+            Values: GST_REG_REG (Regular), GST_REG_COMP (Composition),
+            GST_UNREG (Unregistered), CONSUMER, OVERSEAS, SEZ, DEEMED
+
+    CustomerCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/CustomerWrite'
+      description: Customer creation request
+      required:
+        - DisplayName
+
+    CustomerUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/CustomerWrite'
+      description: Customer update request
+      required:
+        - Id
+        - SyncToken
+
+    Customer:
+      allOf:
+        - $ref: '#/components/schemas/CustomerWrite'
+      description: Customer entity with all read-only properties
+      properties:
+        Level:
+          type: integer
+          description: Hierarchical level of the customer in the hierarchy (read-only)
+        Balance:
+          type: number
+          format: double
+          description: |
+            The balance of the customer (accounts receivable).
+            Read-only, calculated from transactions.
+        BalanceWithJobs:
+          type: number
+          format: double
+          description: |
+            The balance of the customer including all sub-customers or jobs.
+            Read-only, calculated from transactions.
+        IsProject:
+          type: boolean
+          description: Indicates whether this customer is a project (read-only)
+        Source:
+          type: string
+          description: |
+            Source through which the customer was added.
+            Read-only field populated by QuickBooks.
+        ARAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            Reference to the accounts receivable account.
+            Read-only and only available for France region.
+        FullyQualifiedName:
+          type: string
+          description: |
+            Fully qualified name including hierarchical path if this is a
+            job or sub-customer. Read-only.
+          example: "ACME Corporation:NYC Branch:Project A"
+        domain:
+          type: string
+          description: The realm or business domain (read-only)
+          example: QBO
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+          description: Metadata including creation and update timestamps
+        V4IDPseudonym:
+          type: string
+          description: V4 ID pseudonym for customer identity (read-only)
+        TaxRegistrationNumber:
+          type: string
+          description: |
+            Automated sales tax registration number (read-only, 
+            populated for automated sales tax compliance).
+
+    CustomerEnvelope:
+      type: object
+      required:
+        - Customer
+        - time
+      description: Response envelope containing customer data
+      properties:
+        Customer:
+          $ref: '#/components/schemas/Customer'
+        time:
+          type: string
+          format: date-time
+          description: Server timestamp of the response
+
+    CustomerQueryResponse:
+      type: object
+      description: Query response containing customer records
+      properties:
+        Customer:
+          type: array
+          items:
+            $ref: '#/components/schemas/Customer'
+          description: Array of customer records returned by the query
+        startPosition:
+          type: integer
+          description: Starting position of the result set
+        maxResults:
+          type: integer
+          description: Maximum number of results requested
+        totalCount:
+          type: integer
+          description: Total count of matching records
+        Fault:
+          $ref: '#/components/schemas/Fault'
+          description: Fault information if a partial error occurred
+
+    CustomerQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      description: Response envelope containing query results
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/CustomerQueryResponse'
+        time:
+          type: string
+          format: date-time
+          description: Server timestamp of the response
+
+    FaultError:
+      type: object
+      description: Individual error in a fault response
+      properties:
+        Message:
+          type: string
+          description: Human-readable error message
+        Detail:
+          type: string
+          description: Detailed error information
+        code:
+          type: string
+          description: Error code
+        element:
+          type: string
+          description: The element that caused the error
+
+    Fault:
+      type: object
+      description: Fault object containing error information
+      properties:
+        type:
+          type: string
+          description: Fault type or category
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+          description: Array of individual errors
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      description: Response envelope containing fault information
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
+          description: Server timestamp of the fault response

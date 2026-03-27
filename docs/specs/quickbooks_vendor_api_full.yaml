@@ -1,0 +1,586 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Vendor
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Vendor entity.
+    Includes create, update, read, soft delete, and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit Vendor documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/vendor
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Vendor
+    description: Vendor resource operations
+
+paths:
+  /v3/company/{realmId}/vendor:
+    post:
+      tags:
+        - Vendor
+      summary: Create or update a vendor
+      operationId: createOrUpdateVendor
+      description: |
+        Create a new Vendor or update an existing one.
+        Soft delete is done by updating Active=false.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/VendorCreateRequest'
+                - $ref: '#/components/schemas/VendorUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/VendorOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/vendor/{vendorId}:
+    get:
+      tags:
+        - Vendor
+      summary: Read a vendor by ID
+      operationId: getVendorById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/VendorId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/VendorOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Vendor
+      summary: Query vendors using GET
+      operationId: queryVendorsGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/VendorQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/VendorQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Vendor
+      summary: Query vendors using POST
+      operationId: queryVendorsPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/VendorQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/VendorQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    VendorId:
+      name: vendorId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "56"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    VendorQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/VendorQueryStatement'
+
+  responses:
+    VendorOrFault:
+      description: Vendor response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/VendorEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    VendorQueryOrFault:
+      description: Vendor query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/VendorQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    VendorQueryStatement:
+      type: string
+      example: SELECT * FROM Vendor STARTPOSITION 1 MAXRESULTS 5
+
+    TelephoneNumber:
+      type: object
+      properties:
+        FreeFormNumber:
+          type: string
+          maxLength: 100
+
+    EmailAddress:
+      type: object
+      properties:
+        Address:
+          type: string
+          format: email
+          maxLength: 100
+
+    WebSiteAddress:
+      type: object
+      properties:
+        URI:
+          type: string
+          format: uri
+          maxLength: 500
+
+    PhysicalAddress:
+      type: object
+      properties:
+        Id:
+          type: string
+        Line1:
+          type: string
+          maxLength: 500
+        Line2:
+          type: string
+          maxLength: 500
+        Line3:
+          type: string
+          maxLength: 500
+        Line4:
+          type: string
+          maxLength: 500
+        Line5:
+          type: string
+          maxLength: 500
+        City:
+          type: string
+          maxLength: 255
+        Country:
+          type: string
+          maxLength: 255
+        CountrySubDivisionCode:
+          type: string
+          maxLength: 3
+        PostalCode:
+          type: string
+          maxLength: 30
+        Lat:
+          type: number
+          format: double
+        Long:
+          type: number
+          format: double
+
+    ContactInfo:
+      type: object
+      properties:
+        Type:
+          type: string
+          enum:
+            - TelephoneNumber
+        Telephone:
+          $ref: '#/components/schemas/TelephoneNumber'
+
+    ReferenceType:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    VendorWrite:
+      type: object
+      properties:
+        Id:
+          type: string
+          readOnly: true
+        SyncToken:
+          type: string
+        sparse:
+          type: boolean
+        DisplayName:
+          type: string
+          maxLength: 500
+        Title:
+          type: string
+          maxLength: 100
+        GivenName:
+          type: string
+          maxLength: 100
+        MiddleName:
+          type: string
+          maxLength: 100
+        FamilyName:
+          type: string
+          maxLength: 100
+        Suffix:
+          type: string
+          maxLength: 100
+        CompanyName:
+          type: string
+          maxLength: 500
+        PrintOnCheckName:
+          type: string
+          maxLength: 500
+        Active:
+          type: boolean
+          default: true
+        PrimaryPhone:
+          $ref: '#/components/schemas/TelephoneNumber'
+        AlternatePhone:
+          $ref: '#/components/schemas/TelephoneNumber'
+        Mobile:
+          $ref: '#/components/schemas/TelephoneNumber'
+        Fax:
+          $ref: '#/components/schemas/TelephoneNumber'
+        PrimaryEmailAddr:
+          $ref: '#/components/schemas/EmailAddress'
+        WebAddr:
+          $ref: '#/components/schemas/WebSiteAddress'
+        BillAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        OtherContactInfo:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContactInfo'
+        Notes:
+          type: string
+          maxLength: 2000
+        Balance:
+          type: number
+          format: double
+          readOnly: true
+        AcctNum:
+          type: string
+          maxLength: 100
+          description: Vendor account number
+        Vendor1099:
+          type: boolean
+        BillRate:
+          type: number
+          format: double
+        TermRef:
+          $ref: '#/components/schemas/ReferenceType'
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+        TaxIdentifier:
+          type: string
+          description: SSN or TIN
+        TaxReportingBasis:
+          type: string
+          enum:
+            - Cash
+            - Accrual
+        APAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: France only
+        HasTPAR:
+          type: boolean
+          description: Australia only
+        GSTIN:
+          type: string
+          description: India only
+        GSTRegistrationType:
+          type: string
+          description: India only
+        BusinessNumber:
+          type: string
+        V4IDPseudonym:
+          type: string
+          readOnly: true
+        Source:
+          type: string
+          readOnly: true
+
+    VendorCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/VendorWrite'
+      required:
+        - DisplayName
+
+    VendorUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/VendorWrite'
+      required:
+        - Id
+        - SyncToken
+
+    Vendor:
+      allOf:
+        - $ref: '#/components/schemas/VendorWrite'
+      properties:
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+        domain:
+          type: string
+          example: QBO
+
+    VendorEnvelope:
+      type: object
+      required:
+        - Vendor
+        - time
+      properties:
+        Vendor:
+          $ref: '#/components/schemas/Vendor'
+        time:
+          type: string
+          format: date-time
+
+    VendorQueryResponse:
+      type: object
+      properties:
+        Vendor:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vendor'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    VendorQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/VendorQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time

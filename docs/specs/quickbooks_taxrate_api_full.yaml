@@ -1,0 +1,468 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - TaxRate
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online TaxRate entity.
+    READ-ONLY outside the United States. Includes read and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit TaxRate documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxrate
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: TaxRate
+    description: Tax rate resource operations (read-only outside US)
+
+paths:
+  /v3/company/{realmId}/taxrate/{taxRateId}:
+    get:
+      tags:
+        - TaxRate
+      summary: Read a tax rate by ID
+      operationId: getTaxRateById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/TaxRateId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxRateOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - TaxRate
+      summary: Query tax rates using GET
+      operationId: queryTaxRatesGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/TaxRateQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxRateQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - TaxRate
+      summary: Query tax rates using POST
+      operationId: queryTaxRatesPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/TaxRateQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxRateQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    TaxRateId:
+      name: taxRateId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "1"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    TaxRateQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/TaxRateQueryStatement'
+
+  responses:
+    TaxRateOrFault:
+      description: TaxRate response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/TaxRateEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    TaxRateQueryOrFault:
+      description: TaxRate query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/TaxRateQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    TaxRateQueryStatement:
+      type: string
+      example: SELECT * FROM TaxRate STARTPOSITION 1 MAXRESULTS 5
+
+    ReferenceType:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    EffectiveTaxRateEntry:
+      type: object
+      description: An entry representing an effective tax rate during a specific time period
+      properties:
+        RateValue:
+          type: number
+          format: double
+          description: |
+            The percentage rate value for this time period, represented as a decimal.
+            For example, 0.0825 represents 8.25%.
+          example: 0.0825
+        EndDate:
+          type: string
+          format: date
+          description: |
+            The end date (inclusive) when this effective tax rate was valid.
+            If null or omitted, the rate is still currently effective.
+          example: '2024-12-31'
+
+    TaxRate:
+      type: object
+      description: |
+        Represents a tax rate in QuickBooks Online. A tax rate defines the percentage or amount of tax
+        to be applied to transactions and specifies the tax agency responsible for collecting and remitting the tax.
+        Tax rates can be linked to tax codes and used in conjunction with other tax rates for compound taxation.
+        READ-ONLY outside the United States.
+      properties:
+        Id:
+          type: string
+          readOnly: true
+          description: Unique identifier for the tax rate assigned by QuickBooks
+          example: '1'
+        SyncToken:
+          type: string
+          description: |
+            Sync token used for optimistic concurrency control. Must be provided when updating a tax rate.
+            The token changes with each modification.
+          example: '0'
+        Name:
+          type: string
+          maxLength: 100
+          description: |
+            The name of the tax rate. This is a user-friendly identifier displayed in transaction forms
+            and reports. Maximum length is 100 characters.
+          example: 'Sales Tax - State'
+        Description:
+          type: string
+          maxLength: 100
+          description: |
+            An optional description providing additional context about the tax rate, its jurisdiction,
+            and its application. Maximum length is 100 characters.
+          example: 'State sales tax for California'
+        Active:
+          type: boolean
+          default: true
+          description: |
+            Indicates whether the tax rate is currently active. Inactive tax rates cannot be assigned
+            to new transactions but remain available for historical reference and reporting.
+        RateValue:
+          type: number
+          format: double
+          description: |
+            The percentage rate value represented as a decimal. For example, 0.0825 represents 8.25%.
+            This is the primary tax percentage applied to transactions.
+          example: 0.0825
+        AgencyRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            Reference to the tax agency or governmental body responsible for collecting and administering this tax.
+            Examples include state revenue departments or local tax authorities.
+        TaxReturnLineRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            Reference to the specific line item on tax return forms where this tax rate's collected amounts
+            should be reported. Used for tax compliance and reporting purposes.
+        SpecialTaxType:
+          type: string
+          enum:
+            - NONE
+            - ZERO_RATE
+            - FOREIGN_TAX
+            - REVERSE_CHARGE
+            - ADJUSTMENT_RATE
+            - INCLUSIVE_RATE
+          description: |
+            Special tax classification for specific tax scenarios:
+            - NONE: Standard tax rate with no special treatment
+            - ZERO_RATE: A tax rate with 0% that must still be tracked and reported
+            - FOREIGN_TAX: Tax applied to foreign transactions
+            - REVERSE_CHARGE: Tax where the buyer is responsible for paying the tax to the government
+            - ADJUSTMENT_RATE: A tax rate used for adjustments or corrections
+            - INCLUSIVE_RATE: Tax that is included in the item price rather than added on top
+          example: NONE
+        DisplayType:
+          type: string
+          enum:
+            - ReadOnly
+            - HideInTransactionForms
+            - HideInPrintedForms
+          description: |
+            Controls how the tax rate is displayed in the user interface:
+            - ReadOnly: The tax rate is visible but cannot be modified by users in transaction forms
+            - HideInTransactionForms: The tax rate is hidden in transaction entry screens but visible in reports
+            - HideInPrintedForms: The tax rate is hidden on printed forms and invoices
+          example: ReadOnly
+        EffectiveTaxRate:
+          type: array
+          description: |
+            An array of effective tax rates that have been in effect at different time periods.
+            Used to track tax rate changes over time for historical accuracy.
+          items:
+            $ref: '#/components/schemas/EffectiveTaxRateEntry'
+        OriginalTaxRate:
+          type: string
+          readOnly: true
+          description: |
+            Read-only field containing the original tax rate value before any modifications.
+            Used for audit trail and historical tracking.
+        domain:
+          type: string
+          readOnly: true
+          description: Read-only domain identifier for the tax rate
+          example: 'QBO'
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+          description: Metadata about the tax rate including creation and modification timestamps
+
+    TaxRateEnvelope:
+      type: object
+      required:
+        - TaxRate
+        - time
+      properties:
+        TaxRate:
+          $ref: '#/components/schemas/TaxRate'
+        time:
+          type: string
+          format: date-time
+
+    TaxRateQueryResponse:
+      type: object
+      properties:
+        TaxRate:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxRate'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    TaxRateQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/TaxRateQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
