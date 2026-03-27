@@ -273,6 +273,8 @@ Deno.serve(async (req) => {
     if (isOrderTopic || isShipmentTopic) {
       // Extract order ID from notification payload
       const rawOrderId =
+        payload?.notification?.data?.orderId ||
+        payload?.notification?.data?.order?.orderId ||
         payload?.resource?.orderId ||
         payload?.data?.orderId ||
         payload?.orderId ||
