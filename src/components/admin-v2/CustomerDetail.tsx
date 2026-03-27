@@ -1,21 +1,125 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useCustomer, useCustomerOrders } from "@/hooks/admin/use-customers";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCustomer, useCustomerOrders, customerKeys } from "@/hooks/admin/use-customers";
 import type { CustomerOrderSummary } from "@/hooks/admin/use-customers";
+import type { CustomerRow } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, BackButton, SectionHead, OrderStatusBadge } from "./ui-primitives";
 import type { OrderStatus } from "@/lib/types/admin";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 export function CustomerDetail() {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: customer, isLoading } = useCustomer(customerId);
   const { data: orders = [], isLoading: ordersLoading } = useCustomerOrders(customerId);
 
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<Partial<CustomerRow>>({});
+
+  const startEdit = () => {
+    if (!customer) return;
+    setForm({
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      email: customer.email,
+      phone: customer.phone,
+      mobile: customer.mobile,
+      billingLine1: customer.billingLine1,
+      billingLine2: customer.billingLine2,
+      billingCity: customer.billingCity,
+      billingCounty: customer.billingCounty,
+      billingPostcode: customer.billingPostcode,
+      billingCountry: customer.billingCountry,
+      notes: customer.notes,
+    });
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setForm({});
+  };
+
+  const saveAndSync = async () => {
+    if (!customer || !customerId) return;
+    setSaving(true);
+    try {
+      // 1. Save locally first
+      const { error: updateErr } = await supabase
+        .from("customer")
+        .update({
+          first_name: form.firstName ?? null,
+          last_name: form.lastName ?? null,
+          display_name: [form.firstName, form.lastName].filter(Boolean).join(" ") || customer.name,
+          email: form.email ?? null,
+          phone: form.phone ?? null,
+          mobile: form.mobile ?? null,
+          billing_line_1: form.billingLine1 ?? null,
+          billing_line_2: form.billingLine2 ?? null,
+          billing_city: form.billingCity ?? null,
+          billing_county: form.billingCounty ?? null,
+          billing_postcode: form.billingPostcode ?? null,
+          billing_country: form.billingCountry ?? null,
+          notes: form.notes ?? null,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", customerId);
+
+      if (updateErr) throw updateErr;
+
+      // 2. Push to QBO if connected
+      if (customer.qboCustomerId) {
+        const { data, error: fnErr } = await supabase.functions.invoke("qbo-upsert-customer", {
+          body: {
+            customer_id: customerId,
+            first_name: form.firstName,
+            last_name: form.lastName,
+            email: form.email,
+            phone: form.phone,
+            mobile: form.mobile,
+            billing_address: {
+              line_1: form.billingLine1,
+              line_2: form.billingLine2,
+              city: form.billingCity,
+              county: form.billingCounty,
+              postcode: form.billingPostcode,
+              country: form.billingCountry || "GB",
+            },
+          },
+        });
+        if (fnErr) {
+          console.error("QBO sync error:", fnErr);
+          toast.warning("Saved locally but QBO sync failed");
+        } else if (data?.success === false) {
+          toast.warning("Saved locally. QBO: " + (data.qbo_error || "sync issue"));
+        } else {
+          toast.success("Saved & synced to QBO");
+        }
+      } else {
+        toast.success("Saved locally (no QBO link)");
+      }
+
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
+    } catch (err: any) {
+      toast.error("Save failed: " + (err.message ?? "Unknown error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (isLoading) {
-    return <p className="text-zinc-500 text-sm">Loading customer…</p>;
+    return <p className="text-muted-foreground text-sm">Loading customer…</p>;
   }
 
   if (!customer) {
-    return <p className="text-zinc-500 text-sm">Customer not found.</p>;
+    return <p className="text-muted-foreground text-sm">Customer not found.</p>;
   }
 
   const formatDate = (iso: string | null) => {
@@ -40,59 +144,104 @@ export function CustomerDetail() {
 
   const channelEntries = Object.entries(customer.channelIds);
 
+  const field = (key: keyof typeof form) => ({
+    value: (form[key] as string) ?? "",
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((prev) => ({ ...prev, [key]: e.target.value || null })),
+  });
+
   return (
     <div>
       <BackButton onClick={() => navigate("/admin/customers")} label="Customers" />
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
-        <h1 className="text-[22px] font-bold text-zinc-900">{customer.name}</h1>
+        <h1 className="text-[22px] font-bold text-foreground">{customer.name}</h1>
         {customer.blueBellMember && <Badge label="Blue Bell" color="#3B82F6" small />}
         {!customer.active && <Badge label="Inactive" color="#71717A" small />}
       </div>
-      <p className="text-zinc-500 text-[13px] mb-5">
+      <p className="text-muted-foreground text-[13px] mb-5">
         {customer.orderCount} orders · £{customer.totalSpend.toFixed(2)} total spend · Customer since {formatDate(customer.createdAt)}
       </p>
 
+      {/* Edit / Save buttons */}
+      <div className="flex gap-2 mb-3">
+        {!editing ? (
+          <Button variant="outline" size="sm" onClick={startEdit}>
+            Edit
+          </Button>
+        ) : (
+          <>
+            <Button size="sm" onClick={saveAndSync} disabled={saving}>
+              {saving ? "Saving…" : customer.qboCustomerId ? "Save & Sync to QBO" : "Save"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={cancelEdit} disabled={saving}>
+              Cancel
+            </Button>
+          </>
+        )}
+      </div>
+
       {/* Info grid */}
       <SurfaceCard className="mb-5">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <InfoField label="Email" value={customer.email || "—"} />
-          <InfoField label="Phone" value={customer.phone ?? "—"} />
-          <InfoField label="Mobile" value={customer.mobile ?? "—"} />
-          <InfoField label="Address" value={address || "—"} />
-          <InfoField
-            label="Channels"
-            value={
-              channelEntries.length > 0
-                ? channelEntries.map(([ch, id]) => `${ch}: ${id}`).join(", ")
-                : "—"
-            }
-          />
-          <InfoField label="QBO Customer ID" value={customer.qboCustomerId ?? "—"} mono />
-          {customer.notes && (
+        {editing ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <EditField label="First Name" {...field("firstName")} />
+            <EditField label="Last Name" {...field("lastName")} />
+            <EditField label="Email" {...field("email")} />
+            <EditField label="Phone" {...field("phone")} />
+            <EditField label="Mobile" {...field("mobile")} />
+            <EditField label="Address Line 1" {...field("billingLine1")} />
+            <EditField label="Address Line 2" {...field("billingLine2")} />
+            <EditField label="City" {...field("billingCity")} />
+            <EditField label="County" {...field("billingCounty")} />
+            <EditField label="Postcode" {...field("billingPostcode")} />
+            <EditField label="Country" {...field("billingCountry")} />
             <div className="col-span-full">
-              <InfoField label="Notes" value={customer.notes} />
+              <EditField label="Notes" {...field("notes")} />
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <InfoField label="First Name" value={customer.firstName ?? "—"} />
+            <InfoField label="Last Name" value={customer.lastName ?? "—"} />
+            <InfoField label="Email" value={customer.email || "—"} />
+            <InfoField label="Phone" value={customer.phone ?? "—"} />
+            <InfoField label="Mobile" value={customer.mobile ?? "—"} />
+            <InfoField label="Address" value={address || "—"} />
+            <InfoField
+              label="Channels"
+              value={
+                channelEntries.length > 0
+                  ? channelEntries.map(([ch, id]) => `${ch}: ${id}`).join(", ")
+                  : "—"
+              }
+            />
+            <InfoField label="QBO Customer ID" value={customer.qboCustomerId ?? "—"} mono />
+            {customer.notes && (
+              <div className="col-span-full">
+                <InfoField label="Notes" value={customer.notes} />
+              </div>
+            )}
+          </div>
+        )}
       </SurfaceCard>
 
       {/* Orders section */}
       <SectionHead>Orders</SectionHead>
       <SurfaceCard noPadding className="overflow-x-auto mt-2">
         {ordersLoading ? (
-          <p className="text-zinc-500 text-sm p-4">Loading orders…</p>
+          <p className="text-muted-foreground text-sm p-4">Loading orders…</p>
         ) : orders.length === 0 ? (
-          <p className="text-zinc-500 text-sm p-4">No orders for this customer.</p>
+          <p className="text-muted-foreground text-sm p-4">No orders for this customer.</p>
         ) : (
           <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr className="border-b border-zinc-200">
+              <tr className="border-b border-border">
                 {["Order", "Channel", "Items", "Total", "Status", "Date"].map((h) => (
                   <th
                     key={h}
-                    className="px-3 py-2.5 text-left text-zinc-500 font-medium text-[10px] uppercase tracking-wider"
+                    className="px-3 py-2.5 text-left text-muted-foreground font-medium text-[10px] uppercase tracking-wider"
                   >
                     {h}
                   </th>
@@ -128,14 +277,33 @@ function InfoField({
 }) {
   return (
     <div>
-      <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">
         {label}
       </div>
       {mono ? (
         <Mono color="dim" className="text-sm">{value}</Mono>
       ) : (
-        <div className="text-zinc-900 text-sm">{value}</div>
+        <div className="text-foreground text-sm">{value}</div>
       )}
+    </div>
+  );
+}
+
+function EditField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">
+        {label}
+      </div>
+      <Input value={value} onChange={onChange} className="h-8 text-sm" />
     </div>
   );
 }
@@ -156,20 +324,20 @@ function CustomerOrderRow({
   return (
     <tr
       onClick={onClick}
-      className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
+      className="border-b border-border cursor-pointer hover:bg-muted/50 transition-colors"
     >
       <td className="px-3 py-2.5">
         <Mono color="amber">{order.orderNumber}</Mono>
       </td>
-      <td className="px-3 py-2.5 text-zinc-600">{order.channel}</td>
-      <td className="px-3 py-2.5 text-zinc-600">{order.itemCount}</td>
+      <td className="px-3 py-2.5 text-muted-foreground">{order.channel}</td>
+      <td className="px-3 py-2.5 text-muted-foreground">{order.itemCount}</td>
       <td className="px-3 py-2.5">
         <Mono color="teal">£{order.total.toFixed(2)}</Mono>
       </td>
       <td className="px-3 py-2.5">
         <OrderStatusBadge status={order.status as OrderStatus} />
       </td>
-      <td className="px-3 py-2.5 text-zinc-500">{formattedDate}</td>
+      <td className="px-3 py-2.5 text-muted-foreground">{formattedDate}</td>
     </tr>
   );
 }
