@@ -219,6 +219,7 @@ export interface Order {
   qboSalesReceiptId: string | null;
   qboSyncStatus: QBOSyncStatus;
   externalOrderId: string | null;
+  orderDate: string;
   createdAt: string;
   shippedAt: string | null;
   deliveredAt: string | null;

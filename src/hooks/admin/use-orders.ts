@@ -46,6 +46,7 @@ function mapOrder(row: Record<string, unknown>): Order {
     qboSalesReceiptId: (row.qbo_sales_receipt_id as string) ?? null,
     qboSyncStatus: (row.qbo_sync_status as QBOSyncStatus) ?? 'pending',
     externalOrderId: (row.origin_reference as string) ?? null,
+    orderDate: (row.txn_date as string) ?? (row.created_at as string),
     createdAt: row.created_at as string,
     shippedAt: (row.shipped_date as string) ?? null,
     deliveredAt: (row.delivered_at as string) ?? null,
