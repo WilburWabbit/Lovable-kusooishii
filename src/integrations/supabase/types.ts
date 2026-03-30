@@ -1129,8 +1129,10 @@ export type Database = {
       }
       landing_raw_qbo_customer: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1139,8 +1141,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1149,8 +1153,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1162,8 +1168,10 @@ export type Database = {
       }
       landing_raw_qbo_item: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1172,8 +1180,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1182,8 +1192,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1195,8 +1207,10 @@ export type Database = {
       }
       landing_raw_qbo_purchase: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1205,8 +1219,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1215,8 +1231,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1228,8 +1246,10 @@ export type Database = {
       }
       landing_raw_qbo_refund_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1238,8 +1258,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1248,8 +1270,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1261,8 +1285,10 @@ export type Database = {
       }
       landing_raw_qbo_sales_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1271,8 +1297,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1281,8 +1309,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
