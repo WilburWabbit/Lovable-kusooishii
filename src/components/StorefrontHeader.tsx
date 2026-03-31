@@ -98,12 +98,12 @@ export function StorefrontHeader() {
 
         {/* Actions */}
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" onClick={() => setIsSearchOpen(!isSearchOpen)}>
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" onClick={() => setIsSearchOpen(!isSearchOpen)} aria-label="Search">
             <Search className="h-5 w-5" />
           </Button>
 
-          <Link to="/account?tab=wishlist">
-            <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
+          <Link to="/account?tab=wishlist" aria-label="Wishlist">
+            <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" aria-label="Wishlist">
               <Heart className="h-5 w-5" />
               {wishlistItems.length > 0 &&
               <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -113,8 +113,8 @@ export function StorefrontHeader() {
             </Button>
           </Link>
 
-          <Link to="/cart">
-            <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
+          <Link to="/cart" aria-label="Shopping cart">
+            <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" aria-label="Shopping cart">
               <ShoppingBag className="h-5 w-5" />
               {cartCount > 0 &&
               <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -127,7 +127,7 @@ export function StorefrontHeader() {
           {user ?
           <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" aria-label="Account menu">
                   <User className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
@@ -166,12 +166,12 @@ export function StorefrontHeader() {
               </DropdownMenuContent>
             </DropdownMenu> :
 
-          <Button variant="ghost" size="icon" asChild className="text-muted-foreground hover:text-foreground">
-              <Link to="/login"><User className="h-5 w-5" /></Link>
+          <Button variant="ghost" size="icon" asChild className="text-muted-foreground hover:text-foreground" aria-label="Sign in">
+              <Link to="/login" aria-label="Sign in"><User className="h-5 w-5" /></Link>
             </Button>
           }
 
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground lg:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground lg:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)} aria-label={isMenuOpen ? "Close menu" : "Open menu"}>
             {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
