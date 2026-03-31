@@ -8,8 +8,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { trackLogin, stashAuthAction } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function LoginPage() {
+  usePageSeo({ title: 'Sign In', description: 'Sign in to your Kuso Oishii account.', path: '/login', noIndex: true });
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/account";

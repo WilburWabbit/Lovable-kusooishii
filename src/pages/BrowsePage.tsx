@@ -15,6 +15,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
 import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -212,6 +213,19 @@ export default function BrowsePage() {
       </StorefrontLayout>
     );
   }
+
+  const seoTitle = isNewMode ? "Just Landed — New LEGO® Arrivals" : isDealsMode ? "LEGO® Deals — Retired Sets & Collectibles" : "Browse LEGO® Sets";
+  const seoDescription = isNewMode
+    ? "The latest LEGO® sets to land at Kuso Oishii. Condition graded, priced, and ready to ship."
+    : isDealsMode
+    ? "Retired LEGO® sets and collectible minifigs at fair prices. Every set condition graded by hand."
+    : "Browse our full range of handpicked, condition-graded LEGO® sets. Filter by theme, condition, year, and more.";
+
+  usePageSeo({
+    title: seoTitle,
+    description: seoDescription,
+    path: '/browse',
+  });
 
   const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Stock";
   const pageSubtitle = isNewMode

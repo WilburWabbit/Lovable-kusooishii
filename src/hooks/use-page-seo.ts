@@ -8,6 +8,9 @@ interface PageSeoOptions {
   description: string;
   path: string;
   noIndex?: boolean;
+  ogImage?: string;
+  ogType?: string;
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 }
 
 function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
@@ -24,7 +27,7 @@ function upsertLink(rel: string, href: string) {
   return el;
 }
 
-export function usePageSeo({ title, description, path, noIndex }: PageSeoOptions) {
+export function usePageSeo({ title, description, path, noIndex, ogImage, ogType, jsonLd }: PageSeoOptions) {
   useEffect(() => {
     const prevTitle = document.title;
     const fullTitle = `${title} | ${SITE_NAME}`;
@@ -37,21 +40,38 @@ export function usePageSeo({ title, description, path, noIndex }: PageSeoOptions
       upsertMeta('property', 'og:title', fullTitle),
       upsertMeta('property', 'og:description', description),
       upsertMeta('property', 'og:url', canonicalUrl),
-      upsertMeta('property', 'og:type', 'website'),
+      upsertMeta('property', 'og:type', ogType ?? 'website'),
       upsertMeta('property', 'og:site_name', SITE_NAME),
-      upsertMeta('name', 'twitter:card', 'summary'),
+      upsertMeta('property', 'og:locale', 'en_GB'),
+      upsertMeta('name', 'twitter:card', 'summary_large_image'),
       upsertMeta('name', 'twitter:title', fullTitle),
       upsertMeta('name', 'twitter:description', description),
     ];
+
+    if (ogImage) {
+      metas.push(upsertMeta('property', 'og:image', ogImage));
+      metas.push(upsertMeta('name', 'twitter:image', ogImage));
+    }
 
     if (noIndex) metas.push(upsertMeta('name', 'robots', 'noindex, nofollow'));
 
     const canonical = upsertLink('canonical', canonicalUrl);
 
+    // JSON-LD structured data
+    let jsonLdScript: HTMLScriptElement | null = null;
+    if (jsonLd) {
+      jsonLdScript = document.createElement('script');
+      jsonLdScript.type = 'application/ld+json';
+      const schemas = Array.isArray(jsonLd) ? jsonLd : [jsonLd];
+      jsonLdScript.textContent = JSON.stringify(schemas.length === 1 ? schemas[0] : schemas);
+      document.head.appendChild(jsonLdScript);
+    }
+
     return () => {
       document.title = prevTitle;
       metas.forEach(el => { try { document.head.removeChild(el); } catch {} });
       try { document.head.removeChild(canonical); } catch {}
+      if (jsonLdScript) { try { document.head.removeChild(jsonLdScript); } catch {} }
     };
-  }, [title, description, path, noIndex]);
+  }, [title, description, path, noIndex, ogImage, ogType, jsonLd]);
 }

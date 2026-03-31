@@ -8,8 +8,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { trackSignUp, stashAuthAction } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function SignupPage() {
+  usePageSeo({ title: 'Create Account', description: 'Create a Kuso Oishii account.', path: '/signup', noIndex: true });
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState(searchParams.get("email") ?? "");

@@ -10,8 +10,10 @@ import WishlistTab from "@/components/WishlistTab";
 import ProfileTab from "@/components/account/ProfileTab";
 import AddressesTab from "@/components/account/AddressesTab";
 import OrdersTab from "@/components/account/OrdersTab";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function AccountPage() {
+  usePageSeo({ title: 'My Account', description: 'Manage your Kuso Oishii account.', path: '/account', noIndex: true });
   const { user, profile, loading, signOut, isStaffOrAdmin, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
