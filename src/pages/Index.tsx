@@ -7,8 +7,15 @@ import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function HomePage() {
+  usePageSeo({
+    title: 'Handpicked LEGO® Sets, Condition Graded & Ready to Ship',
+    description: 'Kuso Oishii — handpicked LEGO® sets with obsessive condition grading. Every set inspected by hand. Rescued stock at fair prices with free UK shipping.',
+    path: '/',
+    ogType: 'website',
+  });
   const { data: featuredSets, isLoading } = useQuery({
     queryKey: ["featured_sets"],
     queryFn: async () => {

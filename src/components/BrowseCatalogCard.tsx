@@ -39,6 +39,9 @@ export function BrowseCatalogCard({ item, className }: BrowseCatalogCardProps) {
           <img
             src={item.img_url}
             alt={item.name}
+            width={400}
+            height={400}
+            loading="lazy"
             className="h-full w-full object-contain p-4"
           />
         ) : (
