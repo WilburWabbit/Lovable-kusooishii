@@ -1,30 +1,27 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-01
 // ============================================================
 // eBay Import Payouts
-// Fetches payouts from eBay Finances API, extracts fee breakdowns,
-// creates payout records, and triggers reconciliation.
+// Fetches payouts from eBay Finances API, stores individual
+// transactions, matches to orders, and triggers reconciliation.
+// Now with digital signatures, full transaction storage, and
+// proper fee breakdown by category.
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import {
+  EbayFinancesClient,
+  EbayTransaction,
+  aggregateFees,
+  buildLegacyFeeBreakdown,
+  extractFeeDetails,
+} from "../_shared/ebay-finances.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
-
-const EBAY_API = "https://api.ebay.com";
-
-// Fee type mapping from eBay to our standard breakdown
-const FEE_TYPE_MAP: Record<string, keyof typeof DEFAULT_FEE_BREAKDOWN> = {
-  FINAL_VALUE_FEE: "fvf",
-  FINAL_VALUE_FEE_FIXED_PER_ORDER: "fvf",
-  AD_FEE: "promoted_listings",
-  PROMOTED_LISTING_FEE: "promoted_listings",
-  INTERNATIONAL_FEE: "international",
-};
-
-const DEFAULT_FEE_BREAKDOWN = { fvf: 0, promoted_listings: 0, international: 0, processing: 0 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -39,7 +36,6 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
     const token = authHeader.replace("Bearer ", "");
 
-    // Allow service role or authenticated user
     if (token !== serviceRoleKey) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);
       if (userError || !user) throw new Error("Unauthorized");
@@ -50,45 +46,28 @@ Deno.serve(async (req) => {
     const dateTo = (body as Record<string, unknown>).dateTo as string | undefined;
 
     // Get eBay access token
-    const { data: ebayAuth } = await admin
-      .from("ebay_auth_tokens" as never)
-      .select("access_token, expires_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const accessToken = await getEbayAccessToken(admin);
+    const client = new EbayFinancesClient(accessToken);
 
-    if (!ebayAuth) throw new Error("No eBay auth token found. Connect eBay first.");
-
-    const accessToken = (ebayAuth as Record<string, unknown>).access_token as string;
-
-    // Build date filter
+    // Determine date range
     const now = new Date();
-    const fromDate = dateFrom ?? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const toDate = dateTo ?? now.toISOString();
+    const startDate = dateFrom ?? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = dateTo ?? now.toISOString();
 
-    // Fetch payouts from eBay Finances API
-    const payoutsUrl = `${EBAY_API}/sell/finances/v1/payout?filter=payoutDate:[${fromDate}..${toDate}]&limit=50&sort=payoutDate`;
-
-    const payoutsRes = await fetch(payoutsUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
+    // Fetch payouts from eBay
+    const payoutsResponse = await client.getPayouts({
+      startDate,
+      endDate,
+      status: "SUCCEEDED",
+      limit: 200,
     });
 
-    if (!payoutsRes.ok) {
-      const errorText = await payoutsRes.text();
-      throw new Error(`eBay Finances API error [${payoutsRes.status}]: ${errorText}`);
-    }
-
-    const payoutsData = await payoutsRes.json();
-    const ebayPayouts = (payoutsData.payouts ?? []) as Record<string, unknown>[];
-
+    const ebayPayouts = payoutsResponse.payouts ?? [];
     let imported = 0;
     let skipped = 0;
 
     for (const ep of ebayPayouts) {
-      const externalId = ep.payoutId as string;
+      const externalId = ep.payoutId;
       if (!externalId) continue;
 
       // Check for duplicate
@@ -103,68 +82,28 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Extract amounts (eBay returns amounts as { value, currency })
-      const payoutAmount = ep.amount as Record<string, unknown> | null;
-      const netAmount = parseFloat((payoutAmount?.value as string) ?? "0");
-      const payoutDate = (ep.payoutDate as string)?.slice(0, 10) ?? now.toISOString().slice(0, 10);
+      // Fetch ALL transactions for this payout (with pagination)
+      const transactions = await client.getAllPayoutTransactions(externalId);
 
-      // Fetch transactions for this payout to get fee breakdown
-      const feeBreakdown = { ...DEFAULT_FEE_BREAKDOWN };
-      let grossAmount = netAmount;
-      let totalFees = 0;
+      // Aggregate fees by QBO account purpose
+      const feesByPurpose = aggregateFees(transactions);
+      const legacyFees = buildLegacyFeeBreakdown(feesByPurpose);
+      const totalFees = Object.values(feesByPurpose).reduce((s, v) => s + v, 0);
+      const totalFeesRounded = Math.round(totalFees * 100) / 100;
+
+      // Calculate gross from transactions
+      const netAmount = parseFloat(ep.amount.value);
+      const grossAmount = Math.round((netAmount + totalFeesRounded) * 100) / 100;
+
+      // Collect order references for matching
       const orderRefs: string[] = [];
-
-      try {
-        const txnUrl = `${EBAY_API}/sell/finances/v1/transaction?filter=payoutId:{${externalId}}&limit=100`;
-        const txnRes = await fetch(txnUrl, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/json",
-          },
-        });
-
-        if (txnRes.ok) {
-          const txnData = await txnRes.json();
-          const transactions = (txnData.transactions ?? []) as Record<string, unknown>[];
-
-          for (const txn of transactions) {
-            // Collect order references
-            const orderId = txn.orderId as string;
-            if (orderId && !orderRefs.includes(orderId)) {
-              orderRefs.push(orderId);
-            }
-
-            // Aggregate fees by type
-            const orderLineItems = (txn.orderLineItems ?? []) as Record<string, unknown>[];
-            for (const oli of orderLineItems) {
-              const fees = (oli.feeBasisAmount ?? oli.fees) as Record<string, unknown>[] | undefined;
-              if (!fees) continue;
-
-              for (const fee of (Array.isArray(fees) ? fees : [])) {
-                const feeType = fee.feeType as string;
-                const feeAmount = parseFloat(((fee.amount as Record<string, unknown>)?.value as string) ?? "0");
-                const mappedKey = FEE_TYPE_MAP[feeType] ?? "processing";
-                feeBreakdown[mappedKey] += Math.abs(feeAmount);
-                totalFees += Math.abs(feeAmount);
-              }
-            }
-          }
-
-          grossAmount = netAmount + totalFees;
+      for (const txn of transactions) {
+        if (txn.orderId && !orderRefs.includes(txn.orderId)) {
+          orderRefs.push(txn.orderId);
         }
-      } catch (txnErr) {
-        console.warn(`Failed to fetch transactions for payout ${externalId}:`, txnErr);
       }
 
-      // Round fee values
-      feeBreakdown.fvf = Math.round(feeBreakdown.fvf * 100) / 100;
-      feeBreakdown.promoted_listings = Math.round(feeBreakdown.promoted_listings * 100) / 100;
-      feeBreakdown.international = Math.round(feeBreakdown.international * 100) / 100;
-      feeBreakdown.processing = Math.round(feeBreakdown.processing * 100) / 100;
-      totalFees = Math.round(totalFees * 100) / 100;
-      grossAmount = Math.round(grossAmount * 100) / 100;
-
-      // Land raw payload
+      // Land raw payload for audit
       await admin
         .from("landing_raw_ebay_payout")
         .upsert({
@@ -180,15 +119,17 @@ Deno.serve(async (req) => {
         .from("payouts")
         .insert({
           channel: "ebay",
-          payout_date: payoutDate,
+          payout_date: ep.payoutDate?.slice(0, 10) ?? now.toISOString().slice(0, 10),
           gross_amount: grossAmount,
-          total_fees: totalFees,
+          total_fees: totalFeesRounded,
           net_amount: Math.round(netAmount * 100) / 100,
-          fee_breakdown: feeBreakdown,
+          fee_breakdown: legacyFees,
           order_count: orderRefs.length,
           unit_count: 0,
           qbo_sync_status: "pending",
           external_payout_id: externalId,
+          bank_reference: ep.bankReference ?? null,
+          transaction_count: transactions.length,
         })
         .select()
         .single();
@@ -198,28 +139,90 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Link eBay orders to payout
       const localPayoutId = (payoutRecord as Record<string, unknown>)?.id as string;
-      if (localPayoutId && orderRefs.length > 0) {
-        // Match eBay order IDs to local orders
+
+      // Match orders and store transactions
+      let matchedCount = 0;
+      let unmatchedCount = 0;
+
+      // Bulk-fetch matching orders
+      const orderMap = new Map<string, { id: string; qbo_sales_receipt_id: string | null }>();
+      if (orderRefs.length > 0) {
         const { data: matchedOrders } = await admin
           .from("sales_order")
-          .select("id")
+          .select("id, external_order_id, qbo_sales_receipt_id")
           .in("external_order_id", orderRefs);
 
-        if (matchedOrders && (matchedOrders as unknown[]).length > 0) {
-          const links = (matchedOrders as { id: string }[]).map((o) => ({
-            payout_id: localPayoutId,
-            sales_order_id: o.id,
-          }));
-
-          await admin
-            .from("payout_orders")
-            .upsert(links as never, { onConflict: "payout_id,sales_order_id" as never });
+        for (const o of (matchedOrders ?? []) as Record<string, unknown>[]) {
+          orderMap.set(o.external_order_id as string, {
+            id: o.id as string,
+            qbo_sales_receipt_id: (o.qbo_sales_receipt_id as string) ?? null,
+          });
         }
       }
 
-      // Trigger reconciliation
+      // Insert individual transactions
+      const txnRecords = transactions.map((txn: EbayTransaction) => {
+        const matchedOrder = txn.orderId ? orderMap.get(txn.orderId) : undefined;
+        const isMatched = !!matchedOrder;
+        if (isMatched) matchedCount++;
+        else if (txn.transactionType === "SALE") unmatchedCount++;
+
+        return {
+          payout_id: externalId,
+          transaction_id: txn.transactionId,
+          transaction_type: txn.transactionType,
+          transaction_status: txn.transactionStatus,
+          transaction_date: txn.transactionDate,
+          order_id: txn.orderId ?? null,
+          buyer_username: txn.buyer?.username ?? null,
+          gross_amount: parseFloat(txn.totalFeeBasisAmount?.value ?? txn.amount?.value ?? "0"),
+          total_fees: Math.abs(parseFloat(txn.totalFeeAmount?.value ?? "0")),
+          net_amount: parseFloat(txn.netAmount?.value ?? txn.amount?.value ?? "0"),
+          currency: txn.amount?.currency ?? "GBP",
+          fee_details: extractFeeDetails(txn),
+          memo: txn.transactionMemo ?? null,
+          matched_order_id: matchedOrder?.id ?? null,
+          matched: isMatched,
+          match_method: isMatched ? "auto_ebay_order_id" : null,
+          qbo_sales_receipt_id: matchedOrder?.qbo_sales_receipt_id ?? null,
+        };
+      });
+
+      if (txnRecords.length > 0) {
+        const { error: txnErr } = await admin
+          .from("ebay_payout_transactions" as never)
+          .upsert(txnRecords as never, {
+            onConflict: "transaction_id,transaction_type" as never,
+          });
+
+        if (txnErr) {
+          console.error(`Failed to insert transactions for payout ${externalId}:`, txnErr);
+        }
+      }
+
+      // Update payout with match counts
+      await admin
+        .from("payouts")
+        .update({
+          matched_order_count: matchedCount,
+          unmatched_transaction_count: unmatchedCount,
+        } as never)
+        .eq("id", localPayoutId);
+
+      // Link matched orders via payout_orders
+      if (localPayoutId && orderMap.size > 0) {
+        const links = Array.from(orderMap.values()).map((o) => ({
+          payout_id: localPayoutId,
+          sales_order_id: o.id,
+        }));
+
+        await admin
+          .from("payout_orders")
+          .upsert(links as never, { onConflict: "payout_id,sales_order_id" as never });
+      }
+
+      // Trigger reconciliation (fire-and-forget)
       if (localPayoutId) {
         fetch(`${supabaseUrl}/functions/v1/v2-reconcile-payout`, {
           method: "POST",
@@ -240,7 +243,7 @@ Deno.serve(async (req) => {
       imported++;
     }
 
-    console.log(`eBay payout import: ${imported} imported, ${skipped} skipped (duplicates)`);
+    console.log(`eBay payout import: ${imported} imported, ${skipped} skipped`);
 
     return new Response(
       JSON.stringify({
