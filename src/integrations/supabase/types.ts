@@ -761,6 +761,72 @@ export type Database = {
         }
         Relationships: []
       }
+      ebay_payout_transactions: {
+        Row: {
+          buyer_username: string | null
+          created_at: string | null
+          currency: string
+          fee_details: Json
+          gross_amount: number
+          id: string
+          match_method: string | null
+          matched: boolean
+          matched_order_id: string | null
+          memo: string | null
+          net_amount: number
+          order_id: string | null
+          payout_id: string
+          qbo_sales_receipt_id: string | null
+          total_fees: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Insert: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          fee_details?: Json
+          gross_amount: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount: number
+          order_id?: string | null
+          payout_id: string
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Update: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          fee_details?: Json
+          gross_amount?: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount?: number
+          order_id?: string | null
+          payout_id?: string
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date?: string
+          transaction_id?: string
+          transaction_status?: string
+          transaction_type?: string
+        }
+        Relationships: []
+      }
       email_send_log: {
         Row: {
           created_at: string
@@ -1650,60 +1716,78 @@ export type Database = {
       }
       payouts: {
         Row: {
+          bank_reference: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at: string
           external_payout_id: string | null
           fee_breakdown: Json | null
           gross_amount: number
           id: string
+          matched_order_count: number | null
           net_amount: number
           notes: string | null
           order_count: number
           payout_date: string
           qbo_deposit_id: string | null
           qbo_expense_id: string | null
+          qbo_sync_error: string | null
           qbo_sync_status: string | null
           reconciliation_status: string | null
+          sync_attempted_at: string | null
           total_fees: number
+          transaction_count: number | null
           unit_count: number
+          unmatched_transaction_count: number | null
           updated_at: string | null
         }
         Insert: {
+          bank_reference?: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount: number
           id?: string
+          matched_order_count?: number | null
           net_amount: number
           notes?: string | null
           order_count?: number
           payout_date: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Update: {
+          bank_reference?: string | null
           channel?: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount?: number
           id?: string
+          matched_order_count?: number | null
           net_amount?: number
           notes?: string | null
           order_count?: number
           payout_date?: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Relationships: []
@@ -2135,6 +2219,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      qbo_account_mapping: {
+        Row: {
+          account_type: string
+          created_at: string | null
+          id: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          account_type: string
+          created_at?: string | null
+          id?: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          account_type?: string
+          created_at?: string | null
+          id?: string
+          purpose?: string
+          qbo_account_id?: string
+          qbo_account_name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       qbo_connection: {
         Row: {
