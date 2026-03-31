@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { AdminV2Sidebar } from "./AdminV2Sidebar";
+import { AiAssistant } from "./AiAssistant";
 import { useBatchUnitSummaries } from "@/hooks/admin/use-purchase-batches";
 import { useOrders } from "@/hooks/admin/use-orders";
 
@@ -32,6 +33,7 @@ export function AdminV2Layout({ children }: AdminV2LayoutProps) {
       <main className="flex-1 overflow-auto bg-stone-100 px-8 py-6 text-zinc-900">
         {children}
       </main>
+      <AiAssistant />
     </div>
   );
 }
