@@ -1,50 +1,63 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
-import Index from "./pages/Index";
-import BrowsePage from "./pages/BrowsePage";
-import ProductDetailPage from "./pages/ProductDetailPage";
-import LoginPage from "./pages/LoginPage";
-import SignupPage from "./pages/SignupPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import AccountPage from "./pages/AccountPage";
-import CartPage from "./pages/CartPage";
-import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
-import AboutPage from "./pages/AboutPage";
-import FAQPage from "./pages/FAQPage";
-import GradingPage from "./pages/GradingPage";
-import ContactPage from "./pages/ContactPage";
-import ShippingPolicyPage from "./pages/ShippingPolicyPage";
-import ReturnsPage from "./pages/ReturnsPage";
-import OrderTrackingPage from "./pages/OrderTrackingPage";
-import TermsPage from "./pages/TermsPage";
-import PrivacyPage from "./pages/PrivacyPage";
-import BlueBellClubPage from "./pages/BlueBellClubPage";
-import UnsubscribePage from "./pages/UnsubscribePage";
-import QboCallbackPage from "./pages/admin/QboCallbackPage";
-import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
-import GmcCallbackPage from "./pages/admin/GmcCallbackPage";
-import NotFound from "./pages/NotFound";
 import { RequireAdmin } from "./components/RequireAdmin";
 
-// Admin pages
-import PurchaseListPage from "./pages/admin-v2/PurchaseListPage";
-import NewPurchaseFormPage from "./pages/admin-v2/NewPurchaseFormPage";
-import BatchDetailPage from "./pages/admin-v2/BatchDetailPage";
-import ProductListPage from "./pages/admin-v2/ProductListPage";
-import ProductDetailAdminPage from "./pages/admin-v2/ProductDetailPage";
-import OrderListPage from "./pages/admin-v2/OrderListPage";
-import OrderDetailPage from "./pages/admin-v2/OrderDetailPage";
-import PayoutListPage from "./pages/admin-v2/PayoutListPage";
-import CustomerListPage from "./pages/admin-v2/CustomerListPage";
-import CustomerDetailPage from "./pages/admin-v2/CustomerDetailPage";
-import AdminSettingsPage from "./pages/admin-v2/SettingsPage";
-import DataSyncPage from "./pages/admin-v2/DataSyncPage";
-import IntakePage from "./pages/admin-v2/IntakePage";
+// Eagerly load homepage (LCP-critical)
+import Index from "./pages/Index";
+
+// Lazy-load storefront pages
+const BrowsePage = lazy(() => import("./pages/BrowsePage"));
+const ProductDetailPage = lazy(() => import("./pages/ProductDetailPage"));
+const CartPage = lazy(() => import("./pages/CartPage"));
+const CheckoutSuccessPage = lazy(() => import("./pages/CheckoutSuccessPage"));
+
+// Lazy-load content pages
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const FAQPage = lazy(() => import("./pages/FAQPage"));
+const GradingPage = lazy(() => import("./pages/GradingPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
+const ShippingPolicyPage = lazy(() => import("./pages/ShippingPolicyPage"));
+const ReturnsPage = lazy(() => import("./pages/ReturnsPage"));
+const OrderTrackingPage = lazy(() => import("./pages/OrderTrackingPage"));
+const TermsPage = lazy(() => import("./pages/TermsPage"));
+const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
+const BlueBellClubPage = lazy(() => import("./pages/BlueBellClubPage"));
+const UnsubscribePage = lazy(() => import("./pages/UnsubscribePage"));
+
+// Lazy-load auth pages
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const SignupPage = lazy(() => import("./pages/SignupPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
+
+// Lazy-load member pages
+const AccountPage = lazy(() => import("./pages/AccountPage"));
+
+// Lazy-load admin pages
+const PurchaseListPage = lazy(() => import("./pages/admin-v2/PurchaseListPage"));
+const NewPurchaseFormPage = lazy(() => import("./pages/admin-v2/NewPurchaseFormPage"));
+const BatchDetailPage = lazy(() => import("./pages/admin-v2/BatchDetailPage"));
+const ProductListPage = lazy(() => import("./pages/admin-v2/ProductListPage"));
+const ProductDetailAdminPage = lazy(() => import("./pages/admin-v2/ProductDetailPage"));
+const OrderListPage = lazy(() => import("./pages/admin-v2/OrderListPage"));
+const OrderDetailPage = lazy(() => import("./pages/admin-v2/OrderDetailPage"));
+const PayoutListPage = lazy(() => import("./pages/admin-v2/PayoutListPage"));
+const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"));
+const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
+const AdminSettingsPage = lazy(() => import("./pages/admin-v2/SettingsPage"));
+const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
+const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
+const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
+const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
+const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
+
+// Lazy-load 404
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
 
@@ -55,6 +68,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
           <Routes>
             {/* Storefront */}
             <Route path="/" element={<Index />} />
@@ -105,6 +119,7 @@ const App = () => (
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>
