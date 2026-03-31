@@ -955,8 +955,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Step 9: FIFO stock depletion ──
+    // ── Step 9: FIFO stock depletion (updates BOTH status columns) ──
     let unitsDepletedTotal = 0;
+    const now = new Date().toISOString();
     for (const pl of processedLines) {
       const { data: availableUnits } = await admin
         .from("stock_unit")
@@ -970,7 +971,13 @@ Deno.serve(async (req) => {
         const unitIds = availableUnits.map((u: any) => u.id);
         const { error: depleteErr } = await admin
           .from("stock_unit")
-          .update({ status: "closed", updated_at: new Date().toISOString() })
+          .update({
+            status: "closed",
+            v2_status: "sold",
+            sold_at: now,
+            order_id: newOrder.id,
+            updated_at: now,
+          })
           .in("id", unitIds);
 
         if (depleteErr) {
