@@ -8,6 +8,11 @@ import {
   useImportEbayPayouts,
 } from "@/hooks/admin/use-payouts";
 import {
+  usePayoutTransactions,
+  useUnmatchedTransactions,
+  useSkipTransaction,
+} from "@/hooks/admin/use-payout-transactions";
+import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -24,10 +29,10 @@ import { sortRows, filterRows } from "@/lib/table-utils";
 import type { ColumnDef } from "@/lib/table-utils";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
-import type { Payout } from "@/lib/types/admin";
+import type { Payout, PayoutTransaction } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
-import { Download, Search } from "lucide-react";
+import { Download, Search, ChevronDown, ChevronRight } from "lucide-react";
 
 // ─── Row type & accessor ─────────────────────────────────────
 
@@ -113,6 +118,27 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     sortable: true,
     align: "right",
     render: (r) => <span className="text-zinc-600">{r.unitCount}</span>,
+  },
+  {
+    key: "matchedOrderCount",
+    label: "Matched",
+    defaultVisible: true,
+    sortable: true,
+    align: "right",
+    render: (r) => <span className="text-green-600">{r.matchedOrderCount}</span>,
+  },
+  {
+    key: "unmatchedTransactionCount",
+    label: "Unmatched",
+    defaultVisible: true,
+    sortable: true,
+    align: "right",
+    render: (r) =>
+      r.unmatchedTransactionCount > 0 ? (
+        <span className="text-red-500 font-medium">{r.unmatchedTransactionCount}</span>
+      ) : (
+        <span className="text-zinc-400">0</span>
+      ),
   },
   {
     key: "qboSyncStatus",
@@ -295,9 +321,9 @@ export function PayoutView() {
       </p>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-4 gap-3 mb-5">
         {summaryLoading ? (
-          <p className="text-zinc-500 text-sm col-span-3">Loading summary…</p>
+          <p className="text-zinc-500 text-sm col-span-4">Loading summary…</p>
         ) : summary ? (
           <>
             <SurfaceCard>
@@ -338,6 +364,7 @@ export function PayoutView() {
                 </button>
               )}
             </SurfaceCard>
+            <UnmatchedSummaryCard />
           </>
         ) : null}
       </div>
@@ -450,97 +477,29 @@ export function PayoutView() {
             </SheetTitle>
           </SheetHeader>
           {selectedPayout && (
-            <div className="flex-1 overflow-auto p-5 grid gap-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Channel</div>
-                  <div className="text-zinc-900 text-sm font-medium">{selectedPayout.channel}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Date</div>
-                  <div className="text-zinc-900 text-sm">
-                    {new Date(selectedPayout.payoutDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Gross</div>
-                  <Mono className="text-sm">£{selectedPayout.grossAmount.toFixed(2)}</Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Net</div>
-                  <Mono color="teal" className="text-sm">£{selectedPayout.netAmount.toFixed(2)}</Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
-                  <div className="text-zinc-900 text-sm">{selectedPayout.orderCount}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
-                  <div className="text-zinc-900 text-sm">{selectedPayout.unitCount}</div>
-                </div>
-              </div>
-
-              <div>
-                <SectionHead>Fee Breakdown</SectionHead>
-                <div className="grid gap-1.5">
-                  {[
-                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown.fvf },
-                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown.promoted_listings },
-                    { label: "International", amount: selectedPayout.feeBreakdown.international },
-                    { label: "Processing", amount: selectedPayout.feeBreakdown.processing },
-                  ].map((fee) => (
-                    <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
-                      <span className="text-zinc-600 text-xs">{fee.label}</span>
-                      <Mono color="red" className="text-xs">£{fee.amount.toFixed(2)}</Mono>
-                    </div>
-                  ))}
-                  <div className="flex justify-between py-1 font-semibold">
-                    <span className="text-zinc-700 text-xs">Total Fees</span>
-                    <Mono color="red" className="text-xs">£{selectedPayout.totalFees.toFixed(2)}</Mono>
-                  </div>
-                </div>
-              </div>
-
-              {selectedPayout.externalPayoutId && (
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External ID</div>
-                  <Mono color="dim" className="text-xs">{selectedPayout.externalPayoutId}</Mono>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex gap-2 pt-3 border-t border-zinc-200">
-                <button
-                  onClick={() => {
-                    reconcilePayout.mutate(selectedPayout.id, {
-                      onSuccess: () => toast.success("Payout reconciled"),
-                      onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation failed"),
-                    });
-                  }}
-                  disabled={reconcilePayout.isPending}
-                  className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2 font-bold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-amber-400 transition-colors"
-                >
-                  {reconcilePayout.isPending ? "Reconciling…" : "Reconcile Orders"}
-                </button>
-                {selectedPayout.qboSyncStatus !== "synced" && (
-                  <button
-                    onClick={() => {
-                      triggerQBOSync.mutate(selectedPayout.id, {
-                        onSuccess: () => toast.success("QBO sync triggered"),
-                        onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
-                      });
-                    }}
-                    disabled={triggerQBOSync.isPending}
-                    className="flex-1 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-700 transition-colors"
-                  >
-                    {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
-                  </button>
-                )}
-              </div>
-            </div>
+            <PayoutSlideOutContent
+              payout={selectedPayout}
+              onReconcile={() => {
+                reconcilePayout.mutate(selectedPayout.id, {
+                  onSuccess: () => toast.success("Payout reconciled"),
+                  onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation failed"),
+                });
+              }}
+              onSyncQBO={() => {
+                triggerQBOSync.mutate(selectedPayout.id, {
+                  onSuccess: () => toast.success("QBO sync triggered"),
+                  onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
+                });
+              }}
+              isReconciling={reconcilePayout.isPending}
+              isSyncing={triggerQBOSync.isPending}
+            />
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Unmatched Transactions Section */}
+      <UnmatchedTransactionsPanel />
 
       {/* Create Payout Dialog */}
       <CreatePayoutDialog
@@ -707,5 +666,343 @@ function CreatePayoutDialog({ open, onClose }: { open: boolean; onClose: () => v
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Transaction Type Badge ─────────────────────────────────
+
+const TXN_TYPE_COLORS: Record<string, string> = {
+  SALE: "#22C55E",
+  REFUND: "#EF4444",
+  SHIPPING_LABEL: "#3B82F6",
+  CREDIT: "#8B5CF6",
+  TRANSFER: "#F59E0B",
+  NON_SALE_CHARGE: "#6B7280",
+};
+
+function TxnTypeBadge({ type }: { type: string }) {
+  return <Badge label={type.replace(/_/g, " ")} color={TXN_TYPE_COLORS[type] ?? "#6B7280"} small />;
+}
+
+// ─── Unmatched Summary Card ────────────────────────────────
+
+function UnmatchedSummaryCard() {
+  const { data: unmatched = [] } = useUnmatchedTransactions();
+  const count = unmatched.length;
+
+  return (
+    <SurfaceCard>
+      <div className="text-xs text-zinc-500 mb-2">Unmatched</div>
+      <div className={`font-mono text-[22px] font-bold ${count > 0 ? "text-red-500" : "text-zinc-400"}`}>
+        {count}
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-2">
+        {count === 0 ? "All transactions matched" : `${count} transactions need review`}
+      </div>
+    </SurfaceCard>
+  );
+}
+
+// ─── Payout Slide-Out Content ──────────────────────────────
+
+function PayoutSlideOutContent({
+  payout,
+  onReconcile,
+  onSyncQBO,
+  isReconciling,
+  isSyncing,
+}: {
+  payout: Payout;
+  onReconcile: () => void;
+  onSyncQBO: () => void;
+  isReconciling: boolean;
+  isSyncing: boolean;
+}) {
+  const { data: transactions = [], isLoading: txnLoading } = usePayoutTransactions(
+    payout.externalPayoutId,
+  );
+
+  const formatDate = (iso: string | null) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  return (
+    <div className="flex-1 overflow-auto p-5 grid gap-4">
+      {/* Header info */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Channel</div>
+          <div className="text-zinc-900 text-sm font-medium">{payout.channel}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Date</div>
+          <div className="text-zinc-900 text-sm">{formatDate(payout.payoutDate)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Gross</div>
+          <Mono className="text-sm">£{payout.grossAmount.toFixed(2)}</Mono>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Net</div>
+          <Mono color="teal" className="text-sm">£{payout.netAmount.toFixed(2)}</Mono>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
+          <div className="text-zinc-900 text-sm">{payout.orderCount}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Transactions</div>
+          <div className="text-zinc-900 text-sm">{payout.transactionCount}</div>
+        </div>
+      </div>
+
+      {/* Bank reference & external ID */}
+      {(payout.bankReference || payout.externalPayoutId) && (
+        <div className="grid grid-cols-2 gap-3">
+          {payout.externalPayoutId && (
+            <div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Payout ID</div>
+              <Mono color="dim" className="text-xs">{payout.externalPayoutId}</Mono>
+            </div>
+          )}
+          {payout.bankReference && (
+            <div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Bank Ref</div>
+              <Mono color="dim" className="text-xs">{payout.bankReference}</Mono>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fee Breakdown */}
+      <div>
+        <SectionHead>Fee Breakdown</SectionHead>
+        <div className="grid gap-1.5">
+          {[
+            { label: "Final Value Fee", amount: payout.feeBreakdown.fvf },
+            { label: "Promoted Listings", amount: payout.feeBreakdown.promoted_listings },
+            { label: "International", amount: payout.feeBreakdown.international },
+            { label: "Processing / Other", amount: payout.feeBreakdown.processing },
+          ]
+            .filter((fee) => fee.amount > 0)
+            .map((fee) => (
+              <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
+                <span className="text-zinc-600 text-xs">{fee.label}</span>
+                <Mono color="red" className="text-xs">£{fee.amount.toFixed(2)}</Mono>
+              </div>
+            ))}
+          <div className="flex justify-between py-1 font-semibold">
+            <span className="text-zinc-700 text-xs">Total Fees</span>
+            <Mono color="red" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
+          </div>
+        </div>
+      </div>
+
+      {/* QBO Sync Status */}
+      <div>
+        <SectionHead>QBO Sync</SectionHead>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <span className="text-zinc-500">Status: </span>
+            <Badge
+              label={payout.qboSyncStatus === "synced" ? "Synced" : payout.qboSyncStatus === "error" ? "Error" : "Pending"}
+              color={payout.qboSyncStatus === "synced" ? "#22C55E" : payout.qboSyncStatus === "error" ? "#EF4444" : "#F59E0B"}
+              small
+            />
+          </div>
+          {payout.qboDepositId && (
+            <div>
+              <span className="text-zinc-500">Deposit: </span>
+              <Mono color="dim">{payout.qboDepositId}</Mono>
+            </div>
+          )}
+          {payout.qboExpenseId && (
+            <div>
+              <span className="text-zinc-500">Expense: </span>
+              <Mono color="dim">{payout.qboExpenseId}</Mono>
+            </div>
+          )}
+          {payout.syncAttemptedAt && (
+            <div>
+              <span className="text-zinc-500">Last attempt: </span>
+              <span className="text-zinc-600">{formatDate(payout.syncAttemptedAt)}</span>
+            </div>
+          )}
+        </div>
+        {payout.qboSyncError && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs">
+            {payout.qboSyncError}
+          </div>
+        )}
+      </div>
+
+      {/* Matching summary */}
+      <div className="flex gap-3 text-xs">
+        <span className="text-green-600">
+          {payout.matchedOrderCount} matched
+        </span>
+        {payout.unmatchedTransactionCount > 0 && (
+          <span className="text-red-500 font-medium">
+            {payout.unmatchedTransactionCount} unmatched
+          </span>
+        )}
+      </div>
+
+      {/* Transaction list */}
+      <div>
+        <SectionHead>Transactions</SectionHead>
+        {txnLoading ? (
+          <p className="text-zinc-500 text-xs">Loading transactions…</p>
+        ) : transactions.length === 0 ? (
+          <p className="text-zinc-400 text-xs">No transaction detail available.</p>
+        ) : (
+          <div className="grid gap-1">
+            {transactions.map((txn) => (
+              <div
+                key={txn.id}
+                className="flex items-center justify-between py-1.5 px-2 border border-zinc-200 rounded text-xs"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <TxnTypeBadge type={txn.transactionType} />
+                  <span className="text-zinc-600 truncate">
+                    {txn.orderId ?? txn.memo ?? txn.transactionId}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Mono color="teal">£{txn.netAmount.toFixed(2)}</Mono>
+                  {txn.matched ? (
+                    <span className="w-2 h-2 rounded-full bg-green-500" title="Matched" />
+                  ) : txn.transactionType === "SALE" ? (
+                    <span className="w-2 h-2 rounded-full bg-red-500" title="Unmatched" />
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-zinc-300" />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex gap-2 pt-3 border-t border-zinc-200">
+        <button
+          onClick={onReconcile}
+          disabled={isReconciling}
+          className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2 font-bold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-amber-400 transition-colors"
+        >
+          {isReconciling ? "Reconciling…" : "Reconcile Orders"}
+        </button>
+        {payout.qboSyncStatus !== "synced" && (
+          <button
+            onClick={onSyncQBO}
+            disabled={isSyncing}
+            className="flex-1 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-700 transition-colors"
+          >
+            {isSyncing ? "Syncing…" : "Sync to QBO"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Unmatched Transactions Panel ──────────────────────────
+
+function UnmatchedTransactionsPanel() {
+  const { data: unmatched = [], isLoading } = useUnmatchedTransactions();
+  const skipTransaction = useSkipTransaction();
+  const [expanded, setExpanded] = useState(false);
+
+  if (isLoading || unmatched.length === 0) return null;
+
+  return (
+    <div className="mt-5">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 mb-2 cursor-pointer bg-transparent border-none p-0"
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-zinc-500" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-zinc-500" />
+        )}
+        <SectionHead>
+          Unmatched Transactions ({unmatched.length})
+        </SectionHead>
+      </button>
+      {expanded && (
+        <SurfaceCard noPadding className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-zinc-200">
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  eBay Order
+                </th>
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  Type
+                </th>
+                <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  Amount
+                </th>
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  Date
+                </th>
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  Payout
+                </th>
+                <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {unmatched.map((txn) => (
+                <tr key={txn.id} className="border-b border-zinc-200">
+                  <td className="px-3 py-2">
+                    <Mono color="dim">{txn.orderId ?? "—"}</Mono>
+                  </td>
+                  <td className="px-3 py-2">
+                    <TxnTypeBadge type={txn.transactionType} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Mono color="teal">£{txn.grossAmount.toFixed(2)}</Mono>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-600">
+                    {new Date(txn.transactionDate).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Mono color="dim" className="text-xs">{txn.payoutId}</Mono>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => {
+                        skipTransaction.mutate(txn.id, {
+                          onSuccess: () => toast.success("Transaction skipped"),
+                          onError: (err) =>
+                            toast.error(err instanceof Error ? err.message : "Skip failed"),
+                        });
+                      }}
+                      disabled={skipTransaction.isPending}
+                      className="text-zinc-400 hover:text-zinc-700 text-[11px] cursor-pointer bg-transparent border-none transition-colors"
+                    >
+                      Skip
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </SurfaceCard>
+      )}
+    </div>
   );
 }
