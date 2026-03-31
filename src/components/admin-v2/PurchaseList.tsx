@@ -25,7 +25,7 @@ export function PurchaseList() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h1 className="text-[22px] font-bold text-zinc-900">Purchases</h1>
         <div className="flex gap-2">
           <button

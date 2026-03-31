@@ -86,7 +86,7 @@ export function AiAssistant() {
       {/* Floating trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500 text-zinc-900 shadow-lg transition-colors hover:bg-amber-400"
+        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500 text-zinc-900 shadow-lg transition-colors hover:bg-amber-400"
         aria-label="Open AI Assistant"
       >
         <MessageSquare className="h-5 w-5" />

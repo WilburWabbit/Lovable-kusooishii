@@ -9,6 +9,7 @@ import type { ProductStockCounts } from "@/hooks/admin/use-products";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
+import { MobileCard } from "./MobileCard";
 import { Download, Search } from "lucide-react";
 
 // ─── Flattened row type ──────────────────────────────────────
@@ -290,107 +291,136 @@ export function ProductList() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-1">
         <h1 className="text-[22px] font-bold text-zinc-900">Products</h1>
-        <div className="flex items-center gap-2">
-          {/* Global search */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
               placeholder="Search MPN or name…"
-              className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+              className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-full sm:w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>
-          {/* Column selector */}
-          <ColumnSelector
-            allColumns={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
-            visibleColumns={prefs.visibleColumns}
-            onToggleColumn={toggleColumn}
-            onMoveColumn={moveColumn}
-          />
-          {/* CSV export */}
-          <button
-            onClick={() => downloadCsv(processedRows, prefs.visibleColumns)}
-            className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">CSV</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <ColumnSelector
+              allColumns={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
+              visibleColumns={prefs.visibleColumns}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+            />
+            <button
+              onClick={() => downloadCsv(processedRows, prefs.visibleColumns)}
+              className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">CSV</span>
+            </button>
+          </div>
         </div>
       </div>
       <p className="text-zinc-500 text-[13px] mb-5">
         {processedRows.length} of {products.length} products
       </p>
 
-      <SurfaceCard noPadding className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <thead>
-            {/* Sort headers */}
-            <tr className="border-b border-zinc-200">
-              {visibleCols.map((col) => (
-                <SortableTableHead
-                  key={col.key}
-                  columnKey={col.key}
-                  label={col.label}
-                  sortKey={prefs.sort.key}
-                  sortDir={prefs.sort.dir}
-                  onToggleSort={toggleSort}
-                  sortable={col.sortable}
-                  align={col.align}
-                  className="px-3 py-2.5 text-[10px] uppercase tracking-wider font-medium"
-                />
+      {/* Mobile card list */}
+      <div className="md:hidden">
+        <SurfaceCard noPadding>
+          {processedRows.length === 0 ? (
+            <p className="p-4 text-center text-zinc-500 text-sm">No products match your filters.</p>
+          ) : (
+            <div className="divide-y divide-zinc-200">
+              {processedRows.map((row) => (
+                <MobileCard key={row.mpn} to={`/admin/products/${row.mpn}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex gap-1">
+                      {row.variants.length > 0
+                        ? row.variants.map((v) => <GradeBadge key={v.sku} grade={v.grade} />)
+                        : <Badge label="Ungraded" color="#F59E0B" small />}
+                    </div>
+                    <span className="text-xs text-zinc-500">{row.unsold} unsold</span>
+                  </div>
+                  <div className="text-sm font-medium text-zinc-900">{row.name}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    <span className="font-mono text-amber-600">{row.mpn}</span>
+                    {row.theme && <span> · {row.theme}</span>}
+                  </div>
+                </MobileCard>
               ))}
-            </tr>
-            {/* Filter row */}
-            <tr className="border-b border-zinc-200 bg-zinc-50">
-              {visibleCols.map((col) => (
-                <th key={col.key} className="px-3 py-1">
-                  {col.sortable !== false ? (
-                    <input
-                      value={prefs.filters[col.key] ?? ""}
-                      onChange={(e) => setFilter(col.key, e.target.value)}
-                      placeholder="Filter…"
-                      className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  ) : (
-                    <span />
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {processedRows.map((row) => (
-              <tr
-                key={row.mpn}
-                onClick={() => navigate(`/admin/products/${row.mpn}`)}
-                className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
-              >
+            </div>
+          )}
+        </SurfaceCard>
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <SurfaceCard noPadding className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-zinc-200">
                 {visibleCols.map((col) => (
-                  <td
+                  <SortableTableHead
                     key={col.key}
-                    className={`px-3 py-2.5 ${col.align === "right" ? "text-right" : ""}`}
-                  >
-                    {col.render(row)}
-                  </td>
+                    columnKey={col.key}
+                    label={col.label}
+                    sortKey={prefs.sort.key}
+                    sortDir={prefs.sort.dir}
+                    onToggleSort={toggleSort}
+                    sortable={col.sortable}
+                    align={col.align}
+                    className="px-3 py-2.5 text-[10px] uppercase tracking-wider font-medium"
+                  />
                 ))}
               </tr>
-            ))}
-            {processedRows.length === 0 && (
-              <tr>
-                <td
-                  colSpan={visibleCols.length}
-                  className="px-3 py-8 text-center text-zinc-500 text-sm"
-                >
-                  No products match your filters.
-                </td>
+              <tr className="border-b border-zinc-200 bg-zinc-50">
+                {visibleCols.map((col) => (
+                  <th key={col.key} className="px-3 py-1">
+                    {col.sortable !== false ? (
+                      <input
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(e) => setFilter(col.key, e.target.value)}
+                        placeholder="Filter…"
+                        className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    ) : (
+                      <span />
+                    )}
+                  </th>
+                ))}
               </tr>
-            )}
-          </tbody>
-        </table>
-      </SurfaceCard>
+            </thead>
+            <tbody>
+              {processedRows.map((row) => (
+                <tr
+                  key={row.mpn}
+                  onClick={() => navigate(`/admin/products/${row.mpn}`)}
+                  className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
+                >
+                  {visibleCols.map((col) => (
+                    <td
+                      key={col.key}
+                      className={`px-3 py-2.5 ${col.align === "right" ? "text-right" : ""}`}
+                    >
+                      {col.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {processedRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={visibleCols.length}
+                    className="px-3 py-8 text-center text-zinc-500 text-sm"
+                  >
+                    No products match your filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </SurfaceCard>
+      </div>
     </div>
   );
 }
