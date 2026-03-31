@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ShoppingCart,
   Package,
@@ -9,9 +9,11 @@ import {
   BarChart3,
   Settings,
   ArrowUpDown,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
+import { useIsMobileLg } from "@/hooks/admin/useIsMobile";
 
 interface SidebarItemProps {
   icon: React.ElementType;
@@ -19,14 +21,16 @@ interface SidebarItemProps {
   to: string;
   active: boolean;
   count?: number;
+  onClick?: () => void;
 }
 
-function SidebarItem({ icon: Icon, label, to, active, count }: SidebarItemProps) {
+function SidebarItem({ icon: Icon, label, to, active, count, onClick }: SidebarItemProps) {
   return (
     <Link
       to={to}
+      onClick={onClick}
       className={cn(
-        "flex items-center gap-2.5 px-4 py-2.5 text-[13px] transition-colors border-l-2",
+        "flex items-center gap-2.5 px-4 py-2.5 min-h-[44px] text-[13px] transition-colors border-l-2",
         active
           ? "border-amber-500 bg-amber-500/[0.07] text-zinc-50 font-semibold"
           : "border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
@@ -53,10 +57,13 @@ function SidebarItem({ icon: Icon, label, to, active, count }: SidebarItemProps)
 interface AdminV2SidebarProps {
   ungradedCount?: number;
   actionNeededCount?: number;
+  open?: boolean;
+  onClose?: () => void;
 }
 
-export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: AdminV2SidebarProps) {
+export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0, open = false, onClose }: AdminV2SidebarProps) {
   const location = useLocation();
+  const isMobile = useIsMobileLg();
 
   const isActive = (path: string) => {
     if (path === "/admin/purchases") {
@@ -74,11 +81,31 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
     return location.pathname.startsWith(path);
   };
 
+  const handleNavClick = () => {
+    if (isMobile && onClose) {
+      onClose();
+    }
+  };
+
   return (
-    <aside className="w-[220px] shrink-0 bg-[#18181B] border-r border-zinc-700/80 flex flex-col h-full">
+    <aside
+      className={cn(
+        "fixed top-0 left-0 z-50 h-full w-[220px] bg-[#18181B] border-r border-zinc-700/80 flex flex-col transition-transform duration-200 ease-in-out",
+        "lg:relative lg:translate-x-0 lg:z-auto lg:shrink-0",
+        open ? "translate-x-0" : "-translate-x-full"
+      )}
+    >
+      {/* Close button — mobile only */}
+      <button
+        onClick={onClose}
+        className="lg:hidden absolute top-4 right-3 p-1 text-zinc-500 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
       {/* Brand */}
       <div className="px-4 py-5 border-b border-zinc-700/80">
-        <Link to="/admin/purchases" className="flex items-center gap-2">
+        <Link to="/admin/purchases" onClick={handleNavClick} className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-sm font-extrabold text-zinc-900">
             K
           </div>
@@ -100,12 +127,14 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/purchases"
           active={isActive("/admin/purchases")}
           count={ungradedCount > 0 ? ungradedCount : undefined}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={Package}
           label="Products"
           to="/admin/products"
           active={isActive("/admin/products")}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={ClipboardList}
@@ -113,18 +142,21 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/orders"
           active={isActive("/admin/orders")}
           count={actionNeededCount > 0 ? actionNeededCount : undefined}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={Users}
           label="Customers"
           to="/admin/customers"
           active={isActive("/admin/customers")}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={Wallet}
           label="Payouts"
           to="/admin/payouts"
           active={isActive("/admin/payouts")}
+          onClick={handleNavClick}
         />
       </div>
 
@@ -138,24 +170,28 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           label="Intake"
           to="/admin/intake"
           active={isActive("/admin/intake")}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={BarChart3}
           label="Analytics"
           to="/admin/analytics"
           active={isActive("/admin/analytics")}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={ArrowUpDown}
           label="Data Sync"
           to="/admin/data-sync"
           active={isActive("/admin/data-sync")}
+          onClick={handleNavClick}
         />
         <SidebarItem
           icon={Settings}
           label="Settings"
           to="/admin/settings"
           active={isActive("/admin/settings")}
+          onClick={handleNavClick}
         />
       </div>
 

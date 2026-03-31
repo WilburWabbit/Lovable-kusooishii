@@ -169,7 +169,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
+      <SheetContent side="right" className="w-full sm:w-[480px] sm:max-w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
         <SheetHeader className="px-5 py-4 border-b border-zinc-200">
           <SheetTitle className="text-zinc-900 text-base font-bold">
             {isBulk ? `Edit ${bulkUnits!.length} Units — ${unit?.mpn}` : `Grade Unit ${unit?.uid ?? ""}`}

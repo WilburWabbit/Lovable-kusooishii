@@ -155,7 +155,7 @@ export function CustomerDetail() {
       <BackButton onClick={() => navigate("/admin/customers")} label="Customers" />
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-1">
+      <div className="flex items-center gap-3 mb-1 flex-wrap">
         <h1 className="text-[22px] font-bold text-foreground">{customer.name}</h1>
         {customer.blueBellMember && <Badge label="Blue Bell" color="#3B82F6" small />}
         {!customer.active && <Badge label="Inactive" color="#71717A" small />}
@@ -235,7 +235,7 @@ export function CustomerDetail() {
         ) : orders.length === 0 ? (
           <p className="text-muted-foreground text-sm p-4">No orders for this customer.</p>
         ) : (
-          <table className="w-full border-collapse text-[13px]">
+          <table className="w-full border-collapse text-[13px] min-w-[500px]">
             <thead>
               <tr className="border-b border-border">
                 {["Order", "Channel", "Items", "Total", "Status", "Date"].map((h) => (

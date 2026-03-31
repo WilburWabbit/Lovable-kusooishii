@@ -124,7 +124,7 @@ export function NewPurchaseForm() {
       {/* Batch header */}
       <SurfaceCard className="mb-4">
         <SectionHead>Batch Details</SectionHead>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="Supplier" required>
             <input
               value={supplierName}
@@ -166,7 +166,7 @@ export function NewPurchaseForm() {
       {/* Shared costs */}
       <SurfaceCard className="mb-4">
         <SectionHead>Shared Costs</SectionHead>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <FormField label="Shipping (£)">
             <input
               type="number"
@@ -222,7 +222,8 @@ export function NewPurchaseForm() {
             + Add Line
           </button>
         </div>
-        <table className="w-full text-xs border-collapse">
+        <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse min-w-[600px]">
           <thead>
             <tr className="border-b border-zinc-200">
               {["MPN", "Qty", "Unit Cost (£)", "Line Total", "Apport./Unit", "Landed/Unit", ""].map(
@@ -302,7 +303,8 @@ export function NewPurchaseForm() {
             })}
           </tbody>
         </table>
-        <div className="px-4 py-3 border-t border-zinc-200 flex justify-between text-xs text-zinc-500">
+        </div>
+        <div className="px-4 py-3 border-t border-zinc-200 flex flex-col gap-1 sm:flex-row sm:justify-between text-xs text-zinc-500">
           <span>
             {lineItems.length} line{lineItems.length !== 1 ? "s" : ""} ·{" "}
             {lineItems.reduce((s, li) => s + li.quantity, 0)} units
@@ -318,7 +320,7 @@ export function NewPurchaseForm() {
       </SurfaceCard>
 
       {/* Submit */}
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         <button
           onClick={handleSubmit}
           disabled={!canSubmit || createBatch.isPending}
