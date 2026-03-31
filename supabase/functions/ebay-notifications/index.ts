@@ -275,6 +275,7 @@ Deno.serve(async (req) => {
       const rawOrderId =
         payload?.notification?.data?.orderId ||
         payload?.notification?.data?.order?.orderId ||
+        payload?.notification?.data?.itemMarkedShipped?.orderId ||
         payload?.resource?.orderId ||
         payload?.data?.orderId ||
         payload?.orderId ||
