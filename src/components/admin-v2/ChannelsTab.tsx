@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   useChannelListings,
   useChannelFees,
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 interface ChannelsTabProps {
   variants: ProductVariant[];
+  productName: string;
 }
 
 const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
@@ -21,13 +22,13 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
-export function ChannelsTab({ variants }: ChannelsTabProps) {
+export function ChannelsTab({ variants, productName }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
   return (
     <div className="grid gap-4">
       {variants.map((v) => (
-        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} />
+        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} productName={productName} />
       ))}
     </div>
   );
@@ -36,9 +37,11 @@ export function ChannelsTab({ variants }: ChannelsTabProps) {
 function VariantChannelsCard({
   variant,
   feesMap,
+  productName,
 }: {
   variant: ProductVariant;
   feesMap: Map<string, { totalFeeRate: number; fees: { name: string; rate: number; fixed: number }[] }> | undefined;
+  productName: string;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
@@ -50,24 +53,47 @@ function VariantChannelsCard({
   }, [listings]);
 
   // Per-channel local state for title, description, price
+  // Initialise with productName as the default title (listings data not yet loaded)
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
   >(() => {
     const initial: Record<string, { title: string; description: string; price: string }> = {};
     for (const ch of CHANNELS) {
-      const existing = listings.find((l) => l.channel === ch.key);
       const feeInfo = feesMap?.get(ch.key);
       const basePrice = variant.salePrice ?? 0;
       const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
 
       initial[ch.key] = {
-        title: existing?.listingTitle ?? "",
-        description: existing?.listingDescription ?? "",
-        price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+        title: productName,
+        description: "",
+        price: feeCalc.suggestedPrice.toFixed(2),
       };
     }
     return initial;
   });
+
+  // When listings load from the DB, apply saved values (overrides the productName default)
+  useEffect(() => {
+    if (!listings.length) return;
+    setChannelState((prev) => {
+      const next = { ...prev };
+      for (const ch of CHANNELS) {
+        const existing = listings.find((l) => l.channel === ch.key);
+        if (existing) {
+          const feeInfo = feesMap?.get(ch.key);
+          const basePrice = variant.salePrice ?? 0;
+          const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
+          next[ch.key] = {
+            title: existing.listingTitle ?? productName,
+            description: existing.listingDescription ?? "",
+            price: existing.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+          };
+        }
+      }
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings]);
 
   const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
     setChannelState((prev) => ({
