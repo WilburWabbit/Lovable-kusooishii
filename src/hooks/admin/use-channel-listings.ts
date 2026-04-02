@@ -178,6 +178,8 @@ export function usePublishListing() {
       }
 
       // Upsert listing with all fields
+      // onConflict uses the existing unique constraint (channel, external_sku)
+      // external_sku is the SKU code — required NOT NULL field
       const { data, error } = await supabase
         .from('channel_listing')
         .upsert(
@@ -186,6 +188,7 @@ export function usePublishListing() {
             channel: channel,
             v2_channel: channel,
             v2_status: 'live',
+            external_sku: skuCode,
             listing_title: listingTitle.trim(),
             listing_description: listingDescription?.trim() ?? null,
             listed_price: listingPrice,
@@ -196,7 +199,7 @@ export function usePublishListing() {
             external_url: externalUrl ?? null,
             listed_at: new Date().toISOString(),
           } as never,
-          { onConflict: 'sku_id,channel' as never },
+          { onConflict: 'channel,external_sku' as never },
         )
         .select()
         .single();

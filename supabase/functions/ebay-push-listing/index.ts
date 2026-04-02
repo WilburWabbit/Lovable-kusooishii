@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     console.log(`eBay inventory item PUT for ${effectiveSku}: ${inventoryRes ? "updated" : "created"}`);
 
     // ─── Step 2: Create or Update Offer ────────────────────
-    const existingExternalId = l.external_id as string | null;
+    const existingExternalId = l.external_listing_id as string | null;
     let offerId: string;
 
     const offerPayload = {
@@ -173,7 +173,7 @@ Deno.serve(async (req) => {
     await admin
       .from("channel_listing")
       .update({
-        external_id: offerId,
+        external_listing_id: offerId,
         external_url: listingItemId
           ? `https://www.ebay.co.uk/itm/${listingItemId}`
           : (l.external_url as string) ?? null,
