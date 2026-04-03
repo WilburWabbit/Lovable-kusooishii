@@ -225,7 +225,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       {/* Tab content */}
       {activeTab === "stock" && <StockUnitsTab mpn={mpn} />}
       {activeTab === "copy" && <CopyMediaTab product={product} />}
-      {activeTab === "channels" && <ChannelsTab variants={product.variants} productName={product.name} />}
+      {activeTab === "channels" && <ChannelsTab variants={product.variants} product={product} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
     </div>
   );

@@ -6,13 +6,14 @@ import {
   calculateChannelPrice,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
-import type { ProductVariant, Channel, ChannelListing } from "@/lib/types/admin";
+import type { Product, ProductVariant, Channel, ChannelListing } from "@/lib/types/admin";
+import { generateEbayTitle } from "@/lib/utils/generate-ebay-title";
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 
 interface ChannelsTabProps {
   variants: ProductVariant[];
-  productName: string;
+  product: Product;
 }
 
 const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
@@ -22,13 +23,13 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
-export function ChannelsTab({ variants, productName }: ChannelsTabProps) {
+export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
   return (
     <div className="grid gap-4">
       {variants.map((v) => (
-        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} productName={productName} />
+        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} product={product} />
       ))}
     </div>
   );
@@ -37,12 +38,13 @@ export function ChannelsTab({ variants, productName }: ChannelsTabProps) {
 function VariantChannelsCard({
   variant,
   feesMap,
-  productName,
+  product,
 }: {
   variant: ProductVariant;
   feesMap: Map<string, { totalFeeRate: number; fees: { name: string; rate: number; fixed: number }[] }> | undefined;
-  productName: string;
+  product: Product;
 }) {
+  const productName = product.name;
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
 
@@ -64,7 +66,16 @@ function VariantChannelsCard({
       const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
 
       initial[ch.key] = {
-        title: productName,
+        title: ch.key === "ebay"
+          ? generateEbayTitle({
+              name: product.name,
+              mpn: product.mpn,
+              theme: product.theme,
+              pieceCount: product.pieceCount,
+              retiredDate: product.retiredDate,
+              grade: variant.grade,
+            })
+          : productName,
         description: "",
         price: feeCalc.suggestedPrice.toFixed(2),
       };
@@ -84,7 +95,16 @@ function VariantChannelsCard({
           const basePrice = variant.salePrice ?? 0;
           const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
           next[ch.key] = {
-            title: existing.listingTitle ?? productName,
+            title: existing.listingTitle ?? (ch.key === "ebay"
+              ? generateEbayTitle({
+                  name: product.name,
+                  mpn: product.mpn,
+                  theme: product.theme,
+                  pieceCount: product.pieceCount,
+                  retiredDate: product.retiredDate,
+                  grade: variant.grade,
+                })
+              : productName),
             description: existing.listingDescription ?? "",
             price: existing.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
           };
