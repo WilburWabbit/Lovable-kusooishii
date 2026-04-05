@@ -761,6 +761,72 @@ export type Database = {
         }
         Relationships: []
       }
+      ebay_payout_transactions: {
+        Row: {
+          buyer_username: string | null
+          created_at: string | null
+          currency: string
+          fee_details: Json
+          gross_amount: number
+          id: string
+          match_method: string | null
+          matched: boolean
+          matched_order_id: string | null
+          memo: string | null
+          net_amount: number
+          order_id: string | null
+          payout_id: string
+          qbo_sales_receipt_id: string | null
+          total_fees: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Insert: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          fee_details?: Json
+          gross_amount: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount: number
+          order_id?: string | null
+          payout_id: string
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Update: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          fee_details?: Json
+          gross_amount?: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount?: number
+          order_id?: string | null
+          payout_id?: string
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date?: string
+          transaction_id?: string
+          transaction_status?: string
+          transaction_type?: string
+        }
+        Relationships: []
+      }
       email_send_log: {
         Row: {
           created_at: string
@@ -1129,8 +1195,10 @@ export type Database = {
       }
       landing_raw_qbo_customer: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1139,8 +1207,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1149,8 +1219,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1162,8 +1234,10 @@ export type Database = {
       }
       landing_raw_qbo_item: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1172,8 +1246,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1182,8 +1258,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1195,8 +1273,10 @@ export type Database = {
       }
       landing_raw_qbo_purchase: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1205,8 +1285,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1215,8 +1297,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1228,8 +1312,10 @@ export type Database = {
       }
       landing_raw_qbo_refund_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1238,8 +1324,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1248,8 +1336,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1261,8 +1351,10 @@ export type Database = {
       }
       landing_raw_qbo_sales_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1271,8 +1363,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1281,8 +1375,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1620,60 +1716,78 @@ export type Database = {
       }
       payouts: {
         Row: {
+          bank_reference: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at: string
           external_payout_id: string | null
           fee_breakdown: Json | null
           gross_amount: number
           id: string
+          matched_order_count: number | null
           net_amount: number
           notes: string | null
           order_count: number
           payout_date: string
           qbo_deposit_id: string | null
           qbo_expense_id: string | null
+          qbo_sync_error: string | null
           qbo_sync_status: string | null
           reconciliation_status: string | null
+          sync_attempted_at: string | null
           total_fees: number
+          transaction_count: number | null
           unit_count: number
+          unmatched_transaction_count: number | null
           updated_at: string | null
         }
         Insert: {
+          bank_reference?: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount: number
           id?: string
+          matched_order_count?: number | null
           net_amount: number
           notes?: string | null
           order_count?: number
           payout_date: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Update: {
+          bank_reference?: string | null
           channel?: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount?: number
           id?: string
+          matched_order_count?: number | null
           net_amount?: number
           notes?: string | null
           order_count?: number
           payout_date?: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Relationships: []
@@ -2105,6 +2219,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      qbo_account_mapping: {
+        Row: {
+          account_type: string
+          created_at: string | null
+          id: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          account_type: string
+          created_at?: string | null
+          id?: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          account_type?: string
+          created_at?: string | null
+          id?: string
+          purpose?: string
+          qbo_account_id?: string
+          qbo_account_name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       qbo_connection: {
         Row: {
@@ -2881,97 +3025,6 @@ export type Database = {
           synced_at?: string
         }
         Relationships: []
-      }
-      welcome_code: {
-        Row: {
-          id: string
-          code: string
-          ebay_order_id: string
-          sales_order_id: string | null
-          customer_id: string | null
-          buyer_name: string
-          buyer_email: string | null
-          order_items: Json
-          order_postcode: string | null
-          primary_sku: string | null
-          stripe_coupon_id: string | null
-          stripe_promo_code_id: string | null
-          promo_code: string | null
-          discount_pct: number
-          scanned_at: string | null
-          scan_count: number
-          redeemed_at: string | null
-          redeemed_order_id: string | null
-          user_id: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          code: string
-          ebay_order_id: string
-          sales_order_id?: string | null
-          customer_id?: string | null
-          buyer_name: string
-          buyer_email?: string | null
-          order_items?: Json
-          order_postcode?: string | null
-          primary_sku?: string | null
-          stripe_coupon_id?: string | null
-          stripe_promo_code_id?: string | null
-          promo_code?: string | null
-          discount_pct?: number
-          scanned_at?: string | null
-          scan_count?: number
-          redeemed_at?: string | null
-          redeemed_order_id?: string | null
-          user_id?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          code?: string
-          ebay_order_id?: string
-          sales_order_id?: string | null
-          customer_id?: string | null
-          buyer_name?: string
-          buyer_email?: string | null
-          order_items?: Json
-          order_postcode?: string | null
-          primary_sku?: string | null
-          stripe_coupon_id?: string | null
-          stripe_promo_code_id?: string | null
-          promo_code?: string | null
-          discount_pct?: number
-          scanned_at?: string | null
-          scan_count?: number
-          redeemed_at?: string | null
-          redeemed_order_id?: string | null
-          user_id?: string | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "welcome_code_sales_order_id_fkey"
-            columns: ["sales_order_id"]
-            isOneToOne: false
-            referencedRelation: "sales_order"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "welcome_code_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customer"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "welcome_code_redeemed_order_id_fkey"
-            columns: ["redeemed_order_id"]
-            isOneToOne: false
-            referencedRelation: "sales_order"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       wishlist: {
         Row: {
