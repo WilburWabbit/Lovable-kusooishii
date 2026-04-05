@@ -1,0 +1,828 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - SalesReceipt
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online SalesReceipt entity.
+    Includes create, update, read, void (soft delete), query, and send endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+    SalesReceipts are critical for mapping eBay and storefront orders to QuickBooks.
+
+externalDocs:
+  description: Official Intuit SalesReceipt documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/salesreceipt
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: SalesReceipt
+    description: Sales receipt resource operations
+
+paths:
+  /v3/company/{realmId}/salesreceipt:
+    post:
+      tags:
+        - SalesReceipt
+      summary: Create or update a sales receipt
+      operationId: createOrUpdateSalesReceipt
+      description: |
+        Create a new SalesReceipt or update an existing one.
+        For create, CustomerRef and Line array are required.
+        For update, Id and SyncToken are required.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/SalesReceiptCreateRequest'
+                - $ref: '#/components/schemas/SalesReceiptUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/salesreceipt/{salesReceiptId}:
+    get:
+      tags:
+        - SalesReceipt
+      summary: Read a sales receipt by ID
+      operationId: getSalesReceiptById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/SalesReceiptId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/salesreceipt/{salesReceiptId}/void:
+    post:
+      tags:
+        - SalesReceipt
+      summary: Void a sales receipt
+      operationId: voidSalesReceipt
+      description: |
+        Void an existing SalesReceipt by setting its status to voided.
+        This is the delete operation for SalesReceipts (soft delete).
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/SalesReceiptId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/salesreceipt/{salesReceiptId}/send:
+    post:
+      tags:
+        - SalesReceipt
+      summary: Send a sales receipt
+      operationId: sendSalesReceipt
+      description: |
+        Send a SalesReceipt to a customer via email.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/SalesReceiptId'
+        - name: sendTo
+          in: query
+          required: true
+          description: Email address to send the receipt to
+          schema:
+            type: string
+            format: email
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - SalesReceipt
+      summary: Query sales receipts using GET
+      operationId: querySalesReceiptsGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/SalesReceiptQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - SalesReceipt
+      summary: Query sales receipts using POST
+      operationId: querySalesReceiptsPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/SalesReceiptQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/SalesReceiptQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    SalesReceiptId:
+      name: salesReceiptId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "156"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    SalesReceiptQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/SalesReceiptQueryStatement'
+
+  responses:
+    SalesReceiptOrFault:
+      description: SalesReceipt response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/SalesReceiptEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    SalesReceiptQueryOrFault:
+      description: SalesReceipt query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/SalesReceiptQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    SalesReceiptQueryStatement:
+      type: string
+      example: SELECT * FROM SalesReceipt STARTPOSITION 1 MAXRESULTS 5
+
+    ReferenceType:
+      type: object
+      description: Reference to another QuickBooks entity with value and optional name
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      description: Reference to a currency with value and optional name
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      description: Metadata containing creation and last update timestamps
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+          description: Entity creation timestamp
+        LastUpdatedTime:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    MemoRef:
+      type: object
+      description: Memo reference with string value
+      properties:
+        value:
+          type: string
+
+    EmailAddress:
+      type: object
+      description: Email address reference
+      properties:
+        Address:
+          type: string
+          format: email
+
+    PhysicalAddress:
+      type: object
+      description: Physical address with standard address fields
+      properties:
+        Id:
+          type: string
+        Line1:
+          type: string
+        Line2:
+          type: string
+        Line3:
+          type: string
+        Line4:
+          type: string
+        City:
+          type: string
+        Country:
+          type: string
+        State:
+          type: string
+        PostalCode:
+          type: string
+        Lat:
+          type: string
+        Long:
+          type: string
+
+    CustomField:
+      type: object
+      description: Custom field with definition, name, type and value
+      properties:
+        DefinitionId:
+          type: string
+        Name:
+          type: string
+        Type:
+          type: string
+          enum:
+            - StringType
+            - NumberType
+            - DateType
+        StringValue:
+          type: string
+        NumberValue:
+          type: number
+          format: double
+        DateValue:
+          type: string
+          format: date
+
+    TaxLineDetail:
+      type: object
+      description: Tax line detail for transaction tax
+      properties:
+        TaxRateRef:
+          $ref: '#/components/schemas/ReferenceType'
+        PercentBased:
+          type: boolean
+        TaxPercent:
+          type: number
+          format: double
+        NetAmountTaxable:
+          type: number
+          format: double
+        TaxAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+
+    TxnTaxDetail:
+      type: object
+      description: Transaction-level tax detail
+      properties:
+        TxnTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        TotalTax:
+          type: number
+          format: double
+        TaxLine:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxLineDetail'
+
+    SalesItemLineDetail:
+      type: object
+      description: Detail for a sales item line
+      properties:
+        ItemRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the item (required)
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+        UnitPrice:
+          type: number
+          format: double
+        Qty:
+          type: number
+          format: double
+        TaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        ServiceDate:
+          type: string
+          format: date
+        DiscountRate:
+          type: number
+          format: double
+        DiscountAmt:
+          type: number
+          format: double
+        ItemAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+      required:
+        - ItemRef
+
+    GroupLineDetail:
+      type: object
+      description: Detail for a group line
+      properties:
+        GroupItemRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the group item
+        Quantity:
+          type: number
+          format: double
+        Line:
+          type: array
+          items:
+            $ref: '#/components/schemas/Line'
+          description: Sub-lines within the group
+
+    DiscountLineDetail:
+      type: object
+      description: Detail for a discount line
+      properties:
+        PercentBased:
+          type: boolean
+        DiscountPercent:
+          type: number
+          format: double
+        DiscountAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+
+    SubTotalLineDetail:
+      type: object
+      description: Read-only subtotal line detail
+      properties:
+        SubTotalLineRef:
+          $ref: '#/components/schemas/ReferenceType'
+
+    DescriptionOnlyLineDetail:
+      type: object
+      description: Line detail for description-only lines (no detail type value needed)
+
+    Line:
+      type: object
+      description: Line item in a sales receipt
+      properties:
+        Id:
+          type: string
+          description: Line ID (read-only)
+        LineNum:
+          type: integer
+          description: Line number
+        Description:
+          type: string
+          description: Description of the line item
+        Amount:
+          type: number
+          format: double
+          description: Amount for the line (required)
+        DetailType:
+          type: string
+          enum:
+            - SalesItemLineDetail
+            - GroupLineDetail
+            - DescriptionOnly
+            - SubTotalLineDetail
+            - DiscountLineDetail
+          description: Type of line detail
+        SalesItemLineDetail:
+          $ref: '#/components/schemas/SalesItemLineDetail'
+        GroupLineDetail:
+          $ref: '#/components/schemas/GroupLineDetail'
+        DescriptionOnlyLineDetail:
+          $ref: '#/components/schemas/DescriptionOnlyLineDetail'
+        SubTotalLineDetail:
+          $ref: '#/components/schemas/SubTotalLineDetail'
+        DiscountLineDetail:
+          $ref: '#/components/schemas/DiscountLineDetail'
+      required:
+        - Amount
+
+    DeliveryInfo:
+      type: object
+      description: Delivery information for the sales receipt
+      properties:
+        DeliveryType:
+          type: string
+          enum:
+            - Email
+          description: Delivery type (currently only Email)
+        DeliveryTime:
+          type: string
+          format: date-time
+          description: Time the receipt was delivered
+
+    SalesReceiptWrite:
+      type: object
+      description: Writable properties for SalesReceipt
+      properties:
+        Id:
+          type: string
+          description: Unique identifier (read-only after creation)
+        SyncToken:
+          type: string
+          description: Token for optimistic concurrency control (required for updates)
+        sparse:
+          type: boolean
+          description: Sparse update flag
+        DocNumber:
+          type: string
+          maxLength: 21
+          description: Document number
+        TxnDate:
+          type: string
+          format: date
+          description: Transaction date
+        Line:
+          type: array
+          items:
+            $ref: '#/components/schemas/Line'
+          description: Line items (required for create)
+        CustomerRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to customer (required for create)
+        CustomerMemo:
+          $ref: '#/components/schemas/MemoRef'
+        BillAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        ShipAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        BillEmail:
+          $ref: '#/components/schemas/EmailAddress'
+        ShipFromAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        ShipDate:
+          type: string
+          format: date
+          description: Shipping date
+        ShipMethodRef:
+          $ref: '#/components/schemas/ReferenceType'
+        TrackingNum:
+          type: string
+          description: Tracking number
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+        DepartmentRef:
+          $ref: '#/components/schemas/ReferenceType'
+        PrivateNote:
+          type: string
+          maxLength: 4000
+          description: Private note (not visible to customer)
+        PaymentMethodRef:
+          $ref: '#/components/schemas/ReferenceType'
+        PaymentRefNum:
+          type: string
+          description: Payment reference number
+        DepositToAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+        ExchangeRate:
+          type: number
+          format: double
+        ApplyTaxAfterDiscount:
+          type: boolean
+        PrintStatus:
+          type: string
+          enum:
+            - NotSet
+            - NeedToPrint
+            - PrintComplete
+          description: Print status of the receipt
+        EmailStatus:
+          type: string
+          enum:
+            - NotSet
+            - NeedToSend
+            - EmailSent
+          description: Email status of the receipt
+        CustomField:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomField'
+        GlobalTaxCalculation:
+          type: string
+          enum:
+            - TaxExcluded
+            - TaxInclusive
+            - NotApplicable
+        FreeFormAddress:
+          type: boolean
+          description: Free form address flag
+        TxnTaxDetail:
+          $ref: '#/components/schemas/TxnTaxDetail'
+        DeliveryInfo:
+          $ref: '#/components/schemas/DeliveryInfo'
+
+    SalesReceiptCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/SalesReceiptWrite'
+      required:
+        - Line
+        - CustomerRef
+
+    SalesReceiptUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/SalesReceiptWrite'
+      required:
+        - Id
+        - SyncToken
+
+    SalesReceipt:
+      allOf:
+        - $ref: '#/components/schemas/SalesReceiptWrite'
+      properties:
+        HomeAmountTotal:
+          type: number
+          format: double
+          description: Home currency amount total (read-only)
+        HomeTotalAmt:
+          type: number
+          format: double
+          description: Home currency total amount, same as HomeAmountTotal (read-only)
+        TotalAmt:
+          type: number
+          format: double
+          description: Total amount in transaction currency (read-only)
+        Balance:
+          type: number
+          format: double
+          description: Balance amount (should be 0 for sales receipt, read-only)
+        TxnSource:
+          type: string
+          description: Transaction source (read-only)
+        RecurDataRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to recurring data if applicable (read-only)
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+        domain:
+          type: string
+          example: QBO
+          description: Entity domain
+
+    SalesReceiptEnvelope:
+      type: object
+      required:
+        - SalesReceipt
+        - time
+      properties:
+        SalesReceipt:
+          $ref: '#/components/schemas/SalesReceipt'
+        time:
+          type: string
+          format: date-time
+
+    SalesReceiptQueryResponse:
+      type: object
+      properties:
+        SalesReceipt:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesReceipt'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    SalesReceiptQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/SalesReceiptQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time

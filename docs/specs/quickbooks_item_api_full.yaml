@@ -1,0 +1,589 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Item
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Item entity.
+    Includes create, update, read, and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit Item documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/item
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Item
+    description: Product and service item resource operations
+
+paths:
+  /v3/company/{realmId}/item:
+    post:
+      tags:
+        - Item
+      summary: Create or update an item
+      operationId: createOrUpdateItem
+      description: |
+        Create a new Item or update an existing one.
+        Items can be of multiple types: Inventory, NonInventory, Service, Group, Category, or Bundle.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/ItemCreateRequest'
+                - $ref: '#/components/schemas/ItemUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/ItemOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/item/{itemId}:
+    get:
+      tags:
+        - Item
+      summary: Read an item by ID
+      operationId: getItemById
+      description: Retrieve a specific item by its ID.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/ItemOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Item
+      summary: Query items using GET
+      operationId: queryItemsGet
+      description: Query items using a SQL-like query statement via GET parameter.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/ItemQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/ItemQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Item
+      summary: Query items using POST
+      operationId: queryItemsPost
+      description: Query items using a SQL-like query statement via POST body.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/ItemQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/ItemQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "1"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    ItemQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/ItemQueryStatement'
+
+  responses:
+    ItemOrFault:
+      description: Item response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ItemEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    ItemQueryOrFault:
+      description: Item query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ItemQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    ItemQueryStatement:
+      type: string
+      example: SELECT * FROM Item STARTPOSITION 1 MAXRESULTS 10
+
+    ReferenceType:
+      type: object
+      description: Reference to another QuickBooks entity
+      properties:
+        value:
+          type: string
+          description: The unique identifier of the referenced entity
+        name:
+          type: string
+          description: The display name of the referenced entity
+      required:
+        - value
+
+    MetaData:
+      type: object
+      description: Metadata about the entity
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        LastUpdatedTime:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    ItemWrite:
+      type: object
+      description: Base item schema for write operations
+      properties:
+        Id:
+          type: string
+          description: The unique identifier of the item (read-only)
+        SyncToken:
+          type: string
+          description: The current sync token for the item, required for updates
+        sparse:
+          type: boolean
+          description: Indicates a sparse update
+        Name:
+          type: string
+          description: The name of the item (max 100 characters)
+          maxLength: 100
+          example: "Professional Services"
+        Sku:
+          type: string
+          description: Stock keeping unit (max 100 characters)
+          maxLength: 100
+          example: "SKU-001"
+        Description:
+          type: string
+          description: Sales description of the item (max 4000 characters)
+          maxLength: 4000
+          example: "Expert consulting and advisory services"
+        PurchaseDesc:
+          type: string
+          description: Purchase description of the item (max 4000 characters)
+          maxLength: 4000
+          example: "Consulting services purchased"
+        Active:
+          type: boolean
+          description: Whether the item is active
+          default: true
+        SubItem:
+          type: boolean
+          description: Whether this is a sub-item
+        ParentRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the parent item
+        Taxable:
+          type: boolean
+          description: Whether the item is subject to tax
+        SalesTaxIncluded:
+          type: boolean
+          description: Whether sales tax is included in the price
+        PurchaseTaxIncluded:
+          type: boolean
+          description: Whether purchase tax is included in the cost
+        Type:
+          type: string
+          enum:
+            - Inventory
+            - NonInventory
+            - Service
+            - Group
+            - Category
+            - Bundle
+          description: The type of item
+          example: "Service"
+        QtyOnHand:
+          type: number
+          format: double
+          description: Quantity on hand (required for Inventory type items)
+          example: 50.00
+        InvStartDate:
+          type: string
+          format: date
+          description: Inventory start date (required for Inventory type items)
+          example: "2024-01-01"
+        AssetAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the asset account (required for Inventory type items)
+        IncomeAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the income account (required for creation)
+        ExpenseAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the expense account
+        PurchaseCost:
+          type: number
+          format: double
+          description: The cost to purchase the item
+          example: 50.00
+        UnitPrice:
+          type: number
+          format: double
+          description: The unit selling price
+          example: 100.00
+        TrackQtyOnHand:
+          type: boolean
+          description: Whether to track quantity on hand
+        SalesTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the sales tax code
+        PurchaseTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the purchase tax code
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to a class for categorization
+        AbatementRate:
+          type: number
+          format: double
+          description: Abatement rate (India only)
+          example: 0.05
+        ReverseChargeRate:
+          type: number
+          format: double
+          description: Reverse charge rate (India only)
+          example: 0.10
+        ServiceType:
+          type: string
+          description: Service type (India only)
+          example: "Professional"
+        ItemCategoryType:
+          type: string
+          enum:
+            - Product
+            - Service
+          description: Item category type
+          example: "Service"
+        Hsnsac:
+          type: string
+          description: HSN/SAC code (India only)
+          example: "9963"
+        TaxClassificationRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to tax classification
+        ReorderPoint:
+          type: number
+          format: double
+          description: Reorder point for inventory management
+          example: 10.00
+
+    ItemCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ItemWrite'
+      description: Request schema for creating a new item
+      required:
+        - Name
+        - Type
+        - IncomeAccountRef
+
+    ItemUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ItemWrite'
+      description: Request schema for updating an existing item
+      required:
+        - Id
+        - SyncToken
+
+    Item:
+      allOf:
+        - $ref: '#/components/schemas/ItemWrite'
+      description: Complete item entity with read-only fields
+      properties:
+        Level:
+          type: integer
+          description: Hierarchical level of the item (read-only)
+          example: 0
+        FullyQualifiedName:
+          type: string
+          description: The fully qualified name including parent hierarchy (read-only)
+          example: "Services:Professional Services"
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+        domain:
+          type: string
+          description: The domain of the entity (read-only)
+          example: "QBO"
+
+    ItemEnvelope:
+      type: object
+      description: Response envelope containing a single item
+      required:
+        - Item
+        - time
+      properties:
+        Item:
+          $ref: '#/components/schemas/Item'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    ItemQueryResponse:
+      type: object
+      description: Response object containing query results
+      properties:
+        Item:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+          description: Array of items matching the query
+        startPosition:
+          type: integer
+          description: The starting position of the result set
+          example: 1
+        maxResults:
+          type: integer
+          description: The maximum number of results returned
+          example: 10
+        totalCount:
+          type: integer
+          description: The total count of items matching the query
+          example: 50
+        Fault:
+          $ref: '#/components/schemas/Fault'
+          description: Fault information if an error occurred during query
+
+    ItemQueryEnvelope:
+      type: object
+      description: Response envelope for query operations
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/ItemQueryResponse'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    FaultError:
+      type: object
+      description: Individual error in a fault response
+      properties:
+        Message:
+          type: string
+          description: Error message
+          example: "Invalid field value"
+        Detail:
+          type: string
+          description: Detailed error information
+          example: "The value provided for 'Name' exceeds the maximum length"
+        code:
+          type: string
+          description: Error code
+          example: "3200"
+        element:
+          type: string
+          description: The element that caused the error
+          example: "Name"
+
+    Fault:
+      type: object
+      description: Fault object containing error details
+      properties:
+        type:
+          type: string
+          description: The type of fault
+          example: "ValidationFault"
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+          description: Array of errors
+
+    FaultEnvelope:
+      type: object
+      description: Response envelope containing fault information
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
+          description: Timestamp of the fault response

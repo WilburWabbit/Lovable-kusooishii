@@ -1,0 +1,414 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - PaymentMethod
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online PaymentMethod entity.
+    Includes create, update, read, soft delete, and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit PaymentMethod documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/paymentmethod
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: PaymentMethod
+    description: Payment method resource operations
+
+paths:
+  /v3/company/{realmId}/paymentmethod:
+    post:
+      tags:
+        - PaymentMethod
+      summary: Create or update a payment method
+      operationId: createOrUpdatePaymentMethod
+      description: |
+        Create a new PaymentMethod or update an existing one.
+        Soft delete is done by updating Active=false.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PaymentMethodCreateRequest'
+                - $ref: '#/components/schemas/PaymentMethodUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/PaymentMethodOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/paymentmethod/{paymentmethodId}:
+    get:
+      tags:
+        - PaymentMethod
+      summary: Read a payment method by ID
+      operationId: getPaymentMethodById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/PaymentMethodId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/PaymentMethodOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - PaymentMethod
+      summary: Query payment methods using GET
+      operationId: queryPaymentMethodsGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/PaymentMethodQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/PaymentMethodQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - PaymentMethod
+      summary: Query payment methods using POST
+      operationId: queryPaymentMethodsPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/PaymentMethodQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/PaymentMethodQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    PaymentMethodId:
+      name: paymentmethodId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "12"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    PaymentMethodQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/PaymentMethodQueryStatement'
+
+  responses:
+    PaymentMethodOrFault:
+      description: PaymentMethod response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/PaymentMethodEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    PaymentMethodQueryOrFault:
+      description: PaymentMethod query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/PaymentMethodQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    PaymentMethodQueryStatement:
+      type: string
+      example: SELECT * FROM PaymentMethod STARTPOSITION 1 MAXRESULTS 5
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    PaymentMethodWrite:
+      type: object
+      properties:
+        Id:
+          type: string
+          readOnly: true
+        SyncToken:
+          type: string
+        Name:
+          type: string
+          maxLength: 31
+          description: Display name of the payment method
+        Active:
+          type: boolean
+          default: true
+          description: Whether the payment method is active
+        Type:
+          type: string
+          enum:
+            - CREDIT_CARD
+            - NON_CREDIT_CARD
+          description: Indicates whether this is a credit card payment method or not
+
+    PaymentMethodCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/PaymentMethodWrite'
+      required:
+        - Name
+
+    PaymentMethodUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/PaymentMethodWrite'
+      required:
+        - Id
+        - SyncToken
+
+    PaymentMethod:
+      allOf:
+        - $ref: '#/components/schemas/PaymentMethodWrite'
+      properties:
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+        domain:
+          type: string
+          readOnly: true
+          example: QBO
+
+    PaymentMethodEnvelope:
+      type: object
+      required:
+        - PaymentMethod
+        - time
+      properties:
+        PaymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        time:
+          type: string
+          format: date-time
+
+    PaymentMethodQueryResponse:
+      type: object
+      properties:
+        PaymentMethod:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentMethod'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    PaymentMethodQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/PaymentMethodQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time

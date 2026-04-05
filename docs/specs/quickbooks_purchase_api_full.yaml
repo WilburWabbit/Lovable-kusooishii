@@ -1,0 +1,752 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Purchase
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Purchase entity.
+    Includes create, update, read, delete (void), and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+    The Purchase entity represents payments made to vendors, employees, or
+    customers and supports multiple line item types with flexible expense tracking.
+
+externalDocs:
+  description: Official Intuit Purchase documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/purchase
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Purchase
+    description: Purchase and payment resource operations
+
+paths:
+  /v3/company/{realmId}/purchase:
+    post:
+      tags:
+        - Purchase
+      summary: Create or update a purchase
+      operationId: createOrUpdatePurchase
+      description: |
+        Create a new Purchase or update an existing one.
+        Delete is done by voiding the purchase via the delete endpoint.
+        For creates, PaymentType, AccountRef, EntityRef, and Line items are required.
+        For updates, Id and SyncToken are required.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PurchaseCreateRequest'
+                - $ref: '#/components/schemas/PurchaseUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/PurchaseOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/purchase/{purchaseId}:
+    get:
+      tags:
+        - Purchase
+      summary: Read a purchase by ID
+      operationId: getPurchaseById
+      description: Retrieve a specific purchase by its ID.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/PurchaseId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/PurchaseOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+    post:
+      tags:
+        - Purchase
+      summary: Void (delete) a purchase
+      operationId: voidPurchase
+      description: |
+        Void a purchase by ID. This is a soft delete operation.
+        The purchase remains in the system marked as voided.
+        Requires the current SyncToken.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/PurchaseId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseVoidRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/PurchaseOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Purchase
+      summary: Query purchases using GET
+      operationId: queryPurchasesGet
+      description: Query purchases using a GET request with a query parameter.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/PurchaseQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/PurchaseQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Purchase
+      summary: Query purchases using POST
+      operationId: queryPurchasesPost
+      description: Query purchases using a POST request with a query statement in the body.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/PurchaseQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/PurchaseQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    PurchaseId:
+      name: purchaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "147"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    PurchaseQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/PurchaseQueryStatement'
+
+  responses:
+    PurchaseOrFault:
+      description: Purchase response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/PurchaseEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    PurchaseQueryOrFault:
+      description: Purchase query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/PurchaseQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    PurchaseQueryStatement:
+      type: string
+      example: SELECT * FROM Purchase WHERE TxnDate >= '2025-01-01' STARTPOSITION 1 MAXRESULTS 10
+
+    ReferenceType:
+      type: object
+      description: Reference to another entity (Vendor, Employee, Customer, Account, etc.)
+      properties:
+        value:
+          type: string
+          description: The unique identifier of the referenced entity
+        name:
+          type: string
+          description: The display name of the referenced entity
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      description: Currency reference
+      properties:
+        value:
+          type: string
+          description: Currency code (e.g., USD)
+        name:
+          type: string
+          description: Currency name
+      required:
+        - value
+
+    MetaData:
+      type: object
+      description: System metadata for the entity
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+          description: Entity creation timestamp
+        LastUpdatedTime:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    PhysicalAddress:
+      type: object
+      description: Physical address for remittance (checks only)
+      properties:
+        Line1:
+          type: string
+        Line2:
+          type: string
+        Line3:
+          type: string
+        City:
+          type: string
+        Country:
+          type: string
+        CountrySubDivisionCode:
+          type: string
+        PostalCode:
+          type: string
+
+    TxnTaxDetail:
+      type: object
+      description: Transaction-level tax detail
+      properties:
+        TxnTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        DefaultTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        Line:
+          type: array
+          items:
+            type: object
+            properties:
+              DetailType:
+                type: string
+              TaxLineDetail:
+                type: object
+                properties:
+                  PercentBased:
+                    type: boolean
+                  TaxPercent:
+                    type: number
+                    format: double
+                  NetAmountTaxable:
+                    type: number
+                    format: double
+                  TaxAmount:
+                    type: number
+                    format: double
+
+    AccountBasedExpenseLineDetail:
+      type: object
+      description: Line detail for account-based expenses
+      properties:
+        AccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Required. The expense account to charge
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. The class or cost center for the expense
+        TaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. Tax code for the line
+        TaxAmount:
+          type: number
+          format: double
+          description: Optional. Tax amount for the line
+        BillableStatus:
+          type: string
+          enum: [Billable, NotBillable, HasBeenBilled]
+          description: Optional. Whether the expense is billable to a customer
+        CustomerRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. Customer to bill for this expense
+        MarkupInfo:
+          type: object
+          description: Optional. Markup information for billable items
+          properties:
+            PercentBased:
+              type: boolean
+            Value:
+              type: number
+              format: double
+            Percent:
+              type: number
+              format: double
+            Account:
+              $ref: '#/components/schemas/ReferenceType'
+      required:
+        - AccountRef
+
+    ItemBasedExpenseLineDetail:
+      type: object
+      description: Line detail for item-based expenses
+      properties:
+        ItemRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Required. The item to purchase
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. The class or cost center for the item
+        UnitPrice:
+          type: number
+          format: double
+          description: Optional. Unit price of the item
+        Qty:
+          type: number
+          format: double
+          description: Optional. Quantity purchased
+        TaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. Tax code for the line
+        TaxAmount:
+          type: number
+          format: double
+          description: Optional. Tax amount for the line
+        BillableStatus:
+          type: string
+          enum: [Billable, NotBillable, HasBeenBilled]
+          description: Optional. Whether the item is billable to a customer
+        CustomerRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. Customer to bill for this item
+        MarkupInfo:
+          type: object
+          description: Optional. Markup information for billable items
+          properties:
+            PercentBased:
+              type: boolean
+            Value:
+              type: number
+              format: double
+            Percent:
+              type: number
+              format: double
+            Account:
+              $ref: '#/components/schemas/ReferenceType'
+      required:
+        - ItemRef
+
+    Line:
+      type: object
+      description: Line item in a purchase
+      properties:
+        Id:
+          type: string
+          description: Unique identifier for the line item
+        LineNum:
+          type: integer
+          description: Line number
+        Description:
+          type: string
+          description: Description of the line item
+        Amount:
+          type: number
+          format: double
+          description: Amount for the line item
+        DetailType:
+          type: string
+          enum: [AccountBasedExpenseLineDetail, ItemBasedExpenseLineDetail]
+          description: Type of line detail
+        AccountBasedExpenseLineDetail:
+          $ref: '#/components/schemas/AccountBasedExpenseLineDetail'
+        ItemBasedExpenseLineDetail:
+          $ref: '#/components/schemas/ItemBasedExpenseLineDetail'
+
+    PurchaseWrite:
+      type: object
+      description: Purchase entity for create and update operations
+      properties:
+        Id:
+          type: string
+          description: Read-only. Unique identifier for the purchase
+        SyncToken:
+          type: string
+          description: Optimistic concurrency control token. Required for updates.
+        sparse:
+          type: boolean
+          description: Optional. If true, only specified fields are updated
+        DocNumber:
+          type: string
+          maxLength: 21
+          description: Optional. Document/check number. Defaults to auto-increment.
+        TxnDate:
+          type: string
+          format: date
+          description: Optional. Transaction date
+        PaymentType:
+          type: string
+          enum: [Cash, Check, CreditCard]
+          description: Required. Method of payment
+        AccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Required. The account (bank, credit card) to which payment is applied
+        EntityRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Required. The entity being paid (Vendor, Employee, or Customer). The type field indicates the entity type.
+        Line:
+          type: array
+          items:
+            $ref: '#/components/schemas/Line'
+          description: Required. Line items for the purchase. At least one is required.
+        DepartmentRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Optional. Department reference for organizational tracking
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+          description: Optional. Currency for the transaction
+        ExchangeRate:
+          type: number
+          format: double
+          description: Optional. Exchange rate if using a currency other than the entity's default
+        PrivateNote:
+          type: string
+          maxLength: 4000
+          description: Optional. Internal note not visible to customers
+        TxnTaxDetail:
+          $ref: '#/components/schemas/TxnTaxDetail'
+          description: Optional. Transaction-level tax details
+        Credit:
+          type: boolean
+          description: Optional. If true, this is a refund/credit memo rather than an expense
+        PrintStatus:
+          type: string
+          enum: [NotSet, NeedToPrint, PrintComplete]
+          description: Optional. Print status for checks
+        GlobalTaxCalculation:
+          type: string
+          enum: [TaxExcluded, TaxInclusive, NotApplicable]
+          description: Optional. How tax is calculated
+        RemitToAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+          description: Optional. Remittance address (for checks)
+        Memo:
+          type: string
+          description: Optional. Memo text (for checks)
+        PaymentRefNum:
+          type: string
+          description: Optional. Check or reference number
+
+    PurchaseCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/PurchaseWrite'
+      required:
+        - PaymentType
+        - AccountRef
+        - EntityRef
+        - Line
+
+    PurchaseUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/PurchaseWrite'
+      required:
+        - Id
+        - SyncToken
+
+    PurchaseVoidRequest:
+      type: object
+      description: Request payload for voiding a purchase
+      properties:
+        Id:
+          type: string
+          description: The purchase ID to void
+        SyncToken:
+          type: string
+          description: Current SyncToken of the purchase
+      required:
+        - Id
+        - SyncToken
+
+    Purchase:
+      allOf:
+        - $ref: '#/components/schemas/PurchaseWrite'
+      properties:
+        TotalAmt:
+          type: number
+          format: double
+          description: Read-only. Total amount of the purchase
+        TxnSource:
+          type: string
+          description: Read-only. Transaction source indicator
+        RecurDataRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Read-only. Reference to recurring transaction data if applicable
+        IncludeInAnnualTPAR:
+          type: boolean
+          description: Optional. Australia only. Include in annual TPAR reporting.
+        domain:
+          type: string
+          example: QBO
+          description: Read-only. Domain indicator
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+          description: System metadata for the entity
+
+    PurchaseEnvelope:
+      type: object
+      description: Envelope containing a single purchase response
+      required:
+        - Purchase
+        - time
+      properties:
+        Purchase:
+          $ref: '#/components/schemas/Purchase'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    PurchaseQueryResponse:
+      type: object
+      description: Response from a purchase query
+      properties:
+        Purchase:
+          type: array
+          items:
+            $ref: '#/components/schemas/Purchase'
+          description: Array of purchases matching the query
+        startPosition:
+          type: integer
+          description: Start position of results
+        maxResults:
+          type: integer
+          description: Maximum results returned
+        totalCount:
+          type: integer
+          description: Total number of results available
+        Fault:
+          $ref: '#/components/schemas/Fault'
+          description: Fault information if an error occurred
+
+    PurchaseQueryEnvelope:
+      type: object
+      description: Envelope containing a purchase query response
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/PurchaseQueryResponse'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    FaultError:
+      type: object
+      description: Individual error within a fault
+      properties:
+        Message:
+          type: string
+          description: Error message
+        Detail:
+          type: string
+          description: Detailed error information
+        code:
+          type: string
+          description: Error code
+        element:
+          type: string
+          description: Element that caused the error
+
+    Fault:
+      type: object
+      description: Fault object containing error details
+      properties:
+        type:
+          type: string
+          description: Fault type
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+          description: Array of errors
+
+    FaultEnvelope:
+      type: object
+      description: Envelope containing fault information
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp

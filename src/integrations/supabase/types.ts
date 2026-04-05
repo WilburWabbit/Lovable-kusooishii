@@ -2882,6 +2882,97 @@ export type Database = {
         }
         Relationships: []
       }
+      welcome_code: {
+        Row: {
+          id: string
+          code: string
+          ebay_order_id: string
+          sales_order_id: string | null
+          customer_id: string | null
+          buyer_name: string
+          buyer_email: string | null
+          order_items: Json
+          order_postcode: string | null
+          primary_sku: string | null
+          stripe_coupon_id: string | null
+          stripe_promo_code_id: string | null
+          promo_code: string | null
+          discount_pct: number
+          scanned_at: string | null
+          scan_count: number
+          redeemed_at: string | null
+          redeemed_order_id: string | null
+          user_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          code: string
+          ebay_order_id: string
+          sales_order_id?: string | null
+          customer_id?: string | null
+          buyer_name: string
+          buyer_email?: string | null
+          order_items?: Json
+          order_postcode?: string | null
+          primary_sku?: string | null
+          stripe_coupon_id?: string | null
+          stripe_promo_code_id?: string | null
+          promo_code?: string | null
+          discount_pct?: number
+          scanned_at?: string | null
+          scan_count?: number
+          redeemed_at?: string | null
+          redeemed_order_id?: string | null
+          user_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          code?: string
+          ebay_order_id?: string
+          sales_order_id?: string | null
+          customer_id?: string | null
+          buyer_name?: string
+          buyer_email?: string | null
+          order_items?: Json
+          order_postcode?: string | null
+          primary_sku?: string | null
+          stripe_coupon_id?: string | null
+          stripe_promo_code_id?: string | null
+          promo_code?: string | null
+          discount_pct?: number
+          scanned_at?: string | null
+          scan_count?: number
+          redeemed_at?: string | null
+          redeemed_order_id?: string | null
+          user_id?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "welcome_code_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "welcome_code_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customer"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "welcome_code_redeemed_order_id_fkey"
+            columns: ["redeemed_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wishlist: {
         Row: {
           created_at: string

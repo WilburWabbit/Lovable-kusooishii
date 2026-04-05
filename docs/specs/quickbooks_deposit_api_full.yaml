@@ -1,0 +1,680 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - Deposit
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online Deposit entity.
+    Includes create, update, read, void (soft delete), and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+    Critical for payout reconciliation — supports linking deposits to payments, sales receipts,
+    and transfers to match Stripe/eBay payouts to bank deposits.
+
+externalDocs:
+  description: Official Intuit Deposit documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/deposit
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: Deposit
+    description: Deposit resource operations for payout reconciliation
+
+paths:
+  /v3/company/{realmId}/deposit:
+    post:
+      tags:
+        - Deposit
+      summary: Create or update a deposit
+      operationId: createOrUpdateDeposit
+      description: |
+        Create a new Deposit or update an existing one.
+        Deposits represent bank deposits and are used to record deposits into bank accounts
+        and track which payments, sales receipts, and transfers are included in each deposit.
+        Critical for reconciling Stripe/eBay payouts to bank deposits.
+        Void a deposit by updating Status to Void (acts as soft delete).
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/DepositCreateRequest'
+                - $ref: '#/components/schemas/DepositUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/DepositOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/deposit/{depositId}:
+    get:
+      tags:
+        - Deposit
+      summary: Read a deposit by ID
+      operationId: getDepositById
+      description: |
+        Retrieve a deposit by its unique identifier.
+        Returns the complete deposit entity with all line items, linked transactions, and metadata.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/DepositId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/DepositOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - Deposit
+      summary: Query deposits using GET
+      operationId: queryDepositsGet
+      description: |
+        Query deposits using QBO query language (GET method).
+        Supports filtering by date, account, status, and other fields for payout reconciliation.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/DepositQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/DepositQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - Deposit
+      summary: Query deposits using POST
+      operationId: queryDepositsPost
+      description: |
+        Query deposits using QBO query language (POST method).
+        Supports filtering by date, account, status, and other fields for payout reconciliation.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/DepositQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/DepositQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    DepositId:
+      name: depositId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "127"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    DepositQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/DepositQueryStatement'
+
+  responses:
+    DepositOrFault:
+      description: Deposit response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/DepositEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    DepositQueryOrFault:
+      description: Deposit query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/DepositQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    DepositQueryStatement:
+      type: string
+      example: SELECT * FROM Deposit WHERE TxnDate >= '2024-01-01' AND DepositToAccountRef.value = '35' STARTPOSITION 1 MAXRESULTS 10
+
+    ReferenceType:
+      type: object
+      description: Reference object containing an identifier and optional name for linked entities
+      properties:
+        value:
+          type: string
+          description: Entity ID reference
+        name:
+          type: string
+          description: Entity name
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      description: Currency reference object
+      properties:
+        value:
+          type: string
+          description: Currency code (e.g., USD)
+        name:
+          type: string
+          description: Currency name
+      required:
+        - value
+
+    MetaData:
+      type: object
+      description: Metadata for audit trail including creation and last update timestamps
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+          description: When the deposit was created
+        LastUpdatedTime:
+          type: string
+          format: date-time
+          description: When the deposit was last updated
+
+    LinkedTxn:
+      type: object
+      description: |
+        Links a line item in the deposit to the payment, sales receipt, transfer, or invoice
+        that was deposited. Critical for payout reconciliation — matches Stripe/eBay payout
+        payments to their corresponding bank deposits.
+      properties:
+        TxnId:
+          type: string
+          description: |
+            The unique identifier of the transaction being linked.
+            For Stripe/eBay payouts, this is the Payment ID (e.g., PAYOUT-123456).
+            Enables matching specific payout transactions to deposits for reconciliation.
+        TxnType:
+          type: string
+          enum:
+            - Payment
+            - SalesReceipt
+            - Transfer
+            - Invoice
+            - Check
+            - CreditCardPayment
+            - JournalEntry
+          description: |
+            Type of transaction being linked. Indicates which entity type TxnId references.
+            'Payment' typically represents customer payments that are part of Stripe/eBay payouts.
+
+    DepositLineDetail:
+      type: object
+      description: |
+        Detailed deposit line information. Specifies the account and method of payment
+        for each item in the deposit. Essential for understanding which customer payments,
+        payments from payment processors (Stripe, eBay), and transfers are included.
+      properties:
+        Entity:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            The customer or entity who made the payment.
+            For Stripe/eBay payout deposits, this references the customer or vendor
+            whose payment is included in the deposit.
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Class for departmental tracking if enabled
+        AccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            The income or asset account to which this deposit line is recorded.
+            For customer payments, typically Accounts Receivable.
+            For Stripe/eBay payouts, the payout clearing account.
+        PaymentMethodRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            Payment method (e.g., credit card, ACH, check).
+            Helps identify how payments were received.
+        CheckNum:
+          type: string
+          description: Check number if this line represents a check deposit
+        TxnType:
+          type: string
+          enum:
+            - Sales
+            - Invoice
+            - Transfer
+            - Check
+            - CreditCardPayment
+            - JournalEntry
+          description: Type of transaction this deposit line represents
+
+    Line:
+      type: object
+      description: |
+        A line item in a deposit. Each line represents one or more payments/transfers
+        being deposited together. Contains the amount, detail type, and linked transactions
+        for payout reconciliation.
+      properties:
+        Id:
+          type: string
+          description: Unique identifier for this line within the deposit
+        LineNum:
+          type: integer
+          description: Line sequence number in the deposit
+        Description:
+          type: string
+          description: |
+            Description of the deposit line.
+            For Stripe/eBay payouts, should reference the payout ID or date.
+        Amount:
+          type: number
+          format: double
+          description: |
+            Amount deposited on this line.
+            For Stripe/eBay payouts, the total payout amount deposited in this line.
+        DetailType:
+          type: string
+          enum:
+            - DepositLineDetail
+          description: Must be "DepositLineDetail" to indicate this is a deposit line
+        DepositLineDetail:
+          $ref: '#/components/schemas/DepositLineDetail'
+          description: Detailed information about this deposit line
+        LinkedTxn:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkedTxn'
+          description: |
+            Array of transactions linked to this deposit line.
+            Each element links to a Payment, SalesReceipt, Transfer, or Invoice
+            that was included in the deposit. Critical for reconciliation:
+            enables matching each individual payout payment to the bank deposit.
+
+    CashBack:
+      type: object
+      description: |
+        Cash back information if the deposit includes cash back from a payment processor.
+        Represents funds withheld or returned from the deposit.
+      properties:
+        AccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Account to record cash back amount
+        Amount:
+          type: number
+          format: double
+          description: Cash back amount
+        Memo:
+          type: string
+          description: Memo describing the cash back
+
+    TxnTaxDetail:
+      type: object
+      description: Tax details for the deposit if applicable
+      properties:
+        TaxLine:
+          type: array
+          items:
+            type: object
+            description: Individual tax line
+          description: Array of tax lines
+
+    DepositWrite:
+      type: object
+      description: Base deposit write schema with properties for create and update
+      properties:
+        Id:
+          type: string
+          description: Unique deposit identifier (read-only on create, required on update)
+        SyncToken:
+          type: string
+          description: |
+            Token used for optimistic locking on updates.
+            Required when updating an existing deposit.
+        sparse:
+          type: boolean
+          description: |
+            When true, only the specified fields are updated.
+            Other fields retain their existing values.
+        TxnDate:
+          type: string
+          format: date
+          description: Date of the deposit transaction
+        DepositToAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: |
+            REQUIRED. The bank account to which the deposit is made.
+            For Stripe/eBay payouts, this is the business bank account
+            receiving the transferred funds.
+        Line:
+          type: array
+          items:
+            $ref: '#/components/schemas/Line'
+          description: |
+            REQUIRED. Array of line items detailing what is being deposited.
+            Each line can represent one or more linked payments/receipts.
+            Critical for reconciliation — each line's LinkedTxn array
+            specifies which payments/receipts are in this deposit.
+        CashBack:
+          $ref: '#/components/schemas/CashBack'
+          description: Cash back details if applicable
+        DepartmentRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Department reference if departmental tracking is enabled
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+          description: Currency of the deposit
+        ExchangeRate:
+          type: number
+          format: double
+          description: Exchange rate if multi-currency
+        PrivateNote:
+          type: string
+          maxLength: 4000
+          description: Private internal note about the deposit
+        TxnTaxDetail:
+          $ref: '#/components/schemas/TxnTaxDetail'
+          description: Tax details if applicable
+        GlobalTaxCalculation:
+          type: string
+          enum:
+            - TaxExcluded
+            - TaxInclusive
+            - NotApplicable
+          description: Indicates how tax was calculated for this deposit
+
+    DepositCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/DepositWrite'
+      description: Request schema for creating a new deposit
+      required:
+        - TxnDate
+        - DepositToAccountRef
+        - Line
+
+    DepositUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/DepositWrite'
+      description: Request schema for updating an existing deposit
+      required:
+        - Id
+        - SyncToken
+
+    Deposit:
+      allOf:
+        - $ref: '#/components/schemas/DepositWrite'
+      description: Complete deposit entity with read-only properties
+      properties:
+        TotalAmt:
+          type: number
+          format: double
+          description: |
+            Read-only. Total amount of the deposit.
+            Calculated as the sum of all line amounts minus cash back.
+        HomeTotalAmt:
+          type: number
+          format: double
+          description: |
+            Read-only. Total amount in home currency if multi-currency.
+            Calculated using the exchange rate if applicable.
+        TxnSource:
+          type: string
+          description: Read-only. Source of the transaction
+        RecurDataRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Read-only. Reference to recurring transaction data if applicable
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+          description: Read-only. Metadata including creation and update timestamps
+        domain:
+          type: string
+          example: QBO
+          description: Read-only. Domain indicator
+
+    DepositEnvelope:
+      type: object
+      required:
+        - Deposit
+        - time
+      description: Response envelope containing a deposit entity
+      properties:
+        Deposit:
+          $ref: '#/components/schemas/Deposit'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    DepositQueryResponse:
+      type: object
+      description: Query response containing deposits matching the query criteria
+      properties:
+        Deposit:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deposit'
+          description: Array of deposits matching the query
+        startPosition:
+          type: integer
+          description: Starting position of results in the full result set
+        maxResults:
+          type: integer
+          description: Maximum results requested
+        totalCount:
+          type: integer
+          description: Total number of deposits matching the query
+        Fault:
+          $ref: '#/components/schemas/Fault'
+          description: Fault information if a query error occurred
+
+    DepositQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      description: Response envelope containing deposit query results
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/DepositQueryResponse'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    FaultError:
+      type: object
+      description: Individual error within a fault
+      properties:
+        Message:
+          type: string
+          description: Error message
+        Detail:
+          type: string
+          description: Detailed error information
+        code:
+          type: string
+          description: Error code
+        element:
+          type: string
+          description: Field or element where error occurred
+
+    Fault:
+      type: object
+      description: Fault object containing error details
+      properties:
+        type:
+          type: string
+          description: Fault type
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+          description: Array of errors
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      description: Response envelope containing a fault (error response)
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp

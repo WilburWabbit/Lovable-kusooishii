@@ -1277,6 +1277,40 @@ Deno.serve(async (req) => {
       console.log(`v2-process-order triggered for eBay order ${newOrder.id}`);
     } catch { /* best effort */ }
 
+    // ── Step 16: Generate welcome code for eBay buyer (non-fatal) ──
+    // Creates a QR welcome code + Stripe promo on the customer's first eBay order.
+    // Repeat buyers with unredeemed codes get the existing code returned.
+    // Fire-and-forget — failure here does not affect the order.
+    let welcomeCodeTriggered = false;
+    try {
+      const welcomeItems = processedLines.map(pl => ({
+        mpn: pl.skuCode?.split(".")[0] || "",
+        name: pl.title || "",
+        img_url: "",
+        quantity: pl.qty,
+        sku_code: pl.skuCode || "",
+      }));
+
+      fetch(`${Deno.env.get("SUPABASE_URL")!}/functions/v1/generate-welcome-code`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ebay_order_id: orderId,
+          sales_order_id: newOrder.id,
+          customer_id: localCustomerId || null,
+          buyer_name: buyerName,
+          buyer_email: buyerEmail || null,
+          order_items: welcomeItems,
+          order_postcode: shippingAddr?.postalCode || null,
+        }),
+      }).catch(() => console.warn("generate-welcome-code trigger failed (non-blocking)"));
+      welcomeCodeTriggered = true;
+      console.log(`generate-welcome-code triggered for eBay order ${orderId}`);
+    } catch { /* best effort */ }
+
     console.log(`Pipeline complete for ${orderId}: qbo_sync_status=${qboSyncStatus}`);
 
     return new Response(
@@ -1290,6 +1324,7 @@ Deno.serve(async (req) => {
         lines_processed: processedLines.length,
         units_depleted: unitsDepletedTotal,
         stock_pushed: stockPushed,
+        welcome_code_triggered: welcomeCodeTriggered,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

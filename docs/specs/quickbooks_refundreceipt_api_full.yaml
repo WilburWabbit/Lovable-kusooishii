@@ -1,0 +1,679 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - RefundReceipt
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online RefundReceipt entity.
+    Includes create, update, read, and query endpoints with full response envelopes,
+    fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit RefundReceipt documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/refundreceipt
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: RefundReceipt
+    description: RefundReceipt resource operations
+
+paths:
+  /v3/company/{realmId}/refundreceipt:
+    post:
+      tags:
+        - RefundReceipt
+      summary: Create or update a refund receipt
+      operationId: createOrUpdateRefundReceipt
+      description: |
+        Create a new RefundReceipt or update an existing one.
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/RefundReceiptCreateRequest'
+                - $ref: '#/components/schemas/RefundReceiptUpdateRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/RefundReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/refundreceipt/{refundReceiptId}:
+    get:
+      tags:
+        - RefundReceipt
+      summary: Read a refund receipt by ID
+      operationId: getRefundReceiptById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/RefundReceiptId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/RefundReceiptOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - RefundReceipt
+      summary: Query refund receipts using GET
+      operationId: queryRefundReceiptsGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/RefundReceiptQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/RefundReceiptQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - RefundReceipt
+      summary: Query refund receipts using POST
+      operationId: queryRefundReceiptsPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/RefundReceiptQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/RefundReceiptQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    RefundReceiptId:
+      name: refundReceiptId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    RefundReceiptQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/RefundReceiptQueryStatement'
+
+  responses:
+    RefundReceiptOrFault:
+      description: RefundReceipt response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/RefundReceiptEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    RefundReceiptQueryOrFault:
+      description: RefundReceipt query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/RefundReceiptQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    RefundReceiptQueryStatement:
+      type: string
+      example: SELECT * FROM RefundReceipt STARTPOSITION 1 MAXRESULTS 5
+
+    ReferenceType:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    CurrencyRef:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    PhysicalAddress:
+      type: object
+      properties:
+        Id:
+          type: string
+        Line1:
+          type: string
+        Line2:
+          type: string
+        Line3:
+          type: string
+        Line4:
+          type: string
+        City:
+          type: string
+        Country:
+          type: string
+        CountrySubDivisionCode:
+          type: string
+        PostalCode:
+          type: string
+
+    EmailAddress:
+      type: object
+      properties:
+        Address:
+          type: string
+          format: email
+
+    Line:
+      type: object
+      properties:
+        Id:
+          type: string
+        LineNum:
+          type: integer
+        Description:
+          type: string
+        Amount:
+          type: number
+          format: double
+        DetailType:
+          type: string
+          enum:
+            - SalesItemLineDetail
+            - SubTotalLineDetail
+            - DiscountLineDetail
+        SalesItemLineDetail:
+          $ref: '#/components/schemas/SalesItemLineDetail'
+        SubTotalLineDetail:
+          $ref: '#/components/schemas/SubTotalLineDetail'
+        DiscountLineDetail:
+          $ref: '#/components/schemas/DiscountLineDetail'
+
+    SalesItemLineDetail:
+      type: object
+      properties:
+        ItemRef:
+          $ref: '#/components/schemas/ReferenceType'
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+        UnitPrice:
+          type: number
+          format: double
+        Qty:
+          type: number
+          format: double
+        TaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        ServiceDate:
+          type: string
+          format: date
+
+    SubTotalLineDetail:
+      type: object
+      properties:
+        SubTotalLineDetail:
+          type: object
+
+    DiscountLineDetail:
+      type: object
+      properties:
+        PercentBased:
+          type: boolean
+        DiscountPercent:
+          type: number
+          format: double
+        DiscountAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+
+    TxnTaxDetail:
+      type: object
+      properties:
+        TxnTaxCodeRef:
+          $ref: '#/components/schemas/ReferenceType'
+        TotalTax:
+          type: number
+          format: double
+        TaxLine:
+          type: array
+          items:
+            type: object
+            properties:
+              Amount:
+                type: number
+                format: double
+              DetailType:
+                type: string
+              TaxLineDetail:
+                type: object
+
+    CustomField:
+      type: object
+      properties:
+        DefinitionId:
+          type: string
+        Name:
+          type: string
+        Type:
+          type: string
+          enum:
+            - StringType
+            - BooleanType
+        StringValue:
+          type: string
+        BooleanValue:
+          type: boolean
+
+    CheckPayment:
+      type: object
+      properties:
+        CheckNum:
+          type: string
+        Status:
+          type: string
+        NameOnAcct:
+          type: string
+        AcctNum:
+          type: string
+        BankName:
+          type: string
+
+    CreditCardPayment:
+      type: object
+      properties:
+        CreditChargeInfo:
+          type: object
+          properties:
+            ProcessPayment:
+              type: boolean
+            CcExpiryMonth:
+              type: integer
+            CcExpiryYear:
+              type: integer
+        CreditChargeResponse:
+          type: object
+          properties:
+            ChargeStatus:
+              type: string
+            TxnId:
+              type: string
+
+    RefundReceiptWrite:
+      type: object
+      properties:
+        Id:
+          type: string
+        SyncToken:
+          type: string
+        sparse:
+          type: boolean
+        DocNumber:
+          type: string
+          maxLength: 21
+        TxnDate:
+          type: string
+          format: date
+        Line:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Line'
+        CustomerRef:
+          $ref: '#/components/schemas/ReferenceType'
+        CustomerMemo:
+          type: object
+          properties:
+            value:
+              type: string
+        BillAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        ShipAddr:
+          $ref: '#/components/schemas/PhysicalAddress'
+        BillEmail:
+          $ref: '#/components/schemas/EmailAddress'
+        ClassRef:
+          $ref: '#/components/schemas/ReferenceType'
+        DepartmentRef:
+          $ref: '#/components/schemas/ReferenceType'
+        PrivateNote:
+          type: string
+          maxLength: 4000
+        PaymentMethodRef:
+          $ref: '#/components/schemas/ReferenceType'
+        PaymentRefNum:
+          type: string
+        DepositToAccountRef:
+          $ref: '#/components/schemas/ReferenceType'
+        CurrencyRef:
+          $ref: '#/components/schemas/CurrencyRef'
+        ExchangeRate:
+          type: number
+          format: double
+        ApplyTaxAfterDiscount:
+          type: boolean
+          default: false
+        PrintStatus:
+          type: string
+          enum:
+            - NotSet
+            - NeedToPrint
+            - PrintComplete
+        EmailStatus:
+          type: string
+          enum:
+            - NotSet
+            - NeedToSend
+            - EmailSent
+        TxnTaxDetail:
+          $ref: '#/components/schemas/TxnTaxDetail'
+        CustomField:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomField'
+        GlobalTaxCalculation:
+          type: string
+          enum:
+            - TaxExcluded
+            - TaxInclusive
+            - NotApplicable
+        CheckPayment:
+          $ref: '#/components/schemas/CheckPayment'
+        CreditCardPayment:
+          $ref: '#/components/schemas/CreditCardPayment'
+
+    RefundReceiptCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/RefundReceiptWrite'
+      required:
+        - Line
+        - CustomerRef
+        - DepositToAccountRef
+
+    RefundReceiptUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/RefundReceiptWrite'
+      required:
+        - Id
+        - SyncToken
+
+    RefundReceipt:
+      allOf:
+        - $ref: '#/components/schemas/RefundReceiptWrite'
+      properties:
+        HomeTotalAmt:
+          type: number
+          format: double
+          readOnly: true
+        TotalAmt:
+          type: number
+          format: double
+          readOnly: true
+        Balance:
+          type: number
+          format: double
+          readOnly: true
+        TxnSource:
+          type: string
+          readOnly: true
+        RecurDataRef:
+          $ref: '#/components/schemas/ReferenceType'
+          readOnly: true
+        RemainingCredit:
+          type: number
+          format: double
+          readOnly: true
+        domain:
+          type: string
+          example: QBO
+          readOnly: true
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+
+    RefundReceiptEnvelope:
+      type: object
+      required:
+        - RefundReceipt
+        - time
+      properties:
+        RefundReceipt:
+          $ref: '#/components/schemas/RefundReceipt'
+        time:
+          type: string
+          format: date-time
+
+    RefundReceiptQueryResponse:
+      type: object
+      properties:
+        RefundReceipt:
+          type: array
+          items:
+            $ref: '#/components/schemas/RefundReceipt'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    RefundReceiptQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/RefundReceiptQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time

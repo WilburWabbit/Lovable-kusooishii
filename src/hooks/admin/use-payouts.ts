@@ -15,9 +15,71 @@ import type {
 // ─── Query Keys ─────────────────────────────────────────────
 
 export const payoutKeys = {
-  all: ['v2', 'payouts'] as const,
-  summary: ['v2', 'payouts', 'summary'] as const,
+  all:        ['v2', 'payouts']              as const,
+  summary:    ['v2', 'payouts', 'summary']   as const,
+  fees:       (payoutId: string)    => ['v2', 'payouts', payoutId, 'fees']    as const,
+  orderFees:  (orderId: string)     => ['v2', 'order-fees', orderId]          as const,
+  unitProfit: (unitId?: string)     => unitId
+    ? ['v2', 'unit-profit', unitId] as const
+    : ['v2', 'unit-profit']         as const,
 };
+
+// ─── Fee Types ──────────────────────────────────────────────
+
+export type FeeCategory =
+  | 'selling_fee'
+  | 'shipping_label'
+  | 'payment_processing'
+  | 'advertising'
+  | 'subscription'
+  | 'other';
+
+export interface PayoutFee {
+  id: string;
+  payoutId: string;
+  salesOrderId: string | null;
+  externalOrderId: string | null;
+  feeCategory: FeeCategory;
+  amount: number;
+  channel: string;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface PayoutFeeLine {
+  id: string;
+  payoutFeeId: string;
+  ebayTransactionId: string | null;
+  feeType: string;      // raw eBay feeType e.g. FINAL_VALUE_FEE
+  feeCategory: FeeCategory;
+  amount: number;
+  createdAt: string;
+}
+
+export interface PayoutFeeWithLines extends PayoutFee {
+  lines: PayoutFeeLine[];
+}
+
+export interface UnitProfit {
+  stockUnitId: string;
+  uid: string | null;
+  sku: string;
+  v2Status: string;
+  batchId: string | null;
+  payoutId: string | null;
+  salesOrderId: string;
+  grossRevenue: number;
+  landedCost: number;
+  sellingFee: number;
+  shippingFee: number;
+  processingFee: number;
+  advertisingFee: number;
+  totalFeesPerUnit: number;
+  netProfit: number;
+  netMarginPct: number | null;
+  grossMarginPct: number | null;
+  feePct: number | null;
+}
 
 // ─── Row → Interface Mapper ────────────────────────────────
 
@@ -256,6 +318,236 @@ export function useImportEbayPayouts() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
       queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
+      // Fee data may have changed — invalidate profit view too
+      queryClient.invalidateQueries({ queryKey: payoutKeys.unitProfit() });
+    },
+  });
+}
+
+// ─── usePayoutFees ──────────────────────────────────────────
+// All payout_fee rows for a given payout, with their lines.
+
+function mapPayoutFee(row: Record<string, unknown>): PayoutFee {
+  return {
+    id:              row.id as string,
+    payoutId:        row.payout_id as string,
+    salesOrderId:    (row.sales_order_id as string) ?? null,
+    externalOrderId: (row.external_order_id as string) ?? null,
+    feeCategory:     row.fee_category as FeeCategory,
+    amount:          row.amount as number,
+    channel:         row.channel as string,
+    description:     (row.description as string) ?? null,
+    createdAt:       row.created_at as string,
+  };
+}
+
+function mapPayoutFeeLine(row: Record<string, unknown>): PayoutFeeLine {
+  return {
+    id:                row.id as string,
+    payoutFeeId:       row.payout_fee_id as string,
+    ebayTransactionId: (row.ebay_transaction_id as string) ?? null,
+    feeType:           row.fee_type as string,
+    feeCategory:       row.fee_category as FeeCategory,
+    amount:            row.amount as number,
+    createdAt:         row.created_at as string,
+  };
+}
+
+export function usePayoutFees(payoutId: string | undefined) {
+  return useQuery({
+    queryKey: payoutKeys.fees(payoutId ?? ''),
+    enabled: !!payoutId,
+    queryFn: async (): Promise<PayoutFeeWithLines[]> => {
+      const { data: fees, error: feesErr } = await supabase
+        .from('payout_fee' as never)
+        .select('*')
+        .eq('payout_id' as never, payoutId!)
+        .order('fee_category' as never);
+
+      if (feesErr) throw feesErr;
+
+      const feeRows = ((fees ?? []) as Record<string, unknown>[]).map(mapPayoutFee);
+      if (feeRows.length === 0) return [];
+
+      // Fetch all lines for these fees in one query
+      const feeIds = feeRows.map((f) => f.id);
+      const { data: lines, error: linesErr } = await supabase
+        .from('payout_fee_line' as never)
+        .select('*')
+        .in('payout_fee_id' as never, feeIds)
+        .order('fee_type' as never);
+
+      if (linesErr) throw linesErr;
+
+      const lineRows = ((lines ?? []) as Record<string, unknown>[]).map(mapPayoutFeeLine);
+
+      // Group lines by payout_fee_id
+      const linesByFeeId = new Map<string, PayoutFeeLine[]>();
+      for (const line of lineRows) {
+        const existing = linesByFeeId.get(line.payoutFeeId) ?? [];
+        existing.push(line);
+        linesByFeeId.set(line.payoutFeeId, existing);
+      }
+
+      return feeRows.map((fee) => ({
+        ...fee,
+        lines: linesByFeeId.get(fee.id) ?? [],
+      }));
+    },
+  });
+}
+
+// ─── useOrderFees ───────────────────────────────────────────
+// All payout_fee rows for a specific sales order.
+// Useful for the order detail view to show fee breakdown.
+
+export function useOrderFees(salesOrderId: string | undefined) {
+  return useQuery({
+    queryKey: payoutKeys.orderFees(salesOrderId ?? ''),
+    enabled: !!salesOrderId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payout_fee' as never)
+        .select('*')
+        .eq('sales_order_id' as never, salesOrderId!)
+        .order('fee_category' as never);
+
+      if (error) throw error;
+
+      return ((data ?? []) as Record<string, unknown>[]).map(mapPayoutFee);
+    },
+  });
+}
+
+// ─── useUnitProfit ──────────────────────────────────────────
+// Queries unit_profit_view.
+// Pass a unitId to get a single unit; omit for all sold units.
+
+function mapUnitProfit(row: Record<string, unknown>): UnitProfit {
+  return {
+    stockUnitId:      row.stock_unit_id as string,
+    uid:              (row.uid as string) ?? null,
+    sku:              row.sku as string,
+    v2Status:         row.v2_status as string,
+    batchId:          (row.batch_id as string) ?? null,
+    payoutId:         (row.payout_id as string) ?? null,
+    salesOrderId:     row.sales_order_id as string,
+    grossRevenue:     row.gross_revenue as number,
+    landedCost:       row.landed_cost as number,
+    sellingFee:       row.selling_fee as number,
+    shippingFee:      row.shipping_fee as number,
+    processingFee:    row.processing_fee as number,
+    advertisingFee:   row.advertising_fee as number,
+    totalFeesPerUnit: row.total_fees_per_unit as number,
+    netProfit:        row.net_profit as number,
+    netMarginPct:     (row.net_margin_pct as number) ?? null,
+    grossMarginPct:   (row.gross_margin_pct as number) ?? null,
+    feePct:           (row.fee_pct as number) ?? null,
+  };
+}
+
+export function useUnitProfit(unitId?: string) {
+  return useQuery({
+    queryKey: payoutKeys.unitProfit(unitId),
+    queryFn: async (): Promise<UnitProfit[]> => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let query: any = supabase
+        .from('unit_profit_view' as never)
+        .select('*');
+
+      if (unitId) {
+        query = query.eq('stock_unit_id', unitId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return ((data ?? []) as Record<string, unknown>[]).map(mapUnitProfit);
+    },
+  });
+}
+
+// ─── useUnitProfitSummary ───────────────────────────────────
+// Aggregate profit stats across all units — useful for the
+// Payouts dashboard summary cards.
+
+export interface UnitProfitSummary {
+  totalUnits: number;
+  totalRevenue: number;
+  totalCost: number;
+  totalFees: number;
+  totalNetProfit: number;
+  avgNetMarginPct: number | null;
+  avgFeePct: number | null;
+  unitsBelowCost: number;        // net_profit < 0
+  unitsWithoutFees: number;      // total_fees_per_unit = 0 (fees not yet attributed)
+}
+
+export function useUnitProfitSummary() {
+  return useQuery({
+    queryKey: [...payoutKeys.unitProfit(), 'summary'],
+    queryFn: async (): Promise<UnitProfitSummary> => {
+      const { data, error } = await supabase
+        .from('unit_profit_view' as never)
+        .select('gross_revenue, landed_cost, total_fees_per_unit, net_profit, net_margin_pct, fee_pct');
+
+      if (error) throw error;
+
+      type Row = {
+        gross_revenue: number;
+        landed_cost: number;
+        total_fees_per_unit: number;
+        net_profit: number;
+        net_margin_pct: number | null;
+        fee_pct: number | null;
+      };
+
+      const rows = (data ?? []) as Row[];
+
+      if (rows.length === 0) {
+        return {
+          totalUnits: 0,
+          totalRevenue: 0,
+          totalCost: 0,
+          totalFees: 0,
+          totalNetProfit: 0,
+          avgNetMarginPct: null,
+          avgFeePct: null,
+          unitsBelowCost: 0,
+          unitsWithoutFees: 0,
+        };
+      }
+
+      const totalRevenue = rows.reduce((s, r) => s + (r.gross_revenue ?? 0), 0);
+      const totalCost    = rows.reduce((s, r) => s + (r.landed_cost ?? 0), 0);
+      const totalFees    = rows.reduce((s, r) => s + (r.total_fees_per_unit ?? 0), 0);
+      const totalNetProfit = rows.reduce((s, r) => s + (r.net_profit ?? 0), 0);
+
+      const marginsWithData = rows.filter((r) => r.net_margin_pct !== null);
+      const avgNetMarginPct = marginsWithData.length > 0
+        ? Math.round(
+            marginsWithData.reduce((s, r) => s + r.net_margin_pct!, 0) / marginsWithData.length * 100,
+          ) / 100
+        : null;
+
+      const feesWithData = rows.filter((r) => r.fee_pct !== null);
+      const avgFeePct = feesWithData.length > 0
+        ? Math.round(
+            feesWithData.reduce((s, r) => s + r.fee_pct!, 0) / feesWithData.length * 100,
+          ) / 100
+        : null;
+
+      return {
+        totalUnits:       rows.length,
+        totalRevenue:     Math.round(totalRevenue * 100) / 100,
+        totalCost:        Math.round(totalCost    * 100) / 100,
+        totalFees:        Math.round(totalFees    * 100) / 100,
+        totalNetProfit:   Math.round(totalNetProfit * 100) / 100,
+        avgNetMarginPct,
+        avgFeePct,
+        unitsBelowCost:   rows.filter((r) => r.net_profit < 0).length,
+        unitsWithoutFees: rows.filter((r) => r.total_fees_per_unit === 0).length,
+      };
     },
   });
 }

@@ -28,6 +28,7 @@ import UnsubscribePage from "./pages/UnsubscribePage";
 import QboCallbackPage from "./pages/admin/QboCallbackPage";
 import EbayCallbackPage from "./pages/admin/EbayCallbackPage";
 import GmcCallbackPage from "./pages/admin/GmcCallbackPage";
+import WelcomePage from "./pages/WelcomePage";
 import NotFound from "./pages/NotFound";
 import { RequireAdmin } from "./components/RequireAdmin";
 
@@ -75,6 +76,9 @@ const App = () => (
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/bluebell" element={<BlueBellClubPage />} />
             <Route path="/unsubscribe" element={<UnsubscribePage />} />
+
+            {/* Welcome (eBay QR landing — unauthenticated) */}
+            <Route path="/welcome/:code" element={<WelcomePage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />

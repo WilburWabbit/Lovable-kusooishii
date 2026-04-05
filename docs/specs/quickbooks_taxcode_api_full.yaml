@@ -1,0 +1,450 @@
+openapi: 3.0.3
+info:
+  title: QuickBooks Online Accounting API - TaxCode
+  version: "1.0.0"
+  description: >
+    Full OpenAPI 3.0 specification for the QuickBooks Online TaxCode entity.
+    READ-ONLY outside the United States. Includes read and query endpoints with full
+    response envelopes, fault handling, metadata, and OAuth2 security.
+
+externalDocs:
+  description: Official Intuit TaxCode documentation
+  url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxcode
+
+servers:
+  - url: https://quickbooks.api.intuit.com
+    description: Production
+  - url: https://sandbox-quickbooks.api.intuit.com
+    description: Sandbox
+
+security:
+  - intuitOAuth2:
+      - com.intuit.quickbooks.accounting
+
+tags:
+  - name: TaxCode
+    description: Tax code resource operations (read-only outside US)
+
+paths:
+  /v3/company/{realmId}/taxcode/{taxCodeId}:
+    get:
+      tags:
+        - TaxCode
+      summary: Read a tax code by ID
+      operationId: getTaxCodeById
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/TaxCodeId'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxCodeOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+  /v3/company/{realmId}/query:
+    get:
+      tags:
+        - TaxCode
+      summary: Query tax codes using GET
+      operationId: queryTaxCodesGet
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/TaxCodeQuery'
+        - $ref: '#/components/parameters/MinorVersion'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxCodeQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+    post:
+      tags:
+        - TaxCode
+      summary: Query tax codes using POST
+      operationId: queryTaxCodesPost
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/MinorVersion'
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              $ref: '#/components/schemas/TaxCodeQueryStatement'
+      responses:
+        "200":
+          $ref: '#/components/responses/TaxCodeQueryOrFault'
+        "400":
+          $ref: '#/components/responses/FaultResponse400'
+        "401":
+          $ref: '#/components/responses/FaultResponse401'
+        "403":
+          $ref: '#/components/responses/FaultResponse403'
+        "404":
+          $ref: '#/components/responses/FaultResponse404'
+        "429":
+          $ref: '#/components/responses/FaultResponse429'
+        default:
+          $ref: '#/components/responses/FaultResponseDefault'
+
+components:
+  securitySchemes:
+    intuitOAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://appcenter.intuit.com/connect/oauth2
+          tokenUrl: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+          scopes:
+            com.intuit.quickbooks.accounting: Access QuickBooks Online Accounting API resources
+
+  headers:
+    IntuitTid:
+      description: Intuit transaction identifier
+      schema:
+        type: string
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "123145678901234"
+
+    TaxCodeId:
+      name: taxCodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "1"
+
+    MinorVersion:
+      name: minorversion
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        example: 75
+
+    TaxCodeQuery:
+      name: query
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/TaxCodeQueryStatement'
+
+  responses:
+    TaxCodeOrFault:
+      description: TaxCode response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/TaxCodeEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    TaxCodeQueryOrFault:
+      description: TaxCode query response or fault
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/TaxCodeQueryEnvelope'
+              - $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse400:
+      description: Bad request
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse401:
+      description: Unauthorized
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse403:
+      description: Forbidden
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse404:
+      description: Not found
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponse429:
+      description: Rate limit exceeded
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+    FaultResponseDefault:
+      description: Default fault response
+      headers:
+        intuit_tid:
+          $ref: '#/components/headers/IntuitTid'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultEnvelope'
+
+  schemas:
+    TaxCodeQueryStatement:
+      type: string
+      example: SELECT * FROM TaxCode STARTPOSITION 1 MAXRESULTS 5
+
+    ReferenceType:
+      type: object
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+      required:
+        - value
+
+    MetaData:
+      type: object
+      properties:
+        CreateTime:
+          type: string
+          format: date-time
+        LastUpdatedTime:
+          type: string
+          format: date-time
+
+    TaxRateList:
+      type: object
+      description: A list container for tax rates applicable to a tax code
+      properties:
+        TaxRateDetail:
+          type: array
+          description: Array of tax rate details
+          items:
+            $ref: '#/components/schemas/TaxRateDetail'
+
+    TaxRateDetail:
+      type: object
+      description: Details of a single tax rate within a tax rate list
+      properties:
+        TaxRateRef:
+          $ref: '#/components/schemas/ReferenceType'
+          description: Reference to the tax rate entity
+        TaxTypeApplicable:
+          type: string
+          enum:
+            - TaxOnAmount
+            - TaxOnAmountPlusTax
+            - TaxOnTax
+          description: |
+            Specifies how the tax rate is calculated:
+            - TaxOnAmount: Tax is calculated on the item amount only
+            - TaxOnAmountPlusTax: Tax is calculated on the item amount plus previously applied taxes
+            - TaxOnTax: Tax is calculated only on other taxes (cascading tax)
+          example: TaxOnAmount
+        TaxOrder:
+          type: integer
+          description: |
+            The order in which this tax rate is applied when multiple tax rates exist.
+            Lower numbers are applied first.
+          example: 1
+
+    TaxCode:
+      type: object
+      description: |
+        Represents a tax code in QuickBooks Online. Tax codes are used to classify items and transactions
+        for tax calculation purposes. They establish the relationship between items and applicable tax rates.
+        READ-ONLY outside the United States.
+      properties:
+        Id:
+          type: string
+          readOnly: true
+          description: Unique identifier for the tax code assigned by QuickBooks
+          example: '1'
+        SyncToken:
+          type: string
+          description: |
+            Sync token used for optimistic concurrency control. Must be provided when updating a tax code.
+            The token changes with each modification.
+          example: '0'
+        Name:
+          type: string
+          maxLength: 100
+          description: |
+            The name of the tax code. This is a user-friendly identifier displayed in transaction forms.
+            Maximum length is 100 characters.
+          example: 'Tax on Sales'
+        Description:
+          type: string
+          description: |
+            An optional description providing additional context about the tax code and its usage.
+          example: 'Standard sales tax applicable to taxable items'
+        Active:
+          type: boolean
+          default: true
+          description: |
+            Indicates whether the tax code is currently active. Inactive tax codes cannot be assigned
+            to new transactions but remain available for historical reference.
+        Taxable:
+          type: boolean
+          description: |
+            When true, this tax code represents a taxable item classification. When false, items
+            with this code are not subject to tax.
+          example: true
+        TaxGroup:
+          type: boolean
+          description: |
+            When true, this tax code is a tax group containing multiple tax rates. Tax groups
+            aggregate multiple tax rates for combined tax calculation.
+          example: false
+        SalesTaxRateList:
+          $ref: '#/components/schemas/TaxRateList'
+          description: |
+            The list of tax rates applicable for sales transactions. Each tax rate in the list
+            specifies a particular tax to be applied to sales of items with this tax code.
+        PurchaseTaxRateList:
+          $ref: '#/components/schemas/TaxRateList'
+          description: |
+            The list of tax rates applicable for purchase transactions. Each tax rate in the list
+            specifies a particular tax to be applied to purchases of items with this tax code.
+        Hidden:
+          type: boolean
+          readOnly: true
+          description: |
+            Read-only field indicating whether the tax code is hidden from user interfaces.
+            Hidden tax codes are typically system-defined or deprecated.
+        domain:
+          type: string
+          readOnly: true
+          description: Read-only domain identifier for the tax code
+          example: 'QBO'
+        MetaData:
+          $ref: '#/components/schemas/MetaData'
+          description: Metadata about the tax code including creation and modification timestamps
+
+    TaxCodeEnvelope:
+      type: object
+      required:
+        - TaxCode
+        - time
+      properties:
+        TaxCode:
+          $ref: '#/components/schemas/TaxCode'
+        time:
+          type: string
+          format: date-time
+
+    TaxCodeQueryResponse:
+      type: object
+      properties:
+        TaxCode:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxCode'
+        startPosition:
+          type: integer
+        maxResults:
+          type: integer
+        totalCount:
+          type: integer
+        Fault:
+          $ref: '#/components/schemas/Fault'
+
+    TaxCodeQueryEnvelope:
+      type: object
+      required:
+        - QueryResponse
+        - time
+      properties:
+        QueryResponse:
+          $ref: '#/components/schemas/TaxCodeQueryResponse'
+        time:
+          type: string
+          format: date-time
+
+    FaultError:
+      type: object
+      properties:
+        Message:
+          type: string
+        Detail:
+          type: string
+        code:
+          type: string
+        element:
+          type: string
+
+    Fault:
+      type: object
+      properties:
+        type:
+          type: string
+        Error:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaultError'
+
+    FaultEnvelope:
+      type: object
+      required:
+        - Fault
+      properties:
+        Fault:
+          $ref: '#/components/schemas/Fault'
+        time:
+          type: string
+          format: date-time
