@@ -6,7 +6,6 @@
 
 import { useState, useRef } from 'react';
 import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
-import { QboAccountMapping } from './QboAccountMapping';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -412,11 +411,6 @@ export function QboSettingsCard() {
           )}
         </div>
       )}
-
-      {/* QBO Account Mapping */}
-      <div className="mt-5 border-t border-zinc-200 pt-4">
-        <QboAccountMapping />
-      </div>
     </SurfaceCard>
   );
 }

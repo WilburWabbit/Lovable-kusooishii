@@ -75,50 +75,6 @@ export interface FeeBreakdown {
   processing: number;
 }
 
-// ─── Payout Transaction Types ──────────────────────────────
-
-export type PayoutTransactionType =
-  | 'SALE'
-  | 'REFUND'
-  | 'SHIPPING_LABEL'
-  | 'TRANSFER'
-  | 'CREDIT'
-  | 'NON_SALE_CHARGE';
-
-export interface PayoutTransaction {
-  id: string;
-  payoutId: string;
-  transactionId: string;
-  transactionType: PayoutTransactionType;
-  transactionStatus: string;
-  transactionDate: string;
-  orderId: string | null;
-  buyerUsername: string | null;
-  grossAmount: number;
-  totalFees: number;
-  netAmount: number;
-  currency: string;
-  feeDetails: Array<{ feeType: string; amount: number }>;
-  memo: string | null;
-  matchedOrderId: string | null;
-  matched: boolean;
-  matchMethod: string | null;
-  qboSalesReceiptId: string | null;
-  createdAt: string;
-}
-
-// ─── QBO Account Mapping ───────────────────────────────────
-
-export interface QboAccountMappingEntry {
-  id: string;
-  purpose: string;
-  qboAccountId: string;
-  qboAccountName: string;
-  accountType: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 // ─── 2.1 Purchase Batch ────────────────────────────────────
 
 export interface PurchaseBatch {
@@ -263,7 +219,6 @@ export interface Order {
   qboSalesReceiptId: string | null;
   qboSyncStatus: QBOSyncStatus;
   externalOrderId: string | null;
-  orderDate: string;
   createdAt: string;
   shippedAt: string | null;
   deliveredAt: string | null;
@@ -324,13 +279,7 @@ export interface Payout {
   qboDepositId: string | null;
   qboExpenseId: string | null;
   qboSyncStatus: QBOSyncStatus;
-  qboSyncError: string | null;
-  syncAttemptedAt: string | null;
   externalPayoutId: string | null;
-  bankReference: string | null;
-  transactionCount: number;
-  matchedOrderCount: number;
-  unmatchedTransactionCount: number;
   createdAt: string;
   updatedAt: string;
 }

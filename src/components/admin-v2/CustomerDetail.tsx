@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCustomer, useCustomerOrders, customerKeys } from "@/hooks/admin/use-customers";
 import type { CustomerOrderSummary } from "@/hooks/admin/use-customers";
 import type { CustomerRow } from "@/lib/types/admin";
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { WelcomeQrLabel } from "./WelcomeQrLabel";
+import { Gift, Tag } from "lucide-react";
 
 export function CustomerDetail() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -17,6 +19,21 @@ export function CustomerDetail() {
   const queryClient = useQueryClient();
   const { data: customer, isLoading } = useCustomer(customerId);
   const { data: orders = [], isLoading: ordersLoading } = useCustomerOrders(customerId);
+
+  // Fetch welcome codes for this customer
+  const { data: welcomeCodes = [] } = useQuery({
+    queryKey: ["welcome-codes", "customer", customerId],
+    queryFn: async () => {
+      if (!customerId) return [];
+      const { data } = await supabase
+        .from("welcome_code")
+        .select("*")
+        .eq("customer_id", customerId)
+        .order("created_at", { ascending: false });
+      return data || [];
+    },
+    enabled: !!customerId,
+  });
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -155,7 +172,7 @@ export function CustomerDetail() {
       <BackButton onClick={() => navigate("/admin/customers")} label="Customers" />
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-1 flex-wrap">
+      <div className="flex items-center gap-3 mb-1">
         <h1 className="text-[22px] font-bold text-foreground">{customer.name}</h1>
         {customer.blueBellMember && <Badge label="Blue Bell" color="#3B82F6" small />}
         {!customer.active && <Badge label="Inactive" color="#71717A" small />}
@@ -235,7 +252,7 @@ export function CustomerDetail() {
         ) : orders.length === 0 ? (
           <p className="text-muted-foreground text-sm p-4">No orders for this customer.</p>
         ) : (
-          <table className="w-full border-collapse text-[13px] min-w-[500px]">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="border-b border-border">
                 {["Order", "Channel", "Items", "Total", "Status", "Date"].map((h) => (
@@ -260,6 +277,82 @@ export function CustomerDetail() {
           </table>
         )}
       </SurfaceCard>
+
+      {/* Member Benefits */}
+      <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 space-y-2">
+        <h3 className="text-sm font-semibold text-amber-500 flex items-center gap-1.5">
+          <Gift className="h-3.5 w-3.5" />
+          Member Benefits
+        </h3>
+        <div className="text-xs text-muted-foreground space-y-1">
+          {customer.blueBellMember && (
+            <p>✓ Blue Bell LEGO Club — 5% collection discount</p>
+          )}
+          {welcomeCodes.some(wc => !wc.redeemed_at) && (
+            <p>✓ eBay Welcome — 5% first-order promo (unredeemed)</p>
+          )}
+          {welcomeCodes.length > 0 && welcomeCodes.every(wc => wc.redeemed_at) && (
+            <p>✓ eBay Welcome — redeemed</p>
+          )}
+          <p>✓ Wishlist & restock alerts</p>
+          <p>✓ Kuso Grade condition transparency</p>
+          <p>✓ Order tracking & history</p>
+        </div>
+      </div>
+
+      {/* Promotions */}
+      <div className="mt-5">
+        <SectionHead>
+          <span className="flex items-center gap-1.5">
+            <Tag className="h-3.5 w-3.5" />
+            Promotions
+          </span>
+        </SectionHead>
+        <div className="mt-2 space-y-2">
+          {welcomeCodes.length > 0 ? (
+            welcomeCodes.map((wc) => (
+              <SurfaceCard key={wc.id} className="flex items-center justify-between">
+                <div>
+                  <Mono color="amber" className="text-sm font-semibold">{wc.promo_code}</Mono>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {wc.discount_pct}% off · Created{" "}
+                    {new Date(wc.created_at).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                    {wc.scanned_at && ` · Scanned ${wc.scan_count}×`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {wc.redeemed_at ? (
+                    <Badge
+                      label={`Redeemed ${new Date(wc.redeemed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`}
+                      color="#22C55E"
+                      small
+                    />
+                  ) : (
+                    <>
+                      <Badge label="Active" color="#F59E0B" small />
+                      <WelcomeQrLabel
+                        code={wc.code}
+                        promoCode={wc.promo_code || ""}
+                        ebayOrderId={wc.ebay_order_id}
+                        primarySku={wc.primary_sku ?? undefined}
+                        postcode={wc.order_postcode ?? undefined}
+                        buyerName={wc.buyer_name ?? undefined}
+                        compact
+                      />
+                    </>
+                  )}
+                </div>
+              </SurfaceCard>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">No promotions issued.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -315,7 +408,7 @@ function CustomerOrderRow({
   order: CustomerOrderSummary;
   onClick: () => void;
 }) {
-  const formattedDate = new Date(order.orderDate).toLocaleDateString("en-GB", {
+  const formattedDate = new Date(order.createdAt).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",

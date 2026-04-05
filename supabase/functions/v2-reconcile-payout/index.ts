@@ -1,9 +1,15 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-05
 // ============================================================
 // V2 Reconcile Payout
 // Matches a payout to orders, transitions stock units to
 // payout_received, and triggers QBO Deposit + Expense sync.
 // Called by Stripe webhook, eBay import, or admin UI.
+//
+// Phase 1 additions:
+//   2b. Late-match payout_fee rows to orders that were imported
+//       after the payout (fees arrived first, order came later).
+//   2c. Populate payout_orders.order_fees / order_net from
+//       payout_fee aggregate once linkage is established.
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
@@ -78,6 +84,80 @@ Deno.serve(async (req) => {
         }
 
         orderIds = links.map((l) => l.sales_order_id);
+      }
+    }
+
+    // ─── 2b. Late-match payout_fee rows ────────────────────────
+    // Fees may have arrived before the order record existed.
+    // Now that we have orderIds, link any unmatched payout_fee rows
+    // for this payout by matching external_order_id → local sales_order.id.
+    if (orderIds.length > 0) {
+      const { data: externalIdRows } = await admin
+        .from("sales_order")
+        .select("id, external_order_id")
+        .in("id", orderIds);
+
+      type ExternalIdRow = { id: string; external_order_id: string | null };
+      for (const row of ((externalIdRows ?? []) as ExternalIdRow[])) {
+        if (!row.external_order_id) continue;
+
+        await admin
+          .from("payout_fee" as never)
+          .update({ sales_order_id: row.id, updated_at: new Date().toISOString() } as never)
+          .eq("payout_id" as never, payoutId)
+          .eq("external_order_id" as never, row.external_order_id)
+          .is("sales_order_id" as never, null);
+      }
+    }
+
+    // ─── 2c. Populate payout_orders fee totals ──────────────
+    // Aggregate payout_fee by order and write order_fees / order_net
+    // back to payout_orders. Safe to run on every reconciliation —
+    // upsert is idempotent.
+    if (orderIds.length > 0) {
+      const { data: feeRows } = await admin
+        .from("payout_fee" as never)
+        .select("sales_order_id, amount")
+        .eq("payout_id" as never, payoutId)
+        .in("sales_order_id" as never, orderIds);
+
+      type FeeRow = { sales_order_id: string; amount: number };
+      const orderFeeTotals = new Map<string, number>();
+      for (const r of ((feeRows ?? []) as FeeRow[])) {
+        orderFeeTotals.set(
+          r.sales_order_id,
+          (orderFeeTotals.get(r.sales_order_id) ?? 0) + r.amount,
+        );
+      }
+
+      if (orderFeeTotals.size > 0) {
+        // Fetch gross totals for update
+        const { data: grossRows } = await admin
+          .from("payout_orders")
+          .select("sales_order_id, order_gross")
+          .eq("payout_id", payoutId)
+          .in("sales_order_id", [...orderFeeTotals.keys()]);
+
+        type GrossRow = { sales_order_id: string; order_gross: number | null };
+        const grossMap = new Map<string, number>();
+        for (const g of ((grossRows ?? []) as GrossRow[])) {
+          grossMap.set(g.sales_order_id, g.order_gross ?? 0);
+        }
+
+        for (const [soId, feeTotal] of orderFeeTotals.entries()) {
+          const roundedFees = Math.round(feeTotal * 100) / 100;
+          const orderGross  = grossMap.get(soId) ?? 0;
+          const orderNet    = Math.round((orderGross - roundedFees) * 100) / 100;
+
+          await admin
+            .from("payout_orders")
+            .update({
+              order_fees: roundedFees,
+              order_net:  orderNet,
+            } as never)
+            .eq("payout_id", payoutId)
+            .eq("sales_order_id", soId);
+        }
       }
     }
 

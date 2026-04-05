@@ -11,7 +11,6 @@ import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
-import { usePageSeo } from '@/hooks/use-page-seo';
 
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
@@ -39,7 +38,6 @@ function BeerIcon() {
 
 
 export default function CartPage() {
-  usePageSeo({ title: 'Cart', description: 'Your shopping cart.', path: '/cart', noIndex: true });
   const { cart, updateQuantity, removeFromCart, cartTotal } = useStore();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [selectedShipping, setSelectedShipping] = useState('standard');

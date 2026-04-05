@@ -146,19 +146,26 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       <BackButton onClick={() => navigate("/admin/products")} label="Back to products" />
 
       {/* Header */}
-      <div className="mb-5">
-        <div className="flex items-center gap-3 mb-1.5 flex-wrap">
-          <h1 className="text-[22px] font-bold text-zinc-900">{product.name}</h1>
-          <Mono color="amber" className="text-sm">{product.mpn}</Mono>
-        </div>
-        <div className="text-zinc-500 text-[13px]">
-          Theme: {product.theme ?? "\u2014"}
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <div className="flex items-center gap-3 mb-1.5">
+            <h1 className="text-[22px] font-bold text-zinc-900">{product.name}</h1>
+            <Mono color="amber" className="text-sm">{product.mpn}</Mono>
+          </div>
+          <div className="text-zinc-500 text-[13px]">
+            Theme: {product.theme ?? "\u2014"}
+          </div>
         </div>
       </div>
 
       {/* Variant summary cards */}
       {product.variants.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <div
+          className="grid gap-3 mb-5"
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(product.variants.length, 4)}, 1fr)`,
+          }}
+        >
           {product.variants.map((v) => (
             <SurfaceCard key={v.sku} className="p-3.5">
               <div className="flex items-center justify-between mb-2.5">
@@ -200,7 +207,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-zinc-200 mb-5 overflow-x-auto whitespace-nowrap">
+      <div className="flex gap-0 border-b border-zinc-200 mb-5">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -225,7 +232,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       {/* Tab content */}
       {activeTab === "stock" && <StockUnitsTab mpn={mpn} />}
       {activeTab === "copy" && <CopyMediaTab product={product} />}
-      {activeTab === "channels" && <ChannelsTab variants={product.variants} product={product} />}
+      {activeTab === "channels" && <ChannelsTab variants={product.variants} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
     </div>
   );

@@ -33,10 +33,10 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
       const { error: orderErr } = await supabase
         .from("sales_order")
         .update({
-          v2_status: "shipped",
-          shipped_via: carrier,
+          status: "shipped",
+          carrier,
           tracking_number: trackingNumber.trim() || null,
-          shipped_date: now.split("T")[0],
+          shipped_at: now,
         } as never)
         .eq("id", orderId);
 
@@ -53,26 +53,6 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
         .in("v2_status" as never, ["sold"]);
 
       if (unitErr) throw unitErr;
-
-      // Push shipping details to QBO (fire-and-forget)
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          const { data: orderRow } = await supabase
-            .from("sales_order")
-            .select("qbo_sales_receipt_id")
-            .eq("id", orderId)
-            .single();
-
-          if (orderRow?.qbo_sales_receipt_id) {
-            supabase.functions.invoke("qbo-update-sales-receipt", {
-              body: { orderId },
-            });
-          }
-        }
-      } catch (qboErr) {
-        console.warn("QBO shipping sync skipped:", qboErr);
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: orderKeys.all });

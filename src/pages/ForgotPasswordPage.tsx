@@ -6,10 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function ForgotPasswordPage() {
-  usePageSeo({ title: 'Forgot Password', description: 'Reset your Kuso Oishii password.', path: '/forgot-password', noIndex: true });
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);

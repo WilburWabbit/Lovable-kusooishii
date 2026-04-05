@@ -88,7 +88,7 @@ const ProductCard = ({ product, onAddToCart }: ProductCardProps) => {
 
           {/* Wishlist */}
           <div className="absolute top-3 right-3">
-            <Button variant="ghost" size="icon" className="bg-background/80 backdrop-blur-sm hover:bg-background" onClick={handleWishlistToggle} aria-label={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}>
+            <Button variant="ghost" size="icon" className="bg-background/80 backdrop-blur-sm hover:bg-background" onClick={handleWishlistToggle}>
               <Heart className={`h-4 w-4 ${isWishlisted ? 'fill-primary text-primary' : 'text-muted-foreground'}`} />
             </Button>
           </div>

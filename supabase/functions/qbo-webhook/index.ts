@@ -1,18 +1,14 @@
-// Redeployed: 2026-XX-XX — CloudEvents v1.0 migration
+// Redeployed: 2026-03-27 — Async-first architecture
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 /**
- * QBO Webhook Receiver — CloudEvents v1.0
+ * QBO Webhook Receiver — Immediate-ACK Architecture
  *
- * Receives POST from Intuit in CloudEvents format (flat array of events),
- * verifies HMAC signature, responds 200 immediately, then fetches full
- * entity data from QBO and lands it into staging tables via
- * EdgeRuntime.waitUntil.
+ * Receives POST from Intuit, verifies HMAC signature, lands the raw
+ * notification metadata into a staging table, responds 200 immediately,
+ * then fires off async processing via EdgeRuntime.waitUntil.
  *
- * Echo suppression: checks qbo_outbound_queue to skip webhook events
- * triggered by our own outbound pushes (prevents infinite sync loops).
- *
- * Intuit migration deadline: 15 May 2026.
+ * This ensures Intuit never times out waiting for a response.
  */
 
 const corsHeaders = {
@@ -90,22 +86,20 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
 
 type LandingTable = "landing_raw_qbo_purchase" | "landing_raw_qbo_sales_receipt" | "landing_raw_qbo_refund_receipt" | "landing_raw_qbo_customer" | "landing_raw_qbo_item";
 
-async function landEntity(
-  admin: any, table: LandingTable, externalId: string,
-  rawPayload: any, correlationId: string, operation: string,
-  cloudEventId?: string, eventTime?: string,
-): Promise<string> {
-  const row: Record<string, any> = {
-    external_id: externalId,
-    raw_payload: operation === "Delete" ? { _deleted: true, _entity_id: externalId } : rawPayload,
-    status: "pending",
-    processed_at: null,
-    correlation_id: correlationId,
-    received_at: new Date().toISOString(),
-  };
-  if (cloudEventId) row.cloud_event_id = cloudEventId;
-  if (eventTime) row.event_time = eventTime;
-  const { error } = await admin.from(table).upsert(row, { onConflict: "external_id" });
+async function landEntity(admin: any, table: LandingTable, externalId: string, rawPayload: any, correlationId: string, operation: string): Promise<string> {
+  if (operation === "Delete") {
+    const tombstone = { _deleted: true, _entity_id: externalId };
+    const { error } = await admin.from(table).upsert({
+      external_id: externalId, raw_payload: tombstone, status: "pending",
+      processed_at: null, correlation_id: correlationId, received_at: new Date().toISOString(),
+    }, { onConflict: "external_id" });
+    return error ? `land error: ${error.message}` : `landed delete tombstone`;
+  }
+
+  const { error } = await admin.from(table).upsert({
+    external_id: externalId, raw_payload: rawPayload, status: "pending",
+    processed_at: null, correlation_id: correlationId, received_at: new Date().toISOString(),
+  }, { onConflict: "external_id" });
   return error ? `land error: ${error.message}` : `landed`;
 }
 
@@ -137,87 +131,48 @@ async function landReferencedItems(admin: any, baseUrl: string, accessToken: str
 }
 
 // ────────────────────────────────────────────────────────────
-// CloudEvents v1.0 types and parser
-// ────────────────────────────────────────────────────────────
-
-interface CloudEvent {
-  specversion: string;
-  id: string;           // event UUID — dedup key
-  source: string;
-  type: string;         // e.g. "qbo.customer.created.v1"
-  datacontenttype: string;
-  time: string;         // ISO 8601 — echo detection timestamp
-  intuitentityid: string;
-  intuitaccountid: string;
-  data: Record<string, unknown>;
-}
-
-function parseEventType(type: string): { entityName: string; operation: string } | null {
-  // "qbo.customer.created.v1" → { entityName: "Customer", operation: "Create" }
-  const match = type.match(/^qbo\.(\w+)\.(created|updated|deleted|merged|voided)\.v\d+$/);
-  if (!match) return null;
-  const entityMap: Record<string, string> = {
-    customer: "Customer", item: "Item", purchase: "Purchase",
-    salesreceipt: "SalesReceipt", refundreceipt: "RefundReceipt",
-    vendor: "Vendor", deposit: "Deposit",
-  };
-  const operationMap: Record<string, string> = {
-    created: "Create", updated: "Update", deleted: "Delete",
-    merged: "Merge", voided: "Void",
-  };
-  return {
-    entityName: entityMap[match[1]] ?? match[1],
-    operation: operationMap[match[2]] ?? match[2],
-  };
-}
-
-// ────────────────────────────────────────────────────────────
 // Entity handlers
 // ────────────────────────────────────────────────────────────
 
-type EntityHandler = (
-  admin: any, baseUrl: string, accessToken: string,
-  entityId: string, operation: string, correlationId: string,
-  cloudEventId?: string, eventTime?: string,
-) => Promise<string>;
+type EntityHandler = (admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string) => Promise<string>;
 
-async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation, cloudEventId, eventTime);
+async function handlePurchase(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_purchase", entityId, null, correlationId, operation);
   const data = await fetchQboEntity(baseUrl, accessToken, `purchase/${entityId}`);
   const purchase = data?.Purchase;
   if (!purchase) return "could not fetch purchase from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, purchase.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_purchase", entityId, purchase, correlationId, operation, cloudEventId, eventTime);
+  return await landEntity(admin, "landing_raw_qbo_purchase", entityId, purchase, correlationId, operation);
 }
 
-async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_sales_receipt", entityId, null, correlationId, operation, cloudEventId, eventTime);
+async function handleSalesReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_sales_receipt", entityId, null, correlationId, operation);
   const data = await fetchQboEntity(baseUrl, accessToken, `salesreceipt/${entityId}`);
   const receipt = data?.SalesReceipt;
   if (!receipt) return "could not fetch SalesReceipt from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_sales_receipt", String(receipt.Id), receipt, correlationId, operation, cloudEventId, eventTime);
+  return await landEntity(admin, "landing_raw_qbo_sales_receipt", String(receipt.Id), receipt, correlationId, operation);
 }
 
-async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_refund_receipt", entityId, null, correlationId, operation, cloudEventId, eventTime);
+async function handleRefundReceipt(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_refund_receipt", entityId, null, correlationId, operation);
   const data = await fetchQboEntity(baseUrl, accessToken, `refundreceipt/${entityId}`);
   const receipt = data?.RefundReceipt;
   if (!receipt) return "could not fetch RefundReceipt from QBO";
   await landReferencedItems(admin, baseUrl, accessToken, receipt.Line ?? [], correlationId);
-  return await landEntity(admin, "landing_raw_qbo_refund_receipt", String(receipt.Id), receipt, correlationId, operation, cloudEventId, eventTime);
+  return await landEntity(admin, "landing_raw_qbo_refund_receipt", String(receipt.Id), receipt, correlationId, operation);
 }
 
-async function handleCustomer(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_customer", entityId, null, correlationId, operation, cloudEventId, eventTime);
+async function handleCustomer(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_customer", entityId, null, correlationId, operation);
   const data = await fetchQboEntity(baseUrl, accessToken, `customer/${entityId}`);
   const customer = data?.Customer;
   if (!customer) return "could not fetch customer from QBO";
-  return await landEntity(admin, "landing_raw_qbo_customer", String(customer.Id), customer, correlationId, operation, cloudEventId, eventTime);
+  return await landEntity(admin, "landing_raw_qbo_customer", String(customer.Id), customer, correlationId, operation);
 }
 
-async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string, cloudEventId?: string, eventTime?: string): Promise<string> {
-  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_item", entityId, null, correlationId, operation, cloudEventId, eventTime);
+async function handleItem(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_item", entityId, null, correlationId, operation);
   const res = await fetch(`${baseUrl}/item/${entityId}?minorversion=65`, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
@@ -225,7 +180,7 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   const data = await res.json();
   const item = data?.Item;
   if (!item) return `item ${entityId} — not found`;
-  return await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, operation, cloudEventId, eventTime);
+  return await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, operation);
 }
 
 const ENTITY_HANDLERS: Record<string, EntityHandler> = {
@@ -243,16 +198,16 @@ const ENTITY_HANDLERS: Record<string, EntityHandler> = {
 async function processWebhookInBackground(body: string, correlationId: string) {
   const log = makeLogger(correlationId);
 
-  let events: CloudEvent[];
+  let payload: any;
   try {
-    const parsed = JSON.parse(body);
-    events = Array.isArray(parsed) ? parsed : [];
+    payload = JSON.parse(body);
   } catch {
     log.error("Failed to parse webhook body");
     return;
   }
 
-  if (events.length === 0) return;
+  const notifications = payload?.eventNotifications ?? [];
+  if (notifications.length === 0) return;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -260,16 +215,13 @@ async function processWebhookInBackground(body: string, correlationId: string) {
   const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
   const admin = createClient(supabaseUrl, serviceRoleKey);
 
-  // Group events by realm (intuitaccountid) for token efficiency
-  const byRealm = new Map<string, CloudEvent[]>();
-  for (const event of events) {
-    const realm = event.intuitaccountid;
-    if (!realm) continue;
-    if (!byRealm.has(realm)) byRealm.set(realm, []);
-    byRealm.get(realm)!.push(event);
-  }
+  for (const notification of notifications) {
+    const realmId = notification.realmId;
+    if (!realmId) continue;
 
-  for (const [realmId, realmEvents] of byRealm) {
+    const entities = notification.dataChangeEvent?.entities ?? [];
+    if (entities.length === 0) continue;
+
     let accessToken: string;
     try {
       accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
@@ -280,64 +232,22 @@ async function processWebhookInBackground(body: string, correlationId: string) {
 
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
 
-    for (const event of realmEvents) {
-      const parsed = parseEventType(event.type);
-      if (!parsed) {
-        log.info("Ignoring unknown event type", { type: event.type });
-        continue;
-      }
+    for (const entity of entities) {
+      const entityName = entity.name;
+      const entityId = entity.id;
+      const operation = entity.operation ?? "Create";
 
-      const { entityName, operation } = parsed;
-      const entityId = event.intuitentityid;
-
-      // Echo suppression: skip events that match a recent outbound push
-      try {
-        const { data: recentPush } = await admin
-          .from("qbo_outbound_queue")
-          .select("pushed_at")
-          .eq("entity_type", entityName.toLowerCase())
-          .eq("entity_id_external", entityId)
-          .eq("status", "pushed")
-          .order("pushed_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (recentPush?.pushed_at) {
-          const pushTime = new Date(recentPush.pushed_at).getTime();
-          const eventTime = new Date(event.time).getTime();
-          if (Math.abs(eventTime - pushTime) < 10_000) {
-            log.info("Echo suppressed", {
-              entity: entityName, id: entityId,
-              event_time: event.time, pushed_at: recentPush.pushed_at,
-            });
-            continue;
-          }
-        }
-      } catch {
-        // qbo_outbound_queue may not exist yet — skip echo suppression
-      }
-
-      // Delegate to existing entity handlers
       const handler = ENTITY_HANDLERS[entityName];
       if (!handler) {
-        log.info("Ignoring unhandled entity type", { entity_name: entityName });
+        log.info("Ignoring unhandled entity type", { entity_name: entityName, entity_id: entityId });
         continue;
       }
 
       try {
-        const result = await handler(
-          admin, baseUrl, accessToken, entityId, operation, correlationId,
-          event.id, event.time,
-        );
-        log.info("Entity landed", {
-          entity_name: entityName, entity_id: entityId,
-          operation, cloud_event_id: event.id, result,
-        });
+        const result = await handler(admin, baseUrl, accessToken, entityId, operation, correlationId);
+        log.info("Entity landed", { entity_name: entityName, entity_id: entityId, operation, result });
       } catch (err: any) {
-        log.error("Entity landing failed", {
-          entity_name: entityName, entity_id: entityId,
-          operation, error: err.message,
-        });
+        log.error("Entity landing failed", { entity_name: entityName, entity_id: entityId, operation, error: err.message });
       }
     }
   }

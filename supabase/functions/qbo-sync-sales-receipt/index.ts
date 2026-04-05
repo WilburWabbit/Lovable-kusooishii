@@ -102,18 +102,6 @@ Deno.serve(async (req) => {
     const orderNumber = order.order_number ?? `KO-${String(order.id).slice(0, 7)}`;
     const channel = (order.origin_channel as string)?.toLowerCase() ?? "website";
 
-    // Look up "Undeposited Funds" account from mapping (or fall back to name query)
-    let undepositedFundsRef: Record<string, unknown> | undefined;
-    const { data: ufMapping } = await admin
-      .from("qbo_account_mapping" as never)
-      .select("qbo_account_id, qbo_account_name")
-      .eq("purpose", "undeposited_funds")
-      .maybeSingle();
-
-    if (ufMapping) {
-      undepositedFundsRef = { value: (ufMapping as Record<string, unknown>).qbo_account_id };
-    }
-
     const salesReceiptPayload: Record<string, unknown> = {
       DocNumber: orderNumber,
       TxnDate: order.created_at ? new Date(order.created_at as string).toISOString().slice(0, 10) : undefined,
@@ -123,11 +111,6 @@ Deno.serve(async (req) => {
       },
       PaymentMethodRef: { value: paymentMethodMap[channel] ?? channel },
     };
-
-    // Deposit to "Undeposited Funds" so payout Deposit can later link this SalesReceipt
-    if (undepositedFundsRef) {
-      salesReceiptPayload.DepositToAccountRef = undepositedFundsRef;
-    }
 
     if (qboCustomerRef) {
       salesReceiptPayload.CustomerRef = { value: qboCustomerRef };

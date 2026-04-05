@@ -38,6 +38,9 @@ const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 // Lazy-load member pages
 const AccountPage = lazy(() => import("./pages/AccountPage"));
 
+// Lazy-load eBay QR landing (unauthenticated, infrequently visited)
+const WelcomePage = lazy(() => import("./pages/WelcomePage"));
+
 // Lazy-load admin pages
 const PurchaseListPage = lazy(() => import("./pages/admin-v2/PurchaseListPage"));
 const NewPurchaseFormPage = lazy(() => import("./pages/admin-v2/NewPurchaseFormPage"));
@@ -89,6 +92,9 @@ const App = () => (
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/bluebell" element={<BlueBellClubPage />} />
             <Route path="/unsubscribe" element={<UnsubscribePage />} />
+
+            {/* Welcome — eBay QR landing (unauthenticated) */}
+            <Route path="/welcome/:code" element={<WelcomePage />} />
 
             {/* Auth */}
             <Route path="/login" element={<LoginPage />} />

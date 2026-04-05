@@ -55,12 +55,12 @@ export function StorefrontFooter() {
           <div className="space-y-4">
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Quick Links</h4>
             <nav className="flex flex-col gap-2">
-              <Link to="/browse" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Shop All Sets</Link>
-              <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Browse Themes</Link>
-              <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Just Landed</Link>
-              {hasDeals && <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Deals</Link>}
-              <Link to="/bluebell" className="font-body text-sm text-blue-400 underline-offset-4 hover:text-blue-300 hover:underline transition-colors">Blue Bell LEGO® Club</Link>
-              <Link to="/about" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">About Us</Link>
+              <Link to="/browse" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shop All Sets</Link>
+              <Link to="/browse?view=themes" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Browse Themes</Link>
+              <Link to="/browse?new=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Just Landed</Link>
+              {hasDeals && <Link to="/browse?deals=true" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Deals</Link>}
+              <Link to="/bluebell" className="font-body text-sm text-blue-400 hover:text-blue-300 transition-colors">Blue Bell LEGO® Club</Link>
+              <Link to="/about" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">About Us</Link>
             </nav>
           </div>
 
@@ -68,12 +68,12 @@ export function StorefrontFooter() {
           <div className="space-y-4">
             <h4 className="font-display font-semibold uppercase tracking-widest text-primary text-base">Customer Service</h4>
             <nav className="flex flex-col gap-2">
-              <Link to="/faq" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">FAQ</Link>
-              <Link to="/grading" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Grading Guide</Link>
-              <Link to="/contact" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Contact Us</Link>
-              <Link to="/order-tracking" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Track Your Order</Link>
-              <Link to="/returns-exchanges" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Returns & Exchanges</Link>
-              <Link to="/shipping-policy" className="font-body text-sm text-primary-foreground/60 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Shipping Info</Link>
+              <Link to="/faq" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">FAQ</Link>
+              <Link to="/grading" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Grading Guide</Link>
+              <Link to="/contact" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Contact Us</Link>
+              <Link to="/order-tracking" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Track Your Order</Link>
+              <Link to="/returns-exchanges" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Returns & Exchanges</Link>
+              <Link to="/shipping-policy" className="font-body text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors">Shipping Info</Link>
             </nav>
           </div>
 
@@ -119,8 +119,8 @@ export function StorefrontFooter() {
               </p>
             </div>
             <div className="flex gap-6">
-              <Link to="/privacy" className="font-body text-sm text-primary-foreground/50 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Privacy Policy</Link>
-              <Link to="/terms" className="font-body text-sm text-primary-foreground/50 underline-offset-4 hover:text-primary-foreground hover:underline transition-colors">Terms of Service</Link>
+              <Link to="/privacy" className="font-body text-sm text-primary-foreground/50 hover:text-primary-foreground transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="font-body text-sm text-primary-foreground/50 hover:text-primary-foreground transition-colors">Terms of Service</Link>
             </div>
           </div>
         </div>

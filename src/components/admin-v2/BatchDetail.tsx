@@ -68,9 +68,9 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
       <BackButton onClick={() => navigate("/admin/purchases")} label="Back to purchases" />
 
       {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-5">
+      <div className="flex items-start justify-between mb-5">
         <div>
-          <div className="flex items-center gap-3 mb-1 flex-wrap">
+          <div className="flex items-center gap-3 mb-1">
             <h1 className="text-[22px] font-bold text-zinc-900">{batch.id}</h1>
             {ungradedCount > 0 ? (
               <Badge label={`${ungradedCount} ungraded`} color="#F59E0B" />
@@ -78,7 +78,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               <Badge label="All graded" color="#22C55E" />
             )}
           </div>
-          <div className="flex flex-wrap gap-2 lg:gap-4 text-zinc-500 text-[13px]">
+          <div className="flex gap-4 text-zinc-500 text-[13px]">
             <span>{batch.supplierName}</span>
             <span>{formattedDate}</span>
             <span>
@@ -97,7 +97,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-4 gap-3 mb-5">
         <SummaryCard label="Total Units" value={totalUnits} />
         <SummaryCard label="Shared Costs" value={`£${batch.totalSharedCosts.toFixed(2)}`} color="#A1A1AA" />
         <SummaryCard label="Batch Cost" value={`£${totalCost.toFixed(2)}`} color="#14B8A6" />
@@ -167,11 +167,11 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGrad
   return (
     <SurfaceCard noPadding className="mb-3 overflow-hidden">
       {/* Line header */}
-      <div className="px-4 py-3 border-b border-zinc-200 flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center">
-        <div className="flex items-center gap-2.5 min-w-0">
+      <div className="px-4 py-3 border-b border-zinc-200 flex justify-between items-center">
+        <div className="flex items-center gap-2.5">
           <Mono color="amber">{line.mpn}</Mono>
           {line.productName && (
-            <span className="text-zinc-600 text-sm truncate max-w-[200px] sm:max-w-[280px]">{line.productName}</span>
+            <span className="text-zinc-600 text-sm truncate max-w-[280px]">{line.productName}</span>
           )}
         </div>
         <div className="flex items-center gap-3 text-xs text-zinc-500">
@@ -191,8 +191,7 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGrad
       </div>
 
       {/* Units table */}
-      <div className="overflow-x-auto">
-      <table className="w-full text-xs border-collapse min-w-[500px]">
+      <table className="w-full text-xs border-collapse">
         <thead>
           <tr className="border-b border-zinc-200">
             <th className="w-8 px-3 py-2" />
@@ -269,7 +268,6 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGrad
           ))}
         </tbody>
       </table>
-      </div>
     </SurfaceCard>
   );
 }

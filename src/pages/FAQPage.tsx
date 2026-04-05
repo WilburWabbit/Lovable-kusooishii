@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +6,8 @@ import { usePageSeo } from '@/hooks/use-page-seo';
 import { GRADE_DETAILS } from '@/lib/grades';
 
 export default function FAQPage() {
+  usePageSeo({ title: 'Frequently Asked Questions', description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.', path: '/faq' });
+
   const gradeItems = Object.entries(GRADE_DETAILS).map(([key, g]) => ({
     id: `grade-${key}`,
     q: `Grade ${key} — ${g.label}`,
@@ -53,26 +54,6 @@ export default function FAQPage() {
       ],
     },
   ];
-
-  const faqJsonLd = useMemo(() => {
-    const allQa = sections.flatMap(s => s.items);
-    return {
-      '@context': 'https://schema.org',
-      '@type': 'FAQPage',
-      mainEntity: allQa.map(item => ({
-        '@type': 'Question',
-        name: item.q,
-        acceptedAnswer: { '@type': 'Answer', text: item.a },
-      })),
-    };
-  }, []);
-
-  usePageSeo({
-    title: 'Frequently Asked Questions',
-    description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.',
-    path: '/faq',
-    jsonLd: faqJsonLd,
-  });
 
   return (
     <StorefrontLayout>

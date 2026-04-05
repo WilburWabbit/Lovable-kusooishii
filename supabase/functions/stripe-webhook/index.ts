@@ -489,17 +489,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
         continue;
       }
 
-      // Mark stock unit as closed (sold) — update BOTH status columns
+      // Mark stock unit as closed (sold)
       if (stockUnit) {
-        const now = new Date().toISOString();
         const { error: stockError } = await supabase
           .from("stock_unit")
-          .update({
-            status: "closed",
-            v2_status: "sold",
-            sold_at: now,
-            order_id: order.id,
-          } as never)
+          .update({ status: "closed" })
           .eq("id", stockUnit.id);
 
         if (stockError) {
@@ -514,7 +508,6 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
             source_system: "stripe",
             after_json: {
               status: "closed",
-              v2_status: "sold",
               reason: "sold",
               order_id: order.id,
               order_number: order.order_number,

@@ -39,7 +39,7 @@ const SearchBar = ({ onClose, autoFocus = false }: SearchBarProps) => {
       </div>
       <Button type="submit" size="sm" className="font-display">Search</Button>
       {onClose && (
-        <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close search">
+        <Button type="button" variant="ghost" size="icon" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       )}

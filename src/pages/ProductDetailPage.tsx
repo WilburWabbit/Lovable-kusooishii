@@ -6,13 +6,12 @@ import { useParams, Link } from "react-router-dom";
 import { ShoppingBag, Heart, Shield, Package, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GRADE_DETAILS } from "@/lib/grades";
 import { useStore, type Product } from "@/lib/store";
 import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
-import { usePageSeo } from "@/hooks/use-page-seo";
 
 interface ProductDetailRow {
   id: string;
@@ -168,67 +167,6 @@ export default function ProductDetailPage() {
   const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
 
-  // SEO — dynamic product meta + Product JSON-LD
-  const cheapestOffer = useMemo(() => {
-    if (!offers?.length) return null;
-    return offers.reduce((a, b) => ((a.price ?? Infinity) < (b.price ?? Infinity) ? a : b));
-  }, [offers]);
-
-  const productJsonLd = useMemo(() => {
-    if (!product) return undefined;
-    const schema: Record<string, unknown> = {
-      '@context': 'https://schema.org',
-      '@type': 'Product',
-      name: product.name,
-      description: product.description ?? `${product.name} LEGO® set (${product.mpn})`,
-      sku: product.mpn,
-      mpn: product.mpn,
-      brand: { '@type': 'Brand', name: 'LEGO' },
-      image: primaryImageUrl ?? undefined,
-    };
-    if (cheapestOffer?.price != null) {
-      schema.offers = {
-        '@type': 'AggregateOffer',
-        priceCurrency: 'GBP',
-        lowPrice: cheapestOffer.price,
-        highPrice: offers?.reduce((max, o) => Math.max(max, o.price ?? 0), 0),
-        offerCount: offers?.length ?? 1,
-        availability: (cheapestOffer.stock_count > 0)
-          ? 'https://schema.org/InStock'
-          : 'https://schema.org/OutOfStock',
-        itemCondition: 'https://schema.org/UsedCondition',
-        seller: { '@type': 'Organization', name: 'Kuso Oishii' },
-      };
-    }
-    return schema;
-  }, [product, offers, cheapestOffer, primaryImageUrl]);
-
-  const breadcrumbJsonLd = useMemo(() => {
-    if (!product) return undefined;
-    const items: Record<string, unknown>[] = [
-      { '@type': 'ListItem', position: 1, name: 'Browse', item: 'https://kusooishii.com/browse' },
-    ];
-    if (themeName) {
-      items.push({ '@type': 'ListItem', position: 2, name: themeName });
-    }
-    items.push({ '@type': 'ListItem', position: items.length + 1, name: product.name });
-    return {
-      '@context': 'https://schema.org',
-      '@type': 'BreadcrumbList',
-      itemListElement: items,
-    };
-  }, [product, themeName]);
-
-  usePageSeo({
-    title: product?.name ? `${product.name} (${mpn})` : mpn ?? 'Product',
-    description: product?.description
-      ?? `Buy ${product?.name ?? mpn} LEGO® set — condition graded and ready to ship from Kuso Oishii.`,
-    path: `/sets/${mpn}`,
-    ogImage: primaryImageUrl ?? undefined,
-    ogType: 'product',
-    jsonLd: productJsonLd && breadcrumbJsonLd ? [productJsonLd, breadcrumbJsonLd] : productJsonLd,
-  });
-
   // Fire view_item event once per product load
   const viewItemFired = useRef<string | null>(null);
   useEffect(() => {
@@ -374,7 +312,7 @@ export default function ProductDetailPage() {
                               idx === selectedImage ? "border-primary" : "border-border hover:border-muted-foreground"
                             }`}
                           >
-                            <img src={img.url} alt={img.alt || ""} loading="lazy" className="absolute inset-0 h-full w-full object-contain" />
+                            <img src={img.url} alt={img.alt || ""} className="absolute inset-0 h-full w-full object-contain" />
                           </button>
                         ))}
                       </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrder, orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
@@ -21,6 +21,7 @@ import { AllocateItemsDialog } from "./AllocateItemsDialog";
 import { ShipOrderDialog } from "./ShipOrderDialog";
 import { ReturnDialog } from "./ReturnDialog";
 import { ProcessReturnDialog } from "./ProcessReturnDialog";
+import { WelcomeQrLabel } from "./WelcomeQrLabel";
 import { toast } from "sonner";
 
 interface OrderDetailProps {
@@ -43,6 +44,20 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     trackingNumber?: string | null;
     payoutStatus?: string;
   }) | null>(null);
+
+  // Fetch welcome code for eBay orders (QR label printing)
+  const { data: welcomeCode } = useQuery({
+    queryKey: ["welcome-code", "order", orderId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("welcome_code")
+        .select("code, promo_code, ebay_order_id, primary_sku, order_postcode, buyer_name, redeemed_at, scan_count, scanned_at")
+        .eq("sales_order_id", orderId)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!order?.id && order?.channel === "ebay",
+  });
 
   const markComplete = useMutation({
     mutationFn: async () => {
@@ -112,6 +127,16 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           </div>
         </div>
         <div className="hidden lg:flex gap-2">
+          {welcomeCode && (
+            <WelcomeQrLabel
+              code={welcomeCode.code}
+              promoCode={welcomeCode.promo_code}
+              ebayOrderId={welcomeCode.ebay_order_id}
+              primarySku={welcomeCode.primary_sku ?? undefined}
+              postcode={welcomeCode.order_postcode ?? undefined}
+              buyerName={welcomeCode.buyer_name ?? undefined}
+            />
+          )}
           {order.status === "needs_allocation" && (
             <button
               onClick={() => setShowAllocate(true)}
@@ -157,11 +182,18 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className={`grid gap-3 mb-5 ${welcomeCode ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2 lg:grid-cols-4"}`}>
         <SummaryCard label="Total" value={`£${order.total.toFixed(2)}`} color="#14B8A6" />
         <SummaryCard label="VAT" value={`£${order.vatAmount.toFixed(2)}`} color="#A1A1AA" />
         <SummaryCard label="Net" value={`£${order.netAmount.toFixed(2)}`} />
         <SummaryCard label="QBO" value={qboLabel} color={qboColor} />
+        {welcomeCode && (
+          <SummaryCard
+            label="Welcome Promo"
+            value={welcomeCode.redeemed_at ? "Redeemed" : welcomeCode.scanned_at ? `Scanned ${welcomeCode.scan_count}×` : "Active"}
+            color={welcomeCode.redeemed_at ? "#22C55E" : welcomeCode.scanned_at ? "#3B82F6" : "#F59E0B"}
+          />
+        )}
       </div>
 
       {/* Line items table */}
