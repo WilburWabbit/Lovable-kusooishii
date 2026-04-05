@@ -2,6 +2,7 @@ import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { SectionHead, SurfaceCard } from "@/components/admin-v2/ui-primitives";
 import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
 import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
+import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
 import { PricingSettingsCard } from "@/components/admin-v2/PricingSettingsCard";
 
 export default function SettingsPage() {
@@ -17,6 +18,7 @@ export default function SettingsPage() {
         <div className="grid gap-3">
           <QboSettingsCard />
           <EbaySettingsCard />
+          <StripeSettingsCard />
         </div>
 
         <div className="mt-6">
