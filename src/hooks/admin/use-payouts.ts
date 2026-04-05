@@ -39,6 +39,7 @@ export interface PayoutFee {
   payoutId: string;
   salesOrderId: string | null;
   externalOrderId: string | null;
+  vendorId: string | null;
   feeCategory: FeeCategory;
   amount: number;
   channel: string;
@@ -333,6 +334,7 @@ function mapPayoutFee(row: Record<string, unknown>): PayoutFee {
     payoutId:        row.payout_id as string,
     salesOrderId:    (row.sales_order_id as string) ?? null,
     externalOrderId: (row.external_order_id as string) ?? null,
+    vendorId:        (row.vendor_id as string) ?? null,
     feeCategory:     row.fee_category as FeeCategory,
     amount:          row.amount as number,
     channel:         row.channel as string,

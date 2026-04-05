@@ -28,6 +28,7 @@ export const purchaseBatchKeys = {
 function mapBatch(row: Record<string, unknown>): PurchaseBatch {
   return {
     id: row.id as string,
+    supplierId: (row.supplier_id as string) ?? null,
     supplierName: row.supplier_name as string,
     purchaseDate: row.purchase_date as string,
     reference: (row.reference as string) ?? null,
