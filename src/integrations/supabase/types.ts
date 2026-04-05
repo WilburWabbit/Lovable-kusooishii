@@ -1424,6 +1424,39 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_raw_qbo_vendor: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
       landing_raw_stripe_event: {
         Row: {
           correlation_id: string | null
@@ -1665,6 +1698,108 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "club_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_fee: {
+        Row: {
+          amount: number
+          channel: string
+          created_at: string
+          description: string | null
+          external_order_id: string | null
+          fee_category: string
+          id: string
+          payout_id: string
+          sales_order_id: string | null
+          updated_at: string
+          vendor_id: string | null
+        }
+        Insert: {
+          amount: number
+          channel?: string
+          created_at?: string
+          description?: string | null
+          external_order_id?: string | null
+          fee_category: string
+          id?: string
+          payout_id: string
+          sales_order_id?: string | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Update: {
+          amount?: number
+          channel?: string
+          created_at?: string
+          description?: string | null
+          external_order_id?: string | null
+          fee_category?: string
+          id?: string
+          payout_id?: string
+          sales_order_id?: string | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_fee_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_fee_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_fee_line: {
+        Row: {
+          amount: number
+          created_at: string
+          ebay_transaction_id: string | null
+          fee_category: string
+          fee_type: string
+          id: string
+          payout_fee_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          ebay_transaction_id?: string | null
+          fee_category: string
+          fee_type: string
+          id?: string
+          payout_fee_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          ebay_transaction_id?: string | null
+          fee_category?: string
+          fee_type?: string
+          id?: string
+          payout_fee_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_fee_line_payout_fee_id_fkey"
+            columns: ["payout_fee_id"]
+            isOneToOne: false
+            referencedRelation: "payout_fee"
             referencedColumns: ["id"]
           },
         ]
@@ -2145,6 +2280,7 @@ export type Database = {
           reference: string | null
           shared_costs: Json
           status: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id: string | null
           supplier_name: string
           supplier_vat_registered: boolean
           total_shared_costs: number
@@ -2158,6 +2294,7 @@ export type Database = {
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id?: string | null
           supplier_name: string
           supplier_vat_registered?: boolean
           total_shared_costs?: number
@@ -2171,13 +2308,22 @@ export type Database = {
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id?: string | null
           supplier_name?: string
           supplier_vat_registered?: boolean
           total_shared_costs?: number
           unit_counter?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "purchase_batches_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "vendor"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       purchase_line_items: {
         Row: {
@@ -2532,6 +2678,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "stock_unit"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
           },
           {
             foreignKeyName: "sales_order_line_tax_code_id_fkey"
@@ -3026,6 +3179,42 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          normalized_name: string | null
+          qbo_vendor_id: string | null
+          updated_at: string
+          vendor_type: Database["public"]["Enums"]["vendor_type"]
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          normalized_name?: string | null
+          qbo_vendor_id?: string | null
+          updated_at?: string
+          vendor_type?: Database["public"]["Enums"]["vendor_type"]
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          normalized_name?: string | null
+          qbo_vendor_id?: string | null
+          updated_at?: string
+          vendor_type?: Database["public"]["Enums"]["vendor_type"]
+        }
+        Relationships: []
+      }
       wishlist: {
         Row: {
           created_at: string
@@ -3197,6 +3386,51 @@ export type Database = {
           },
         ]
       }
+      unit_profit_view: {
+        Row: {
+          advertising_fee: number | null
+          batch_id: string | null
+          fee_pct: number | null
+          gross_margin_pct: number | null
+          gross_revenue: number | null
+          landed_cost: number | null
+          net_margin_pct: number | null
+          net_profit: number | null
+          payout_id: string | null
+          processing_fee: number | null
+          sales_order_id: string | null
+          selling_fee: number | null
+          shipping_fee: number | null
+          sku: string | null
+          stock_unit_id: string | null
+          total_fees_per_unit: number | null
+          uid: string | null
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_stock_unit_payout"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_unit_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v2_variant_stock_summary: {
         Row: {
           avg_cost: number | null
@@ -3347,12 +3581,23 @@ export type Database = {
             }
             Returns: string
           }
+      ensure_vendor: {
+        Args: {
+          p_display_name: string
+          p_vendor_type?: Database["public"]["Enums"]["vendor_type"]
+        }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      infer_vendor_type: {
+        Args: { p_name: string }
+        Returns: Database["public"]["Enums"]["vendor_type"]
       }
       move_to_dlq: {
         Args: {
@@ -3363,6 +3608,7 @@ export type Database = {
         }
         Returns: number
       }
+      normalize_vendor_name: { Args: { p_name: string }; Returns: string }
       parse_sku_code: {
         Args: { p_sku_code: string }
         Returns: {
@@ -3456,6 +3702,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      v2_link_unmatched_payout_fees: { Args: never; Returns: number }
       v2_reallocate_costs_by_grade: {
         Args: { p_line_item_id: string }
         Returns: undefined
@@ -3538,6 +3785,7 @@ export type Database = {
         | "refunded"
         | "restocked"
         | "needs_allocation"
+      vendor_type: "supplier" | "marketplace" | "payment_processor" | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3742,6 +3990,7 @@ export const Constants = {
         "restocked",
         "needs_allocation",
       ],
+      vendor_type: ["supplier", "marketplace", "payment_processor", "other"],
     },
   },
 } as const
