@@ -261,6 +261,25 @@ async function processWebhookInBackground(body: string, correlationId: string) {
     }
   }
 
+  // Auto-trigger the processor to drain whatever we just landed
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
+    const processRes = await fetchWithTimeout(processUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "x-webhook-trigger": "true",
+      },
+      body: JSON.stringify({ batch_size: 15 }),
+    });
+    log.info("Auto-triggered processor", { status: processRes.status });
+  } catch (err: any) {
+    log.warn("Failed to auto-trigger processor (non-fatal)", { error: err.message });
+  }
+
   log.info("Background processing complete");
 }
 
