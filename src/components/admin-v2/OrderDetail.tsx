@@ -16,6 +16,7 @@ import {
   BackButton,
 } from "./ui-primitives";
 import { OrderUnitSlideOut } from "./OrderUnitSlideOut";
+import { StickyActions } from "./StickyActions";
 import { AllocateItemsDialog } from "./AllocateItemsDialog";
 import { ShipOrderDialog } from "./ShipOrderDialog";
 import { ReturnDialog } from "./ReturnDialog";
@@ -44,7 +45,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     payoutStatus?: string;
   }) | null>(null);
 
-  // Fetch welcome code for eBay orders
+  // Fetch welcome code for eBay orders (QR label printing)
   const { data: welcomeCode } = useQuery({
     queryKey: ["welcome-code", "order", orderId],
     queryFn: async () => {
@@ -62,7 +63,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     mutationFn: async () => {
       const { error } = await supabase
         .from("sales_order")
-        .update({ status: "complete" } as never)
+        .update({ v2_status: "complete" } as never)
         .eq("id", orderId);
       if (error) throw error;
 
@@ -89,7 +90,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   }
 
   const customerName = order.customer?.name ?? "Cash Sales";
-  const formattedDate = new Date(order.createdAt).toLocaleDateString("en-GB", {
+  const formattedDate = new Date(order.orderDate).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -109,23 +110,23 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       : "#F59E0B";
 
   return (
-    <div>
+    <div className="pb-20 lg:pb-0">
       <BackButton onClick={() => navigate("/admin/orders")} label="Back to orders" />
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-5">
         <div>
-          <div className="flex items-center gap-3 mb-1">
+          <div className="flex items-center gap-3 mb-1 flex-wrap">
             <h1 className="text-[22px] font-bold text-zinc-900">{order.orderNumber}</h1>
             <OrderStatusBadge status={order.status} />
           </div>
-          <div className="flex gap-4 text-zinc-500 text-[13px]">
+          <div className="flex flex-wrap gap-2 lg:gap-4 text-zinc-500 text-[13px]">
             <span>{customerName}</span>
             <span>{order.channel}</span>
             <span>{formattedDate}</span>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="hidden lg:flex gap-2">
           {welcomeCode && (
             <WelcomeQrLabel
               code={welcomeCode.code}
@@ -181,7 +182,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       </div>
 
       {/* Summary cards */}
-      <div className={`grid gap-3 mb-5 ${welcomeCode ? "grid-cols-5" : "grid-cols-4"}`}>
+      <div className={`grid gap-3 mb-5 ${welcomeCode ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2 lg:grid-cols-4"}`}>
         <SummaryCard label="Total" value={`£${order.total.toFixed(2)}`} color="#14B8A6" />
         <SummaryCard label="VAT" value={`£${order.vatAmount.toFixed(2)}`} color="#A1A1AA" />
         <SummaryCard label="Net" value={`£${order.netAmount.toFixed(2)}`} />
@@ -200,7 +201,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         <div className="px-4 py-3 border-b border-zinc-200">
           <SectionHead>Line Items → Stock Units</SectionHead>
         </div>
-        <table className="w-full border-collapse text-xs">
+        <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs min-w-[640px]">
           <thead>
             <tr className="border-b border-zinc-200">
               {["SKU", "Unit ID", "Unit Price", "COGS", "Status", "Tracking", "Payout", ""].map(
@@ -310,7 +312,41 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
             )}
           </tbody>
         </table>
+        </div>
       </SurfaceCard>
+
+      {/* Mobile sticky actions */}
+      {order.status === "needs_allocation" && (
+        <StickyActions>
+          <button onClick={() => setShowAllocate(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
+            Allocate Items
+          </button>
+        </StickyActions>
+      )}
+      {(order.status === "new" || order.status === "awaiting_shipment") && (
+        <StickyActions>
+          <button onClick={() => setShowShip(true)} className="flex-1 bg-teal-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
+            Ship Order
+          </button>
+        </StickyActions>
+      )}
+      {(order.status === "shipped" || order.status === "delivered") && (
+        <StickyActions>
+          <button onClick={() => setShowReturn(true)} className="flex-1 bg-red-500/20 text-red-600 border border-red-500/30 rounded-md py-2.5 text-[13px]">
+            Return
+          </button>
+          <button onClick={() => markComplete.mutate()} disabled={markComplete.isPending} className="flex-1 bg-zinc-200 text-zinc-600 rounded-md py-2.5 text-[13px]">
+            {markComplete.isPending ? "Completing…" : "Complete"}
+          </button>
+        </StickyActions>
+      )}
+      {order.status === "return_pending" && (
+        <StickyActions>
+          <button onClick={() => setShowProcessReturn(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
+            Process Return
+          </button>
+        </StickyActions>
+      )}
 
       {/* Unit slide-out */}
       <OrderUnitSlideOut
