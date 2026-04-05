@@ -645,6 +645,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           qbo_customer_id: string | null
+          stripe_customer_id: string | null
           synced_at: string
           updated_at: string
           user_id: string | null
@@ -671,6 +672,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           qbo_customer_id?: string | null
+          stripe_customer_id?: string | null
           synced_at?: string
           updated_at?: string
           user_id?: string | null
@@ -697,6 +699,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           qbo_customer_id?: string | null
+          stripe_customer_id?: string | null
           synced_at?: string
           updated_at?: string
           user_id?: string | null
@@ -2812,6 +2815,8 @@ export type Database = {
           sale_price: number | null
           saleable_flag: boolean
           sku_code: string
+          stripe_price_id: string | null
+          stripe_product_id: string | null
           updated_at: string
           v2_markdown_applied: string | null
         }
@@ -2834,6 +2839,8 @@ export type Database = {
           sale_price?: number | null
           saleable_flag?: boolean
           sku_code: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
           updated_at?: string
           v2_markdown_applied?: string | null
         }
@@ -2856,6 +2863,8 @@ export type Database = {
           sale_price?: number | null
           saleable_flag?: boolean
           sku_code?: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
           updated_at?: string
           v2_markdown_applied?: string | null
         }
