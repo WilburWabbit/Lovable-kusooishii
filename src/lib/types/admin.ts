@@ -23,6 +23,8 @@ export type StockUnitStatus =
 
 export type PurchaseBatchStatus = 'draft' | 'recorded';
 
+export type VendorType = 'supplier' | 'marketplace' | 'payment_processor' | 'other';
+
 export type Channel = 'ebay' | 'website' | 'bricklink' | 'brickowl' | 'in_person';
 
 export type ChannelListingStatus = 'draft' | 'live' | 'paused' | 'ended';
@@ -79,6 +81,7 @@ export interface FeeBreakdown {
 
 export interface PurchaseBatch {
   id: string; // PO-NNN
+  supplierId: string | null;
   supplierName: string;
   purchaseDate: string; // ISO date
   reference: string | null;

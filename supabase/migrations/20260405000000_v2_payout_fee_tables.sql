@@ -161,7 +161,13 @@ order_fee_totals AS (
 SELECT
   su.id                                                               AS stock_unit_id,
   su.uid,
-  su.sku,
+  COALESCE(
+    sk.sku_code,
+    CASE
+      WHEN su.condition_grade IS NOT NULL THEN su.mpn || '.' || su.condition_grade::text
+      ELSE su.mpn
+    END
+  )                                                                   AS sku,
   su.v2_status,
   su.batch_id,
   su.payout_id,
@@ -227,6 +233,8 @@ SELECT
 FROM public.sales_order_line sol
 JOIN public.stock_unit su
   ON su.id = sol.stock_unit_id
+LEFT JOIN public.sku sk
+  ON sk.id = su.sku_id
 LEFT JOIN order_unit_counts ouc
   ON ouc.sales_order_id = sol.sales_order_id
 LEFT JOIN order_fee_totals oft
