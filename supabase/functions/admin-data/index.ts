@@ -1735,11 +1735,16 @@ Deno.serve(async (req) => {
         .select("id");
       customersReset = cData?.length ?? 0;
 
+      const { data: vData } = await admin.from("landing_raw_qbo_vendor")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const vendorsReset = vData?.length ?? 0;
+
       await admin.from("audit_event").insert({
         entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
         trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
         source_system: "admin-data", correlation_id: rebuildCorrelationId,
-        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, items_reset: itemsReset, customers_reset: customersReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted, stock_deleted: stockDeleted },
+        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted, stock_deleted: stockDeleted },
       });
 
       result = {
@@ -1750,6 +1755,7 @@ Deno.serve(async (req) => {
         refunds_reset: refundsReset,
         items_reset: itemsReset,
         customers_reset: customersReset,
+        vendors_reset: vendorsReset,
         receipts_deleted: receiptsDeleted,
         orders_deleted: ordersDeleted,
         stock_deleted: stockDeleted,
@@ -1761,7 +1767,7 @@ Deno.serve(async (req) => {
       const fnName = params.function;
       if (!fnName || typeof fnName !== "string") throw new ValidationError("Missing 'function' parameter");
 
-      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-tax-rates"];
+      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates"];
       if (!allowed.includes(fnName)) throw new ValidationError(`Function '${fnName}' not allowed for proxying`);
 
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

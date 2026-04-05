@@ -38,6 +38,7 @@ export function QboSettingsCard() {
   const [salesPct, setSalesPct] = useState(0);
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingItems, setSyncingItems] = useState(false);
+  const [syncingVendors, setSyncingVendors] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [processLabel, setProcessLabel] = useState('');
   const [reconciling, setReconciling] = useState(false);
@@ -49,7 +50,7 @@ export function QboSettingsCard() {
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || processing || reconciling || rebuilding;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || rebuilding;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -78,7 +79,8 @@ export function QboSettingsCard() {
         const r = (data as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
         if (r) {
           total += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-            (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+            (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0) +
+            (r.vendors?.processed ?? 0);
         }
         if (!(data as Record<string, unknown>).has_more) break;
       }
@@ -197,6 +199,20 @@ export function QboSettingsCard() {
     }
   };
 
+  const syncVendorsAction = async () => {
+    setSyncingVendors(true);
+    try {
+      const d = await invokeWithAuth<Record<string, unknown>>('qbo-sync-vendors');
+      if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
+      toast.success(`Vendors: ${(d as Record<string, unknown>).landed ?? 0} landed, ${(d as Record<string, unknown>).skipped ?? 0} unchanged`);
+      if (((d as Record<string, unknown>).landed as number) > 0) await drainPending();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Vendor sync failed');
+    } finally {
+      setSyncingVendors(false);
+    }
+  };
+
   const processPending = async () => {
     setProcessing(true);
     setProcessLabel('Processing all pending...');
@@ -209,6 +225,7 @@ export function QboSettingsCard() {
       if (r?.purchases?.processed) parts.push(`${r.purchases.processed} purchases`);
       if (r?.sales?.processed) parts.push(`${r.sales.processed} sales`);
       if (r?.customers?.processed) parts.push(`${r.customers.processed} customers`);
+      if (r?.vendors?.processed) parts.push(`${r.vendors.processed} vendors`);
       toast.success(parts.length > 0 ? parts.join(', ') : 'Nothing to process');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Processing failed');
@@ -254,7 +271,8 @@ export function QboSettingsCard() {
         const r = (d as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
         if (r) {
           totalProcessed += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-            (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0);
+            (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0) +
+            (r.vendors?.processed ?? 0);
         }
         if (!(d as Record<string, unknown>).has_more) break;
       }
@@ -357,6 +375,7 @@ export function QboSettingsCard() {
               <Btn onClick={syncSalesAction} busy={syncingSales}>Sales</Btn>
               <Btn onClick={syncCustomersAction} busy={syncingCustomers}>Customers</Btn>
               <Btn onClick={syncItemsAction} busy={syncingItems}>Items</Btn>
+              <Btn onClick={syncVendorsAction} busy={syncingVendors}>Vendors</Btn>
             </div>
           </div>
 

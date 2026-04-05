@@ -84,7 +84,7 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
 // Entity fetch + land helpers (used in background processing)
 // ────────────────────────────────────────────────────────────
 
-type LandingTable = "landing_raw_qbo_purchase" | "landing_raw_qbo_sales_receipt" | "landing_raw_qbo_refund_receipt" | "landing_raw_qbo_customer" | "landing_raw_qbo_item";
+type LandingTable = "landing_raw_qbo_purchase" | "landing_raw_qbo_sales_receipt" | "landing_raw_qbo_refund_receipt" | "landing_raw_qbo_customer" | "landing_raw_qbo_item" | "landing_raw_qbo_vendor";
 
 async function landEntity(admin: any, table: LandingTable, externalId: string, rawPayload: any, correlationId: string, operation: string): Promise<string> {
   if (operation === "Delete") {
@@ -183,12 +183,21 @@ async function handleItem(admin: any, baseUrl: string, accessToken: string, enti
   return await landEntity(admin, "landing_raw_qbo_item", String(item.Id), item, correlationId, operation);
 }
 
+async function handleVendor(admin: any, baseUrl: string, accessToken: string, entityId: string, operation: string, correlationId: string): Promise<string> {
+  if (operation === "Delete") return await landEntity(admin, "landing_raw_qbo_vendor", entityId, null, correlationId, operation);
+  const data = await fetchQboEntity(baseUrl, accessToken, `vendor/${entityId}`);
+  const vendor = data?.Vendor;
+  if (!vendor) return "could not fetch vendor from QBO";
+  return await landEntity(admin, "landing_raw_qbo_vendor", String(vendor.Id), vendor, correlationId, operation);
+}
+
 const ENTITY_HANDLERS: Record<string, EntityHandler> = {
   Purchase: handlePurchase,
   SalesReceipt: handleSalesReceipt,
   RefundReceipt: handleRefundReceipt,
   Customer: handleCustomer,
   Item: handleItem,
+  Vendor: handleVendor,
 };
 
 // ────────────────────────────────────────────────────────────

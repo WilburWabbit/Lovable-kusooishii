@@ -5,11 +5,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
  * qbo-process-pending — THE single source of truth for all QBO → canonical processing.
  *
  * Reads pending landing records and processes them in dependency order:
- *   1. Items → SKUs (+ product auto-creation + QtyOnHand reconciliation)
+ *   1. Vendors + Customers + Items → reference data
  *   2. Purchases → Receipts → Receipt Lines → Stock Units
  *   3. Sales Receipts → Sales Orders → Order Lines → Stock Allocation
  *   4. Refund Receipts → ignored (with legacy refund cleanup)
- *   5. Customers → Customer records + order backlinking
  *
  * Accepts optional body: { entity_type?, batch_size?, external_id? }
  */
@@ -38,6 +37,34 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
 
 function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+function normalizeVendorName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const normalized = raw.trim().replace(/\s+/g, " ").toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getVendorDisplayName(vendor: any, fallbackExternalId: string): string {
+  const firstName = typeof vendor?.GivenName === "string" ? vendor.GivenName.trim() : "";
+  const lastName = typeof vendor?.FamilyName === "string" ? vendor.FamilyName.trim() : "";
+  const personalName = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+  const candidates = [
+    vendor?.DisplayName,
+    vendor?.CompanyName,
+    vendor?.PrintOnCheckName,
+    vendor?.FullyQualifiedName,
+    personalName,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim().replace(/\s+/g, " ");
+    }
+  }
+
+  return `QBO Vendor ${fallbackExternalId}`;
 }
 
 const ALLOCABLE_FEE_PATTERN = /\b(buy(?:ing)?\s+fee|purchase\s+fee|fees?|shipping|delivery|courier|postage|freight|carriage|inbound|warehouse)\b/i;
@@ -919,7 +946,119 @@ async function processRefundReceipts(
 }
 
 // ════════════════════════════════════════════════════════════
-// 5. PROCESS CUSTOMERS
+// 5. PROCESS VENDORS
+// ════════════════════════════════════════════════════════════
+
+async function processVendors(admin: any, batchSize: number): Promise<{ processed: number; errors: number }> {
+  const { data: pending } = await admin
+    .from("landing_raw_qbo_vendor")
+    .select("id, external_id, raw_payload")
+    .eq("status", "pending")
+    .order("received_at", { ascending: true })
+    .limit(batchSize);
+
+  let processed = 0, errors = 0;
+
+  for (const entry of (pending ?? [])) {
+    try {
+      const vendor = entry.raw_payload ?? {};
+      const qboVendorId = String(vendor.Id ?? entry.external_id);
+
+      if (vendor?._deleted === true) {
+        const { error } = await admin
+          .from("vendor")
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq("qbo_vendor_id", qboVendorId);
+
+        if (error) {
+          errors++;
+          await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "error", error.message);
+          continue;
+        }
+
+        await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "committed");
+        processed++;
+        continue;
+      }
+
+      const displayName = getVendorDisplayName(vendor, qboVendorId);
+      const normalizedName = normalizeVendorName(displayName);
+      if (!normalizedName) {
+        await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "skipped", "No vendor name");
+        processed++;
+        continue;
+      }
+
+      const companyName =
+        typeof vendor.CompanyName === "string" && vendor.CompanyName.trim().length > 0
+          ? vendor.CompanyName.trim().replace(/\s+/g, " ")
+          : null;
+      const isActive = vendor.Active !== false;
+
+      const { data: existingByQboId, error: existingQboError } = await admin
+        .from("vendor")
+        .select("id, vendor_type")
+        .eq("qbo_vendor_id", qboVendorId)
+        .maybeSingle();
+
+      if (existingQboError) {
+        errors++;
+        await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "error", existingQboError.message);
+        continue;
+      }
+
+      let existing = existingByQboId;
+      if (!existing && normalizedName) {
+        const { data: existingByName, error: existingNameError } = await admin
+          .from("vendor")
+          .select("id, vendor_type")
+          .eq("normalized_name", normalizedName)
+          .maybeSingle();
+
+        if (existingNameError) {
+          errors++;
+          await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "error", existingNameError.message);
+          continue;
+        }
+
+        existing = existingByName;
+      }
+
+      const payload = {
+        qbo_vendor_id: qboVendorId,
+        display_name: displayName,
+        company_name: companyName,
+        is_active: isActive,
+        vendor_type: existing?.vendor_type && existing.vendor_type !== "other"
+          ? existing.vendor_type
+          : "supplier",
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = existing?.id
+        ? await admin.from("vendor").update(payload).eq("id", existing.id)
+        : await admin.from("vendor").insert(payload);
+
+      if (error) {
+        errors++;
+        await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "error", error.message);
+        continue;
+      }
+
+      await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "committed");
+      processed++;
+    } catch (err: any) {
+      errors++;
+      console.error(`Process vendor ${entry.external_id}:`, err.message);
+      await markLanding(admin, "landing_raw_qbo_vendor", entry.id, "error", err.message);
+    }
+  }
+
+  return { processed, errors };
+}
+
+// ════════════════════════════════════════════════════════════
+// 6. PROCESS CUSTOMERS
 // ════════════════════════════════════════════════════════════
 
 async function processCustomers(admin: any, batchSize: number): Promise<{ processed: number; errors: number; orders_linked: number }> {
@@ -1020,22 +1159,25 @@ Deno.serve(async (req) => {
 
     if (entityType) {
       // Single entity type requested — process just that
-      if (entityType === "customers") results.customers = await processCustomers(admin, batchSize);
+      if (entityType === "vendors") results.vendors = await processVendors(admin, batchSize);
+      else if (entityType === "customers") results.customers = await processCustomers(admin, batchSize);
       else if (entityType === "items") results.items = await processItems(admin, batchSize);
       else if (entityType === "purchases") results.purchases = await processPurchases(admin, batchSize);
       else if (entityType === "sales") results.sales = await processSalesReceipts(admin, batchSize);
       else if (entityType === "refunds") results.refunds = await processRefundReceipts(admin, batchSize);
     } else {
       // Tiered processing: respect dependency order
-      // Tier 1: Customers + Items (no inter-dependencies)
-      const [pendingCust, pendingItems] = await Promise.all([
+      // Tier 1: Vendors + Customers + Items (reference data)
+      const [pendingVendors, pendingCust, pendingItems] = await Promise.all([
+        admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
         admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
         admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
       ]);
-      const tier1Remaining = (pendingCust.count ?? 0) + (pendingItems.count ?? 0);
+      const tier1Remaining = (pendingVendors.count ?? 0) + (pendingCust.count ?? 0) + (pendingItems.count ?? 0);
 
       if (tier1Remaining > 0) {
         // Process Tier 1 only
+        results.vendors = await processVendors(admin, batchSize);
         results.customers = await processCustomers(admin, batchSize);
         results.items = await processItems(admin, batchSize);
       } else {
@@ -1061,12 +1203,14 @@ Deno.serve(async (req) => {
       { count: pendingSales },
       { count: pendingRefunds },
       { count: pendingCustomers },
+      { count: pendingVendors },
     ] = await Promise.all([
       admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_purchase").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_sales_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_refund_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
 
     const remaining = {
@@ -1075,6 +1219,7 @@ Deno.serve(async (req) => {
       sales: pendingSales ?? 0,
       refunds: pendingRefunds ?? 0,
       customers: pendingCustomers ?? 0,
+      vendors: pendingVendors ?? 0,
     };
     const totalRemaining = Object.values(remaining).reduce((a, b) => a + b, 0);
 
