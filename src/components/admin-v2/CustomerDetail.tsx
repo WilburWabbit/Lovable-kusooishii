@@ -25,12 +25,12 @@ export function CustomerDetail() {
     queryKey: ["welcome-codes", "customer", customerId],
     queryFn: async () => {
       if (!customerId) return [];
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .from("welcome_code")
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
-      return data || [];
+      return (data || []) as any[];
     },
     enabled: !!customerId,
   });
