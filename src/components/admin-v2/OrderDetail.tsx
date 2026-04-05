@@ -49,12 +49,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const { data: welcomeCode } = useQuery({
     queryKey: ["welcome-code", "order", orderId],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .from("welcome_code")
         .select("code, promo_code, ebay_order_id, primary_sku, order_postcode, buyer_name, redeemed_at, scan_count, scanned_at")
         .eq("sales_order_id", orderId)
         .maybeSingle();
-      return data;
+      return data as any;
     },
     enabled: !!order?.id && order?.channel === "ebay",
   });
@@ -90,7 +90,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   }
 
   const customerName = order.customer?.name ?? "Cash Sales";
-  const formattedDate = new Date(order.orderDate).toLocaleDateString("en-GB", {
+  const formattedDate = new Date(order.createdAt).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
