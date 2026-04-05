@@ -29,6 +29,7 @@ function mapCustomerRow(
     email: (row.email as string) ?? '',
     channelIds: (row.channel_ids as Record<string, string>) ?? {},
     qboCustomerId: (row.qbo_customer_id as string) ?? null,
+    stripeCustomerId: (row.stripe_customer_id as string) ?? null,
     blueBellMember: (row.blue_bell_member as boolean) ?? false,
     createdAt: row.created_at as string,
     phone: (row.phone as string) ?? null,

@@ -65,6 +65,8 @@ function mapVariant(row: Record<string, unknown>): ProductVariant {
     sku: row.sku_code as string,
     mpn: row.mpn as string,
     grade: Number(row.condition_grade) as ConditionGrade,
+    stripeProductId: (row.stripe_product_id as string) ?? null,
+    stripePriceId: (row.stripe_price_id as string) ?? null,
     salePrice: (row.price as number) ?? null,
     floorPrice: (row.floor_price as number) ?? null,
     avgCost: (row.avg_cost as number) ?? null,

@@ -163,6 +163,8 @@ export interface ProductVariant {
   sku: string; // mpn.grade
   mpn: string;
   grade: ConditionGrade;
+  stripeProductId: string | null;
+  stripePriceId: string | null;
   salePrice: number | null;
   floorPrice: number | null;
   avgCost: number | null;
@@ -246,6 +248,7 @@ export interface Customer {
   email: string;
   channelIds: Record<string, string>; // { ebay: "username", bricklink: "username" }
   qboCustomerId: string | null;
+  stripeCustomerId: string | null;
   blueBellMember: boolean;
   createdAt: string;
 }

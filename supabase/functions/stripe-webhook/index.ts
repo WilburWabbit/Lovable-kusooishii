@@ -196,6 +196,24 @@ serve(async (req) => {
         processingError = err as Error;
       }
     }
+  } else if (event.type === "payment_intent.succeeded") {
+    const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+    const { data: existingOrder } = await supabase
+      .from("sales_order")
+      .select("id")
+      .eq("payment_reference", paymentIntent.id)
+      .maybeSingle();
+
+    if (existingOrder) {
+      console.log(`Order for Stripe payment intent ${paymentIntent.id} already exists (${existingOrder.id}), skipping`);
+    } else {
+      try {
+        await handleInPersonPaymentIntent(paymentIntent, stripe, isTestEvent);
+      } catch (err) {
+        processingError = err as Error;
+      }
+    }
   } else if (event.type === "payout.paid") {
     try {
       await handlePayoutPaid(event.data.object as Record<string, unknown>, isTestEvent);
@@ -237,6 +255,226 @@ serve(async (req) => {
     status: 200,
   });
 });
+
+async function paymentIntentBelongsToCheckout(
+  paymentIntentId: string,
+  stripe: Stripe,
+): Promise<boolean> {
+  try {
+    const sessions = await stripe.checkout.sessions.list({
+      limit: 1,
+      payment_intent: paymentIntentId,
+    } as never);
+    return sessions.data.length > 0;
+  } catch (err) {
+    console.warn(`Failed to look up Checkout Session for payment_intent ${paymentIntentId}:`, err);
+    return false;
+  }
+}
+
+async function handleInPersonPaymentIntent(
+  paymentIntent: Stripe.PaymentIntent,
+  stripe: Stripe,
+  isTestEvent: boolean,
+) {
+  try {
+    if ((paymentIntent.amount_received ?? 0) <= 0) {
+      console.log(`Skipping Stripe payment_intent ${paymentIntent.id} with no captured amount`);
+      return;
+    }
+
+    if (paymentIntent.invoice) {
+      console.log(`Skipping Stripe payment_intent ${paymentIntent.id} linked to invoice ${paymentIntent.invoice}`);
+      return;
+    }
+
+    if (paymentIntent.metadata?.origin_channel === "web") {
+      console.log(`Skipping Stripe payment_intent ${paymentIntent.id} tagged as web checkout`);
+      return;
+    }
+
+    const isCheckoutIntent = await paymentIntentBelongsToCheckout(paymentIntent.id, stripe);
+    if (isCheckoutIntent) {
+      console.log(`Skipping Stripe payment_intent ${paymentIntent.id} because it belongs to Checkout`);
+      return;
+    }
+
+    const latestChargeId = typeof paymentIntent.latest_charge === "string"
+      ? paymentIntent.latest_charge
+      : paymentIntent.latest_charge?.id ?? null;
+    const charge = latestChargeId
+      ? await stripe.charges.retrieve(latestChargeId)
+      : null;
+
+    const fallbackAddress = paymentIntent.shipping?.address ?? null;
+    const billingAddress = charge?.billing_details?.address ?? fallbackAddress;
+    const billingName = charge?.billing_details?.name?.trim()
+      || paymentIntent.shipping?.name?.trim()
+      || "Market Sale";
+    const billingEmail = charge?.billing_details?.email?.trim() || null;
+    const shippingCountry = (billingAddress?.country || "GB").toUpperCase();
+    const grossTotal = (paymentIntent.amount_received ?? paymentIntent.amount ?? 0) / 100;
+    const taxTotal = Math.round((grossTotal - grossTotal / 1.2) * 100) / 100;
+    const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
+    const txnDate = paymentIntent.created
+      ? new Date(paymentIntent.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const guestEmail = billingEmail || `stripe-pos-${paymentIntent.id}@internal.local`;
+    const chargeId = charge?.id ?? null;
+    const rawPaymentMethod = charge?.payment_method_details?.type ?? paymentIntent.payment_method_types?.[0] ?? "card";
+    const paymentMethod = rawPaymentMethod === "card_present" || rawPaymentMethod === "card"
+      ? "card"
+      : rawPaymentMethod;
+
+    let customerId: string | null = null;
+    const stripeCustomerId = typeof paymentIntent.customer === "string" ? paymentIntent.customer : paymentIntent.customer?.id ?? null;
+    let stripeCustomer: Stripe.Customer | null = null;
+    if (stripeCustomerId) {
+      const { data: existingByStripeId } = await supabase
+        .from("customer")
+        .select("id")
+        .eq("stripe_customer_id", stripeCustomerId)
+        .maybeSingle();
+      if (existingByStripeId) {
+        customerId = existingByStripeId.id;
+      } else {
+        const retrievedCustomer = await stripe.customers.retrieve(stripeCustomerId);
+        if (!("deleted" in retrievedCustomer) || retrievedCustomer.deleted !== true) {
+          stripeCustomer = retrievedCustomer as Stripe.Customer;
+        }
+      }
+    }
+
+    if (!customerId && billingEmail) {
+      const { data: existingCustomer } = await supabase
+        .from("customer")
+        .select("id")
+        .eq("email", billingEmail)
+        .maybeSingle();
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+        if (stripeCustomerId) {
+          await supabase
+            .from("customer")
+            .update({ stripe_customer_id: stripeCustomerId, synced_at: new Date().toISOString() })
+            .eq("id", customerId);
+        }
+      } else {
+        const { data: newCustomer } = await supabase
+          .from("customer")
+          .insert({
+            display_name: billingName,
+            email: billingEmail,
+            stripe_customer_id: stripeCustomerId,
+          })
+          .select("id")
+          .single();
+        customerId = newCustomer?.id ?? null;
+      }
+    }
+
+    if (!customerId && stripeCustomer) {
+      const { data: newCustomer } = await supabase
+        .from("customer")
+        .insert({
+          display_name: stripeCustomer.name ?? billingName,
+          email: stripeCustomer.email ?? null,
+          phone: stripeCustomer.phone ?? null,
+          stripe_customer_id: stripeCustomer.id,
+        })
+        .select("id")
+        .single();
+      customerId = newCustomer?.id ?? null;
+    }
+
+    const notes = [
+      "Auto-imported from Stripe in-person/POS payment.",
+      `payment_intent=${paymentIntent.id}`,
+      chargeId ? `charge=${chargeId}` : null,
+      paymentIntent.description ? `description=${paymentIntent.description}` : null,
+      "Manual SKU allocation required.",
+    ].filter(Boolean).join(" ");
+
+    const { data: order, error: orderError } = await supabase
+      .from("sales_order")
+      .insert({
+        origin_channel: "in_person",
+        origin_reference: paymentIntent.id,
+        payment_reference: paymentIntent.id,
+        status: "paid",
+        txn_date: txnDate,
+        customer_id: customerId,
+        guest_email: guestEmail,
+        guest_name: billingName,
+        shipping_name: billingName,
+        shipping_line_1: billingAddress?.line1 || "",
+        shipping_line_2: billingAddress?.line2 || null,
+        shipping_city: billingAddress?.city || "",
+        shipping_county: billingAddress?.state || null,
+        shipping_postcode: billingAddress?.postal_code || "",
+        shipping_country: shippingCountry,
+        merchandise_subtotal: netAmount,
+        shipping_total: 0,
+        discount_total: 0,
+        tax_total: taxTotal,
+        gross_total: grossTotal,
+        net_amount: netAmount,
+        payment_method: paymentMethod,
+        global_tax_calculation: "TaxExcluded",
+        qbo_sync_status: isTestEvent ? "skipped" : "needs_manual_review",
+        v2_status: "needs_allocation",
+        blue_bell_club: false,
+        notes,
+        is_test: isTestEvent,
+      })
+      .select("id, order_number")
+      .single();
+
+    if (orderError) {
+      throw orderError;
+    }
+
+    console.log(`Created in-person order ${order.order_number} (${order.id}) from payment_intent ${paymentIntent.id}`);
+
+    await supabase.from("audit_event").insert({
+      entity_type: "sales_order",
+      entity_id: order.id,
+      trigger_type: "stripe_pos_webhook",
+      actor_type: "system",
+      source_system: "stripe",
+      after_json: {
+        order_number: order.order_number,
+        payment_intent: paymentIntent.id,
+        charge_id: chargeId,
+        gross_total: grossTotal,
+        payment_method: paymentMethod,
+        origin_channel: "in_person",
+        requires_manual_allocation: true,
+        is_test: isTestEvent,
+      },
+    });
+
+    if (order.order_number) {
+      await supabase.from("sales_order").update({
+        doc_number: order.order_number,
+      }).eq("id", order.id);
+    }
+
+    if (!isTestEvent) {
+      await supabase.from("admin_alert").insert({
+        severity: "warning",
+        category: "stripe_pos_sale_needs_allocation",
+        title: `Stripe in-person sale ${order.order_number} needs allocation`,
+        detail: `Card payment ${paymentIntent.id} was imported automatically from Stripe. Add line items / stock allocation before QBO sync.`,
+        entity_type: "sales_order",
+        entity_id: order.id,
+      });
+    }
+  } catch (err) {
+    console.error("Error handling payment_intent.succeeded:", err);
+    throw err;
+  }
+}
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe: Stripe, isTestEvent: boolean) {
   try {

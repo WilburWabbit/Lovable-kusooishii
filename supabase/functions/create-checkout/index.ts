@@ -91,19 +91,38 @@ serve(async (req) => {
         userId = data.user.id;
         userEmail = data.user.email ?? undefined;
         if (userEmail) {
-          const customers = await stripe.customers.list({
-            email: userEmail,
-            limit: 1,
-          });
-          if (customers.data.length > 0) {
-            customerId = customers.data[0].id;
+          const { data: localCustomer } = await adminClient
+            .from("customer")
+            .select("id, stripe_customer_id, display_name")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+          const existingStripeCustomerId = localCustomer?.stripe_customer_id;
+          if (existingStripeCustomerId) {
+            customerId = existingStripeCustomerId;
           } else {
-            // Create a Stripe customer for registered users so they aren't treated as guests
-            const newCustomer = await stripe.customers.create({
+            const customers = await stripe.customers.list({
               email: userEmail,
-              metadata: { supabase_user_id: userId ?? "" },
+              limit: 1,
             });
-            customerId = newCustomer.id;
+            if (customers.data.length > 0) {
+              customerId = customers.data[0].id;
+            } else {
+              // Create a Stripe customer for registered users so they aren't treated as guests
+              const newCustomer = await stripe.customers.create({
+                email: userEmail,
+                name: localCustomer?.display_name ?? undefined,
+                metadata: { supabase_user_id: userId ?? "" },
+              });
+              customerId = newCustomer.id;
+            }
+
+            if (localCustomer?.id && customerId) {
+              await adminClient
+                .from("customer")
+                .update({ stripe_customer_id: customerId, synced_at: new Date().toISOString() })
+                .eq("id", localCustomer.id);
+            }
           }
         }
       }
@@ -218,6 +237,14 @@ serve(async (req) => {
       automatic_tax: { enabled: true },
       success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cart`,
+      payment_intent_data: {
+        metadata: {
+          origin_channel: "web",
+          shipping_method: shippingMethod,
+          sku_items: skuItemsStr,
+          ...(isTestMode ? { is_test: "true" } : {}),
+        },
+      },
       metadata: {
         shipping_method: shippingMethod,
         origin_channel: "web",

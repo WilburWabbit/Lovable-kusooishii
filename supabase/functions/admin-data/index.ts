@@ -1767,7 +1767,7 @@ Deno.serve(async (req) => {
       const fnName = params.function;
       if (!fnName || typeof fnName !== "string") throw new ValidationError("Missing 'function' parameter");
 
-      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates"];
+      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates", "stripe-sync-customers", "stripe-sync-products"];
       if (!allowed.includes(fnName)) throw new ValidationError(`Function '${fnName}' not allowed for proxying`);
 
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
