@@ -108,6 +108,7 @@ export function useOrders() {
                 email: (customerRow.email as string) ?? '',
                 channelIds: {},
                 qboCustomerId: null,
+                stripeCustomerId: null,
                 blueBellMember: false,
                 createdAt: '',
               }
