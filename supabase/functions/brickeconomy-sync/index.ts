@@ -228,6 +228,25 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- Append price history snapshots (one row per item per sync) ---
+    const historyRows = allItems.map((item) => ({
+      item_type: item.item_type,
+      item_number: item.item_number,
+      current_value: item.current_value,
+      growth: item.growth,
+      retail_price: item.retail_price,
+      currency: item.currency,
+      source: "bulk_sync",
+      recorded_at: now,
+    }));
+    for (let i = 0; i < historyRows.length; i += 100) {
+      const batch = historyRows.slice(i, i + 100);
+      const { error } = await admin.from("brickeconomy_price_history").insert(batch);
+      if (error) {
+        console.error("Price history insert error:", error.message);
+      }
+    }
+
     // --- Portfolio snapshots (upsert by snapshot_type) ---
     await admin.from("brickeconomy_portfolio_snapshot").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 

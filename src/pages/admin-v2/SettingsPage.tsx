@@ -4,6 +4,7 @@ import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
 import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
 import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
 import { PricingSettingsCard } from "@/components/admin-v2/PricingSettingsCard";
+import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
 
 export default function SettingsPage() {
   return (
@@ -19,6 +20,7 @@ export default function SettingsPage() {
           <QboSettingsCard />
           <EbaySettingsCard />
           <StripeSettingsCard />
+          <BrickEconomySettingsCard />
         </div>
 
         <div className="mt-6">

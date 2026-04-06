@@ -120,6 +120,7 @@ Deno.serve(async (req) => {
 
     // Store market prices in brickeconomy_collection for later use during grading
     if (brickEconomy) {
+      const syncedAt = new Date().toISOString();
       await admin
         .from("brickeconomy_collection")
         .upsert({
@@ -129,9 +130,21 @@ Deno.serve(async (req) => {
           theme: rebrickable?.theme ?? null,
           current_value: brickEconomy.current_value,
           retail_price: brickEconomy.retail_price,
-          synced_at: new Date().toISOString(),
+          synced_at: syncedAt,
           currency: "GBP",
         } as never, { onConflict: "item_number" as never });
+
+      // Append a price history snapshot for this individual lookup
+      await admin.from("brickeconomy_price_history").insert({
+        item_type: "set",
+        item_number: setNumber,
+        current_value: brickEconomy.current_value,
+        growth: null,
+        retail_price: brickEconomy.retail_price,
+        currency: "GBP",
+        source: "individual",
+        recorded_at: syncedAt,
+      } as never);
     }
 
     return jsonResponse({

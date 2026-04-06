@@ -6,6 +6,7 @@ import { StockUnitsTab } from "./StockUnitsTab";
 import { CopyMediaTab } from "./CopyMediaTab";
 import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
+import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
 import { toast } from "sonner";
 import type { ProductVariant } from "@/lib/types/admin";
 
@@ -13,7 +14,7 @@ interface ProductDetailProps {
   mpn: string;
 }
 
-type TabKey = "stock" | "copy" | "channels" | "specs";
+type TabKey = "stock" | "copy" | "channels" | "specs" | "market";
 
 // ─── Inline editable price cell ──────────────────────────────
 
@@ -139,6 +140,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
     { key: "copy", label: "Copy & Media" },
     { key: "channels", label: "Channels" },
     { key: "specs", label: "Specifications" },
+    { key: "market", label: "Market Data" },
   ];
 
   return (
@@ -234,6 +236,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       {activeTab === "copy" && <CopyMediaTab product={product} />}
       {activeTab === "channels" && <ChannelsTab variants={product.variants} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
+      {activeTab === "market" && <BrickEconomyPriceChart mpn={mpn} />}
     </div>
   );
 }
