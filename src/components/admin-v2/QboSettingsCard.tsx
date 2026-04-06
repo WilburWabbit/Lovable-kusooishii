@@ -67,13 +67,15 @@ export function QboSettingsCard() {
 
   // ── Helpers ──
 
-  const drainPending = async (label?: string) => {
+  const drainPending = async (label?: string, entityType?: string) => {
     setProcessing(true);
     let total = 0;
     try {
       for (let i = 0; i < 200; i++) {
         setProcessLabel(label ? `${label} (${total} committed)` : `Processing... (${total} committed)`);
-        const data = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { batch_size: 50 });
+        const body: Record<string, unknown> = { batch_size: 50 };
+        if (entityType) body.entity_type = entityType;
+        const data = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', body);
         if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
         const r = (data as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
         if (r) {
@@ -82,6 +84,12 @@ export function QboSettingsCard() {
             (r.vendors?.processed ?? 0) + (r.deposits?.processed ?? 0);
         }
         if (!(data as Record<string, unknown>).has_more) break;
+
+        // If entity-type-specific, also check if this specific entity has remaining
+        if (entityType) {
+          const remaining = (data as Record<string, unknown>).remaining as Record<string, number> | undefined;
+          if (remaining && (remaining[entityType] ?? 0) === 0) break;
+        }
       }
       return total;
     } finally {
