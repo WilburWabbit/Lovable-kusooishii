@@ -3559,19 +3559,10 @@ export type Database = {
         }
         Returns: undefined
       }
-      allocate_stock_units:
-        | {
-            Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
-            Returns: string[]
-          }
-        | {
-            Args: {
-              p_order_line_ids?: string[]
-              p_quantity: number
-              p_sku_id: string
-            }
-            Returns: string[]
-          }
+      allocate_stock_units: {
+        Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
+        Returns: string[]
+      }
       browse_catalog: {
         Args: {
           filter_grade?: string

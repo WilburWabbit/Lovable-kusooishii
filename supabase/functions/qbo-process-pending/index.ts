@@ -395,7 +395,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     .from("landing_raw_qbo_purchase")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockCreated = 0;
@@ -652,7 +652,6 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             v2_status: "graded",
             graded_at: now,
             landed_cost: landedCost,
-            carrying_value: landedCost,
             supplier_id: vendorName, inbound_receipt_line_id: receiptLineId,
           });
         }
@@ -757,7 +756,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
     .from("landing_raw_qbo_sales_receipt")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockMatched = 0, stockMissing = 0;
@@ -904,13 +903,13 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           const unitPrice = detail.UnitPrice ?? 0;
           const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
-          // Check if this is a non-stock item (Service/NonInventory/shipping)
+          // Check if this is a non-stock item (Service/NonInventory/shipping/literal IDs)
           const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
             .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
           const qboItemPayload = itemLanding?.raw_payload;
           const qboItemType = qboItemPayload?.Type ?? "";
-          if (["Service", "NonInventory"].includes(qboItemType)) {
-            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType})`);
+          if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType}, landing: ${!!itemLanding})`);
             continue;
           }
 
@@ -996,7 +995,7 @@ async function processRefundReceipts(
     .from("landing_raw_qbo_refund_receipt")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, refundOrdersRemoved = 0;
