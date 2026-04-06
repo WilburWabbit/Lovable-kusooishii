@@ -652,7 +652,6 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             v2_status: "graded",
             graded_at: now,
             landed_cost: landedCost,
-            carrying_value: landedCost,
             supplier_id: vendorName, inbound_receipt_line_id: receiptLineId,
           });
         }
