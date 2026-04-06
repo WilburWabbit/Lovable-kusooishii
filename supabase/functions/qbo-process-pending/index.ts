@@ -395,7 +395,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     .from("landing_raw_qbo_purchase")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockCreated = 0;
