@@ -92,10 +92,10 @@ export function useBrickEconomyQuota() {
 
       const { data: lastEvent } = await supabase
         .from("audit_event")
-        .select("created_at")
+        .select("occurred_at")
         .eq("entity_type", "brickeconomy_sync")
         .eq("trigger_type", "brickeconomy_sync")
-        .order("created_at", { ascending: false })
+        .order("occurred_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
