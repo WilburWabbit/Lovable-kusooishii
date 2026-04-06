@@ -1378,6 +1378,7 @@ Deno.serve(async (req) => {
       else if (entityType === "purchases") results.purchases = await processPurchases(admin, batchSize);
       else if (entityType === "sales") results.sales = await processSalesReceipts(admin, batchSize);
       else if (entityType === "refunds") results.refunds = await processRefundReceipts(admin, batchSize);
+      else if (entityType === "deposits") results.deposits = await processDeposits(admin, batchSize);
     } else {
       // Tiered processing: respect dependency order
       const [pendingVendors, pendingCust, pendingItems] = await Promise.all([
@@ -1398,8 +1399,18 @@ Deno.serve(async (req) => {
         if ((pendingPurch ?? 0) > 0) {
           results.purchases = await processPurchases(admin, batchSize);
         } else {
-          results.sales = await processSalesReceipts(admin, batchSize);
-          results.refunds = await processRefundReceipts(admin, batchSize);
+          const { count: pendingSalesCount } = await admin.from("landing_raw_qbo_sales_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+          const { count: pendingRefundsCount } = await admin.from("landing_raw_qbo_refund_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+
+          if (((pendingSalesCount ?? 0) + (pendingRefundsCount ?? 0)) > 0) {
+            results.sales = await processSalesReceipts(admin, batchSize);
+            results.refunds = await processRefundReceipts(admin, batchSize);
+          } else {
+            // Tier 4: Deposits (after all sales are processed)
+            results.deposits = await processDeposits(admin, batchSize);
+          }
         }
       }
     }
