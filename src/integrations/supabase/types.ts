@@ -1301,6 +1301,45 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_raw_qbo_deposit: {
+        Row: {
+          cloud_event_id: string | null
+          correlation_id: string | null
+          error_message: string | null
+          event_time: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          cloud_event_id?: string | null
+          correlation_id?: string | null
+          error_message?: string | null
+          event_time?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          cloud_event_id?: string | null
+          correlation_id?: string | null
+          error_message?: string | null
+          event_time?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
       landing_raw_qbo_item: {
         Row: {
           cloud_event_id: string | null
