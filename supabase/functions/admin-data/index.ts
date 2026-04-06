@@ -1633,14 +1633,44 @@ Deno.serve(async (req) => {
 
     } else if (action === "rebuild-from-qbo") {
       // Full reset: QBO is the absolute source of truth.
-      // Delete ALL transactional data regardless of origin, then replay from landing tables.
+      // Phase 1: Clear ALL QBO landing tables (stale data purge)
+      // Phase 2: Delete all canonical transactional data
+      // Phase 3: UI drives re-sync from QBO live, then processes
       const rebuildCorrelationId = crypto.randomUUID();
-      let purchasesReset = 0, salesReset = 0, refundsReset = 0, itemsReset = 0, customersReset = 0;
       let receiptsDeleted = 0, ordersDeleted = 0;
       let stockDeleted = 0;
       let payoutsDeleted = 0;
 
-      // Step 1: Delete ALL sales orders (not just QBO-originated) — NO stock reopening
+      // ═══ Phase 1: CLEAR all QBO landing tables (fresh start) ═══
+      // This ensures deleted QBO records don't get re-created from stale landing data
+      let landingPurchasesCleared = 0, landingSalesCleared = 0, landingRefundsCleared = 0;
+      let landingItemsCleared = 0, landingCustomersCleared = 0, landingVendorsCleared = 0, landingTaxCleared = 0;
+
+      const clearTable = async (table: string) => {
+        const { data } = await admin.from(table).select("id");
+        const ids = (data ?? []).map((r: any) => r.id);
+        if (ids.length > 0) {
+          for (let i = 0; i < ids.length; i += 100) {
+            const batch = ids.slice(i, i + 100);
+            await admin.from(table).delete().in("id", batch);
+          }
+        }
+        return ids.length;
+      };
+
+      landingPurchasesCleared = await clearTable("landing_raw_qbo_purchase");
+      landingSalesCleared = await clearTable("landing_raw_qbo_sales_receipt");
+      landingRefundsCleared = await clearTable("landing_raw_qbo_refund_receipt");
+      landingItemsCleared = await clearTable("landing_raw_qbo_item");
+      landingCustomersCleared = await clearTable("landing_raw_qbo_customer");
+      landingVendorsCleared = await clearTable("landing_raw_qbo_vendor");
+      landingTaxCleared = await clearTable("landing_raw_qbo_tax_entity");
+
+      console.log(`Phase 1 complete: cleared ${landingPurchasesCleared} purchases, ${landingSalesCleared} sales, ${landingRefundsCleared} refunds, ${landingItemsCleared} items, ${landingCustomersCleared} customers, ${landingVendorsCleared} vendors, ${landingTaxCleared} tax entities from landing tables`);
+
+      // ═══ Phase 2: Delete ALL canonical transactional data ═══
+
+      // Step 1: Delete ALL sales orders — NO stock reopening
       const { data: allOrders } = await admin.from("sales_order").select("id");
       for (const order of (allOrders ?? [])) {
         await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
@@ -1651,7 +1681,6 @@ Deno.serve(async (req) => {
       // Step 2: Delete ALL payout data
       const { data: allPayouts } = await admin.from("payouts").select("id");
       for (const payout of (allPayouts ?? [])) {
-        // Delete fee lines first, then fees, then payout orders
         const { data: payoutFees } = await admin.from("payout_fee").select("id").eq("payout_id", payout.id);
         for (const fee of (payoutFees ?? [])) {
           await admin.from("payout_fee_line").delete().eq("payout_fee_id", fee.id);
@@ -1681,12 +1710,11 @@ Deno.serve(async (req) => {
         receiptsDeleted++;
       }
 
-      // Step 4b: Delete ALL SKUs (recreated by processor from QBO items)
+      // Step 4b: Delete ALL SKUs
       let skusDeleted = 0;
       const { data: allSkus } = await admin.from("sku").select("id");
       const allSkuIds = (allSkus ?? []).map((s: any) => s.id);
       if (allSkuIds.length > 0) {
-        // Delete price audit logs referencing these SKUs first
         for (let i = 0; i < allSkuIds.length; i += 100) {
           const batch = allSkuIds.slice(i, i + 100);
           await admin.from("price_audit_log").delete().in("sku_id", batch);
@@ -1698,7 +1726,7 @@ Deno.serve(async (req) => {
         skusDeleted = allSkuIds.length;
       }
 
-      // Step 4c: Delete ALL vendors (recreated from QBO vendor landing data)
+      // Step 4c: Delete ALL vendors
       let vendorsDeleted = 0;
       const { data: allVendors } = await admin.from("vendor").select("id");
       if ((allVendors ?? []).length > 0) {
@@ -1708,7 +1736,7 @@ Deno.serve(async (req) => {
         vendorsDeleted = allVendors!.length;
       }
 
-      // Step 5: Clean up QBO-related audit events from prior processing cycles
+      // Step 5: Clean up audit events
       await admin.from("audit_event").delete()
         .in("trigger_type", [
           "qbo_inventory_adjustment", "qbo_qty_backfill",
@@ -1717,43 +1745,7 @@ Deno.serve(async (req) => {
           "cleanup_orphaned_stock",
         ]);
 
-      // Step 6: Reset ALL QBO landing tables to pending
-      const { data: pData } = await admin.from("landing_raw_qbo_purchase")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      purchasesReset = pData?.length ?? 0;
-
-      const { data: sData } = await admin.from("landing_raw_qbo_sales_receipt")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      salesReset = sData?.length ?? 0;
-
-      const { data: rData } = await admin.from("landing_raw_qbo_refund_receipt")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      refundsReset = rData?.length ?? 0;
-
-      const { data: iData } = await admin.from("landing_raw_qbo_item")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      itemsReset = iData?.length ?? 0;
-
-      const { data: cData } = await admin.from("landing_raw_qbo_customer")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      customersReset = cData?.length ?? 0;
-
-      const { data: vData } = await admin.from("landing_raw_qbo_vendor")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      const vendorsReset = vData?.length ?? 0;
-
-      const { data: tData } = await admin.from("landing_raw_qbo_tax_entity")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      const taxReset = tData?.length ?? 0;
-
-      // Step 7: Reset non-QBO landing tables for re-matching
+      // Step 6: Reset non-QBO landing tables for re-matching
       const { data: stripeData } = await admin.from("landing_raw_stripe_event")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
@@ -1774,7 +1766,7 @@ Deno.serve(async (req) => {
         .select("id");
       const ebayListingsReset = ebayListingData?.length ?? 0;
 
-      // Step 8: Delete ALL customers (recreated from QBO customer landing data)
+      // Step 7: Delete ALL customers
       let customersDeleted = 0;
       const { data: allCustomers } = await admin.from("customer").select("id");
       const allCustomerIds = (allCustomers ?? []).map((c: any) => c.id);
@@ -1786,7 +1778,7 @@ Deno.serve(async (req) => {
         customersDeleted = allCustomerIds.length;
       }
 
-      // Step 8b: Delete ALL tax_code and vat_rate (recreated from QBO tax entity landing data)
+      // Step 8: Delete ALL tax_code and vat_rate
       let taxCodesDeleted = 0, vatRatesDeleted = 0;
       const { data: allTaxCodes } = await admin.from("tax_code").select("id");
       if ((allTaxCodes ?? []).length > 0) {
@@ -1803,7 +1795,7 @@ Deno.serve(async (req) => {
         vatRatesDeleted = allVatRates!.length;
       }
 
-      // Delete eBay payout transactions (they'll be rebuilt from landing data)
+      // Delete eBay payout transactions
       await admin.from("ebay_payout_transactions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
       await admin.from("audit_event").insert({
@@ -1811,28 +1803,34 @@ Deno.serve(async (req) => {
         trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
         source_system: "admin-data", correlation_id: rebuildCorrelationId,
         output_json: {
-          purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset,
-          items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset,
-          tax_reset: taxReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted,
-          stock_deleted: stockDeleted, payouts_deleted: payoutsDeleted,
-          skus_deleted: skusDeleted, vendors_deleted: vendorsDeleted,
-          stripe_reset: stripeReset, ebay_orders_reset: ebayOrdersReset,
-          ebay_payouts_reset: ebayPayoutsReset, ebay_listings_reset: ebayListingsReset,
-          customers_deleted: customersDeleted,
-          tax_codes_deleted: taxCodesDeleted, vat_rates_deleted: vatRatesDeleted,
+          landing_cleared: {
+            purchases: landingPurchasesCleared, sales: landingSalesCleared,
+            refunds: landingRefundsCleared, items: landingItemsCleared,
+            customers: landingCustomersCleared, vendors: landingVendorsCleared,
+            tax: landingTaxCleared,
+          },
+          canonical_deleted: {
+            orders: ordersDeleted, receipts: receiptsDeleted, stock: stockDeleted,
+            payouts: payoutsDeleted, skus: skusDeleted, vendors: vendorsDeleted,
+            customers: customersDeleted, tax_codes: taxCodesDeleted, vat_rates: vatRatesDeleted,
+          },
+          non_qbo_reset: {
+            stripe: stripeReset, ebay_orders: ebayOrdersReset,
+            ebay_payouts: ebayPayoutsReset, ebay_listings: ebayListingsReset,
+          },
         },
       });
 
       result = {
         success: true,
         correlation_id: rebuildCorrelationId,
-        purchases_reset: purchasesReset,
-        sales_reset: salesReset,
-        refunds_reset: refundsReset,
-        items_reset: itemsReset,
-        customers_reset: customersReset,
-        vendors_reset: vendorsReset,
-        tax_reset: taxReset,
+        phase: "landing_cleared_and_canonical_wiped",
+        landing_cleared: {
+          purchases: landingPurchasesCleared, sales: landingSalesCleared,
+          refunds: landingRefundsCleared, items: landingItemsCleared,
+          customers: landingCustomersCleared, vendors: landingVendorsCleared,
+          tax: landingTaxCleared,
+        },
         receipts_deleted: receiptsDeleted,
         orders_deleted: ordersDeleted,
         stock_deleted: stockDeleted,

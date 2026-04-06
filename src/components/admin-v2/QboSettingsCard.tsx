@@ -1,7 +1,6 @@
 // ============================================================
 // Admin V2 — QBO Settings Card
-// Connect/disconnect, sync triggers, process pending, reconcile.
-// Ported from v1 QboSettingsPanel using v2 design primitives.
+// Multi-phase rebuild pipeline: clear → snapshot → wipe → process → replay
 // ============================================================
 
 import { useState, useRef } from 'react';
@@ -68,12 +67,12 @@ export function QboSettingsCard() {
 
   // ── Helpers ──
 
-  const drainPending = async () => {
+  const drainPending = async (label?: string) => {
     setProcessing(true);
     let total = 0;
     try {
-      for (let i = 0; i < 100; i++) {
-        setProcessLabel(`Auto-processing... (${total} committed)`);
+      for (let i = 0; i < 200; i++) {
+        setProcessLabel(label ? `${label} (${total} committed)` : `Processing... (${total} committed)`);
         const data = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { batch_size: 50 });
         if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
         const r = (data as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
@@ -84,13 +83,24 @@ export function QboSettingsCard() {
         }
         if (!(data as Record<string, unknown>).has_more) break;
       }
-      if (total > 0) toast.success(`Auto-processed ${total} records`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Processing failed');
+      return total;
     } finally {
       setProcessing(false);
       setProcessLabel('');
     }
+  };
+
+  const syncAllMonths = async (fnName: string, label: string, setProgress: (l: string) => void, setPct: (n: number) => void) => {
+    const months = generateMonthList();
+    let landed = 0;
+    for (let i = 0; i < months.length; i++) {
+      setProgress(`${label} ${months[i]} (${i + 1}/${months.length})`);
+      setPct(((i + 1) / months.length) * 100);
+      const d = await invokeWithAuth<Record<string, unknown>>(fnName, { month: months[i] });
+      if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
+      landed += ((d as Record<string, unknown>).landed as number) ?? ((d as Record<string, unknown>).sales_landed as number) ?? 0;
+    }
+    return landed;
   };
 
   // ── Actions ──
@@ -135,7 +145,10 @@ export function QboSettingsCard() {
         skipped += ((d as Record<string, unknown>).skipped_existing as number) ?? ((d as Record<string, unknown>).skipped as number) ?? 0;
       }
       toast.success(`Purchases: ${landed} landed, ${skipped} unchanged`);
-      if (!cancelPurchases.current && landed > 0) await drainPending();
+      if (!cancelPurchases.current && landed > 0) {
+        const total = await drainPending();
+        if (total > 0) toast.success(`Auto-processed ${total} records`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Purchase sync failed');
     } finally {
@@ -161,7 +174,10 @@ export function QboSettingsCard() {
         skipped += ((d as Record<string, unknown>).sales_skipped as number ?? 0) + ((d as Record<string, unknown>).refunds_skipped as number ?? 0);
       }
       toast.success(`Sales: ${landed} landed, ${skipped} unchanged`);
-      if (!cancelSales.current && landed > 0) await drainPending();
+      if (!cancelSales.current && landed > 0) {
+        const total = await drainPending();
+        if (total > 0) toast.success(`Auto-processed ${total} records`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Sales sync failed');
     } finally {
@@ -177,7 +193,10 @@ export function QboSettingsCard() {
       const d = await invokeWithAuth<Record<string, unknown>>('qbo-sync-customers');
       if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
       toast.success(`Customers: ${(d as Record<string, unknown>).landed ?? 0} landed, ${(d as Record<string, unknown>).skipped ?? 0} unchanged`);
-      if (((d as Record<string, unknown>).landed as number) > 0) await drainPending();
+      if (((d as Record<string, unknown>).landed as number) > 0) {
+        const total = await drainPending();
+        if (total > 0) toast.success(`Auto-processed ${total} records`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Customer sync failed');
     } finally {
@@ -191,7 +210,10 @@ export function QboSettingsCard() {
       const d = await invokeWithAuth<Record<string, unknown>>('qbo-sync-items');
       if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
       toast.success(`Items: ${(d as Record<string, unknown>).landed ?? 0} landed, ${(d as Record<string, unknown>).skipped ?? 0} unchanged`);
-      if (((d as Record<string, unknown>).landed as number) > 0) await drainPending();
+      if (((d as Record<string, unknown>).landed as number) > 0) {
+        const total = await drainPending();
+        if (total > 0) toast.success(`Auto-processed ${total} records`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Item sync failed');
     } finally {
@@ -205,7 +227,10 @@ export function QboSettingsCard() {
       const d = await invokeWithAuth<Record<string, unknown>>('qbo-sync-vendors');
       if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
       toast.success(`Vendors: ${(d as Record<string, unknown>).landed ?? 0} landed, ${(d as Record<string, unknown>).skipped ?? 0} unchanged`);
-      if (((d as Record<string, unknown>).landed as number) > 0) await drainPending();
+      if (((d as Record<string, unknown>).landed as number) > 0) {
+        const total = await drainPending();
+        if (total > 0) toast.success(`Auto-processed ${total} records`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Vendor sync failed');
     } finally {
@@ -256,27 +281,52 @@ export function QboSettingsCard() {
   };
 
   const rebuildFromQbo = async () => {
-    if (!confirm('This will delete all receipts, stock units, and QBO orders, then reprocess from staged data. Continue?')) return;
+    if (!confirm(
+      'FULL REBUILD: This will:\n' +
+      '1. Clear all QBO landing tables\n' +
+      '2. Re-fetch ALL data from QBO live\n' +
+      '3. Delete all transactional data\n' +
+      '4. Reprocess everything chronologically\n\n' +
+      'This may take several minutes. Continue?'
+    )) return;
+
     setRebuilding(true);
     try {
-      setRebuildPhase('Resetting canonical data...');
+      // ═══ Phase 1: Clear landing tables & wipe canonical data ═══
+      setRebuildPhase('Phase 1: Clearing landing tables & canonical data...');
       const resetData = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'rebuild-from-qbo' });
       if ((resetData as Record<string, unknown>)?.error) throw new Error(String((resetData as Record<string, unknown>).error));
 
-      let totalProcessed = 0;
-      for (let i = 0; i < 200; i++) {
-        setRebuildPhase(`Processed ${totalProcessed} records...`);
-        const d = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { batch_size: 50 });
-        if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
-        const r = (d as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
-        if (r) {
-          totalProcessed += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
-            (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0) +
-            (r.vendors?.processed ?? 0);
-        }
-        if (!(d as Record<string, unknown>).has_more) break;
-      }
-      toast.success(`Rebuild complete — ${totalProcessed} records committed`);
+      // ═══ Phase 2: Re-fetch from QBO live ═══
+      // 2a: Tax rates (single call)
+      setRebuildPhase('Phase 2a: Syncing tax rates from QBO...');
+      await invokeWithAuth('qbo-sync-tax-rates');
+
+      // 2b: Customers (single call)
+      setRebuildPhase('Phase 2b: Landing customers from QBO...');
+      await invokeWithAuth('qbo-sync-customers');
+
+      // 2c: Items (single call)
+      setRebuildPhase('Phase 2c: Landing items from QBO...');
+      await invokeWithAuth('qbo-sync-items');
+
+      // 2d: Vendors (single call)
+      setRebuildPhase('Phase 2d: Landing vendors from QBO...');
+      await invokeWithAuth('qbo-sync-vendors');
+
+      // 2e: Purchases (month by month)
+      setRebuildPhase('Phase 2e: Landing purchases from QBO...');
+      await syncAllMonths('qbo-sync-purchases', 'Purchases', setRebuildPhase, () => {});
+
+      // 2f: Sales (month by month)
+      setRebuildPhase('Phase 2f: Landing sales from QBO...');
+      await syncAllMonths('qbo-sync-sales', 'Sales', setRebuildPhase, () => {});
+
+      // ═══ Phase 3: Process all pending (chronological) ═══
+      setRebuildPhase('Phase 3: Processing all records...');
+      const totalProcessed = await drainPending('Rebuild processing');
+
+      toast.success(`Rebuild complete — ${totalProcessed} records committed from fresh QBO snapshot`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Rebuild failed');
     } finally {
@@ -365,7 +415,14 @@ export function QboSettingsCard() {
             </div>
           )}
           {processLabel && <p className="text-[10px] text-zinc-500">{processLabel}</p>}
-          {rebuildPhase && <p className="text-[10px] text-zinc-500">{rebuildPhase}</p>}
+          {rebuildPhase && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-amber-600 font-medium">{rebuildPhase}</p>
+              <div className="h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-400 animate-pulse" style={{ width: '100%' }} />
+              </div>
+            </div>
+          )}
 
           {/* Land data */}
           <div>
@@ -402,25 +459,27 @@ export function QboSettingsCard() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <p className="text-xs font-medium text-zinc-700">Stock Discrepancies</p>
-                <button onClick={() => setReconcileDetails(null)} className="text-[9px] text-zinc-400 hover:text-zinc-600">Dismiss</button>
+                <button onClick={() => setReconcileDetails(null)} className="text-[9px] text-zinc-400 hover:text-zinc-600">dismiss</button>
               </div>
-              <div className="overflow-x-auto rounded border border-zinc-200">
-                <table className="w-full text-[11px]">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px]">
                   <thead>
-                    <tr className="bg-zinc-50">
-                      <th className="text-left px-2 py-1 font-medium text-zinc-500">SKU</th>
-                      <th className="text-right px-2 py-1 font-medium text-zinc-500">App</th>
-                      <th className="text-right px-2 py-1 font-medium text-zinc-500">QBO</th>
-                      <th className="text-right px-2 py-1 font-medium text-zinc-500">Diff</th>
+                    <tr className="border-b border-zinc-200">
+                      <th className="text-left py-1 pr-2 text-zinc-500 font-medium">SKU</th>
+                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">QBO</th>
+                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">App</th>
+                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">Diff</th>
+                      <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reconcileDetails.map((d, i) => (
-                      <tr key={i} className="border-t border-zinc-100">
-                        <td className="px-2 py-1"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
-                        <td className="text-right px-2 py-1">{String(d.app_qty ?? 0)}</td>
-                        <td className="text-right px-2 py-1">{String(d.qbo_qty ?? 0)}</td>
-                        <td className="text-right px-2 py-1 font-medium">{String(d.diff ?? 0)}</td>
+                    {reconcileDetails.slice(0, 20).map((d, i) => (
+                      <tr key={i} className="border-b border-zinc-100">
+                        <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
+                        <td className="text-right py-0.5 px-2">{String(d.qbo_qty)}</td>
+                        <td className="text-right py-0.5 px-2">{String(d.app_qty)}</td>
+                        <td className="text-right py-0.5 px-2">{String(d.diff)}</td>
+                        <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
                       </tr>
                     ))}
                   </tbody>
