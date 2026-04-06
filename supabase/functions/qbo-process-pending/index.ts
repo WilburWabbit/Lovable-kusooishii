@@ -730,10 +730,16 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       if (createdStockUnitIds.length > 0) {
         console.warn(`Rolling back ${createdStockUnitIds.length} stock units for purchase ${entry.external_id}`);
         for (let i = 0; i < createdStockUnitIds.length; i += 100) {
-          const batch = createdStockUnitIds.slice(i, i + 100);
-          await admin.from("stock_unit").delete().in("id", batch);
+          const rollbackBatch = createdStockUnitIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", rollbackBatch);
         }
         stockCreated -= createdStockUnitIds.length;
+      }
+
+      // ROLLBACK: Delete purchase line items and batch created in this iteration
+      if (batchId) {
+        await admin.from("purchase_line_items").delete().eq("batch_id", batchId);
+        await admin.from("purchase_batches").delete().eq("id", batchId);
       }
 
       // ROLLBACK: Delete inserted receipt lines
