@@ -79,7 +79,7 @@ export function QboSettingsCard() {
         if (r) {
           total += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
             (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0) +
-            (r.vendors?.processed ?? 0);
+            (r.vendors?.processed ?? 0) + (r.deposits?.processed ?? 0);
         }
         if (!(data as Record<string, unknown>).has_more) break;
       }
