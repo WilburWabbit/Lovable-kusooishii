@@ -92,7 +92,8 @@ Deno.serve(async (req) => {
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
     const correlationId = crypto.randomUUID();
 
-    const qboCustomers = await queryQboAll(baseUrl, accessToken, "Customer");
+    // Only sync active customers — inactive/deleted customers should not be landed
+    const qboCustomers = await queryQboActiveCustomers(baseUrl, accessToken);
     console.log(`Landing ${qboCustomers.length} QBO customers (correlation: ${correlationId})`);
 
     let landed = 0, skipped = 0;
