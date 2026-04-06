@@ -31,7 +31,7 @@ function mapProduct(row: Record<string, unknown>): Product {
     id: row.id as string,
     mpn: row.mpn as string,
     name: (row.name as string) ?? '',
-    productType: ((row.product_type as string) === 'minifig' ? 'minifig' : 'set') as "set" | "minifig",
+    productType: (['minifig', 'minifigure'].includes(row.product_type as string) ? 'minifig' : 'set') as "set" | "minifig",
     theme: theme ? (theme.name as string) : null,
     subtheme: (row.subtheme_name as string) ?? null,
     setNumber: (row.set_number as string) ?? null,
