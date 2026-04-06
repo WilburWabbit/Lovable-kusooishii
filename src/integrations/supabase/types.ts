@@ -3618,44 +3618,21 @@ export type Database = {
         Args: { payload: Json; queue_name: string }
         Returns: number
       }
-      ensure_product_exists:
-        | {
-            Args: {
-              p_brand?: string
-              p_item_type?: string
-              p_mpn: string
-              p_name?: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_brand?: string
-              p_img_url?: string
-              p_item_type?: string
-              p_mpn: string
-              p_name?: string
-              p_piece_count?: number
-              p_release_year?: number
-              p_retired?: boolean
-              p_subtheme?: string
-              p_theme_id?: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_img_url?: string
-              p_mpn: string
-              p_name?: string
-              p_piece_count?: number
-              p_release_year?: number
-              p_retired?: boolean
-              p_subtheme?: string
-              p_theme_id?: string
-            }
-            Returns: string
-          }
+      ensure_product_exists: {
+        Args: {
+          p_brand?: string
+          p_img_url?: string
+          p_item_type?: string
+          p_mpn: string
+          p_name?: string
+          p_piece_count?: number
+          p_release_year?: number
+          p_retired?: boolean
+          p_subtheme?: string
+          p_theme_id?: string
+        }
+        Returns: string
+      }
       ensure_vendor: {
         Args: {
           p_display_name: string
