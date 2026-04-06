@@ -137,6 +137,7 @@ export interface Product {
   id: string;
   mpn: string;
   name: string;
+  productType: "set" | "minifig";
   theme: string | null;
   subtheme: string | null;
   setNumber: string | null;

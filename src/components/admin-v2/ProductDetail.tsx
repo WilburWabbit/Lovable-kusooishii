@@ -236,7 +236,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       {activeTab === "copy" && <CopyMediaTab product={product} />}
       {activeTab === "channels" && <ChannelsTab variants={product.variants} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
-      {activeTab === "market" && <BrickEconomyPriceChart mpn={mpn} />}
+      {activeTab === "market" && <BrickEconomyPriceChart mpn={mpn} itemType={product.productType === "minifig" ? "minifig" : "set"} />}
     </div>
   );
 }
