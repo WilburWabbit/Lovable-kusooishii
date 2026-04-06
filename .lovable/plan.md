@@ -1,35 +1,46 @@
 
 
-# BrickEconomy Market Data Not Displaying — Fix Plan
+# Fix Minifig BrickEconomy Market Data
 
 ## Root Cause
 
-The `BrickEconomyPriceChart` component strips the version suffix from the MPN before querying:
+Two bugs preventing minifig market data from displaying:
 
+### Bug 1: Product type mapping mismatch
+The `product` table stores `product_type = 'minifigure'` for minifigs, but the mapper in `use-products.ts` only checks for `'minifig'`:
 ```typescript
-const setNumber = mpn.split("-")[0]; // "75367-1" → "75367"
+// Current — misses "minifigure"
+productType: ((row.product_type as string) === 'minifig' ? 'minifig' : 'set')
 ```
+This causes all minifigure products to be mapped as `"set"`, so the chart queries `item_type = 'set'` instead of `'minifig'`.
 
-But the database stores `item_number` WITH the suffix (e.g., `75367-1` for sets). The query returns zero rows, so the UI shows "No price history yet" despite 646 rows existing in the table.
-
-Minifig item numbers (e.g., `nex016`) have no hyphen, so `.split("-")[0]` works for them — but the component defaults `itemType` to `"set"`, so minifigs are unlikely to be queried correctly either.
+### Bug 2: Hook adds wrong suffix for minifigs
+The `useBrickEconomyPriceHistory` hook always appends `-1` to the base number:
+```typescript
+const versionedNumber = `${baseNumber}-1`; // "col130" → "col130-1"
+```
+Minifig item numbers in the DB are just `col130` (no suffix). The `.or()` query tries `col130` AND `col130-1` — the first would match, but since `item_type` is wrong (Bug 1), nothing returns.
 
 ## Fix
 
-**File: `src/components/admin-v2/BrickEconomyPriceChart.tsx` (line 62)**
-
-Remove the `.split("-")[0]` — pass the full MPN directly as the `itemNumber` to the price history hook:
-
+### File 1: `src/hooks/admin/use-products.ts` (line 34)
+Change the product type check to also match `"minifigure"`:
 ```typescript
-// Before:
-const setNumber = mpn.split("-")[0];
-const { data: history = [], isLoading } = useBrickEconomyPriceHistory(itemType, setNumber);
-
-// After:
-const { data: history = [], isLoading } = useBrickEconomyPriceHistory(itemType, mpn);
+productType: (['minifig', 'minifigure'].includes(row.product_type as string) ? 'minifig' : 'set')
 ```
 
-This is a one-line change. The MPN already matches the `item_number` format stored by the sync function (e.g., `75367-1`).
+### File 2: `src/hooks/admin/use-brickeconomy.ts` (lines 40-41)
+Skip the versioned number logic for minifigs (they don't use `-1` suffixes):
+```typescript
+const baseNumber = itemNumber.split("-")[0];
+const numbers = itemType === "minifig"
+  ? [baseNumber]
+  : [baseNumber, baseNumber.includes("-") ? baseNumber : `${baseNumber}-1`];
+```
+Then update the `.or()` to use the dynamic array:
+```typescript
+.or(numbers.map(n => `item_number.eq.${n}`).join(","))
+```
 
-No other files need changes — the hook, the sync function, and the settings card are all correct.
+Both are small, targeted changes. No other files need modification.
 
