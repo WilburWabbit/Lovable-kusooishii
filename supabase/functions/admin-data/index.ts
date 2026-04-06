@@ -1665,6 +1665,7 @@ Deno.serve(async (req) => {
       landingCustomersCleared = await clearTable("landing_raw_qbo_customer");
       landingVendorsCleared = await clearTable("landing_raw_qbo_vendor");
       landingTaxCleared = await clearTable("landing_raw_qbo_tax_entity");
+      await clearTable("landing_raw_qbo_deposit");
 
       console.log(`Phase 1 complete: cleared ${landingPurchasesCleared} purchases, ${landingSalesCleared} sales, ${landingRefundsCleared} refunds, ${landingItemsCleared} items, ${landingCustomersCleared} customers, ${landingVendorsCleared} vendors, ${landingTaxCleared} tax entities from landing tables`);
 
@@ -1700,6 +1701,18 @@ Deno.serve(async (req) => {
           await admin.from("stock_unit").delete().in("id", batch);
         }
         stockDeleted = allStockIds.length;
+      }
+
+      // Step 3b: Delete ALL purchase_line_items then purchase_batches
+      let purchaseBatchesDeleted = 0;
+      await admin.from("purchase_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const { data: allBatches } = await admin.from("purchase_batches").select("id");
+      if ((allBatches ?? []).length > 0) {
+        for (let i = 0; i < allBatches!.length; i += 100) {
+          const batch = allBatches!.slice(i, i + 100);
+          await admin.from("purchase_batches").delete().in("id", batch.map((b: any) => b.id));
+        }
+        purchaseBatchesDeleted = allBatches!.length;
       }
 
       // Step 4: Delete ALL inbound receipts and lines
@@ -1852,7 +1865,7 @@ Deno.serve(async (req) => {
       const fnName = params.function;
       if (!fnName || typeof fnName !== "string") throw new ValidationError("Missing 'function' parameter");
 
-      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates", "stripe-sync-customers", "stripe-sync-products"];
+      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates", "qbo-sync-deposits", "stripe-sync-customers", "stripe-sync-products"];
       if (!allowed.includes(fnName)) throw new ValidationError(`Function '${fnName}' not allowed for proxying`);
 
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

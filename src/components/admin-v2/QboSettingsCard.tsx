@@ -79,7 +79,7 @@ export function QboSettingsCard() {
         if (r) {
           total += (r.items?.processed ?? 0) + (r.purchases?.processed ?? 0) +
             (r.sales?.processed ?? 0) + (r.refunds?.processed ?? 0) + (r.customers?.processed ?? 0) +
-            (r.vendors?.processed ?? 0);
+            (r.vendors?.processed ?? 0) + (r.deposits?.processed ?? 0);
         }
         if (!(data as Record<string, unknown>).has_more) break;
       }
@@ -321,6 +321,10 @@ export function QboSettingsCard() {
       // 2f: Sales (month by month)
       setRebuildPhase('Phase 2f: Landing sales from QBO...');
       await syncAllMonths('qbo-sync-sales', 'Sales', setRebuildPhase, () => {});
+
+      // 2g: Deposits (single call)
+      setRebuildPhase('Phase 2g: Landing deposits from QBO...');
+      await invokeWithAuth('qbo-sync-deposits');
 
       // ═══ Phase 3: Process all pending (chronological) ═══
       setRebuildPhase('Phase 3: Processing all records...');

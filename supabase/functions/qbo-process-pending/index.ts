@@ -1213,7 +1213,122 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
     }
   }
 
-  return { processed, errors, orders_linked: ordersLinked };
+
+  // ── Customer orphan cleanup: delete canonical customers with no matching landing record ──
+  const { data: qboCustomers } = await admin
+    .from("customer")
+    .select("id, qbo_customer_id")
+    .not("qbo_customer_id", "is", null);
+
+  let customersOrphaned = 0;
+  for (const cust of (qboCustomers ?? [])) {
+    const { data: landingMatch } = await admin
+      .from("landing_raw_qbo_customer")
+      .select("id")
+      .eq("external_id", cust.qbo_customer_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (!landingMatch) {
+      // No landing record means this customer was deleted/deactivated in QBO
+      await admin.from("customer").delete().eq("id", cust.id);
+      customersOrphaned++;
+    }
+  }
+  if (customersOrphaned > 0) {
+    console.log(`Customer orphan cleanup: deleted ${customersOrphaned} customers with no landing record`);
+  }
+
+  return { processed, errors, orders_linked: ordersLinked, orphans_deleted: customersOrphaned };
+}
+
+// ════════════════════════════════════════════════════════════
+// 7. PROCESS DEPOSITS → Payouts
+// ════════════════════════════════════════════════════════════
+
+async function processDeposits(admin: any, batchSize: number): Promise<{ processed: number; errors: number; payouts_created: number }> {
+  const { data: pending } = await admin
+    .from("landing_raw_qbo_deposit")
+    .select("id, external_id, raw_payload")
+    .eq("status", "pending")
+    .order("raw_payload->>'TxnDate'", { ascending: true })
+    .limit(batchSize);
+
+  let processed = 0, errors = 0, payoutsCreated = 0;
+
+  for (const entry of (pending ?? [])) {
+    try {
+      const deposit = entry.raw_payload;
+      const qboDepositId = String(deposit.Id);
+      const txnDate = deposit.TxnDate ?? null;
+      const totalAmt = deposit.TotalAmt ?? 0;
+      const currency = deposit.CurrencyRef?.value ?? "GBP";
+      const memo = deposit.PrivateNote ?? null;
+
+      // Detect channel from memo or deposit lines
+      let channel = "unknown";
+      const memoLower = (memo ?? "").toLowerCase();
+      if (/ebay/i.test(memoLower)) channel = "ebay";
+      else if (/stripe/i.test(memoLower) || /web/i.test(memoLower) || /ko-/i.test(memoLower)) channel = "web";
+      else if (/square/i.test(memoLower) || /cash/i.test(memoLower)) channel = "in_person";
+
+      // Check for existing payout by qbo_deposit_id
+      const { data: existingPayout } = await admin.from("payouts")
+        .select("id").eq("qbo_deposit_id", qboDepositId).maybeSingle();
+
+      let payoutId: string;
+      if (existingPayout) {
+        payoutId = existingPayout.id;
+        // Update existing
+        await admin.from("payouts").update({
+          payout_date: txnDate, net_amount: totalAmt, currency, channel,
+          notes: memo, updated_at: new Date().toISOString(),
+        }).eq("id", payoutId);
+      } else {
+        const { data: newPayout, error: payoutErr } = await admin.from("payouts").insert({
+          qbo_deposit_id: qboDepositId, payout_date: txnDate,
+          net_amount: totalAmt, currency, channel, notes: memo,
+          status: "reconciled",
+        }).select("id").single();
+        if (payoutErr) throw payoutErr;
+        payoutId = newPayout.id;
+        payoutsCreated++;
+      }
+
+      // Link deposit lines to sales orders via QBO SalesReceipt IDs
+      const lines = deposit.Line ?? [];
+      for (const line of lines) {
+        const linkedTxnId = line.LinkedTxn?.[0]?.TxnId;
+        const linkedTxnType = line.LinkedTxn?.[0]?.TxnType;
+        if (!linkedTxnId || linkedTxnType !== "SalesReceipt") continue;
+
+        // Find the sales order linked to this QBO SalesReceipt
+        const { data: linkedOrder } = await admin.from("sales_order")
+          .select("id").eq("qbo_sales_receipt_id", String(linkedTxnId)).maybeSingle();
+        if (!linkedOrder) continue;
+
+        // Check if payout_orders link already exists
+        const { data: existingLink } = await admin.from("payout_orders")
+          .select("id").eq("payout_id", payoutId).eq("sales_order_id", linkedOrder.id).maybeSingle();
+        if (existingLink) continue;
+
+        const lineAmt = line.Amount ?? 0;
+        await admin.from("payout_orders").insert({
+          payout_id: payoutId, sales_order_id: linkedOrder.id,
+          order_gross: lineAmt,
+        });
+      }
+
+      await markLanding(admin, "landing_raw_qbo_deposit", entry.id, "committed");
+      processed++;
+    } catch (err: any) {
+      errors++;
+      console.error(`Process deposit ${entry.external_id}:`, err.message);
+      await markLanding(admin, "landing_raw_qbo_deposit", entry.id, "error", err.message);
+    }
+  }
+
+  return { processed, errors, payouts_created: payoutsCreated };
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1263,6 +1378,7 @@ Deno.serve(async (req) => {
       else if (entityType === "purchases") results.purchases = await processPurchases(admin, batchSize);
       else if (entityType === "sales") results.sales = await processSalesReceipts(admin, batchSize);
       else if (entityType === "refunds") results.refunds = await processRefundReceipts(admin, batchSize);
+      else if (entityType === "deposits") results.deposits = await processDeposits(admin, batchSize);
     } else {
       // Tiered processing: respect dependency order
       const [pendingVendors, pendingCust, pendingItems] = await Promise.all([
@@ -1283,8 +1399,18 @@ Deno.serve(async (req) => {
         if ((pendingPurch ?? 0) > 0) {
           results.purchases = await processPurchases(admin, batchSize);
         } else {
-          results.sales = await processSalesReceipts(admin, batchSize);
-          results.refunds = await processRefundReceipts(admin, batchSize);
+          const { count: pendingSalesCount } = await admin.from("landing_raw_qbo_sales_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+          const { count: pendingRefundsCount } = await admin.from("landing_raw_qbo_refund_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+
+          if (((pendingSalesCount ?? 0) + (pendingRefundsCount ?? 0)) > 0) {
+            results.sales = await processSalesReceipts(admin, batchSize);
+            results.refunds = await processRefundReceipts(admin, batchSize);
+          } else {
+            // Tier 4: Deposits (after all sales are processed)
+            results.deposits = await processDeposits(admin, batchSize);
+          }
         }
       }
     }
@@ -1297,6 +1423,7 @@ Deno.serve(async (req) => {
       { count: pendingRefunds },
       { count: pendingCustomers },
       { count: pendingVendors },
+      { count: pendingDeposits },
     ] = await Promise.all([
       admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_purchase").select("id", { count: "exact", head: true }).eq("status", "pending"),
@@ -1304,6 +1431,7 @@ Deno.serve(async (req) => {
       admin.from("landing_raw_qbo_refund_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      admin.from("landing_raw_qbo_deposit").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
 
     const remaining = {
@@ -1313,6 +1441,7 @@ Deno.serve(async (req) => {
       refunds: pendingRefunds ?? 0,
       customers: pendingCustomers ?? 0,
       vendors: pendingVendors ?? 0,
+      deposits: pendingDeposits ?? 0,
     };
     const totalRemaining = Object.values(remaining).reduce((a, b) => a + b, 0);
 
