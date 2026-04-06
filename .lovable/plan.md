@@ -1,50 +1,59 @@
 
+Fix rebuild sequencing and unify purchase replay
 
-# Fix Duplicate Purchases, Stale Customers, and Missing Payouts
+What is broken now
+- Rebuild clears `purchase_batches` and `purchase_line_items` in `admin-data`.
+- `qbo-process-pending.processPurchases()` does not recreate them; it only rebuilds `inbound_receipt`, `inbound_receipt_line`, and `stock_unit`.
+- The Purchases UI (`PurchaseList` / `usePurchaseBatches`) only reads `purchase_batches`.
+- The only path that currently creates batches is the Intake client mutation in `use-intake.ts`, which rebuild never calls.
+- Result: purchases can be marked “processed” while the actual v2 purchase model is still empty or incomplete.
 
-## Root Causes Found
+Implementation plan
 
-### 1. Duplicate Purchase Batches (PO-086 + PO-172 for same QBO 1748)
-The rebuild deletes `inbound_receipt`, `stock_unit`, `sku`, etc. but **never deletes `purchase_batches` or `purchase_line_items`**. There are 173 batch rows for 87 distinct QBO references — every purchase is duplicated exactly. The old batch rows from before the rebuild persist, and the Intake UI creates new ones when processing receipts.
+1. Create one canonical server-side purchase promotion path
+- Move purchase promotion into one shared server-side routine used by both rebuild and manual intake.
+- Input: one `inbound_receipt`.
+- Output: `purchase_batches`, `purchase_line_items`, and `stock_unit` rows with correct `batch_id`, `line_item_id`, and `inbound_receipt_line_id`.
+- Make it idempotent per QBO purchase: replaying one purchase must replace that purchase’s batch/lines/units, not append.
 
-### 2. Stale/Deleted Customers (QBO ID 493 still present)
-Two bugs compound:
-- `qbo-sync-customers` queries `SELECT * FROM Customer` with **no `Active = true` filter**, so inactive/merged customers are landed
-- `processCustomers` has no post-processing cleanup step to delete canonical customers that no longer have a matching landing record after a rebuild
+2. Change QBO purchase processing to use that routine
+- In `qbo-process-pending`, keep QBO purchase landing/normalisation into `inbound_receipt` + lines.
+- Replace the current “create stock only + mark receipt processed” branch with “promote receipt into purchase batch”.
+- Do not mark the QBO purchase landing row committed until batch, line items, and units all succeed.
+- On error, roll back partial batch/line/unit writes and leave the record retryable.
 
-### 3. Missing Payout/Deposit Data
-No `qbo-sync-deposits` function exists. eBay payout landing table is empty (reset during rebuild, never repopulated). The rebuild's Phase 3 processes QBO records but never replays non-QBO landing events.
+3. Enforce the exact rebuild order
+```text
+Tax/reference pre-step -> Customers -> Items -> Purchases -> Sales/Refunds -> Deposits
+```
+- For rebuild, stop relying on the generic mixed `drainPending()` loop as the main control path.
+- In `QboSettingsCard`, explicitly:
+  - land one phase
+  - process only that entity type until pending = 0
+  - stop if errors remain
+  - only then advance
+- Purchases must be fully promoted before any sales run; deposits must wait until all sales/refunds are committed.
 
-## Plan
+4. Remove the split-brain intake path
+- Update `use-intake.ts` so manual “Process into Batch” calls the same server-side purchase promotion routine instead of writing batches/units directly from the browser.
+- Align or retire `process-receipt` so there is only one authoritative receipt-to-batch implementation.
 
-### Step 1: Add `purchase_batches` and `purchase_line_items` to rebuild deletion
+5. Add rebuild safety checks
+- After the Purchases phase, verify:
+  - every committed QBO purchase has one matching purchase batch
+  - batch line totals/unit counts reconcile to the receipt
+  - no stock units exist for a QBO purchase without `batch_id` and `line_item_id`
+- If any of those checks fail, stop before Sales.
 
-In `admin-data/index.ts`, add deletion of `purchase_line_items` (child first) then `purchase_batches` between the stock unit deletion and inbound receipt deletion steps.
+Files to update
+- `supabase/functions/qbo-process-pending/index.ts`
+- `src/components/admin-v2/QboSettingsCard.tsx`
+- `src/hooks/admin/use-intake.ts`
+- `supabase/functions/process-receipt/index.ts` or a new shared purchase-promotion helper
+- `supabase/functions/admin-data/index.ts` for rebuild orchestration/reporting only
 
-### Step 2: Filter inactive customers during sync
-
-In `qbo-sync-customers/index.ts`, change the query from `SELECT * FROM Customer` to `SELECT * FROM Customer WHERE Active = true` to prevent inactive/deleted customers from being landed.
-
-### Step 3: Add customer orphan cleanup after processing
-
-In `qbo-process-pending/index.ts`, after `processCustomers` finishes all pending records, add a cleanup step: query all `customer` rows where `qbo_customer_id IS NOT NULL`, then check each against `landing_raw_qbo_customer`. Delete any canonical customer whose QBO ID has no matching landing record (meaning it was deleted/deactivated in QBO).
-
-### Step 4: Create QBO Deposit sync and landing
-
-- **Migration**: Create `landing_raw_qbo_deposit` table (same structure as other landing tables)
-- **New edge function**: `qbo-sync-deposits/index.ts` — queries `SELECT * FROM Deposit` from QBO and lands raw payloads
-- **Processor addition**: Add `processDeposits` function in `qbo-process-pending` that reads deposit landing records and creates `payouts` rows, linking deposit lines to sales orders via their QBO SalesReceipt references
-
-### Step 5: Add deposit sync to rebuild pipeline
-
-In `QboSettingsCard.tsx`, add a Phase 2g step between sales sync and processing to sync deposits from QBO. Add `landing_raw_qbo_deposit` to the landing tables cleared during Phase 1 in `admin-data`.
-
-## Files Modified
-
-1. `supabase/functions/admin-data/index.ts` — delete `purchase_batches`/`purchase_line_items` in rebuild; clear `landing_raw_qbo_deposit`
-2. `supabase/functions/qbo-sync-customers/index.ts` — filter `Active = true`
-3. `supabase/functions/qbo-process-pending/index.ts` — customer orphan cleanup; `processDeposits` function
-4. `supabase/functions/qbo-sync-deposits/index.ts` — new function
-5. `src/components/admin-v2/QboSettingsCard.tsx` — add deposit sync phase
-6. Database migration — create `landing_raw_qbo_deposit` table
-
+Expected result
+- Rebuild follows the business sequence you specified.
+- Purchases are not just cleared; they are actually rebuilt into the v2 purchase model the UI uses.
+- Sales allocate against rebuilt purchase stock, and deposits reconcile only after the sales base exists.
+- One bad purchase can be purged and replayed with the same code path as the full rebuild.
