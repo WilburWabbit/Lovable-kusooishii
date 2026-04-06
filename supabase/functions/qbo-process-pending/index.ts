@@ -1423,6 +1423,7 @@ Deno.serve(async (req) => {
       { count: pendingRefunds },
       { count: pendingCustomers },
       { count: pendingVendors },
+      { count: pendingDeposits },
     ] = await Promise.all([
       admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_purchase").select("id", { count: "exact", head: true }).eq("status", "pending"),
@@ -1430,6 +1431,7 @@ Deno.serve(async (req) => {
       admin.from("landing_raw_qbo_refund_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      admin.from("landing_raw_qbo_deposit").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
 
     const remaining = {
@@ -1439,6 +1441,7 @@ Deno.serve(async (req) => {
       refunds: pendingRefunds ?? 0,
       customers: pendingCustomers ?? 0,
       vendors: pendingVendors ?? 0,
+      deposits: pendingDeposits ?? 0,
     };
     const totalRemaining = Object.values(remaining).reduce((a, b) => a + b, 0);
 
