@@ -382,6 +382,11 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
   let processed = 0, errors = 0, stockCreated = 0;
 
   for (const entry of (pending ?? [])) {
+    // Track IDs created in this iteration for rollback
+    const createdStockUnitIds: string[] = [];
+    let receiptId: string | null = null;
+    let insertedLineIds: string[] = [];
+
     try {
       const purchase = entry.raw_payload;
       const qboPurchaseId = String(purchase.Id);
@@ -413,6 +418,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         .select("id, status").single();
 
       if (receiptErr) { errors++; await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", receiptErr.message); continue; }
+      receiptId = receipt.id;
 
       // If already processed, handle existing stock before recreating lines
       if (receipt.status === "processed") {
@@ -433,7 +439,6 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
               for (const nl of newLines) {
                 const itemRef = nl.ItemBasedExpenseLineDetail?.ItemRef;
                 if (!itemRef?.value) continue;
-                // Look up item from landing table
                 const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
                   .select("raw_payload").eq("external_id", itemRef.value).maybeSingle();
                 const qboItem = itemLanding?.raw_payload;
@@ -501,10 +506,34 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         let rawSkuCode: string | null = null;
 
         if (isStockLine && detail.ItemRef?.value) {
-          // Look up item from landing table (no QBO API call!)
           const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
             .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
           const qboItem = itemLanding?.raw_payload;
+
+          // Skip non-stock QBO items (Service, NonInventory, shipping lines)
+          const qboItemType = qboItem?.Type ?? "";
+          if (["Service", "NonInventory"].includes(qboItemType)) {
+            // Treat as non-stock line
+            const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+            const lineDescription = [
+              line.Description,
+              detail.ItemRef?.name,
+            ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" - ") || "No description";
+            lineRows.push({
+              inbound_receipt_id: receipt.id,
+              description: lineDescription,
+              quantity: detail.Qty ?? 1,
+              unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
+              line_total: line.Amount ?? 0,
+              qbo_item_id: detail.ItemRef?.value ?? null,
+              is_stock_line: false,
+              mpn: null, condition_grade: null,
+              qbo_tax_code_ref: taxCodeRef,
+              sku_code: null,
+            });
+            continue;
+          }
+
           const skuField = qboItem?.Sku;
           if (skuField && String(skuField).trim()) {
             rawSkuCode = String(skuField).trim();
@@ -548,6 +577,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       const { data: insertedLines, error: insertErr } = await admin
         .from("inbound_receipt_line").insert(lineRows).select("id, mpn, condition_grade, is_stock_line, qbo_tax_code_ref");
       if (insertErr) { errors++; await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", insertErr.message); continue; }
+      insertedLineIds = (insertedLines ?? []).map((l: any) => l.id);
 
       // Resolve tax codes
       for (const il of (insertedLines ?? [])) {
@@ -603,7 +633,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             price: landedCost, active_flag: true, saleable_flag: true,
             qbo_item_id: qboItemId,
           }).select("id").single();
-          if (skuErr) { console.error("SKU create error:", skuErr); continue; }
+          if (skuErr) { console.error("SKU create error:", skuErr); throw new Error(`SKU create failed: ${skuErr.message}`); }
           sku = newSku;
         } else {
           const skuUpdate: Record<string, any> = { product_id: productId, saleable_flag: true };
@@ -629,9 +659,10 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             supplier_id: vendorName, inbound_receipt_line_id: receiptLineId,
           });
         }
-        const { error: suErr } = await admin.from("stock_unit").insert(stockUnits);
-        if (suErr) { console.error("Stock unit insert error:", suErr); continue; }
-        stockCreated += stockUnits.length;
+        const { data: createdUnits, error: suErr } = await admin.from("stock_unit").insert(stockUnits).select("id");
+        if (suErr) { console.error("Stock unit insert error:", suErr); throw new Error(`Stock unit insert failed: ${suErr.message}`); }
+        for (const cu of (createdUnits ?? [])) createdStockUnitIds.push(cu.id);
+        stockCreated += (createdUnits ?? []).length;
       }
 
       await admin.from("inbound_receipt").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", receipt.id);
@@ -640,6 +671,27 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     } catch (err: any) {
       errors++;
       console.error(`Process purchase ${entry.external_id}:`, err.message);
+
+      // ROLLBACK: Delete any stock units created in this iteration
+      if (createdStockUnitIds.length > 0) {
+        console.warn(`Rolling back ${createdStockUnitIds.length} stock units for purchase ${entry.external_id}`);
+        for (let i = 0; i < createdStockUnitIds.length; i += 100) {
+          const batch = createdStockUnitIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", batch);
+        }
+        stockCreated -= createdStockUnitIds.length;
+      }
+
+      // ROLLBACK: Delete inserted receipt lines
+      if (insertedLineIds.length > 0) {
+        await admin.from("inbound_receipt_line").delete().in("id", insertedLineIds);
+      }
+
+      // Reset receipt status to pending so it can be retried
+      if (receiptId) {
+        await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receiptId);
+      }
+
       await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", err.message);
     }
   }
@@ -787,19 +839,11 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
       }
 
-      // Same-channel dedup: delete existing QBO order for re-creation
+      // Same-channel dedup: delete existing QBO order for re-creation using unified cleanup
       const { data: existing } = await admin.from("sales_order")
         .select("id").eq("origin_channel", originChannel).eq("origin_reference", qboId).maybeSingle();
       if (existing) {
-        const { data: oldLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", existing.id);
-        for (const ol of (oldLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
-          }
-        }
-        await admin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
-        await admin.from("sales_order").delete().eq("id", existing.id);
+        await cleanupSalesOrder(admin, existing.id);
       }
 
       const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
@@ -860,6 +904,17 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           const qty = detail.Qty ?? 1;
           const unitPrice = detail.UnitPrice ?? 0;
           const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+          // Check if this is a non-stock item (Service/NonInventory/shipping)
+          const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
+            .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
+          const qboItemPayload = itemLanding?.raw_payload;
+          const qboItemType = qboItemPayload?.Type ?? "";
+          if (["Service", "NonInventory"].includes(qboItemType)) {
+            // Skip non-stock items (shipping, discounts, service charges)
+            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType})`);
+            continue;
+          }
 
           const { skuId, skuCode } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
           if (!skuId) {

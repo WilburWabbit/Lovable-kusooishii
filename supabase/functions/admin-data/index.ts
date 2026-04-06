@@ -1632,75 +1632,56 @@ Deno.serve(async (req) => {
       result = { success: true, orphans_deleted: deleted };
 
     } else if (action === "rebuild-from-qbo") {
-      // Nuclear reset: delete all canonical QBO data, reset all landing tables to pending.
-      // Caller then triggers qbo-process-pending to replay from staged data.
+      // Full reset: QBO is the absolute source of truth.
+      // Delete ALL transactional data regardless of origin, then replay from landing tables.
       const rebuildCorrelationId = crypto.randomUUID();
       let purchasesReset = 0, salesReset = 0, refundsReset = 0, itemsReset = 0, customersReset = 0;
       let receiptsDeleted = 0, ordersDeleted = 0;
-      let stockDeleted = 0, stockOrphaned = 0;
+      let stockDeleted = 0;
+      let payoutsDeleted = 0;
 
-      // Step 1: Delete all QBO-originated sales orders (NO stock reopening)
-      const { data: qboOrders } = await admin.from("sales_order")
-        .select("id").in("origin_channel", ["qbo", "qbo_refund"]);
-      for (const order of (qboOrders ?? [])) {
-        // Reopen stock units linked to order lines before deleting
-        const { data: orderLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", order.id);
-        for (const ol of (orderLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id).eq("status", "closed");
-          }
-        }
+      // Step 1: Delete ALL sales orders (not just QBO-originated) — NO stock reopening
+      const { data: allOrders } = await admin.from("sales_order").select("id");
+      for (const order of (allOrders ?? [])) {
         await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
         await admin.from("sales_order").delete().eq("id", order.id);
         ordersDeleted++;
       }
 
-      // Step 2: Delete ALL stock units (available, received, graded, written_off, closed)
-      // linked to inbound receipts. Also delete orphaned stock.
+      // Step 2: Delete ALL payout data
+      const { data: allPayouts } = await admin.from("payouts").select("id");
+      for (const payout of (allPayouts ?? [])) {
+        // Delete fee lines first, then fees, then payout orders
+        const { data: payoutFees } = await admin.from("payout_fee").select("id").eq("payout_id", payout.id);
+        for (const fee of (payoutFees ?? [])) {
+          await admin.from("payout_fee_line").delete().eq("payout_fee_id", fee.id);
+        }
+        await admin.from("payout_fee").delete().eq("payout_id", payout.id);
+        await admin.from("payout_orders").delete().eq("payout_id", payout.id);
+        await admin.from("payouts").delete().eq("id", payout.id);
+        payoutsDeleted++;
+      }
+
+      // Step 3: Delete ALL stock units
+      const { data: allStock } = await admin.from("stock_unit").select("id");
+      const allStockIds = (allStock ?? []).map((u: any) => u.id);
+      if (allStockIds.length > 0) {
+        for (let i = 0; i < allStockIds.length; i += 100) {
+          const batch = allStockIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", batch);
+        }
+        stockDeleted = allStockIds.length;
+      }
+
+      // Step 4: Delete ALL inbound receipts and lines
       const { data: allReceipts } = await admin.from("inbound_receipt").select("id");
       for (const receipt of (allReceipts ?? [])) {
-        const { data: receiptLines } = await admin.from("inbound_receipt_line")
-          .select("id").eq("inbound_receipt_id", receipt.id);
-        const lineIds = (receiptLines ?? []).map((l: any) => l.id);
-
-        if (lineIds.length > 0) {
-          // Hard-delete ALL stock units linked to these lines
-          const { data: allUnits } = await admin.from("stock_unit")
-            .select("id")
-            .in("inbound_receipt_line_id", lineIds);
-          const unitIds = (allUnits ?? []).map((u: any) => u.id);
-          if (unitIds.length > 0) {
-            for (let i = 0; i < unitIds.length; i += 100) {
-              const batch = unitIds.slice(i, i + 100);
-              await admin.from("stock_unit").delete().in("id", batch);
-            }
-            stockDeleted += unitIds.length;
-          }
-        }
-
-        // Delete receipt lines and the receipt itself
         await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
         await admin.from("inbound_receipt").delete().eq("id", receipt.id);
         receiptsDeleted++;
       }
 
-      // Step 3: Clean up any remaining orphaned stock units (all statuses)
-      const { data: remainingOrphans } = await admin.from("stock_unit")
-        .select("id")
-        .is("inbound_receipt_line_id", null);
-      const orphanIds = (remainingOrphans ?? []).map((o: any) => o.id);
-      if (orphanIds.length > 0) {
-        for (let i = 0; i < orphanIds.length; i += 100) {
-          const batch = orphanIds.slice(i, i + 100);
-          await admin.from("stock_unit").delete().in("id", batch);
-        }
-        stockDeleted += orphanIds.length;
-      }
-
-      // Step 3b: Clean up QBO-related audit events from prior processing cycles
-      // These reference entities that were just deleted and would cause stale
-      // lookups in reconcile-stock Step A0.
+      // Step 5: Clean up QBO-related audit events from prior processing cycles
       await admin.from("audit_event").delete()
         .in("trigger_type", [
           "qbo_inventory_adjustment", "qbo_qty_backfill",
@@ -1709,7 +1690,7 @@ Deno.serve(async (req) => {
           "cleanup_orphaned_stock",
         ]);
 
-      // Step 4: Reset ALL landing tables to pending
+      // Step 6: Reset ALL QBO landing tables to pending
       const { data: pData } = await admin.from("landing_raw_qbo_purchase")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
@@ -1740,11 +1721,58 @@ Deno.serve(async (req) => {
         .select("id");
       const vendorsReset = vData?.length ?? 0;
 
+      const { data: tData } = await admin.from("landing_raw_qbo_tax_entity")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const taxReset = tData?.length ?? 0;
+
+      // Step 7: Reset non-QBO landing tables for re-matching
+      const { data: stripeData } = await admin.from("landing_raw_stripe_event")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const stripeReset = stripeData?.length ?? 0;
+
+      const { data: ebayOrderData } = await admin.from("landing_raw_ebay_order")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const ebayOrdersReset = ebayOrderData?.length ?? 0;
+
+      const { data: ebayPayoutData } = await admin.from("landing_raw_ebay_payout")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const ebayPayoutsReset = ebayPayoutData?.length ?? 0;
+
+      const { data: ebayListingData } = await admin.from("landing_raw_ebay_listing")
+        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
+        .select("id");
+      const ebayListingsReset = ebayListingData?.length ?? 0;
+
+      // Step 8: Customer reconciliation — delete orphans without QBO ID
+      const { data: orphanCustomers } = await admin.from("customer")
+        .select("id")
+        .is("qbo_customer_id", null);
+      let customersDeleted = 0;
+      for (const c of (orphanCustomers ?? [])) {
+        await admin.from("customer").delete().eq("id", c.id);
+        customersDeleted++;
+      }
+
+      // Delete eBay payout transactions (they'll be rebuilt from landing data)
+      await admin.from("ebay_payout_transactions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+
       await admin.from("audit_event").insert({
         entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
         trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
         source_system: "admin-data", correlation_id: rebuildCorrelationId,
-        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted, stock_deleted: stockDeleted },
+        output_json: {
+          purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset,
+          items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset,
+          tax_reset: taxReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted,
+          stock_deleted: stockDeleted, payouts_deleted: payoutsDeleted,
+          stripe_reset: stripeReset, ebay_orders_reset: ebayOrdersReset,
+          ebay_payouts_reset: ebayPayoutsReset, ebay_listings_reset: ebayListingsReset,
+          customers_deleted: customersDeleted,
+        },
       });
 
       result = {
@@ -1756,9 +1784,16 @@ Deno.serve(async (req) => {
         items_reset: itemsReset,
         customers_reset: customersReset,
         vendors_reset: vendorsReset,
+        tax_reset: taxReset,
         receipts_deleted: receiptsDeleted,
         orders_deleted: ordersDeleted,
         stock_deleted: stockDeleted,
+        payouts_deleted: payoutsDeleted,
+        stripe_reset: stripeReset,
+        ebay_orders_reset: ebayOrdersReset,
+        ebay_payouts_reset: ebayPayoutsReset,
+        ebay_listings_reset: ebayListingsReset,
+        customers_deleted: customersDeleted,
       };
 
     } else if (action === "proxy-function") {
@@ -1884,6 +1919,74 @@ Deno.serve(async (req) => {
         stripe_test_mode: enabled,
         cleanup: !enabled ? { orders_deleted: ordersDeleted, lines_deleted: linesDeleted, stock_reopened: stockReopened, events_deleted: eventsDeleted } : undefined,
       };
+
+    } else if (action === "list-staging-errors") {
+      // Query all landing tables for error records
+      const LANDING_TABLES = [
+        { table: "landing_raw_qbo_purchase", entity: "Purchase" },
+        { table: "landing_raw_qbo_sales_receipt", entity: "Sales Receipt" },
+        { table: "landing_raw_qbo_refund_receipt", entity: "Refund Receipt" },
+        { table: "landing_raw_qbo_item", entity: "Item" },
+        { table: "landing_raw_qbo_customer", entity: "Customer" },
+        { table: "landing_raw_qbo_vendor", entity: "Vendor" },
+        { table: "landing_raw_qbo_tax_entity", entity: "Tax Entity" },
+        { table: "landing_raw_stripe_event", entity: "Stripe Event" },
+        { table: "landing_raw_ebay_order", entity: "eBay Order" },
+        { table: "landing_raw_ebay_payout", entity: "eBay Payout" },
+        { table: "landing_raw_ebay_listing", entity: "eBay Listing" },
+      ];
+
+      const allErrors: any[] = [];
+      for (const { table, entity } of LANDING_TABLES) {
+        const { data } = await admin.from(table)
+          .select("id, external_id, status, error_message, received_at, raw_payload")
+          .eq("status", "error")
+          .order("received_at", { ascending: false })
+          .limit(50);
+        for (const row of (data ?? [])) {
+          allErrors.push({
+            ...row,
+            table_name: table,
+            entity_type: entity,
+          });
+        }
+      }
+
+      // Sort by received_at desc
+      allErrors.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime());
+      result = allErrors;
+
+    } else if (action === "retry-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "pending", processed_at: null, error_message: null })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "skip-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "skipped", processed_at: new Date().toISOString() })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
 
     } else {
       return new Response(

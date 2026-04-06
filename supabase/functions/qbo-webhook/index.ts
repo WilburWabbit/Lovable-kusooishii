@@ -82,11 +82,29 @@ interface LandMetadata {
 }
 
 async function landEntity(admin: any, table: LandingTable, externalId: string, rawPayload: any, correlationId: string, operation: string, meta?: LandMetadata): Promise<string> {
+  const effectivePayload = operation === "Delete" ? { _deleted: true, _entity_id: externalId } : rawPayload;
+
+  // Skip upsert when existing record is already committed and payload hasn't changed
+  const { data: existing } = await admin.from(table)
+    .select("id, status, raw_payload")
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  if (existing?.status === "committed" && operation !== "Delete") {
+    // Compare payload hash to avoid resetting committed records
+    const existingHash = JSON.stringify(existing.raw_payload);
+    const newHash = JSON.stringify(effectivePayload);
+    if (existingHash === newHash) {
+      return "skipped — payload unchanged";
+    }
+  }
+
   const row: Record<string, any> = {
     external_id: externalId,
-    raw_payload: operation === "Delete" ? { _deleted: true, _entity_id: externalId } : rawPayload,
+    raw_payload: effectivePayload,
     status: "pending",
     processed_at: null,
+    error_message: null,
     correlation_id: correlationId,
     received_at: new Date().toISOString(),
   };
