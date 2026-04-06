@@ -59,10 +59,9 @@ export function BrickEconomyPriceChart({
   itemType = "set",
 }: BrickEconomyPriceChartProps) {
   const queryClient = useQueryClient();
-  const setNumber = mpn.split("-")[0];
   const { data: history = [], isLoading } = useBrickEconomyPriceHistory(
     itemType,
-    setNumber,
+    mpn,
   );
   const [refreshing, setRefreshing] = useState(false);
 
