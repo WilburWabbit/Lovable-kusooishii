@@ -783,12 +783,14 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
       const receipt = entry.raw_payload;
       const qboId = String(receipt.Id ?? receipt._entity_id ?? entry.external_id);
       const originChannel = detectOriginChannel(receipt);
+      const originRef = deriveOriginReference(receipt, originChannel);
 
       // Handle deletion tombstones — reset stock and remove order
       if (receipt?._deleted === true) {
+        // Search by qbo_sales_receipt_id OR origin_reference
         const { data: existingOrder } = await admin.from("sales_order")
           .select("id")
-          .or(`and(origin_channel.eq.qbo,origin_reference.eq.${qboId}),qbo_sales_receipt_id.eq.${qboId}`)
+          .or(`qbo_sales_receipt_id.eq.${qboId},and(origin_reference.eq.${originRef},origin_channel.eq.${originChannel})`)
           .maybeSingle();
         if (existingOrder) {
           await cleanupSalesOrder(admin, existingOrder.id);
@@ -808,18 +810,18 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         continue;
       }
 
-      // Cross-channel dedup
+      // ── Match-first: try to find an existing order to enrich ──
       const docNumber = receipt.DocNumber ?? null;
       if (docNumber) {
-        // Check eBay by origin_reference
-        const { data: ebayByRef } = await admin.from("sales_order")
-          .select("id").eq("origin_channel", "ebay").eq("origin_reference", docNumber).maybeSingle();
-        if (ebayByRef) {
+        // Check by origin_reference (eBay order ID, KO- number, etc)
+        const { data: byRef } = await admin.from("sales_order")
+          .select("id").eq("origin_reference", docNumber).maybeSingle();
+        if (byRef) {
           const enrichFields: Record<string, any> = {
             doc_number: docNumber, qbo_sales_receipt_id: qboId,
             qbo_sync_status: "synced",
           };
-          await admin.from("sales_order").update(enrichFields).eq("id", ebayByRef.id);
+          await admin.from("sales_order").update(enrichFields).eq("id", byRef.id);
           await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
           processed++;
           continue;
@@ -827,7 +829,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
         // Check by doc_number
         const { data: byDocNumber } = await admin.from("sales_order")
-          .select("id").eq("doc_number", docNumber).neq("origin_channel", "qbo").maybeSingle();
+          .select("id").eq("doc_number", docNumber).maybeSingle();
         if (byDocNumber) {
           await admin.from("sales_order").update({
             qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
@@ -839,7 +841,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
         // Check by order_number
         const { data: byOrderNumber } = await admin.from("sales_order")
-          .select("id").eq("order_number", docNumber).neq("origin_channel", "qbo").maybeSingle();
+          .select("id").eq("order_number", docNumber).maybeSingle();
         if (byOrderNumber) {
           await admin.from("sales_order").update({
             qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
@@ -850,11 +852,17 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
       }
 
-      // Same-channel dedup: delete existing QBO order for re-creation using unified cleanup
+      // Same-channel dedup: delete existing order for re-creation using unified cleanup
       const { data: existing } = await admin.from("sales_order")
-        .select("id").eq("origin_channel", originChannel).eq("origin_reference", qboId).maybeSingle();
+        .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
       if (existing) {
         await cleanupSalesOrder(admin, existing.id);
+      }
+      // Also check by qbo_sales_receipt_id for legacy data
+      const { data: existingByQboId } = await admin.from("sales_order")
+        .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
+      if (existingByQboId) {
+        await cleanupSalesOrder(admin, existingByQboId.id);
       }
 
       const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
