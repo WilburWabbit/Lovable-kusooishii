@@ -67,13 +67,15 @@ export function QboSettingsCard() {
 
   // ── Helpers ──
 
-  const drainPending = async (label?: string) => {
+  const drainPending = async (label?: string, entityType?: string) => {
     setProcessing(true);
     let total = 0;
     try {
       for (let i = 0; i < 200; i++) {
         setProcessLabel(label ? `${label} (${total} committed)` : `Processing... (${total} committed)`);
-        const data = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { batch_size: 50 });
+        const body: Record<string, unknown> = { batch_size: 50 };
+        if (entityType) body.entity_type = entityType;
+        const data = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', body);
         if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
         const r = (data as Record<string, unknown>).results as Record<string, Record<string, number>> | undefined;
         if (r) {
@@ -82,6 +84,12 @@ export function QboSettingsCard() {
             (r.vendors?.processed ?? 0) + (r.deposits?.processed ?? 0);
         }
         if (!(data as Record<string, unknown>).has_more) break;
+
+        // If entity-type-specific, also check if this specific entity has remaining
+        if (entityType) {
+          const remaining = (data as Record<string, unknown>).remaining as Record<string, number> | undefined;
+          if (remaining && (remaining[entityType] ?? 0) === 0) break;
+        }
       }
       return total;
     } finally {
@@ -326,11 +334,42 @@ export function QboSettingsCard() {
       setRebuildPhase('Phase 2g: Landing deposits from QBO...');
       await invokeWithAuth('qbo-sync-deposits');
 
-      // ═══ Phase 3: Process all pending (chronological) ═══
-      setRebuildPhase('Phase 3: Processing all records...');
-      const totalProcessed = await drainPending('Rebuild processing');
+      // ═══ Phase 3: Process in strict dependency order ═══
+      // 3a: Vendors
+      setRebuildPhase('Phase 3a: Processing vendors...');
+      await drainPending('Processing vendors', 'vendors');
 
-      toast.success(`Rebuild complete — ${totalProcessed} records committed from fresh QBO snapshot`);
+      // 3b: Customers
+      setRebuildPhase('Phase 3b: Processing customers...');
+      await drainPending('Processing customers', 'customers');
+
+      // 3c: Items → SKUs
+      setRebuildPhase('Phase 3c: Processing items...');
+      await drainPending('Processing items', 'items');
+
+      // 3d: Purchases → Receipts → Purchase Batches → Stock Units
+      setRebuildPhase('Phase 3d: Processing purchases...');
+      const purchasesProcessed = await drainPending('Processing purchases', 'purchases');
+
+      // 3e: Safety check — verify purchases created batches
+      setRebuildPhase('Phase 3e: Verifying purchase integrity...');
+      const verifyData = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { entity_type: 'purchases', batch_size: 1 });
+      const purchaseRemaining = ((verifyData as Record<string, unknown>)?.remaining as Record<string, number>)?.purchases ?? 0;
+      if (purchaseRemaining > 0) {
+        toast.error(`${purchaseRemaining} purchases still pending — stopping before sales`);
+        return;
+      }
+
+      // 3f: Sales + Refunds
+      setRebuildPhase('Phase 3f: Processing sales receipts...');
+      await drainPending('Processing sales', 'sales');
+      await drainPending('Processing refunds', 'refunds');
+
+      // 3g: Deposits
+      setRebuildPhase('Phase 3g: Processing deposits...');
+      await drainPending('Processing deposits', 'deposits');
+
+      toast.success(`Rebuild complete — ${purchasesProcessed}+ records committed from fresh QBO snapshot`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Rebuild failed');
     } finally {

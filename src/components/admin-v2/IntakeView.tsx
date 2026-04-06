@@ -178,10 +178,9 @@ function ReceiptDetail({
     try {
       const result = await processReceipt.mutateAsync({
         receiptId,
-        lines,
       });
-      toast.success(`Created batch with ${result.unitCount} units`);
-      onProcessed(result.batchId);
+      toast.success(`Created batch with ${result.unitsCreated} units`);
+      onProcessed(receiptId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Processing failed');
     }

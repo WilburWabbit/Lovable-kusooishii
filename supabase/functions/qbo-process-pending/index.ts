@@ -422,6 +422,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     const createdStockUnitIds: string[] = [];
     let receiptId: string | null = null;
     let insertedLineIds: string[] = [];
+    let batchId: string | null = null;
 
     try {
       const purchase = entry.raw_payload;
@@ -596,7 +597,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         }
       }
 
-      // Auto-process: create SKUs + stock units
+      // Auto-process: create SKUs + stock units + purchase batch + purchase line items
       const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
       const overheadLines = lineRows.filter(l => !l.is_stock_line && isAllocableFeeLine(l.description));
 
@@ -616,6 +617,24 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       const totalOverhead = overheadLines.reduce((s, l) => s + Number(l.line_total), 0);
       const totalStockCost = stockLines.reduce((s, l) => s + Number(l.line_total), 0);
       const validGrades = ["1", "2", "3", "4", "5"];
+
+      // ── Create purchase batch (v2 purchase model) ──
+      const sharedCosts = JSON.stringify({ shipping: 0, broker_fee: 0, other: Math.round(totalOverhead * 100) / 100 });
+      const { data: batch, error: batchErr } = await admin.from("purchase_batches").insert({
+        supplier_name: vendorName ?? "Unknown Supplier",
+        purchase_date: txnDate ?? new Date().toISOString().split("T")[0],
+        reference: qboPurchaseId,
+        supplier_vat_registered: false,
+        shared_costs: sharedCosts,
+        total_shared_costs: Math.round(totalOverhead * 100) / 100,
+        status: "recorded",
+      }).select("id").single();
+
+      if (batchErr) {
+        console.error("Purchase batch create error:", batchErr);
+        throw new Error(`Purchase batch create failed: ${batchErr.message}`);
+      }
+      batchId = batch.id;
 
       for (let i = 0; i < stockLines.length; i++) {
         const line = stockLines[i];
@@ -650,6 +669,21 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
           await admin.from("sku").update(skuUpdate).eq("id", sku.id);
         }
 
+        // Create purchase line item
+        const { data: pli, error: pliErr } = await admin.from("purchase_line_items").insert({
+          batch_id: batchId,
+          mpn: line.mpn,
+          quantity: line.quantity,
+          unit_cost: Number(line.unit_cost),
+          apportioned_cost: Math.round((lineOverhead / Math.max(line.quantity, 1)) * 100) / 100,
+          landed_cost_per_unit: landedCost,
+        }).select("id").single();
+
+        if (pliErr) {
+          console.error("Purchase line item create error:", pliErr);
+          throw new Error(`Purchase line item create failed: ${pliErr.message}`);
+        }
+
         const receiptLineId = insertedLines?.[lineRows.indexOf(line)]?.id ?? null;
 
         // Shortfall guard — count stock for THIS receipt line
@@ -670,6 +704,8 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             graded_at: now,
             landed_cost: landedCost,
             supplier_id: vendorName, inbound_receipt_line_id: receiptLineId,
+            batch_id: batchId,
+            line_item_id: pli.id,
           });
         }
         const { data: createdUnits, error: suErr } = await admin.from("stock_unit").insert(stockUnits).select("id");
@@ -677,6 +713,12 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         for (const cu of (createdUnits ?? [])) createdStockUnitIds.push(cu.id);
         stockCreated += (createdUnits ?? []).length;
       }
+
+      // Update batch unit counter
+      await admin.from("purchase_batches").update({ unit_counter: stockCreated }).eq("id", batchId);
+
+      // Run cost apportionment
+      await admin.rpc("v2_calculate_apportioned_costs", { p_batch_id: batchId });
 
       await admin.from("inbound_receipt").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", receipt.id);
       await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "committed");
@@ -689,10 +731,16 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       if (createdStockUnitIds.length > 0) {
         console.warn(`Rolling back ${createdStockUnitIds.length} stock units for purchase ${entry.external_id}`);
         for (let i = 0; i < createdStockUnitIds.length; i += 100) {
-          const batch = createdStockUnitIds.slice(i, i + 100);
-          await admin.from("stock_unit").delete().in("id", batch);
+          const rollbackBatch = createdStockUnitIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", rollbackBatch);
         }
         stockCreated -= createdStockUnitIds.length;
+      }
+
+      // ROLLBACK: Delete purchase line items and batch created in this iteration
+      if (batchId) {
+        await admin.from("purchase_line_items").delete().eq("batch_id", batchId);
+        await admin.from("purchase_batches").delete().eq("id", batchId);
       }
 
       // ROLLBACK: Delete inserted receipt lines
