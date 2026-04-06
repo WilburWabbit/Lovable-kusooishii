@@ -1,80 +1,108 @@
 
+Rebuild from QBO needs to become a true fresh snapshot + replay, not “delete canonical rows and reuse whatever is already in landing”.
 
-# Fix QBO Rebuild — Complete Data Integrity Overhaul
+What I found
+- The current rebuild only wipes canonical rows and resets landing rows to `pending`. It does not refresh landing from live QBO first, so deleted QBO purchases/customers/sales receipts are being rebuilt from stale landing data.
+- The QBO sync functions upsert records they still see, but they do not remove or tombstone landing rows for records that no longer exist in QBO.
+- Delete tombstones are only handled properly for SalesReceipts and Vendors. Purchases, Customers, and Items still do not clean up canonical data when QBO deletes them.
+- Channel codes are inconsistent:
+  - Stripe/web checkout uses `web`
+  - QBO processor creates `website`
+  - in-person uses `in_person`
+  - QBO processor creates `square`
+  This breaks dedup, payout reconciliation, and channel attribution.
+- QBO-created orders use `origin_reference = qboId` instead of the real external order/payment reference, so later eBay/website/in-person matching cannot reconnect them.
+- Rebuild only replays the QBO processor. It does not replay Stripe/eBay landing flows afterward, so payout and order statuses stay wrong.
+- Tax sync still writes canonical tax rows directly instead of going through the staged processor.
 
-## Root Cause Summary
+Plan
 
-The rebuild ran but **79 of 86 purchases failed** with a single error: `cannot insert a non-DEFAULT value into column "carrying_value"`. This column is a **generated column** (`landed_cost - accumulated_impairment`), but the processor explicitly sets it on line 655. This means only 7 purchases succeeded, creating just 405 stock units (all orphaned from a prior rebuild). The 329 committed sales orders allocated against near-zero stock, explaining the massive discrepancies.
+1. Replace rebuild with a fresh QBO snapshot pipeline
+- In `admin-data`, change `rebuild-from-qbo` so it:
+  1. clears all QBO landing tables
+  2. re-fetches current QBO data into landing
+  3. wipes QBO-derived/transactional canonical data
+  4. replays processing in the correct order
+  5. replays non-QBO landing data
+  6. runs final integrity checks
+- Update `QboSettingsCard` so the rebuild button drives these phases instead of just reset + `qbo-process-pending`.
 
-Additionally:
-- **Processing order uses `received_at`** (random API landing order), not `TxnDate` (chronological). Purchases from 2024-12 are processed after 2025 purchases.
-- **SHIPPING_ITEM_ID literal value** has no landing record, so the non-stock skip fails — it only checks `Service`/`NonInventory` types but gets `""` for missing items.
-- **405 orphan stock units** with null `inbound_receipt_line_id` survived the rebuild.
+2. Make landing authoritative during rebuild
+- Update `qbo-sync-customers`, `qbo-sync-items`, `qbo-sync-vendors`, `qbo-sync-purchases`, `qbo-sync-sales`, and tax sync so rebuild mode produces a fresh landing snapshot rather than an additive merge.
+- Land tax codes as well as tax rates.
+- Stop direct canonical tax writes during sync; land first, process second.
 
-## Changes
+3. Finish delete handling in the processor
+- In `qbo-process-pending`, add explicit `_deleted` logic for:
+  - Purchases: remove/reconcile receipt + stock correctly
+  - Customers: remove QBO-mastered customers or clear QBO linkage where appropriate
+  - Items: deactivate/remove QBO-derived SKU mappings
+  - Tax entities: rebuild `tax_code` and `vat_rate` from staged data
+- Keep replay chronological for transactions: purchases oldest→newest, then order enrichment/sales.
 
-### 1. Fix `carrying_value` generated column error
+4. Normalize internal channel values
+- Standardize canonical `origin_channel` values used everywhere:
+  - `ebay`
+  - `web`
+  - `in_person`
+  - other marketplaces only where genuinely needed
+- Change QBO channel detection to map:
+  - eBay DocNumber pattern → `ebay`
+  - `KO-` / Stripe indicators → `web`
+  - Square/cash/in-person indicators → `in_person`
+- Update any read paths and payout logic to accept old values during transition, but rebuild all new rows with the normalized values only.
 
-**File**: `supabase/functions/qbo-process-pending/index.ts`
+5. Change QBO sales import to match-first, create-last
+- QBO SalesReceipts should:
+  - match an existing eBay/website/in-person order first
+  - enrich that order with QBO ids/status
+  - only create a fallback order if no source order exists
+- Use the real external channel reference as `origin_reference` when available, not the QBO receipt id.
+- Keep the QBO receipt id only in `qbo_sales_receipt_id`.
 
-Remove `carrying_value: landedCost` from the stock unit insert payload (line 655). The column is `GENERATED ALWAYS AS (landed_cost - accumulated_impairment)` — Postgres computes it automatically. This single fix will unblock 79 failed purchases.
+6. Preserve only non-QBO-mastered data, then re-associate it
+- Preserve:
+  - product/media/copy by `mpn`
+  - SKU-linked non-QBO config by `sku_code` / `external_sku`
+  - local-only customer identity fields by email / `user_id` / `stripe_customer_id`
+- Re-associate after rebuild:
+  - rebuilt SKUs relink to existing product/media by `mpn`
+  - retained listing/config rows relink to new `sku_id` by `sku_code`
+  - local-only customers remain; QBO customers merge into them when keys match
+- Delete anything retained that cannot be re-associated cleanly.
 
-### 2. Process in chronological order (TxnDate)
+7. Replay non-QBO sources after QBO purchases are rebuilt
+- After QBO reference/tax/purchase replay, replay:
+  - Stripe landing events
+  - eBay order landing
+  - eBay payout landing
+- Then run payout reconciliation so statuses and payout links are rebuilt against the fresh stock/order set.
 
-**File**: `supabase/functions/qbo-process-pending/index.ts`
+8. Add targeted repair tools so one bad record does not require another full rebuild
+- Add admin actions to purge + replay:
+  - one QBO purchase
+  - one QBO sales receipt
+  - one QBO customer
+  - one payout reconciliation run
+- These should reuse the same cleanup/rebuild rules as the full rebuild.
 
-Change all landing table queries from `.order("received_at", { ascending: true })` to `.order("raw_payload->>'TxnDate'", { ascending: true })`. This ensures purchases are created oldest-first so sales can find available stock via FIFO allocation.
+Technical details
+- Main files:
+  - `supabase/functions/admin-data/index.ts`
+  - `src/components/admin-v2/QboSettingsCard.tsx`
+  - `supabase/functions/qbo-process-pending/index.ts`
+  - `supabase/functions/qbo-sync-customers/index.ts`
+  - `supabase/functions/qbo-sync-items/index.ts`
+  - `supabase/functions/qbo-sync-vendors/index.ts`
+  - `supabase/functions/qbo-sync-purchases/index.ts`
+  - `supabase/functions/qbo-sync-sales/index.ts`
+  - `supabase/functions/qbo-sync-tax-rates/index.ts`
+  - `supabase/functions/v2-reconcile-payout/index.ts`
+- If needed, add a small migration for rebuild locking/run tracking so two rebuilds cannot overlap.
 
-Affected functions: `processPurchases` (line 398), `processSalesReceipts` (line 760), `processRefundReceipts` (line 999), `processVendors` (line 1035), `processCustomers` (line 1147), `processItems` (line 254).
-
-For items/vendors/customers that lack TxnDate in payload, keep `received_at` ordering (harmless for reference data).
-
-### 3. Fix SHIPPING_ITEM_ID skip logic
-
-**File**: `supabase/functions/qbo-process-pending/index.ts`
-
-In `processSalesReceipts`, after the `landing_raw_qbo_item` lookup for each line, add a guard: if the `ItemRef.value` is not a numeric ID (like `SHIPPING_ITEM_ID`) OR the landing record doesn't exist, skip the line as non-stock. Currently it only checks `["Service", "NonInventory"]` but gets `""` for missing items.
-
-```typescript
-// Skip non-stock items: literal IDs, missing landing records, Service/NonInventory
-if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || 
-    ["Service", "NonInventory"].includes(qboItemType)) {
-  continue;
-}
-```
-
-### 4. Rebuild must delete ALL customers
-
-**File**: `supabase/functions/admin-data/index.ts`
-
-The current rebuild only deletes customers without a `qbo_customer_id`. But customers whose QBO records were deleted still have stale `qbo_customer_id` values and show as `5evs46` with no name data. The rebuild should delete **all** customers (they're recreated from the customer landing table during replay).
-
-Change Step 8 from:
-```typescript
-.is("qbo_customer_id", null)
-```
-to: delete ALL customers.
-
-### 5. Rebuild must also delete `tax_code` and `vat_rate`
-
-These are recreated from `landing_raw_qbo_tax_entity`. Add deletion of these tables in the rebuild sequence (after SKUs, before landing reset).
-
-### 6. Clean up duplicate `allocate_stock_units` function
-
-There are two versions of the function (one old, one new with v2_status support). Drop the old 2-arg version to prevent ambiguity.
-
-## Files Modified
-
-1. `supabase/functions/qbo-process-pending/index.ts` — remove `carrying_value`, chronological ordering, SHIPPING_ITEM_ID fix
-2. `supabase/functions/admin-data/index.ts` — delete all customers, delete tax_code/vat_rate in rebuild
-3. Database migration — drop old `allocate_stock_units` overload
-
-## Expected Outcome
-
-After deploying and running "Rebuild from QBO":
-- All 623 purchases process successfully (no `carrying_value` error)
-- Stock units created in chronological order, sales find correct stock via FIFO
-- Channel detection, date override, and v2_status all work (already fixed in prior deploy)
-- Customers fully rebuilt from QBO data with correct names
-- No orphan stock, no duplicate receipts
-
+Expected outcome
+- Old QBO purchases/customers/items stop reappearing
+- Deleted QBO customers disappear unless they are truly local-only
+- eBay / website / in-person attribution becomes consistent
+- QBO sales receipts enrich the correct operational orders instead of creating duplicates
+- payout and order statuses rebuild correctly because non-QBO landings are replayed after the QBO stock base is restored
