@@ -1,105 +1,135 @@
 
 
-# Revised Plan: QBO Data Integrity — Harden, Error UI, and Full Reset
+# Fix QBO Processor — Idempotency, Channel Detection, Dates, v2_status
 
-## Part 1: Harden the Processor (unchanged from prior plan)
+## Problem Summary
 
-### File: `supabase/functions/qbo-process-pending/index.ts`
+After "Rebuild from QBO", data is severely corrupted by 6 distinct bugs:
 
-- **Rollback-on-error for purchases**: Track created stock unit IDs; if any line fails, delete all partial stock and receipt lines created in that iteration before marking as `error`.
-- **Rollback-on-error for sales receipts**: Use `cleanupSalesOrder` consistently in both dedup and error paths. Reset `v2_status` to `graded`, clear `sold_at`/`order_id`.
-- **Skip non-stock lines**: Service/NonInventory items and shipping lines should not attempt stock allocation.
+1. **Receipt lines multiplied ~10x** — Purchase 1733 has 169 QBO lines but 1611 receipt lines and 630 stock units. The shortfall guard on line 647 only checks existing stock per receipt line ID, but the receipt lines themselves are recreated every run because the "pending receipt" path (line 486-492) only nullifies stock unit links before deleting lines — it doesn't prevent new lines from being created on every invocation.
 
-### File: `supabase/functions/qbo-webhook/index.ts`
+2. **All orders show `origin_channel: qbo`** — Hardcoded on line 774. eBay (`14-14455-15040`), Square (`SQR-01000`), Etsy (`ETSY-3121423800`) all misattributed.
 
-- **Skip upsert when payload unchanged**: If an existing record is `committed` and the payload hash matches, don't reset to `pending`.
+3. **Order dates show rebuild time** — `created_at` defaults to `now()` on insert. The QBO `TxnDate` is stored in `txn_date` but `created_at` is never overridden.
 
-## Part 2: Individual Error Resolution UI (unchanged)
+4. **`v2_status` is NULL on all stock** — Stock inserts (line 656) omit `v2_status` and `graded_at`. 404 units with `status: available, v2_status: NULL`.
 
-### File: `src/pages/admin-v2/DataSyncPage.tsx` + new `src/components/admin-v2/StagingErrorsPanel.tsx`
+5. **`allocate_stock_units` SQL function only sets `status = 'closed'`** — Doesn't update `v2_status`, `sold_at`, or `order_id`. 254 closed units have NULL `v2_status`.
 
-- Query all landing tables for `status = 'error'` records.
-- Per-row actions: **Retry** (reset to `pending`), **Skip** (mark `skipped`), **View Payload** (JSON viewer).
+6. **No payout data rebuilt** — eBay payout landing table is empty. This is a known data gap (payouts were never landed).
 
-### File: `supabase/functions/admin-data/index.ts`
+## Root Cause of Duplication (Bug 1 — Critical)
 
-- Add `retry-landing-record` and `skip-landing-record` actions.
+The processor's purchase path has a fatal idempotency flaw:
 
-## Part 3: Full Reset — QBO as Absolute Source of Truth (REVISED)
+- After rebuild, all landing records are `pending`, and receipts are deleted.
+- The processor picks up 15 records per batch. For each, it upserts a receipt (creates new), then creates lines + stock.
+- The processor is invoked multiple times (webhook auto-trigger + manual drain loop).
+- On subsequent runs, the same landing record is still `pending` (or was re-triggered). The receipt now exists with `status: pending` (line 486 branch). This branch clears stale lines but only nullifies `inbound_receipt_line_id` on linked stock — it does NOT delete the stock. Then it falls through and creates ALL new lines + stock again.
+- The shortfall guard (line 647) counts stock per NEW receipt line ID (just inserted), so count is always 0. Full duplication every run.
 
-The core principle: **QBO is the canonical master for all transactional data. If a record does not exist in QBO, it should not exist in the app.** Non-QBO-originated records (Stripe orders, eBay orders, eBay payouts) are valid only if they have a corresponding QBO record (sales receipt, deposit, etc.). Orphans without QBO backing are deleted.
+## Plan
 
-### File: `supabase/functions/admin-data/index.ts` — `rebuild-from-qbo` action
+### Step 1: Fix purchase idempotency in `qbo-process-pending`
 
-**Phase 1: Delete ALL transactional data (not just QBO-originated)**
+Add a true idempotency guard at the top of the purchase loop: after upserting the receipt, count existing receipt lines. If the line count matches the expected QBO line count AND receipt status is `processed`, mark as committed and skip. This prevents re-expansion entirely.
 
-The current rebuild only deletes orders with `origin_channel IN ('qbo', 'qbo_refund')`. The revised version deletes ALL sales orders, order lines, and stock — regardless of origin channel. This ensures Stripe/eBay/web orders that don't have matching QBO sales receipts are cleaned out.
+For the "pending receipt with existing lines" path (line 486), change from nullifying stock `inbound_receipt_line_id` to **deleting** orphaned stock units that aren't closed/sold, then delete old lines.
+
+### Step 2: Add `v2_status` to stock unit creation
+
+In `processPurchases` (line 656), add `v2_status: "graded"` and `graded_at: new Date().toISOString()` to every stock unit insert.
+
+### Step 3: Fix channel detection in `processSalesReceipts`
+
+Replace hardcoded `originChannel = "qbo"` (line 774) with detection logic:
 
 ```text
-1. Delete ALL sales_order_line records
-2. Delete ALL sales_order records
-3. Delete ALL stock_unit records (receipt-linked AND orphans)
-4. Delete ALL inbound_receipt_line records
-5. Delete ALL inbound_receipt records
-6. Delete ALL payout_orders, payout_fee, payout_fee_line records
-7. Clean up stale audit_event records from prior processing cycles
+DocNumber patterns:
+  /^\d{2}-\d{5}-\d{5}$/  → "ebay"
+  /^KO-/                  → "website"
+  /^SQR-/                 → "square"
+  /^ETSY-/                → "etsy"
+  PaymentMethodRef.name containing "Stripe" → "website"
+  PaymentMethodRef.name containing "eBay"   → "ebay"
+  default → "qbo"
 ```
 
-**Phase 2: Preserve enriched non-transactional data**
+### Step 4: Fix order `created_at` from QBO TxnDate
 
-These tables are NOT touched:
-- `lego_catalog` (products) — enriched with media, descriptions, specs
-- `channel_listing` — marketplace listing state
-- `media_asset` — product images
-- `brickeconomy_*` — market data
-- `customer` — customer master (will be reconciled, not deleted)
-- `sku` — SKU definitions (will be recreated by processor as needed)
+In the order insert payload (line 874), add `created_at: txnDate ? new Date(txnDate).toISOString() : new Date().toISOString()` so orders sort by transaction date, not rebuild time.
 
-**Phase 3: Reset ALL landing tables to `pending`**
+### Step 5: Update `allocate_stock_units` SQL function
 
-Reset every QBO staging table so the processor replays the full history:
-- `landing_raw_qbo_purchase`
-- `landing_raw_qbo_sales_receipt`
-- `landing_raw_qbo_refund_receipt`
-- `landing_raw_qbo_item`
-- `landing_raw_qbo_customer`
-- `landing_raw_qbo_vendor`
-- `landing_raw_qbo_tax_entity`
+Migration to add `v2_status`, `sold_at`, and `order_id` handling:
 
-**Phase 4: Reconcile non-QBO landing tables**
+```sql
+-- Also set v2_status = 'sold', sold_at = now()
+UPDATE public.stock_unit
+SET status = 'closed', v2_status = 'sold', sold_at = now(), updated_at = now()
+WHERE id = ANY(v_unit_ids);
+```
 
-After QBO replay completes, non-QBO orders (Stripe, eBay) that were re-created by the processor from their QBO sales receipt counterparts will exist. Any Stripe/eBay landing records (`landing_raw_stripe_event`, `landing_raw_ebay_order`, `landing_raw_ebay_payout`) should also be reset to `pending` so they can be re-matched against the rebuilt QBO data. Records that cannot match a QBO counterpart after replay are flagged as errors for manual review.
+Then after allocation in `processSalesReceipts`, update `order_id` on the allocated units.
 
-Reset:
-- `landing_raw_stripe_event`
-- `landing_raw_ebay_order`
-- `landing_raw_ebay_payout`
-- `landing_raw_ebay_listing`
+### Step 6: Delete SKUs during rebuild
 
-**Phase 5: Customer reconciliation**
+Add SKU deletion to the rebuild (after stock/receipts are deleted, before landing reset). SKUs are recreated by the processor from QBO item data — they should not be preserved if we're treating QBO as absolute truth. Only the `sku` table rows are deleted; `lego_catalog` and `product` remain.
 
-Customers that exist locally but have no `qbo_customer_id` and no local orders (after rebuild) are deleted. Customers with a `qbo_customer_id` are preserved and will be updated from QBO data during replay.
+### Step 7: Rebuild cleanup additions
 
-### Summary of changes vs current rebuild
-
-| Aspect | Current | Revised |
-|---|---|---|
-| Sales orders deleted | Only `origin_channel IN ('qbo', 'qbo_refund')` | ALL sales orders |
-| Stock units deleted | Only receipt-linked + orphans without receipt | ALL stock units |
-| Payouts/fees | Not touched | Deleted (rebuilt from eBay/Stripe landing data) |
-| Non-QBO landing tables | Not touched | Reset to `pending` for re-matching |
-| Customers | Not touched | Orphans without QBO ID or orders deleted |
-| Products/media/listings | Not touched | Not touched (correct) |
-
-## Deployment
-
-Redeploy: `qbo-process-pending`, `qbo-webhook`, `admin-data`
+Also delete from `vendor` table (vendors are rebuilt from `landing_raw_qbo_vendor`). Add `product` table cleanup for products without any `lego_catalog` link or media — these are stubs auto-created by the processor and will be recreated.
 
 ## Files Modified
 
-1. `supabase/functions/qbo-process-pending/index.ts` — rollback guards, shipping line skip, unified stock reset
-2. `supabase/functions/qbo-webhook/index.ts` — skip unchanged payload upserts
-3. `supabase/functions/admin-data/index.ts` — retry/skip actions, revised full rebuild
-4. `src/pages/admin-v2/DataSyncPage.tsx` — staging errors UI
-5. `src/components/admin-v2/StagingErrorsPanel.tsx` — new component
+1. `supabase/functions/qbo-process-pending/index.ts` — idempotency guard, v2_status on stock, channel detection, created_at override, order_id on allocated stock
+2. `supabase/functions/admin-data/index.ts` — SKU + vendor deletion in rebuild
+3. Database migration — update `allocate_stock_units` function to set `v2_status`, `sold_at`
+
+## Technical Details
+
+### Idempotency Guard (purchase processing)
+
+```typescript
+// After receipt upsert, before creating lines:
+const { count: existingLineCount } = await admin.from("inbound_receipt_line")
+  .select("id", { count: "exact", head: true })
+  .eq("inbound_receipt_id", receipt.id);
+
+const expectedLineCount = (purchase.Line ?? []).filter(
+  (l: any) => l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
+).length;
+
+if (receipt.status === "processed" && (existingLineCount ?? 0) === expectedLineCount) {
+  await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "committed");
+  processed++;
+  continue;
+}
+```
+
+### Channel Detection
+
+```typescript
+function detectOriginChannel(receipt: any): string {
+  const doc = receipt.DocNumber ?? "";
+  if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
+  if (doc.startsWith("KO-")) return "website";
+  if (doc.startsWith("SQR-")) return "square";
+  if (doc.startsWith("ETSY-")) return "etsy";
+  if (doc.startsWith("R-SQR-") || doc.startsWith("R-ETSY-") || doc.startsWith("R-")) return "qbo_refund";
+  const pmtName = receipt.PaymentMethodRef?.name ?? "";
+  if (/stripe/i.test(pmtName)) return "website";
+  if (/ebay/i.test(pmtName)) return "ebay";
+  return "qbo";
+}
+```
+
+### Rebuild additions
+
+```text
+After Step 3 (delete stock) and Step 4 (delete receipts):
+  Step 4b: Delete ALL SKUs
+  Step 4c: Delete ALL vendors
+  Step 4d: Delete products without lego_catalog_id or media
+```
 
