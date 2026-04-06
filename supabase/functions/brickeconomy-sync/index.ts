@@ -241,6 +241,18 @@ Deno.serve(async (req) => {
       source: "bulk_sync",
       recorded_at: now,
     }));
+
+    // Delete any existing bulk_sync rows for today so re-running the sync on the same
+    // day replaces rather than duplicates them. The unique index
+    // brickeconomy_price_history_daily_idx enforces this at the DB level too.
+    const today = now.slice(0, 10); // "YYYY-MM-DD"
+    await admin
+      .from("brickeconomy_price_history")
+      .delete()
+      .eq("source", "bulk_sync")
+      .gte("recorded_at", `${today}T00:00:00Z`)
+      .lt("recorded_at", `${today}T23:59:59.999Z`);
+
     let historyErrors = 0;
     let historyErrorMsg: string | null = null;
     for (let i = 0; i < historyRows.length; i += 100) {
