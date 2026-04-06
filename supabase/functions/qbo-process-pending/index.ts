@@ -1213,7 +1213,33 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
     }
   }
 
-  return { processed, errors, orders_linked: ordersLinked };
+
+  // ── Customer orphan cleanup: delete canonical customers with no matching landing record ──
+  const { data: qboCustomers } = await admin
+    .from("customer")
+    .select("id, qbo_customer_id")
+    .not("qbo_customer_id", "is", null);
+
+  let customersOrphaned = 0;
+  for (const cust of (qboCustomers ?? [])) {
+    const { data: landingMatch } = await admin
+      .from("landing_raw_qbo_customer")
+      .select("id")
+      .eq("external_id", cust.qbo_customer_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (!landingMatch) {
+      // No landing record means this customer was deleted/deactivated in QBO
+      await admin.from("customer").delete().eq("id", cust.id);
+      customersOrphaned++;
+    }
+  }
+  if (customersOrphaned > 0) {
+    console.log(`Customer orphan cleanup: deleted ${customersOrphaned} customers with no landing record`);
+  }
+
+  return { processed, errors, orders_linked: ordersLinked, orphans_deleted: customersOrphaned };
 }
 
 // ════════════════════════════════════════════════════════════
