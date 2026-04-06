@@ -756,7 +756,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
     .from("landing_raw_qbo_sales_receipt")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockMatched = 0, stockMissing = 0;
