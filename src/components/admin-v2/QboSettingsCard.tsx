@@ -322,6 +322,10 @@ export function QboSettingsCard() {
       setRebuildPhase('Phase 2f: Landing sales from QBO...');
       await syncAllMonths('qbo-sync-sales', 'Sales', setRebuildPhase, () => {});
 
+      // 2g: Deposits (single call)
+      setRebuildPhase('Phase 2g: Landing deposits from QBO...');
+      await invokeWithAuth('qbo-sync-deposits');
+
       // ═══ Phase 3: Process all pending (chronological) ═══
       setRebuildPhase('Phase 3: Processing all records...');
       const totalProcessed = await drainPending('Rebuild processing');
