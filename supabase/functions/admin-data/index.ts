@@ -1702,6 +1702,18 @@ Deno.serve(async (req) => {
         stockDeleted = allStockIds.length;
       }
 
+      // Step 3b: Delete ALL purchase_line_items then purchase_batches
+      let purchaseBatchesDeleted = 0;
+      await admin.from("purchase_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const { data: allBatches } = await admin.from("purchase_batches").select("id");
+      if ((allBatches ?? []).length > 0) {
+        for (let i = 0; i < allBatches!.length; i += 100) {
+          const batch = allBatches!.slice(i, i + 100);
+          await admin.from("purchase_batches").delete().in("id", batch.map((b: any) => b.id));
+        }
+        purchaseBatchesDeleted = allBatches!.length;
+      }
+
       // Step 4: Delete ALL inbound receipts and lines
       const { data: allReceipts } = await admin.from("inbound_receipt").select("id");
       for (const receipt of (allReceipts ?? [])) {
