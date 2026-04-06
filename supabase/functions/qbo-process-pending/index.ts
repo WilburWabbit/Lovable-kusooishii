@@ -718,8 +718,23 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
   for (const entry of (pending ?? [])) {
     try {
       const receipt = entry.raw_payload;
-      const qboId = String(receipt.Id);
+      const qboId = String(receipt.Id ?? receipt._entity_id ?? entry.external_id);
       const originChannel = "qbo";
+
+      // Handle deletion tombstones — reset stock and remove order
+      if (receipt?._deleted === true) {
+        const { data: existingOrder } = await admin.from("sales_order")
+          .select("id")
+          .or(`and(origin_channel.eq.qbo,origin_reference.eq.${qboId}),qbo_sales_receipt_id.eq.${qboId}`)
+          .maybeSingle();
+        if (existingOrder) {
+          await cleanupSalesOrder(admin, existingOrder.id);
+          console.log(`Deleted sales order for QBO SalesReceipt ${qboId} — stock reset`);
+        }
+        await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed", "Deleted in QBO — stock reset");
+        processed++;
+        continue;
+      }
 
       const itemLines = (receipt.Line ?? []).filter(
         (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
