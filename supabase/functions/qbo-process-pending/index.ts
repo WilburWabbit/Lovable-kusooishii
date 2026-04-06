@@ -903,13 +903,13 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           const unitPrice = detail.UnitPrice ?? 0;
           const taxCodeRef = detail.TaxCodeRef?.value ?? null;
 
-          // Check if this is a non-stock item (Service/NonInventory/shipping)
+          // Check if this is a non-stock item (Service/NonInventory/shipping/literal IDs)
           const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
             .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
           const qboItemPayload = itemLanding?.raw_payload;
           const qboItemType = qboItemPayload?.Type ?? "";
-          if (["Service", "NonInventory"].includes(qboItemType)) {
-            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType})`);
+          if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType}, landing: ${!!itemLanding})`);
             continue;
           }
 

@@ -1774,14 +1774,33 @@ Deno.serve(async (req) => {
         .select("id");
       const ebayListingsReset = ebayListingData?.length ?? 0;
 
-      // Step 8: Customer reconciliation — delete orphans without QBO ID
-      const { data: orphanCustomers } = await admin.from("customer")
-        .select("id")
-        .is("qbo_customer_id", null);
+      // Step 8: Delete ALL customers (recreated from QBO customer landing data)
       let customersDeleted = 0;
-      for (const c of (orphanCustomers ?? [])) {
-        await admin.from("customer").delete().eq("id", c.id);
-        customersDeleted++;
+      const { data: allCustomers } = await admin.from("customer").select("id");
+      const allCustomerIds = (allCustomers ?? []).map((c: any) => c.id);
+      if (allCustomerIds.length > 0) {
+        for (let i = 0; i < allCustomerIds.length; i += 100) {
+          const batch = allCustomerIds.slice(i, i + 100);
+          await admin.from("customer").delete().in("id", batch);
+        }
+        customersDeleted = allCustomerIds.length;
+      }
+
+      // Step 8b: Delete ALL tax_code and vat_rate (recreated from QBO tax entity landing data)
+      let taxCodesDeleted = 0, vatRatesDeleted = 0;
+      const { data: allTaxCodes } = await admin.from("tax_code").select("id");
+      if ((allTaxCodes ?? []).length > 0) {
+        for (const tc of allTaxCodes!) {
+          await admin.from("tax_code").delete().eq("id", tc.id);
+        }
+        taxCodesDeleted = allTaxCodes!.length;
+      }
+      const { data: allVatRates } = await admin.from("vat_rate").select("id");
+      if ((allVatRates ?? []).length > 0) {
+        for (const vr of allVatRates!) {
+          await admin.from("vat_rate").delete().eq("id", vr.id);
+        }
+        vatRatesDeleted = allVatRates!.length;
       }
 
       // Delete eBay payout transactions (they'll be rebuilt from landing data)
