@@ -1665,6 +1665,7 @@ Deno.serve(async (req) => {
       landingCustomersCleared = await clearTable("landing_raw_qbo_customer");
       landingVendorsCleared = await clearTable("landing_raw_qbo_vendor");
       landingTaxCleared = await clearTable("landing_raw_qbo_tax_entity");
+      await clearTable("landing_raw_qbo_deposit");
 
       console.log(`Phase 1 complete: cleared ${landingPurchasesCleared} purchases, ${landingSalesCleared} sales, ${landingRefundsCleared} refunds, ${landingItemsCleared} items, ${landingCustomersCleared} customers, ${landingVendorsCleared} vendors, ${landingTaxCleared} tax entities from landing tables`);
 
