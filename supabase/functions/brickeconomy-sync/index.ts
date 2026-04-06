@@ -229,9 +229,11 @@ Deno.serve(async (req) => {
     }
 
     // --- Append price history snapshots (one row per item per sync) ---
+    // Normalise item_number to base set number (strip version suffix, e.g. "75367-1" → "75367")
+    // so it matches the format used by fetch-product-data and the UI chart query.
     const historyRows = allItems.map((item) => ({
       item_type: item.item_type,
-      item_number: item.item_number,
+      item_number: item.item_number.split("-")[0],
       current_value: item.current_value,
       growth: item.growth,
       retail_price: item.retail_price,
@@ -239,11 +241,15 @@ Deno.serve(async (req) => {
       source: "bulk_sync",
       recorded_at: now,
     }));
+    let historyErrors = 0;
+    let historyErrorMsg: string | null = null;
     for (let i = 0; i < historyRows.length; i += 100) {
       const batch = historyRows.slice(i, i + 100);
       const { error } = await admin.from("brickeconomy_price_history").insert(batch);
       if (error) {
         console.error("Price history insert error:", error.message);
+        historyErrors++;
+        historyErrorMsg = historyErrorMsg ?? error.message;
       }
     }
 
@@ -333,6 +339,10 @@ Deno.serve(async (req) => {
         minifigs_synced: minifigItems.length,
         catalog_matches: catalogMatches,
         insert_errors: insertErrors,
+        history_errors: historyErrors,
+        // Surface the first price history error message so the UI can warn the user
+        // (most likely cause: brickeconomy_price_history migration not yet applied)
+        ...(historyErrorMsg ? { history_error_detail: historyErrorMsg } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
