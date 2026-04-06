@@ -1819,6 +1819,7 @@ Deno.serve(async (req) => {
           stripe_reset: stripeReset, ebay_orders_reset: ebayOrdersReset,
           ebay_payouts_reset: ebayPayoutsReset, ebay_listings_reset: ebayListingsReset,
           customers_deleted: customersDeleted,
+          tax_codes_deleted: taxCodesDeleted, vat_rates_deleted: vatRatesDeleted,
         },
       });
 
