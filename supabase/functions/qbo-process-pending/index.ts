@@ -894,7 +894,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
       const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
 
       const orderPayload: Record<string, any> = {
-        origin_channel: originChannel, origin_reference: qboId,
+        origin_channel: originChannel, origin_reference: originRef,
         status: "complete", guest_name: customerName,
         guest_email: `qbo-sale-${qboId}@imported.local`,
         shipping_name: customerName,
