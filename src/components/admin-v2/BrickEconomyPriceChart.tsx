@@ -22,6 +22,7 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { toast } from "sonner";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { productKeys } from "@/hooks/admin/use-products";
 
 interface BrickEconomyPriceChartProps {
   /** MPN e.g. "75367-1" — used to derive the set number for the API call */
@@ -70,9 +71,10 @@ export function BrickEconomyPriceChart({
     try {
       await invokeWithAuth("fetch-product-data", { mpn });
       toast.success(`Refreshed market data for ${mpn}`);
-      // Invalidate price history and product queries
+      // Invalidate price history (prefix match catches all item/type combos)
+      // and product detail (use productKeys to match the exact registered queryKey)
       queryClient.invalidateQueries({ queryKey: ["brickeconomy", "price-history"] });
-      queryClient.invalidateQueries({ queryKey: ["products", mpn] });
+      queryClient.invalidateQueries({ queryKey: productKeys.detail(mpn) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Refresh failed");
     } finally {
@@ -80,14 +82,16 @@ export function BrickEconomyPriceChart({
     }
   };
 
-  // Deduplicate to one data point per day (latest value wins)
+  // Deduplicate to one data point per day (latest timestamp wins).
+  // Store recorded_at in the accumulator so we compare timestamps to timestamps.
   const chartData = Object.values(
-    history.reduce<Record<string, { date: string; current_value: number | null; retail_price: number | null; source: string }>>(
+    history.reduce<Record<string, { date: string; recorded_at: string; current_value: number | null; retail_price: number | null; source: string }>>(
       (acc, row) => {
         const day = row.recorded_at.slice(0, 10);
-        if (!acc[day] || row.recorded_at > acc[day].date) {
+        if (!acc[day] || row.recorded_at > acc[day].recorded_at) {
           acc[day] = {
             date: day,
+            recorded_at: row.recorded_at,
             current_value: row.current_value,
             retail_price: row.retail_price,
             source: row.source,

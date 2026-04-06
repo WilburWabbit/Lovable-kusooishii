@@ -118,12 +118,33 @@ Deno.serve(async (req) => {
         : null;
     }
 
-    // Store market prices in brickeconomy_collection for later use during grading
+    // Store market prices in brickeconomy_collection for later use during grading.
+    // brickeconomy_collection has UNIQUE(item_type, item_number, paid_price, acquired_date)
+    // — not a single-column unique on item_number — so onConflict("item_number") fails
+    // silently. Instead, find the most recent row for this set and update it, or insert.
     if (brickEconomy) {
       const syncedAt = new Date().toISOString();
-      await admin
+
+      const { data: existingCollectionRow } = await admin
         .from("brickeconomy_collection")
-        .upsert({
+        .select("id")
+        .eq("item_type", "set")
+        .eq("item_number", setNumber)
+        .order("synced_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingCollectionRow) {
+        await admin
+          .from("brickeconomy_collection")
+          .update({
+            current_value: brickEconomy.current_value,
+            retail_price: brickEconomy.retail_price,
+            synced_at: syncedAt,
+          } as never)
+          .eq("id", existingCollectionRow.id);
+      } else {
+        await admin.from("brickeconomy_collection").insert({
           item_type: "set",
           item_number: setNumber,
           name: rebrickable?.name ?? null,
@@ -132,19 +153,47 @@ Deno.serve(async (req) => {
           retail_price: brickEconomy.retail_price,
           synced_at: syncedAt,
           currency: "GBP",
-        } as never, { onConflict: "item_number" as never });
+        } as never);
+      }
 
-      // Append a price history snapshot for this individual lookup
-      await admin.from("brickeconomy_price_history").insert({
-        item_type: "set",
-        item_number: setNumber,
-        current_value: brickEconomy.current_value,
-        growth: null,
-        retail_price: brickEconomy.retail_price,
-        currency: "GBP",
-        source: "individual",
-        recorded_at: syncedAt,
-      } as never);
+      // Upsert a price history snapshot for this individual lookup — one row per day.
+      // Check for an existing row today (source='individual') and update it rather than
+      // inserting a duplicate. The unique index brickeconomy_price_history_daily_idx
+      // enforces uniqueness on (item_type, item_number, source, recorded_at::date).
+      const today = syncedAt.slice(0, 10); // "YYYY-MM-DD"
+      const { data: existingHistoryRow } = await admin
+        .from("brickeconomy_price_history")
+        .select("id")
+        .eq("item_type", "set")
+        .eq("item_number", setNumber)
+        .eq("source", "individual")
+        .gte("recorded_at", `${today}T00:00:00Z`)
+        .lt("recorded_at", `${today}T23:59:59.999Z`)
+        .maybeSingle();
+
+      if (existingHistoryRow) {
+        const { error: histErr } = await admin
+          .from("brickeconomy_price_history")
+          .update({
+            current_value: brickEconomy.current_value,
+            retail_price: brickEconomy.retail_price,
+            recorded_at: syncedAt,
+          } as never)
+          .eq("id", existingHistoryRow.id);
+        if (histErr) console.error("Price history update failed:", histErr.message);
+      } else {
+        const { error: histErr } = await admin.from("brickeconomy_price_history").insert({
+          item_type: "set",
+          item_number: setNumber,
+          current_value: brickEconomy.current_value,
+          growth: null,
+          retail_price: brickEconomy.retail_price,
+          currency: "GBP",
+          source: "individual",
+          recorded_at: syncedAt,
+        } as never);
+        if (histErr) console.error("Price history insert failed:", histErr.message);
+      }
     }
 
     return jsonResponse({

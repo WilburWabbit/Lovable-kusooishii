@@ -35,11 +35,16 @@ export function useBrickEconomyPriceHistory(
   return useQuery({
     queryKey: ["brickeconomy", "price-history", itemType, itemNumber],
     queryFn: async () => {
+      // Query by base number ("75367") and also by versioned number ("75367-1") for
+      // backwards compatibility with any rows stored before normalisation was applied.
+      const baseNumber = itemNumber.split("-")[0];
+      const versionedNumber = baseNumber.includes("-") ? baseNumber : `${baseNumber}-1`;
+
       const { data, error } = await supabase
         .from("brickeconomy_price_history")
         .select("*")
         .eq("item_type", itemType)
-        .eq("item_number", itemNumber)
+        .or(`item_number.eq.${baseNumber},item_number.eq.${versionedNumber}`)
         .order("recorded_at", { ascending: true });
 
       if (error) throw new Error(error.message);

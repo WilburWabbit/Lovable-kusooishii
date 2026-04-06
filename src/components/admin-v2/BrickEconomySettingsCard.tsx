@@ -17,6 +17,8 @@ interface SyncResult {
   minifigs_synced?: number;
   catalog_matches?: number;
   insert_errors?: number;
+  history_errors?: number;
+  history_error_detail?: string;
   error?: string;
   syncs_today?: number;
   calls_today?: number;
@@ -78,6 +80,15 @@ export function BrickEconomySettingsCard() {
           ? `Synced: ${parts.join(", ")}`
           : "Sync complete (no items returned)",
       );
+      // Warn if price history inserts failed (most likely cause: migration not applied)
+      if (data.history_errors && data.history_errors > 0) {
+        toast.warning(
+          data.history_error_detail?.includes("does not exist")
+            ? "Price history table missing — run: npx supabase db push"
+            : `Price history write failed: ${data.history_error_detail ?? "unknown error"}`,
+          { duration: 8000 },
+        );
+      }
       // Invalidate quota and price history queries
       queryClient.invalidateQueries({ queryKey: ["brickeconomy"] });
     } catch (err) {
