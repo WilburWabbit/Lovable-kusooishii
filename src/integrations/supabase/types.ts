@@ -98,6 +98,36 @@ export type Database = {
         }
         Relationships: []
       }
+      brickeconomy_channel_overrides: {
+        Row: {
+          channel: string
+          id: string
+          item_number: string
+          item_type: string
+          notes: string | null
+          price_override: number
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          id?: string
+          item_number: string
+          item_type: string
+          notes?: string | null
+          price_override: number
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          id?: string
+          item_number?: string
+          item_type?: string
+          notes?: string | null
+          price_override?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brickeconomy_collection: {
         Row: {
           acquired_date: string | null
@@ -200,6 +230,42 @@ export type Database = {
           synced_at?: string
           total_count?: number | null
           unique_count?: number | null
+        }
+        Relationships: []
+      }
+      brickeconomy_price_history: {
+        Row: {
+          currency: string
+          current_value: number | null
+          growth: number | null
+          id: string
+          item_number: string
+          item_type: string
+          recorded_at: string
+          retail_price: number | null
+          source: string
+        }
+        Insert: {
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number: string
+          item_type: string
+          recorded_at?: string
+          retail_price?: number | null
+          source?: string
+        }
+        Update: {
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number?: string
+          item_type?: string
+          recorded_at?: string
+          retail_price?: number | null
+          source?: string
         }
         Relationships: []
       }
