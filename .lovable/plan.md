@@ -1,108 +1,50 @@
 
-Rebuild from QBO needs to become a true fresh snapshot + replay, not “delete canonical rows and reuse whatever is already in landing”.
 
-What I found
-- The current rebuild only wipes canonical rows and resets landing rows to `pending`. It does not refresh landing from live QBO first, so deleted QBO purchases/customers/sales receipts are being rebuilt from stale landing data.
-- The QBO sync functions upsert records they still see, but they do not remove or tombstone landing rows for records that no longer exist in QBO.
-- Delete tombstones are only handled properly for SalesReceipts and Vendors. Purchases, Customers, and Items still do not clean up canonical data when QBO deletes them.
-- Channel codes are inconsistent:
-  - Stripe/web checkout uses `web`
-  - QBO processor creates `website`
-  - in-person uses `in_person`
-  - QBO processor creates `square`
-  This breaks dedup, payout reconciliation, and channel attribution.
-- QBO-created orders use `origin_reference = qboId` instead of the real external order/payment reference, so later eBay/website/in-person matching cannot reconnect them.
-- Rebuild only replays the QBO processor. It does not replay Stripe/eBay landing flows afterward, so payout and order statuses stay wrong.
-- Tax sync still writes canonical tax rows directly instead of going through the staged processor.
+# Fix Duplicate Purchases, Stale Customers, and Missing Payouts
 
-Plan
+## Root Causes Found
 
-1. Replace rebuild with a fresh QBO snapshot pipeline
-- In `admin-data`, change `rebuild-from-qbo` so it:
-  1. clears all QBO landing tables
-  2. re-fetches current QBO data into landing
-  3. wipes QBO-derived/transactional canonical data
-  4. replays processing in the correct order
-  5. replays non-QBO landing data
-  6. runs final integrity checks
-- Update `QboSettingsCard` so the rebuild button drives these phases instead of just reset + `qbo-process-pending`.
+### 1. Duplicate Purchase Batches (PO-086 + PO-172 for same QBO 1748)
+The rebuild deletes `inbound_receipt`, `stock_unit`, `sku`, etc. but **never deletes `purchase_batches` or `purchase_line_items`**. There are 173 batch rows for 87 distinct QBO references — every purchase is duplicated exactly. The old batch rows from before the rebuild persist, and the Intake UI creates new ones when processing receipts.
 
-2. Make landing authoritative during rebuild
-- Update `qbo-sync-customers`, `qbo-sync-items`, `qbo-sync-vendors`, `qbo-sync-purchases`, `qbo-sync-sales`, and tax sync so rebuild mode produces a fresh landing snapshot rather than an additive merge.
-- Land tax codes as well as tax rates.
-- Stop direct canonical tax writes during sync; land first, process second.
+### 2. Stale/Deleted Customers (QBO ID 493 still present)
+Two bugs compound:
+- `qbo-sync-customers` queries `SELECT * FROM Customer` with **no `Active = true` filter**, so inactive/merged customers are landed
+- `processCustomers` has no post-processing cleanup step to delete canonical customers that no longer have a matching landing record after a rebuild
 
-3. Finish delete handling in the processor
-- In `qbo-process-pending`, add explicit `_deleted` logic for:
-  - Purchases: remove/reconcile receipt + stock correctly
-  - Customers: remove QBO-mastered customers or clear QBO linkage where appropriate
-  - Items: deactivate/remove QBO-derived SKU mappings
-  - Tax entities: rebuild `tax_code` and `vat_rate` from staged data
-- Keep replay chronological for transactions: purchases oldest→newest, then order enrichment/sales.
+### 3. Missing Payout/Deposit Data
+No `qbo-sync-deposits` function exists. eBay payout landing table is empty (reset during rebuild, never repopulated). The rebuild's Phase 3 processes QBO records but never replays non-QBO landing events.
 
-4. Normalize internal channel values
-- Standardize canonical `origin_channel` values used everywhere:
-  - `ebay`
-  - `web`
-  - `in_person`
-  - other marketplaces only where genuinely needed
-- Change QBO channel detection to map:
-  - eBay DocNumber pattern → `ebay`
-  - `KO-` / Stripe indicators → `web`
-  - Square/cash/in-person indicators → `in_person`
-- Update any read paths and payout logic to accept old values during transition, but rebuild all new rows with the normalized values only.
+## Plan
 
-5. Change QBO sales import to match-first, create-last
-- QBO SalesReceipts should:
-  - match an existing eBay/website/in-person order first
-  - enrich that order with QBO ids/status
-  - only create a fallback order if no source order exists
-- Use the real external channel reference as `origin_reference` when available, not the QBO receipt id.
-- Keep the QBO receipt id only in `qbo_sales_receipt_id`.
+### Step 1: Add `purchase_batches` and `purchase_line_items` to rebuild deletion
 
-6. Preserve only non-QBO-mastered data, then re-associate it
-- Preserve:
-  - product/media/copy by `mpn`
-  - SKU-linked non-QBO config by `sku_code` / `external_sku`
-  - local-only customer identity fields by email / `user_id` / `stripe_customer_id`
-- Re-associate after rebuild:
-  - rebuilt SKUs relink to existing product/media by `mpn`
-  - retained listing/config rows relink to new `sku_id` by `sku_code`
-  - local-only customers remain; QBO customers merge into them when keys match
-- Delete anything retained that cannot be re-associated cleanly.
+In `admin-data/index.ts`, add deletion of `purchase_line_items` (child first) then `purchase_batches` between the stock unit deletion and inbound receipt deletion steps.
 
-7. Replay non-QBO sources after QBO purchases are rebuilt
-- After QBO reference/tax/purchase replay, replay:
-  - Stripe landing events
-  - eBay order landing
-  - eBay payout landing
-- Then run payout reconciliation so statuses and payout links are rebuilt against the fresh stock/order set.
+### Step 2: Filter inactive customers during sync
 
-8. Add targeted repair tools so one bad record does not require another full rebuild
-- Add admin actions to purge + replay:
-  - one QBO purchase
-  - one QBO sales receipt
-  - one QBO customer
-  - one payout reconciliation run
-- These should reuse the same cleanup/rebuild rules as the full rebuild.
+In `qbo-sync-customers/index.ts`, change the query from `SELECT * FROM Customer` to `SELECT * FROM Customer WHERE Active = true` to prevent inactive/deleted customers from being landed.
 
-Technical details
-- Main files:
-  - `supabase/functions/admin-data/index.ts`
-  - `src/components/admin-v2/QboSettingsCard.tsx`
-  - `supabase/functions/qbo-process-pending/index.ts`
-  - `supabase/functions/qbo-sync-customers/index.ts`
-  - `supabase/functions/qbo-sync-items/index.ts`
-  - `supabase/functions/qbo-sync-vendors/index.ts`
-  - `supabase/functions/qbo-sync-purchases/index.ts`
-  - `supabase/functions/qbo-sync-sales/index.ts`
-  - `supabase/functions/qbo-sync-tax-rates/index.ts`
-  - `supabase/functions/v2-reconcile-payout/index.ts`
-- If needed, add a small migration for rebuild locking/run tracking so two rebuilds cannot overlap.
+### Step 3: Add customer orphan cleanup after processing
 
-Expected outcome
-- Old QBO purchases/customers/items stop reappearing
-- Deleted QBO customers disappear unless they are truly local-only
-- eBay / website / in-person attribution becomes consistent
-- QBO sales receipts enrich the correct operational orders instead of creating duplicates
-- payout and order statuses rebuild correctly because non-QBO landings are replayed after the QBO stock base is restored
+In `qbo-process-pending/index.ts`, after `processCustomers` finishes all pending records, add a cleanup step: query all `customer` rows where `qbo_customer_id IS NOT NULL`, then check each against `landing_raw_qbo_customer`. Delete any canonical customer whose QBO ID has no matching landing record (meaning it was deleted/deactivated in QBO).
+
+### Step 4: Create QBO Deposit sync and landing
+
+- **Migration**: Create `landing_raw_qbo_deposit` table (same structure as other landing tables)
+- **New edge function**: `qbo-sync-deposits/index.ts` — queries `SELECT * FROM Deposit` from QBO and lands raw payloads
+- **Processor addition**: Add `processDeposits` function in `qbo-process-pending` that reads deposit landing records and creates `payouts` rows, linking deposit lines to sales orders via their QBO SalesReceipt references
+
+### Step 5: Add deposit sync to rebuild pipeline
+
+In `QboSettingsCard.tsx`, add a Phase 2g step between sales sync and processing to sync deposits from QBO. Add `landing_raw_qbo_deposit` to the landing tables cleared during Phase 1 in `admin-data`.
+
+## Files Modified
+
+1. `supabase/functions/admin-data/index.ts` — delete `purchase_batches`/`purchase_line_items` in rebuild; clear `landing_raw_qbo_deposit`
+2. `supabase/functions/qbo-sync-customers/index.ts` — filter `Active = true`
+3. `supabase/functions/qbo-process-pending/index.ts` — customer orphan cleanup; `processDeposits` function
+4. `supabase/functions/qbo-sync-deposits/index.ts` — new function
+5. `src/components/admin-v2/QboSettingsCard.tsx` — add deposit sync phase
+6. Database migration — create `landing_raw_qbo_deposit` table
+
