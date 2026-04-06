@@ -224,9 +224,9 @@ function detectOriginChannel(receipt: any): string {
   // eBay order IDs: XX-XXXXX-XXXXX pattern
   if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
   // Stripe/website orders: KO- prefix
-  if (doc.startsWith("KO-")) return "website";
-  // Square orders
-  if (doc.startsWith("SQR-")) return "square";
+  if (doc.startsWith("KO-")) return "web";
+  // Square orders → in_person
+  if (doc.startsWith("SQR-")) return "in_person";
   // Etsy orders
   if (doc.startsWith("ETSY-")) return "etsy";
   // Refund patterns
@@ -234,12 +234,29 @@ function detectOriginChannel(receipt: any): string {
 
   // Fallback: check PaymentMethodRef
   const pmtName = receipt.PaymentMethodRef?.name ?? "";
-  if (/stripe/i.test(pmtName)) return "website";
+  if (/stripe/i.test(pmtName)) return "web";
   if (/ebay/i.test(pmtName)) return "ebay";
-  if (/square/i.test(pmtName)) return "square";
+  if (/square/i.test(pmtName) || /cash/i.test(pmtName)) return "in_person";
   if (/etsy/i.test(pmtName)) return "etsy";
 
-  return "qbo";
+  return "in_person";
+}
+
+// Derive the external reference for an order — prefer the channel-native ID
+function deriveOriginReference(receipt: any, originChannel: string): string {
+  const doc = receipt.DocNumber ?? "";
+  const qboId = String(receipt.Id);
+
+  // For eBay, the DocNumber IS the eBay order ID
+  if (originChannel === "ebay" && doc) return doc;
+  // For web, the DocNumber IS the KO- order number
+  if (originChannel === "web" && doc.startsWith("KO-")) return doc;
+  // For in_person with SQR- prefix, use that
+  if (originChannel === "in_person" && doc.startsWith("SQR-")) return doc;
+  // For etsy with ETSY- prefix
+  if (originChannel === "etsy" && doc.startsWith("ETSY-")) return doc;
+  // Fallback: use QBO receipt ID
+  return qboId;
 }
 
 // ════════════════════════════════════════════════════════════
