@@ -104,7 +104,7 @@ export function useBrickEconomyQuota() {
         calls_today: callsToday,
         quota: QUOTA,
         remaining: Math.max(0, QUOTA - callsToday),
-        last_sync_at: lastEvent?.created_at ?? null,
+        last_sync_at: lastEvent?.occurred_at ?? null,
       } as BrickEconomyQuota;
     },
     // Refresh every 60 seconds so quota stays current
