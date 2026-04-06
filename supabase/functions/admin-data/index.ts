@@ -1920,6 +1920,74 @@ Deno.serve(async (req) => {
         cleanup: !enabled ? { orders_deleted: ordersDeleted, lines_deleted: linesDeleted, stock_reopened: stockReopened, events_deleted: eventsDeleted } : undefined,
       };
 
+    } else if (action === "list-staging-errors") {
+      // Query all landing tables for error records
+      const LANDING_TABLES = [
+        { table: "landing_raw_qbo_purchase", entity: "Purchase" },
+        { table: "landing_raw_qbo_sales_receipt", entity: "Sales Receipt" },
+        { table: "landing_raw_qbo_refund_receipt", entity: "Refund Receipt" },
+        { table: "landing_raw_qbo_item", entity: "Item" },
+        { table: "landing_raw_qbo_customer", entity: "Customer" },
+        { table: "landing_raw_qbo_vendor", entity: "Vendor" },
+        { table: "landing_raw_qbo_tax_entity", entity: "Tax Entity" },
+        { table: "landing_raw_stripe_event", entity: "Stripe Event" },
+        { table: "landing_raw_ebay_order", entity: "eBay Order" },
+        { table: "landing_raw_ebay_payout", entity: "eBay Payout" },
+        { table: "landing_raw_ebay_listing", entity: "eBay Listing" },
+      ];
+
+      const allErrors: any[] = [];
+      for (const { table, entity } of LANDING_TABLES) {
+        const { data } = await admin.from(table)
+          .select("id, external_id, status, error_message, received_at, raw_payload")
+          .eq("status", "error")
+          .order("received_at", { ascending: false })
+          .limit(50);
+        for (const row of (data ?? [])) {
+          allErrors.push({
+            ...row,
+            table_name: table,
+            entity_type: entity,
+          });
+        }
+      }
+
+      // Sort by received_at desc
+      allErrors.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime());
+      result = allErrors;
+
+    } else if (action === "retry-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "pending", processed_at: null, error_message: null })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "skip-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "skipped", processed_at: new Date().toISOString() })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
