@@ -102,9 +102,15 @@ async function ensureProductExists(
 
   const { data: ensuredProductId, error: ensureErr } = await admin.rpc("ensure_product_exists", {
     p_mpn: mpn,
+    p_name: productName,
     p_brand: brand,
     p_item_type: itemType,
-    p_name: productName,
+    p_theme_id: null,
+    p_subtheme: null,
+    p_piece_count: null,
+    p_release_year: null,
+    p_retired: null,
+    p_img_url: null,
   });
 
   if (!ensureErr && ensuredProductId) {
