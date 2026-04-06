@@ -634,7 +634,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         console.error("Purchase batch create error:", batchErr);
         throw new Error(`Purchase batch create failed: ${batchErr.message}`);
       }
-      const batchId = batch.id;
+      batchId = batch.id;
 
       for (let i = 0; i < stockLines.length; i++) {
         const line = stockLines[i];
