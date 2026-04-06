@@ -422,6 +422,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     const createdStockUnitIds: string[] = [];
     let receiptId: string | null = null;
     let insertedLineIds: string[] = [];
+    let batchId: string | null = null;
 
     try {
       const purchase = entry.raw_payload;
