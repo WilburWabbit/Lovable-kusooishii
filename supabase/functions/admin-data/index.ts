@@ -1844,6 +1844,8 @@ Deno.serve(async (req) => {
         ebay_payouts_reset: ebayPayoutsReset,
         ebay_listings_reset: ebayListingsReset,
         customers_deleted: customersDeleted,
+        tax_codes_deleted: taxCodesDeleted,
+        vat_rates_deleted: vatRatesDeleted,
       };
 
     } else if (action === "proxy-function") {
