@@ -1681,6 +1681,33 @@ Deno.serve(async (req) => {
         receiptsDeleted++;
       }
 
+      // Step 4b: Delete ALL SKUs (recreated by processor from QBO items)
+      let skusDeleted = 0;
+      const { data: allSkus } = await admin.from("sku").select("id");
+      const allSkuIds = (allSkus ?? []).map((s: any) => s.id);
+      if (allSkuIds.length > 0) {
+        // Delete price audit logs referencing these SKUs first
+        for (let i = 0; i < allSkuIds.length; i += 100) {
+          const batch = allSkuIds.slice(i, i + 100);
+          await admin.from("price_audit_log").delete().in("sku_id", batch);
+        }
+        for (let i = 0; i < allSkuIds.length; i += 100) {
+          const batch = allSkuIds.slice(i, i + 100);
+          await admin.from("sku").delete().in("id", batch);
+        }
+        skusDeleted = allSkuIds.length;
+      }
+
+      // Step 4c: Delete ALL vendors (recreated from QBO vendor landing data)
+      let vendorsDeleted = 0;
+      const { data: allVendors } = await admin.from("vendor").select("id");
+      if ((allVendors ?? []).length > 0) {
+        for (const v of allVendors!) {
+          await admin.from("vendor").delete().eq("id", v.id);
+        }
+        vendorsDeleted = allVendors!.length;
+      }
+
       // Step 5: Clean up QBO-related audit events from prior processing cycles
       await admin.from("audit_event").delete()
         .in("trigger_type", [
@@ -1769,6 +1796,7 @@ Deno.serve(async (req) => {
           items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset,
           tax_reset: taxReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted,
           stock_deleted: stockDeleted, payouts_deleted: payoutsDeleted,
+          skus_deleted: skusDeleted, vendors_deleted: vendorsDeleted,
           stripe_reset: stripeReset, ebay_orders_reset: ebayOrdersReset,
           ebay_payouts_reset: ebayPayoutsReset, ebay_listings_reset: ebayListingsReset,
           customers_deleted: customersDeleted,
@@ -1789,6 +1817,8 @@ Deno.serve(async (req) => {
         orders_deleted: ordersDeleted,
         stock_deleted: stockDeleted,
         payouts_deleted: payoutsDeleted,
+        skus_deleted: skusDeleted,
+        vendors_deleted: vendorsDeleted,
         stripe_reset: stripeReset,
         ebay_orders_reset: ebayOrdersReset,
         ebay_payouts_reset: ebayPayoutsReset,
