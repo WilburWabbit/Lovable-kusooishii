@@ -839,19 +839,11 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
       }
 
-      // Same-channel dedup: delete existing QBO order for re-creation
+      // Same-channel dedup: delete existing QBO order for re-creation using unified cleanup
       const { data: existing } = await admin.from("sales_order")
         .select("id").eq("origin_channel", originChannel).eq("origin_reference", qboId).maybeSingle();
       if (existing) {
-        const { data: oldLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", existing.id);
-        for (const ol of (oldLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
-          }
-        }
-        await admin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
-        await admin.from("sales_order").delete().eq("id", existing.id);
+        await cleanupSalesOrder(admin, existing.id);
       }
 
       const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
