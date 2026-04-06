@@ -1,52 +1,36 @@
 
 
-# QBO Webhook Not Processing — Root Cause & Fix
+# Fix QBO Sales Receipt Processing — Blocked by Function Overload
 
-## Root Cause
+## Problem
 
-The QBO webhook is receiving notifications from Intuit but silently dropping all of them. The single recent invocation (April 4, 200 OK, 345ms) produced zero application logs — no landing, no errors, nothing.
+Sales receipts (1795, 1796) are stuck as `pending` and never processed. The root cause is a cascading blockage:
 
-**Why**: Intuit has migrated to CloudEvents v1.0 format (deadline May 15, 2026), but the deployed webhook code only handles the legacy `eventNotifications` format:
+1. **17 pending purchases** are blocking Tier 3 (sales receipts) because the processor uses strict tiered dependency ordering
+2. Purchases fail to complete because `ensure_product_exists` has **3 ambiguous overloads** in the database (4-arg, 8-arg, 10-arg). PostgreSQL cannot disambiguate between them when called with `(p_mpn, p_brand, p_item_type, p_name)`
+3. The fallback (direct lookup) works but is slow — the processor times out ("connection closed before message completed") before finishing all 17 purchases
+4. Until purchases are fully drained, the tiered logic never reaches sales receipts
 
-```typescript
-// Line 218 — looks for old format
-const notifications = payload?.eventNotifications ?? [];
-if (notifications.length === 0) return;  // ← exits here every time
+## Fix
+
+### Step 1: Database migration — Drop redundant function overloads
+
+Drop the 4-arg and 8-arg versions, keeping only the 10-arg version (which has all parameters including `p_brand` and `p_item_type`):
+
+```sql
+DROP FUNCTION IF EXISTS public.ensure_product_exists(text, text, text, text);
+DROP FUNCTION IF EXISTS public.ensure_product_exists(text, text, uuid, text, integer, integer, boolean, text);
 ```
 
-CloudEvents payloads arrive as a flat array of objects with different field names (`type`, `source`, headers like `intuit-signature`). The code never finds `eventNotifications`, so it returns immediately — no data is landed, no processor is triggered.
+This leaves only the 10-arg version, which the RPC call already matches (it has `p_mpn`, `p_brand`, `p_item_type`, `p_name` plus optional extras).
 
-This is **systemic**: every entity type (Customer, SalesReceipt, Purchase, Item, Vendor, RefundReceipt) is affected. Nothing has been landed via webhook since March 31.
+### Step 2: Redeploy `qbo-process-pending`
 
-## Fix Plan
+No code changes needed — the existing RPC call with `{p_mpn, p_brand, p_item_type, p_name}` will now unambiguously match the remaining 10-arg function (other params use defaults).
 
-### File: `supabase/functions/qbo-webhook/index.ts`
+### Expected Result
 
-Add CloudEvents parsing alongside the legacy format. CloudEvents from Intuit:
-- Are a flat JSON array of objects
-- Each has `type` (e.g., `qbo.customer.created.v1`), `data.intuitaccountid` (realm), `data.intuitentityid` (entity ID)
-- Use the same `intuit-signature` HMAC verification
-
-**Changes:**
-
-1. **Parse CloudEvents format** — After signature verification, detect whether the payload is a CloudEvents array or legacy format by checking if it's an array vs an object with `eventNotifications`.
-
-2. **Map CloudEvents to entity handlers** — Parse `type` field (e.g., `qbo.customer.created.v1`) into entity name + operation, extract `intuitaccountid` as `realmId`, `intuitentityid` as entity ID.
-
-3. **Propagate metadata** — Pass `cloudEventId` (from `id` field) and `eventTime` (from `time` field) to `landEntity` for the staging tables that have those columns (`landing_raw_qbo_customer`, `landing_raw_qbo_item`, etc.).
-
-4. **Keep legacy format as fallback** — Maintain backward compatibility in case Intuit sends mixed formats during migration.
-
-5. **Echo suppression** — Query `qbo_outbound_queue` for recent pushes (within 10 seconds of the event) to prevent infinite sync loops when the app pushes to QBO and QBO sends a webhook back.
-
-### Deployment
-
-Redeploy `qbo-webhook` after changes.
-
-### Verification
-
-After deployment, trigger a test change in QBO (e.g., edit a customer) and confirm:
-- Webhook logs show entity landing messages
-- New records appear in `landing_raw_qbo_customer` (or relevant table)
-- `qbo-process-pending` is auto-triggered and processes the staged data
+- Purchases process without the ambiguity warning or fallback delay
+- 17 pending purchases clear quickly
+- Tier 3 unlocks, and the 2 pending sales receipts (1795, 1796) get processed
 
