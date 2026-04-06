@@ -205,9 +205,9 @@ async function cleanupSalesOrder(admin: any, orderId: string): Promise<void> {
     if (createdLine.stock_unit_id) {
       await admin
         .from("stock_unit")
-        .update({ status: "available" })
+        .update({ status: "available", v2_status: "graded", order_id: null, sold_at: null })
         .eq("id", createdLine.stock_unit_id)
-        .eq("status", "closed");
+        .in("status", ["closed", "sold"]);
     }
   }
 
