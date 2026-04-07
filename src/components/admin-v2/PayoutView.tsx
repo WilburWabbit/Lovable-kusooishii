@@ -484,10 +484,10 @@ export function PayoutView() {
                 <SectionHead>Fee Breakdown</SectionHead>
                 <div className="grid gap-1.5">
                   {[
-                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown.fvf },
-                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown.promoted_listings },
-                    { label: "International", amount: selectedPayout.feeBreakdown.international },
-                    { label: "Processing", amount: selectedPayout.feeBreakdown.processing },
+                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown?.fvf },
+                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown?.promoted_listings },
+                    { label: "International", amount: selectedPayout.feeBreakdown?.international },
+                    { label: "Processing", amount: selectedPayout.feeBreakdown?.processing },
                   ].map((fee) => (
                     <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
                       <span className="text-zinc-600 text-xs">{fee.label}</span>
