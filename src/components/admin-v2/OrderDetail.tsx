@@ -123,7 +123,14 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       ? "#EF4444"
       : "#F59E0B";
 
-  const netProfit = order.netAmount - totalCogs - totalOrderFees;
+  // Ex-VAT P&L: all pillars netted at 20%
+  const netRevenue = exVAT(order.total);
+  const netCogs = exVAT(totalCogs);
+  const netFees = exVAT(totalOrderFees);
+  const netProfit = netRevenue - netCogs - netFees;
+  const vatReclaimCogs = totalCogs - netCogs;
+  const vatReclaimFees = totalOrderFees - netFees;
+  const totalVatReclaim = vatReclaimCogs + vatReclaimFees;
 
   return (
     <div className="pb-20 lg:pb-0">
