@@ -42,6 +42,8 @@ export function QboSettingsCard() {
   const [processLabel, setProcessLabel] = useState('');
   const [reconciling, setReconciling] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<Record<string, unknown>[] | null>(null);
+  const [reconcileType, setReconcileType] = useState<string>('stock');
+  const [reconcilingEntity, setReconcilingEntity] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildPhase, setRebuildPhase] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
@@ -49,7 +51,7 @@ export function QboSettingsCard() {
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || rebuilding;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -271,6 +273,7 @@ export function QboSettingsCard() {
   const reconcileStock = async () => {
     setReconciling(true);
     setReconcileDetails(null);
+    setReconcileType('stock');
     try {
       const d = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'reconcile-stock' });
       if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
@@ -287,6 +290,34 @@ export function QboSettingsCard() {
       setReconciling(false);
     }
   };
+
+  const reconcileEntity = async (entityAction: string, label: string) => {
+    setReconcilingEntity(entityAction);
+    setReconcileDetails(null);
+    setReconcileType(entityAction);
+    try {
+      const d = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: entityAction });
+      if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
+      const summary = [
+        `${(d as Record<string, unknown>).total_qbo ?? 0} in QBO`,
+        `${(d as Record<string, unknown>).total_app ?? 0} in app`,
+        `${(d as Record<string, unknown>).in_sync ?? 0} in sync`,
+      ];
+      if ((d as Record<string, unknown>).missing_in_app) summary.push(`${(d as Record<string, unknown>).missing_in_app} missing in app`);
+      if ((d as Record<string, unknown>).missing_in_qbo) summary.push(`${(d as Record<string, unknown>).missing_in_qbo} missing in QBO`);
+      if ((d as Record<string, unknown>).mismatched) summary.push(`${(d as Record<string, unknown>).mismatched} mismatched`);
+      if ((d as Record<string, unknown>).auto_fixed) summary.push(`${(d as Record<string, unknown>).auto_fixed} auto-fixed`);
+      toast.success(`${label}: ${summary.join(', ')}`);
+      if (((d as Record<string, unknown>).details as unknown[])?.length > 0) {
+        setReconcileDetails((d as Record<string, unknown>).details as Record<string, unknown>[]);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `${label} reconciliation failed`);
+    } finally {
+      setReconcilingEntity(null);
+    }
+  };
+
 
   const rebuildFromQbo = async () => {
     if (!confirm(
@@ -519,6 +550,11 @@ export function QboSettingsCard() {
             <div className="flex flex-wrap gap-1.5">
               <Btn onClick={processPending} busy={processing}>Process Pending</Btn>
               <Btn onClick={reconcileStock} busy={reconciling}>Reconcile Stock</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-purchases', 'Purchases')} busy={reconcilingEntity === 'reconcile-purchases'}>Reconcile Purchases</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-sales', 'Sales')} busy={reconcilingEntity === 'reconcile-sales'}>Reconcile Sales</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-customers', 'Customers')} busy={reconcilingEntity === 'reconcile-customers'}>Reconcile Customers</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-items', 'Items')} busy={reconcilingEntity === 'reconcile-items'}>Reconcile Items</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-vendors', 'Vendors')} busy={reconcilingEntity === 'reconcile-vendors'}>Reconcile Vendors</Btn>
             </div>
           </div>
 
@@ -535,28 +571,52 @@ export function QboSettingsCard() {
           {reconcileDetails && reconcileDetails.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs font-medium text-zinc-700">Stock Discrepancies</p>
+                <p className="text-xs font-medium text-zinc-700">
+                  {reconcileType === 'stock' ? 'Stock Discrepancies' : `${reconcileType.replace('reconcile-', '').replace(/^\w/, (c: string) => c.toUpperCase())} Discrepancies`}
+                </p>
                 <button onClick={() => setReconcileDetails(null)} className="text-[9px] text-zinc-400 hover:text-zinc-600">dismiss</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[10px]">
                   <thead>
                     <tr className="border-b border-zinc-200">
-                      <th className="text-left py-1 pr-2 text-zinc-500 font-medium">SKU</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">QBO</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">App</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">Diff</th>
-                      <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                      {reconcileType === 'stock' ? (
+                        <>
+                          <th className="text-left py-1 pr-2 text-zinc-500 font-medium">SKU</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">QBO</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">App</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">Diff</th>
+                          <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="text-left py-1 pr-2 text-zinc-500 font-medium">Entity</th>
+                          <th className="text-left py-1 px-2 text-zinc-500 font-medium">QBO ID</th>
+                          <th className="text-left py-1 px-2 text-zinc-500 font-medium">Issue</th>
+                          <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {reconcileDetails.slice(0, 20).map((d, i) => (
+                    {reconcileDetails.slice(0, 30).map((d, i) => (
                       <tr key={i} className="border-b border-zinc-100">
-                        <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
-                        <td className="text-right py-0.5 px-2">{String(d.qbo_qty)}</td>
-                        <td className="text-right py-0.5 px-2">{String(d.app_qty)}</td>
-                        <td className="text-right py-0.5 px-2">{String(d.diff)}</td>
-                        <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                        {reconcileType === 'stock' ? (
+                          <>
+                            <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
+                            <td className="text-right py-0.5 px-2">{String(d.qbo_qty)}</td>
+                            <td className="text-right py-0.5 px-2">{String(d.app_qty)}</td>
+                            <td className="text-right py-0.5 px-2">{String(d.diff)}</td>
+                            <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.entity)}</Mono></td>
+                            <td className="py-0.5 px-2"><Mono className="text-[10px]">{String(d.qbo_id)}</Mono></td>
+                            <td className="py-0.5 px-2 text-zinc-600 max-w-[200px] truncate">{String(d.issue)}</td>
+                            <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
