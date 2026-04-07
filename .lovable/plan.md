@@ -1,64 +1,49 @@
 
+Root cause confirmed from the live state:
 
-# Fix: Ghost Units and Stuck Purchases — Root Cause and Resolution
+- `landing_raw_qbo_purchase` entries for `881` and `1733` are still `status = error` with:
+  `Stock unit insert failed: duplicate key value violates unique constraint "stock_unit_uid_key"`
+- Matching `inbound_receipt` rows already exist for both purchases and are `pending`, but each currently has `0` receipt lines.
+- There are no active `purchase_batches` for references `881` or `1733`, which means the system is in a half-reset state: some derived data was cleaned up, but the landing records themselves are still blocked in `error`.
+- The current cleanup logic in `supabase/functions/admin-data/index.ts` is incorrect:
+  ```ts
+  await admin.from("stock_unit").delete().eq("inbound_receipt_line_id", receipt.id)
+  ```
+  `stock_unit.inbound_receipt_line_id` references `inbound_receipt_line.id`, not `inbound_receipt.id`, so this reset path does not actually target the right stock rows.
+- `Process Pending` only processes `status = pending`, so these two purchases will not recover reliably while they remain in `error`.
 
-## What went wrong
+Plan:
 
-Three compounding issues:
+1. Fix the purchase reset logic in `supabase/functions/admin-data/index.ts`
+   - Load the receipt for a given QBO purchase id.
+   - Collect the real `inbound_receipt_line.id` values.
+   - Delete purchase-linked stock units using those line ids.
+   - Delete the matching receipt lines.
+   - Delete any related `purchase_line_items` and `purchase_batches` by `reference = qboPurchaseId`.
+   - Reset the landing row to `pending` and clear `processed_at` / `error_message`.
 
-1. **The `admin-data` edge function was not redeployed** after the cleanup code was added. The button clicks in the UI likely ran the OLD version of the function (which didn't have the cleanup logic), or returned errors silently. The edge function logs show zero recent calls to `admin-data`.
+2. Add a targeted repair action for stuck QBO purchases
+   - Create a dedicated admin action such as `reset-qbo-purchase`.
+   - Accept one or more QBO purchase ids.
+   - Use this specifically for `881` and `1733` instead of relying on the broad ghost cleanup action.
 
-2. **`reconcile-stock` is the SOURCE of ghost units.** Lines 1548-1567 auto-backfill stock units when QBO qty exceeds app qty. These backfill units have `batch_id = NULL`, `line_item_id = NULL`, `v2_status = NULL`, and `landed_cost = 0` — exactly the 213 ghosts currently in the database. Every time you run "Reconcile Stock" while purchases 881 and 1733 are stuck, it re-creates the ghosts you just cleaned up.
+3. Harden `qbo-process-pending`
+   - Before reprocessing an errored purchase, clear any stale derived purchase artifacts for that same QBO purchase id.
+   - Reuse the same cleanup helper so manual reset and retry follow one deterministic path.
+   - Improve the failure logging around stock-unit insert so the purchase id and batch id are captured if a UID collision ever happens again.
 
-3. **Purchases 881 and 1733 remain in `error` status** with "duplicate key" messages. The cleanup was supposed to reset them to `pending`, but since the deployed function was stale, nothing happened.
+4. Add a UI path for this repair flow
+   - In `src/components/admin-v2/StagingErrorsPanel.tsx`, add a “Reset & retry” action for QBO purchase errors.
+   - Keep the existing generic Retry button for simple staging resets, but use the targeted reset for purchase-processing failures.
 
-## Fix — three changes in one deployment
+Files to change:
+- `supabase/functions/admin-data/index.ts`
+- `supabase/functions/qbo-process-pending/index.ts`
+- `src/components/admin-v2/StagingErrorsPanel.tsx`
 
-### 1. Stop `reconcile-stock` from creating ghost units
+No migration is needed.
 
-The backfill logic at line 1548-1567 creates units with no purchase provenance, violating the "app-controlled truth" principle. Replace auto-backfill with **report-only** — flag the discrepancy but do not insert fake units.
-
-**File**: `supabase/functions/admin-data/index.ts`, lines 1548-1586
-
-Replace the backfill block with:
-```typescript
-// QBO has more than app — report only (do NOT auto-create ghost units)
-const shortfall = qboQty - available;
-qboHigher++;
-details.push({
-  sku_code: sku.sku_code,
-  qbo_qty: qboQty,
-  app_qty: available,
-  diff: shortfall,
-  direction: "qbo_higher",
-  action: "report_only",
-});
-```
-
-This removes the insert of zero-cost units entirely. Discrepancies are still reported for admin review.
-
-### 2. Ensure ghost cleanup works and resets errored purchases
-
-The existing `cleanup-ghost-units` action (lines 2302-2356) is correct but was never deployed. No code changes needed — just ensure deployment.
-
-### 3. Force-redeploy the edge function
-
-Deploy `admin-data` immediately after making the change so the cleanup and reconciliation fixes are live.
-
-## Execution sequence
-
-1. Edit `admin-data/index.ts` — remove backfill insert, make it report-only
-2. Deploy `admin-data` edge function
-3. User clicks **Cleanup Ghost Units** → deletes 213 ghosts + resets purchases 881/1733 to pending
-4. User clicks **Process Pending** → purchases 881/1733 create proper stock units with landed costs
-5. User clicks **Recalc Avg Cost** → SKU averages corrected
-6. User runs **Reconcile Stock** → reports only, no more ghost creation
-
-## Files changed
-
-| File | Change |
-|------|--------|
-| `supabase/functions/admin-data/index.ts` | Remove auto-backfill insert in `reconcile-stock` (lines 1548-1586), replace with report-only |
-
-One file, one logical change, then deploy.
-
+Expected result:
+- Purchases `881` and `1733` move from `error` to `pending`, then process cleanly
+- Receipt lines, purchase batches, line items, and stock units are recreated from QBO in the correct order
+- The affected SKUs stop showing false stock discrepancies because the purchases are truly processed, not just landed
