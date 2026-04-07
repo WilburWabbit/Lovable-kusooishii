@@ -78,7 +78,22 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     defaultVisible: true,
     sortable: true,
     align: "right",
-    render: (r) => <span className="text-zinc-600">{r.lineItems.length}</span>,
+    render: (r) => {
+      const firstName = r.lineItems[0]?.name;
+      const count = r.lineItems.length;
+      return (
+        <span className="text-zinc-600">
+          {firstName ? (
+            <span title={firstName}>
+              {firstName.length > 24 ? firstName.slice(0, 24) + "…" : firstName}
+              {count > 1 && <span className="text-zinc-400 ml-1">+{count - 1}</span>}
+            </span>
+          ) : (
+            count
+          )}
+        </span>
+      );
+    },
   },
   {
     key: "total",

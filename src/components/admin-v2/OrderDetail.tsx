@@ -246,9 +246,14 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   }}
                 >
                   <td className="px-3 py-2.5">
-                    <Mono color={item.sku ? "amber" : "dim"}>
-                      {item.sku ?? "—"}
-                    </Mono>
+                    <div>
+                      <Mono color={item.sku ? "amber" : "dim"}>
+                        {item.sku ?? "—"}
+                      </Mono>
+                      {item.name && (
+                        <p className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-[200px]">{item.name}</p>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     <Mono color={isUnallocated ? "amber" : "default"}>
