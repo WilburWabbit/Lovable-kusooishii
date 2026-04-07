@@ -1546,44 +1546,17 @@ Deno.serve(async (req) => {
             action: `wrote_off_${unitWrittenOff}`,
           });
         } else {
-          // QBO has more than app — auto-backfill balancing units
+          // QBO has more than app — report only (do NOT auto-create ghost units)
           const shortfall = qboQty - available;
           qboHigher++;
-
-          const backfillUnits = [];
-          const { data: skuRecord } = await admin.from("sku").select("id, sku_code").eq("id", sku.id).single();
-          const parsed = skuRecord ? { conditionGrade: skuRecord.sku_code.includes(".") ? skuRecord.sku_code.split(".").pop() : "1" } : { conditionGrade: "1" };
-          const mpn = sku.sku_code.includes(".") ? sku.sku_code.substring(0, sku.sku_code.lastIndexOf(".")) : sku.sku_code;
-
-          for (let i = 0; i < shortfall; i++) {
-            backfillUnits.push({
-              sku_id: sku.id,
-              mpn,
-              condition_grade: parsed.conditionGrade,
-              status: "available",
-              landed_cost: 0,
-            });
-          }
-          await admin.from("stock_unit").insert(backfillUnits);
-
-          await admin.from("audit_event").insert({
-            entity_type: "sku", entity_id: sku.id,
-            trigger_type: "stock_reconciliation_backfill", actor_type: "user",
-            actor_id: userId, source_system: "admin-data",
-            correlation_id: correlationId,
-            input_json: { sku_code: sku.sku_code, qbo_qty: qboQty, app_qty: available, units_created: shortfall, reason: "qbo_higher_auto_backfill" },
-          });
-
-          backfilled += shortfall;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
             app_qty: available,
             diff: shortfall,
             direction: "qbo_higher",
-            action: `backfilled_${shortfall}`,
+            action: "report_only",
           });
-
         }
       }
 
