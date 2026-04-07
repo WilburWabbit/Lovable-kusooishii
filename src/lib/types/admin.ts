@@ -283,6 +283,10 @@ export interface Payout {
   qboExpenseId: string | null;
   qboSyncStatus: QBOSyncStatus;
   externalPayoutId: string | null;
+  reconciliationStatus: 'pending' | 'reconciled';
+  transactionCount: number;
+  matchedOrderCount: number;
+  unmatchedTransactionCount: number;
   createdAt: string;
   updatedAt: string;
 }
