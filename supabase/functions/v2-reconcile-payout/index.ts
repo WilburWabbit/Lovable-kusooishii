@@ -94,18 +94,18 @@ Deno.serve(async (req) => {
     if (orderIds.length > 0) {
       const { data: externalIdRows } = await admin
         .from("sales_order")
-        .select("id, external_order_id")
+        .select("id, origin_reference")
         .in("id", orderIds);
 
-      type ExternalIdRow = { id: string; external_order_id: string | null };
+      type ExternalIdRow = { id: string; origin_reference: string | null };
       for (const row of ((externalIdRows ?? []) as ExternalIdRow[])) {
-        if (!row.external_order_id) continue;
+        if (!row.origin_reference) continue;
 
         await admin
           .from("payout_fee" as never)
           .update({ sales_order_id: row.id, updated_at: new Date().toISOString() } as never)
           .eq("payout_id" as never, payoutId)
-          .eq("external_order_id" as never, row.external_order_id)
+          .eq("external_order_id" as never, row.origin_reference)
           .is("sales_order_id" as never, null);
       }
     }

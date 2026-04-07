@@ -1087,11 +1087,18 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
           for (let i = 0; i < qty; i++) {
             const stockUnitId = unitIds[i] ?? null;
+            // Fetch landed_cost for COGS if we have a stock unit
+            let cogs: number | null = null;
+            if (stockUnitId) {
+              const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+              cogs = unitData?.landed_cost ?? null;
+            }
             const { error: lineErr } = await admin.from("sales_order_line").insert({
               sales_order_id: order.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
               stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
               vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
+              cogs,
             });
             if (lineErr) {
               throw lineErr;
