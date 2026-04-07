@@ -307,6 +307,8 @@ export function OrderList() {
       result = result.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(term) ||
+          (r.externalOrderId ?? "").toLowerCase().includes(term) ||
+          (r.docNumber ?? "").toLowerCase().includes(term) ||
           (r.customer?.name ?? "Cash Sales").toLowerCase().includes(term),
       );
     }
