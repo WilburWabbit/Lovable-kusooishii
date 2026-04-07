@@ -1,62 +1,95 @@
 
 
-# External References as Primary Identifiers Across Admin UI
+# Fix: Payouts, Orders, COGS, and Fee Linking
 
-## Problem
+## Root Causes Found
 
-Internal identifiers (`KO-NNNNNNN`, `PO-NNN`) are shown prominently while external references are hidden. The app is an integration hub — users need to see the identifiers that match eBay and QBO.
+### 1. Payout fees never link to orders (all 80 `payout_fee` rows have `sales_order_id = NULL`)
+The `ebay-import-payouts` function queries `sales_order.external_order_id` to match eBay orders, but eBay order IDs are stored in `origin_reference`. The `external_order_id` column is always NULL, so `orderMap` is always empty and every fee is written with `sales_order_id = null`.
 
-**Key data insight**: Cash/in-person sales have a QBO-generated `doc_number` (e.g., `14-14455-15044`) returned by the API — these should be used as their primary reference, not just for eBay orders.
+### 2. COGS is NULL on all 338 linked order lines
+The QBO processor (`qbo-process-pending`) creates order lines with stock unit links but never writes `cogs`. The `v2-process-order` function does write COGS, but it skips already-allocated lines (`if (line.stock_unit_id) continue`). Since QBO processing links the units first, COGS is never populated.
 
-## What changes
+### 3. `net_amount` is NULL on all 335 orders
+No processor ever computes or writes `net_amount` to `sales_order`.
 
-### 1. Types and hooks — map `docNumber`
+### 4. `unit_profit_view` shows all fees as zero
+The view joins on `payout_fee.sales_order_id`, which is always NULL (consequence of issue #1).
 
-**`src/lib/types/admin.ts`** — Add `docNumber: string | null` to `Order` interface.
+## Fixes
 
-**`src/hooks/admin/use-orders.ts`** — Map `doc_number` → `docNumber` in `mapOrder`.
+### Fix 1: Correct order matching in `ebay-import-payouts`
+**File: `supabase/functions/ebay-import-payouts/index.ts`**
 
-### 2. Order List — external ref as primary column
+Change the order lookup query from:
+```sql
+.select("id, external_order_id, qbo_sales_receipt_id, gross_total")
+.in("external_order_id", orderRefs)
+```
+to:
+```sql
+.select("id, origin_reference, qbo_sales_receipt_id, gross_total")
+.in("origin_reference", orderRefs)
+```
+Update the `LocalOrder` type and `orderMap.set()` key to use `origin_reference` instead of `external_order_id`.
 
-**`src/components/admin-v2/OrderList.tsx`**
+### Fix 2: Populate COGS when QBO processor links stock units
+**File: `supabase/functions/qbo-process-pending/index.ts`**
 
-- Rename "Order" column to "Ref" and show the best external reference as the primary value:
-  - **eBay orders**: Show `externalOrderId` (eBay order number, e.g., `14-14455-15038`)
-  - **Cash/in-person/web sales**: Show `docNumber` (QBO receipt number, e.g., `14-14455-15044`)
-  - Every order will have at least a `docNumber` since all orders come through QBO
-- Move the internal `orderNumber` column to `defaultVisible: false`, renamed "Internal ID"
-- Remove the separate "External ID" column (its value is now in the primary column)
-- Search filtering includes `externalOrderId`, `docNumber`, and `orderNumber`
+In the sales receipt processing section, wherever a `stock_unit_id` is written to `sales_order_line`, also write `cogs: landed_cost` from the consumed stock unit.
 
-### 3. Order Detail — external ref as heading
+### Fix 3: Backfill COGS from linked stock units
+**File: `supabase/functions/ebay-import-payouts/index.ts`** (or a migration)
 
-**`src/components/admin-v2/OrderDetail.tsx`**
+Create a one-time migration to backfill existing data:
+```sql
+UPDATE sales_order_line sol
+SET cogs = su.landed_cost
+FROM stock_unit su
+WHERE sol.stock_unit_id = su.id
+  AND sol.cogs IS NULL;
+```
 
-- Change heading to show the best external reference (eBay ID or DocNumber) as the primary title
-- Show `order.orderNumber` (KO-) as small secondary text
-- Add reference badges for **Channel Ref** and **QBO Doc** when both exist and differ
+### Fix 4: Populate `net_amount` on sales orders
+**File: `supabase/functions/qbo-process-pending/index.ts`**
 
-### 4. Purchase List — QBO reference as primary identifier
+When creating/updating sales orders, compute `net_amount = gross_total - tax_total` and write it.
 
-**`src/components/admin-v2/PurchaseList.tsx`**
+Also backfill via migration:
+```sql
+UPDATE sales_order
+SET net_amount = gross_total - COALESCE(tax_total, 0)
+WHERE net_amount IS NULL;
+```
 
-- In BatchCard, show the QBO `reference` (e.g., `814`) as the primary identifier
-- Show `PO-NNN` as secondary/smaller text
+### Fix 5: Backfill `payout_fee.sales_order_id` for existing data
+Migration to link existing payout fees to their orders:
+```sql
+UPDATE payout_fee pf
+SET sales_order_id = so.id
+FROM sales_order so
+WHERE so.origin_reference = pf.external_order_id
+  AND pf.sales_order_id IS NULL;
+```
 
-### 5. Payout linked orders — use external refs
+### Fix 6: Fix `v2-reconcile-payout` to also use `origin_reference`
+**File: `supabase/functions/v2-reconcile-payout/index.ts`**
 
-**`src/components/admin-v2/PayoutView.tsx`**
-
-- In the linked orders table, show external order ID / doc number as the primary identifier
+Verify and fix any queries that use `external_order_id` instead of `origin_reference` for matching.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `src/lib/types/admin.ts` | Add `docNumber` to `Order` |
-| `src/hooks/admin/use-orders.ts` | Map `doc_number` in `mapOrder` |
-| `src/components/admin-v2/OrderList.tsx` | External ref as primary "Ref" column, internal ID hidden |
-| `src/components/admin-v2/OrderDetail.tsx` | External ref as heading, internal ID secondary |
-| `src/components/admin-v2/PurchaseList.tsx` | QBO reference as primary in BatchCard |
-| `src/components/admin-v2/PayoutView.tsx` | External ref in linked orders table |
+| `supabase/functions/ebay-import-payouts/index.ts` | Fix order matching to use `origin_reference` |
+| `supabase/functions/qbo-process-pending/index.ts` | Write `cogs` when linking stock units; write `net_amount` on order creation |
+| `supabase/functions/v2-reconcile-payout/index.ts` | Fix order matching to use `origin_reference` |
+| Migration | Backfill `cogs`, `net_amount`, and `payout_fee.sales_order_id` for existing data |
+
+## Expected outcome
+- Fee breakdown appears on order detail pages
+- COGS displays for all allocated line items
+- Net profit calculation works correctly
+- Payout linked orders table shows correct fees per order
+- `unit_profit_view` returns real fee and profit data
 
