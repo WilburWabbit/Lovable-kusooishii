@@ -2308,25 +2308,28 @@ Deno.serve(async (req) => {
 
       let resetCount = 0;
       for (const ep of (erroredPurchases ?? [])) {
-        // Clean up partial receipt lines and stock units for this purchase
-        const { data: receipt } = await admin
-          .from("inbound_receipt")
-          .select("id")
-          .eq("qbo_purchase_id", ep.external_id)
-          .maybeSingle();
-        if (receipt) {
-          await admin.from("stock_unit").delete().eq("inbound_receipt_line_id", receipt.id);
-          await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
-        }
-        // Reset to pending
-        await admin
-          .from("landing_raw_qbo_purchase")
-          .update({ status: "pending", error_message: null, processed_at: null })
-          .eq("id", ep.id);
+        await resetQboPurchase(admin, ep.external_id, ep.id);
         resetCount++;
       }
 
       result = { success: true, deleted, resetCount, message: `Deleted ${deleted} ghost stock units, reset ${resetCount} errored purchases to pending` };
+
+    } else if (action === "reset-qbo-purchase") {
+      // Targeted reset for specific stuck QBO purchases
+      const ids: string[] = body.ids ?? [];
+      if (ids.length === 0) throw new ValidationError("ids array required");
+      let resetCount = 0;
+      for (const qboPurchaseId of ids) {
+        const { data: landing } = await admin
+          .from("landing_raw_qbo_purchase")
+          .select("id")
+          .eq("external_id", qboPurchaseId)
+          .maybeSingle();
+        if (!landing) continue;
+        await resetQboPurchase(admin, qboPurchaseId, landing.id);
+        resetCount++;
+      }
+      result = { success: true, resetCount, message: `Reset ${resetCount} purchases to pending` };
 
     } else if (action === "recalc-avg-cost") {
       // Recalculate avg_cost on all SKUs from their linked stock units
