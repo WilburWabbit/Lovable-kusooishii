@@ -491,7 +491,7 @@ export function PayoutView() {
                   ].map((fee) => (
                     <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
                       <span className="text-zinc-600 text-xs">{fee.label}</span>
-                      <Mono color="red" className="text-xs">£{fee.amount.toFixed(2)}</Mono>
+                      <Mono color="red" className="text-xs">£{(fee.amount ?? 0).toFixed(2)}</Mono>
                     </div>
                   ))}
                   <div className="flex justify-between py-1 font-semibold">
