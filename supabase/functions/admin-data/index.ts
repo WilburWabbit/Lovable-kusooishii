@@ -921,7 +921,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 7. Compute prices
+      // 7. Compute prices using shared VAT-aware floor calculator
       // Decompose fees into rate-based and fixed components, respecting applies_to
       let effectiveFeeRate = 0;
       let fixedFeeCosts = 0;
@@ -942,12 +942,16 @@ Deno.serve(async (req) => {
 
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
-      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
-      let floorPrice = Math.round(((costBase + minProfit + fixedFeeCosts) / denominator) * 100) / 100;
 
-      // Post-check: verify floor covers all fees with min/max clamps applied
+      // VAT-aware floor: revenue = P/1.2, net fees = gross_fees/1.2
+      // P >= 1.2 × (costBase + minProfit + fixedFees/1.2) / (1 - margin - feeRate - risk)
+      const netFixedFees = fixedFeeCosts / 1.2;
+      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+      let floorPrice = Math.round((1.2 * (costBase + minProfit + netFixedFees) / denominator) * 100) / 100;
+
+      // Post-check: verify floor covers all fees with min/max clamps (ex-VAT basis)
       for (let i = 0; i < 5; i++) {
-        let totalFees = 0;
+        let totalFeesGross = 0;
         for (const fee of fees ?? []) {
           let base = floorPrice;
           if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
@@ -955,11 +959,12 @@ Deno.serve(async (req) => {
           let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
           if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
           if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
-          totalFees += amount;
+          totalFeesGross += amount;
         }
-        const riskReserve = floorPrice * riskRate;
-        const requiredRevenue = costBase + minProfit + totalFees + riskReserve;
-        const neededPrice = requiredRevenue / (1 - effectiveMargin);
+        const netFees = totalFeesGross / 1.2;
+        const riskReserve = (floorPrice / 1.2) * riskRate;
+        const requiredExVat = costBase + minProfit + netFees + riskReserve;
+        const neededPrice = 1.2 * requiredExVat / (1 - effectiveMargin);
         if (neededPrice <= floorPrice + 0.01) break;
         floorPrice = Math.round(neededPrice * 100) / 100;
       }
