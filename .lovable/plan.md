@@ -1,43 +1,79 @@
 
 
-# Fix: Duplicate Purchase Batches on QBO Reprocessing
+# Fix: Reliable Post-Landing Processing for QBO Webhooks
 
 ## Problem
 
-When QBO purchase 1733 is updated (via webhook), the landing record is reset to `pending` and reprocessed. Each reprocessing run creates a **new** `purchase_batches` row because the code does a blind `INSERT` without checking if a batch with the same `reference` (QBO purchase ID) already exists. This has produced three duplicate batches: PO-603, PO-665, PO-666 — all with `reference = '1733'`.
+When multiple QBO webhooks arrive in quick succession (e.g., 4 sales receipts within 13 minutes), only the first triggers a successful processor run. The later webhooks land their data but the auto-triggered processor either:
+- Was already running from a previous webhook and finishes before the new data lands
+- Times out or fails silently because concurrent invocations interfere
+
+This leaves records stuck in `pending` until manually processed.
 
 ## Root cause
 
-In `qbo-process-pending/index.ts`, the reprocessing cleanup (lines 487-510) correctly deletes old receipt lines and stock units, but:
-1. It never checks for or deletes existing `purchase_batches` with the same `reference`
-2. It never deletes linked `purchase_line_items`
-3. The batch creation at line 630 is a blind `INSERT` with no upsert or existence check
+The webhook calls `qbo-process-pending` once at the end of `processWebhookInBackground`. But Supabase Edge Functions can run concurrently — if webhook A's processor call starts before webhook B has finished landing, B's records are missed. There is no retry or re-check mechanism.
 
-## Fix
+## Solution
 
-**File: `supabase/functions/qbo-process-pending/index.ts`**
+**File: `supabase/functions/qbo-webhook/index.ts`**
 
-Add cleanup of existing purchase batches during reprocessing. Before creating a new batch (around line 628), check for and delete any existing `purchase_batches` rows with `reference = qboPurchaseId`:
+Replace the single fire-and-forget processor call with a **poll-after-land** pattern:
 
-1. Query `purchase_batches` where `reference = qboPurchaseId`
-2. For each found batch:
-   - Delete linked `stock_unit` rows that are not sold (same pattern as receipt line cleanup)
-   - Nullify links on sold stock units
-   - Delete `purchase_line_items` for the batch
-   - Delete the batch itself
-3. Then proceed with the normal `INSERT`
+1. After landing all entities, wait a short delay (3 seconds) to allow any near-simultaneous webhooks to finish landing
+2. Call `qbo-process-pending` 
+3. Check the response's `has_more` / `total_remaining` field
+4. If there are still pending records, wait 2 seconds and call the processor again (up to 3 total attempts)
 
-This ensures that when a QBO purchase is updated and reprocessed, the old v2 model artifacts are cleaned up before new ones are created.
+This ensures that even if webhooks overlap, the processor will drain all pending records within the same background execution.
 
-## Data cleanup
+```
+// Replace lines 366-381 with:
+// Auto-trigger processor with retry loop to drain all pending records
+const maxAttempts = 3;
+await new Promise(r => setTimeout(r, 3000)); // let concurrent webhooks finish landing
 
-After deploying, delete the two orphan batches (PO-665 and PO-666) and their linked purchase_line_items and stock units. PO-603 is the original and should be kept if it has the correct data, or all three can be purged and purchase 1733 reset to `pending` for a clean reprocess.
+for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  try {
+    const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
+    const processRes = await fetchWithTimeout(processUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "x-webhook-trigger": "true",
+      },
+      body: JSON.stringify({ batch_size: 50 }),
+    });
+    const result = await processRes.json();
+    log.info("Processor attempt completed", { 
+      attempt, 
+      status: processRes.status,
+      total_remaining: result.total_remaining ?? 0 
+    });
+    
+    if (!result.has_more || (result.total_remaining ?? 0) === 0) break;
+    
+    // More records pending — wait and retry
+    await new Promise(r => setTimeout(r, 2000));
+  } catch (err: any) {
+    log.warn("Processor attempt failed (non-fatal)", { attempt, error: err.message });
+    break;
+  }
+}
+```
+
+Additionally, increase `batch_size` from 15 to 50 to ensure a single processor call can handle a typical webhook payload's worth of entities.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/qbo-process-pending/index.ts` | Add batch cleanup before batch creation in `processPurchases` |
+| `supabase/functions/qbo-webhook/index.ts` | Replace single processor call with poll-and-drain loop (3 attempts, 3s initial delay, 2s between retries, batch_size 50) |
 
-No migration needed — data cleanup will be done via the existing reset mechanism after the code fix is deployed.
+## Expected outcome
+
+- All QBO webhook notifications are landed and processed automatically without manual intervention
+- Near-simultaneous webhooks (common when QBO batches notifications) are handled reliably
+- Processing order is maintained by the existing chronological TxnDate ordering in `qbo-process-pending`
 
