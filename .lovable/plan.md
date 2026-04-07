@@ -1,78 +1,36 @@
 
 
-# Add CRUD for Channel Fees, Shipping Rates, and Selling Cost Defaults
+# Fix Batch Repricing: Wrong Action Name
 
 ## Problem
 
-The pricing engine relies on three configuration tables — `channel_fee_schedule`, `shipping_rate_table`, and `selling_cost_defaults` — but there is no UI to manage them. Currently they can only be edited via direct database access. The existing `PricingSettingsCard` only covers the `pricing_settings` table (markdown thresholds and margin targets).
+The `PricingActionsCard` component calls the wrong edge function action. It calls `calculate-selling-costs` (which requires `sale_price` — used for post-sale P&L breakdown) instead of `calculate-pricing` (which computes floor/target/ceiling prices from costs and fees). Every call fails with `"sku_id, channel, and sale_price are required"`.
 
-## Data already in place
+## Root cause
 
-All three tables exist with correct schemas and RLS policies (staff/admin ALL access). No migrations needed.
+In `PricingActionsCard.tsx`:
+- **Line 57**: Batch loop calls `calculate-selling-costs` — should be `calculate-pricing`
+- **Line 98**: Single SKU calls `calculate-selling-costs` — should be `calculate-pricing`
 
-- **`channel_fee_schedule`** (5 rows): channel, fee_name, rate_percent, fixed_amount, applies_to, min/max_amount, active, notes
-- **`shipping_rate_table`** (12+ rows): carrier, service_name, size_band, max_weight_kg, dimensions, cost/price_ex_vat/price_inc_vat, tracked, active
-- **`selling_cost_defaults`** (8 rows): key-value pairs for packaging_cost, risk_reserve_rate, condition multipliers, min margin, min profit
+The `calculate-pricing` action (line 829 of `admin-data/index.ts`) only requires `sku_id` and `channel`, and returns `floor_price`, `target_price`, `ceiling_price`, `confidence_score`, and `breakdown` — exactly what the component expects.
 
-## Design
+## Additional issue: Edge Function timeout risk
 
-Break Settings into dedicated sub-pages with sidebar entries, keeping it manageable:
-
-### Option A: Separate pages (cleaner, matches the "Settings separate from operations" principle)
-
-Add three new sidebar entries under a "Settings" group:
-- **Settings** (existing — integrations + pricing engine params)
-- **Selling Fees** → `/admin/selling-fees`
-- **Shipping Rates** → `/admin/shipping-rates`
-
-`selling_cost_defaults` fits naturally into the existing PricingSettingsCard (same key-value pattern as `pricing_settings`), so add it there.
-
-### New pages
-
-#### 1. Channel Fees Page (`/admin/selling-fees`)
-- Table view grouped by channel (eBay, BrickLink, Web)
-- Columns: Fee Name, Rate %, Fixed £, Applies To, Min/Max, Active, Notes
-- Inline editing (click to edit, Enter to save — same pattern as PricingSettingsCard)
-- Add new fee row button per channel
-- Toggle active/inactive
-- Delete with confirmation
-
-#### 2. Shipping Rates Page (`/admin/shipping-rates`)
-- Table view grouped by carrier (Evri, Royal Mail)
-- Columns: Service, Size Band, Max Weight, Dimensions (L×W×D), Cost (ex-VAT), Price (inc-VAT), Tracked, Active
-- Inline editing for cost/price fields
-- Add new rate button
-- Toggle active/inactive
-
-#### 3. Selling Cost Defaults (added to existing PricingSettingsCard)
-- Add `selling_cost_defaults` rows below `pricing_settings` rows in the same card
-- Same inline edit pattern — they're both key-value tables
+The batch loop makes 2 sequential HTTP calls per listing (calculate + update). With 30+ listings, this runs in the browser for minutes. Each call is fine individually, but the pattern is fragile. For now, fixing the action name will make it work. A queue-based approach can be considered later if the listing count grows significantly.
 
 ## Changes
 
-### New files
-| File | Purpose |
-|------|---------|
-| `src/hooks/admin/use-channel-fees.ts` | CRUD hooks for `channel_fee_schedule` |
-| `src/hooks/admin/use-shipping-rates.ts` | CRUD hooks for `shipping_rate_table` |
-| `src/hooks/admin/use-selling-cost-defaults.ts` | CRUD hooks for `selling_cost_defaults` |
-| `src/pages/admin-v2/ChannelFeesPage.tsx` | Channel fees management page |
-| `src/pages/admin-v2/ShippingRatesPage.tsx` | Shipping rates management page |
+### `src/components/admin-v2/PricingActionsCard.tsx`
 
-### Modified files
+Two line changes:
+1. Line 57: Change `action: 'calculate-selling-costs'` to `action: 'calculate-pricing'`
+2. Line 98: Same change for the single SKU lookup
+
+No other files need changes — the edge function and update action are correct.
+
+## Files changed
+
 | File | Change |
 |------|--------|
-| `src/App.tsx` | Add routes for `/admin/selling-fees` and `/admin/shipping-rates` |
-| `src/components/admin-v2/AdminV2Sidebar.tsx` | Add sidebar entries for Selling Fees and Shipping Rates under Settings group |
-| `src/components/admin-v2/PricingSettingsCard.tsx` | Add `selling_cost_defaults` section below pricing_settings |
-
-## Technical approach
-
-- All hooks follow existing patterns: TanStack Query for reads, mutations for writes, `as never` casts for tables not yet in generated types
-- Inline editing pattern matches PricingSettingsCard (click value to edit, Enter/Escape, Save/Cancel buttons)
-- Channel fees grouped by channel with collapsible sections
-- Shipping rates grouped by carrier
-- "Add row" opens a form row at the bottom of each group
-- Delete uses a confirmation dialog (shadcn AlertDialog)
-- All mutations invalidate the relevant query key on success
+| `src/components/admin-v2/PricingActionsCard.tsx` | Fix action name from `calculate-selling-costs` to `calculate-pricing` (2 occurrences) |
 
