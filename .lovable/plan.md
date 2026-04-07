@@ -1,79 +1,65 @@
 
 
-# Fix: Reliable Post-Landing Processing for QBO Webhooks
+# Rebuild Payouts UI and Surface Fees Across Relevant Screens
 
 ## Problem
 
-When multiple QBO webhooks arrive in quick succession (e.g., 4 sales receipts within 13 minutes), only the first triggers a successful processor run. The later webhooks land their data but the auto-triggered processor either:
-- Was already running from a previous webhook and finishes before the new data lands
-- Times out or fails silently because concurrent invocations interfere
+1. **PayoutView** uses hardcoded fee categories (`fvf`, `promoted_listings`, `international`, `processing`) that don't match real data (`ebay_selling_fees`, `ebay_shipping`, `ebay_other_fees`). The detail slide-out shows zeros for everything.
+2. The reconcile button gives no feedback about what it does or did.
+3. Linked orders per payout are not shown despite `payout_orders` having real data.
+4. Three hooks already exist (`useOrderFees`, `usePayoutFees`, `useUnitProfit`) but are **never used** in any component. Fee and profit data is invisible across all screens.
 
-This leaves records stuck in `pending` until manually processed.
+## What changes
 
-## Root cause
+### 1. PayoutView — Rebuild with real data
 
-The webhook calls `qbo-process-pending` once at the end of `processWebhookInBackground`. But Supabase Edge Functions can run concurrently — if webhook A's processor call starts before webhook B has finished landing, B's records are missed. There is no retry or re-check mechanism.
+**File: `src/components/admin-v2/PayoutView.tsx`**
 
-## Solution
+- **FeeBreakdown type**: Change from hardcoded 4-field interface to `Record<string, number>`. Update `src/lib/types/admin.ts` accordingly.
+- **Main table columns**: Remove hardcoded FVF/Promoted/International/Processing columns. Replace with a single "Selling Fees" / "Shipping" / "Other" set matching real `fee_breakdown` keys, or just keep Gross/Fees/Net and add a `reconciliation_status` column.
+- **Detail slide-out**: Rebuild with three sections:
+  1. **Totals** — Gross, Fees, Net, Reconciliation status badge
+  2. **Fee Breakdown** — Dynamically render from `fee_breakdown` JSONB keys with formatted labels (e.g., `ebay_selling_fees` → "Selling Fees")
+  3. **Linked Orders** — Use `usePayoutFees` to group fees by `external_order_id`, showing each order's selling fees, shipping, and other fees. Link to order detail where `sales_order_id` exists.
+- **Reconcile button**: After reconciliation completes, show result counts (matched/unmatched) in a toast. Add a status badge showing "Reconciled" vs "Pending".
+- **Create Payout dialog**: Update fee inputs to match real categories (Selling Fees, Shipping, Other) instead of FVF/Promoted/International/Processing.
 
-**File: `supabase/functions/qbo-webhook/index.ts`**
+### 2. OrderDetail — Show fees and profit per unit
 
-Replace the single fire-and-forget processor call with a **poll-after-land** pattern:
+**File: `src/components/admin-v2/OrderDetail.tsx`**
 
-1. After landing all entities, wait a short delay (3 seconds) to allow any near-simultaneous webhooks to finish landing
-2. Call `qbo-process-pending` 
-3. Check the response's `has_more` / `total_remaining` field
-4. If there are still pending records, wait 2 seconds and call the processor again (up to 3 total attempts)
+- Add `useOrderFees(orderId)` call to fetch all `payout_fee` rows for this order.
+- Add a **Fees & Costs** summary card row showing: Total Selling Fees, Shipping Costs, Other Fees.
+- In the line items table, add a "Fees" column showing per-unit fee total (from `useUnitProfit` or aggregated from `payout_fee` by `external_order_id`).
+- Add a "Profit" summary card: Revenue - COGS - Fees = Net Profit.
 
-This ensures that even if webhooks overlap, the processor will drain all pending records within the same background execution.
+### 3. OrderUnitSlideOut — Show unit-level P&L
 
-```
-// Replace lines 366-381 with:
-// Auto-trigger processor with retry loop to drain all pending records
-const maxAttempts = 3;
-await new Promise(r => setTimeout(r, 3000)); // let concurrent webhooks finish landing
+**File: `src/components/admin-v2/OrderUnitSlideOut.tsx`**
 
-for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-  try {
-    const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
-    const processRes = await fetchWithTimeout(processUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "x-webhook-trigger": "true",
-      },
-      body: JSON.stringify({ batch_size: 50 }),
-    });
-    const result = await processRes.json();
-    log.info("Processor attempt completed", { 
-      attempt, 
-      status: processRes.status,
-      total_remaining: result.total_remaining ?? 0 
-    });
-    
-    if (!result.has_more || (result.total_remaining ?? 0) === 0) break;
-    
-    // More records pending — wait and retry
-    await new Promise(r => setTimeout(r, 2000));
-  } catch (err: any) {
-    log.warn("Processor attempt failed (non-fatal)", { attempt, error: err.message });
-    break;
-  }
-}
-```
+- When a stock unit is linked, use `useUnitProfit(stockUnitId)` to show: Revenue, Landed Cost, Selling Fee, Shipping Fee, Processing Fee, Net Profit, Margin %.
 
-Additionally, increase `batch_size` from 15 to 50 to ensure a single processor call can handle a typical webhook payload's worth of entities.
+### 4. Type updates
+
+**File: `src/lib/types/admin.ts`**
+
+- Change `FeeBreakdown` from `{ fvf; promoted_listings; international; processing }` to `Record<string, number>`.
+- Add `reconciliationStatus` field to `Payout` interface.
+
+### 5. Hooks mapper update
+
+**File: `src/hooks/admin/use-payouts.ts`**
+
+- Update `mapPayout` to include `reconciliationStatus` from `reconciliation_status` column.
+- Update `CreatePayoutInput` fee breakdown to use dynamic keys.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/qbo-webhook/index.ts` | Replace single processor call with poll-and-drain loop (3 attempts, 3s initial delay, 2s between retries, batch_size 50) |
-
-## Expected outcome
-
-- All QBO webhook notifications are landed and processed automatically without manual intervention
-- Near-simultaneous webhooks (common when QBO batches notifications) are handled reliably
-- Processing order is maintained by the existing chronological TxnDate ordering in `qbo-process-pending`
+| `src/lib/types/admin.ts` | `FeeBreakdown` → `Record<string, number>`, add `reconciliationStatus` to `Payout` |
+| `src/hooks/admin/use-payouts.ts` | Update `mapPayout`, update `CreatePayoutInput` |
+| `src/components/admin-v2/PayoutView.tsx` | Rebuild detail slide-out with dynamic fees + linked orders; fix columns; improve create dialog; add reconciliation status |
+| `src/components/admin-v2/OrderDetail.tsx` | Add fee summary cards and profit calculation using `useOrderFees` |
+| `src/components/admin-v2/OrderUnitSlideOut.tsx` | Add unit P&L section using `useUnitProfit` |
 
