@@ -2114,8 +2114,12 @@ Deno.serve(async (req) => {
 
       if (action === "reconcile-purchases") {
         const qboRecords = await queryQbo("SELECT * FROM Purchase", "Purchase");
-        totalQbo = qboRecords.length;
-        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+        // Filter to inventory-only purchases (matching processor logic)
+        const inventoryPurchases = qboRecords.filter((r: any) =>
+          (r.Line ?? []).some((l: any) => l.DetailType === "ItemBasedExpenseLineDetail")
+        );
+        totalQbo = inventoryPurchases.length;
+        const qboMap = new Map(inventoryPurchases.map((r: any) => [String(r.Id), r]));
 
         const { data: appRecords } = await admin.from("inbound_receipt").select("id, qbo_purchase_id, total_amount, vendor_name, txn_date");
         totalApp = (appRecords ?? []).length;
@@ -2161,9 +2165,12 @@ Deno.serve(async (req) => {
             details.push({ entity: qbo.DocNumber ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
           } else {
             const app = appMap.get(qboId)!;
-            const qboNet = Number(qbo.TotalAmt ?? 0);
-            const qboTax = Number(qbo.TxnTaxDetail?.TotalTax ?? 0);
-            const qboTotal = Math.round((qboNet + qboTax) * 100) / 100;
+            const globalTaxCalc = qbo.GlobalTaxCalculation ?? null;
+            const qboTotalAmt = Number(qbo.TotalAmt ?? 0);
+            const qboTaxAmt = Number(qbo.TxnTaxDetail?.TotalTax ?? 0);
+            const qboTotal = Math.round(
+              (globalTaxCalc === "TaxInclusive" ? qboTotalAmt : qboTotalAmt + qboTaxAmt) * 100
+            ) / 100;
             const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
             if (Math.abs(qboTotal - appTotal) > 0.01) {
               mismatched++;
