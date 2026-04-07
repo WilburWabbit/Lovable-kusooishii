@@ -76,6 +76,9 @@ export interface UnitProfit {
   processingFee: number;
   advertisingFee: number;
   totalFeesPerUnit: number;
+  netRevenue: number;
+  netLandedCost: number;
+  netTotalFees: number;
   netProfit: number;
   netMarginPct: number | null;
   grossMarginPct: number | null;
