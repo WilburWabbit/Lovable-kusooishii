@@ -717,8 +717,9 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         stockCreated += (createdUnits ?? []).length;
       }
 
-      // Update batch unit counter
-      await admin.from("purchase_batches").update({ unit_counter: stockCreated }).eq("id", batchId);
+      // Update batch unit counter (count only units created for THIS batch)
+      const batchUnitCount = createdStockUnitIds.length;
+      await admin.from("purchase_batches").update({ unit_counter: batchUnitCount }).eq("id", batchId);
 
       // Run cost apportionment
       await admin.rpc("v2_calculate_apportioned_costs", { p_batch_id: batchId });
