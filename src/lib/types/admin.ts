@@ -237,6 +237,7 @@ export interface OrderLineItem {
   orderId: string;
   stockUnitId: string | null; // null if unallocated
   sku: string | null; // null if unallocated
+  name: string | null; // product/SKU name
   unitPrice: number;
   cogs: number | null; // landed cost of consumed stock unit (FIFO)
 }

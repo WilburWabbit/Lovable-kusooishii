@@ -2299,6 +2299,61 @@ Deno.serve(async (req) => {
         details,
       };
 
+    } else if (action === "cleanup-ghost-units") {
+      // Delete stock units with no purchase provenance (ghosts)
+      const { data: ghosts, error: ghostErr } = await admin
+        .from("stock_unit")
+        .select("id")
+        .is("batch_id", null)
+        .is("line_item_id", null);
+      if (ghostErr) throw ghostErr;
+
+      const ghostIds = (ghosts ?? []).map((g: any) => g.id);
+      let deleted = 0;
+      // Delete in batches of 100
+      for (let i = 0; i < ghostIds.length; i += 100) {
+        const batch = ghostIds.slice(i, i + 100);
+        // Unlink from order lines first
+        await admin
+          .from("sales_order_line")
+          .update({ stock_unit_id: null, cogs: null } as any)
+          .in("stock_unit_id", batch);
+        const { error: delErr } = await admin
+          .from("stock_unit")
+          .delete()
+          .in("id", batch);
+        if (delErr) throw delErr;
+        deleted += batch.length;
+      }
+
+      result = { success: true, deleted, message: `Deleted ${deleted} ghost stock units` };
+
+    } else if (action === "recalc-avg-cost") {
+      // Recalculate avg_cost on all SKUs from their linked stock units
+      const { data: skus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code");
+      if (skuErr) throw skuErr;
+
+      let updated = 0;
+      for (const sku of (skus ?? [])) {
+        const { data: units } = await admin
+          .from("stock_unit")
+          .select("landed_cost")
+          .not("landed_cost", "is", null)
+          .gt("landed_cost", 0)
+          .eq("sku_id" as any, sku.id);
+
+        if (units && units.length > 0) {
+          const total = units.reduce((sum: number, u: any) => sum + Number(u.landed_cost ?? 0), 0);
+          const avg = Math.round((total / units.length) * 100) / 100;
+          await admin.from("sku").update({ avg_cost: avg } as any).eq("id", sku.id);
+          updated++;
+        }
+      }
+
+      result = { success: true, updated, message: `Recalculated avg_cost on ${updated} SKUs` };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

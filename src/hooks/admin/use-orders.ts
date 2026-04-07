@@ -69,6 +69,7 @@ function mapLineItem(row: Record<string, unknown>): OrderLineItem {
     orderId: row.sales_order_id as string,
     stockUnitId: (row.stock_unit_id as string) ?? null,
     sku: sku ? (sku.sku_code as string) : null,
+    name: sku ? ((sku.name as string) ?? null) : null,
     unitPrice: (row.unit_price as number) ?? 0,
     cogs: (row.cogs as number) ?? null,
   };
