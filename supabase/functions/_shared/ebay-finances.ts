@@ -2,7 +2,7 @@
  * Shared eBay Finances API client and fee utilities.
  */
 
-// ── Types ────────────────────────────────────────────────────
+import { signEbayRequest } from "./ebay-digital-signature.ts";
 
 export interface EbayAmount {
   value: string;
@@ -111,10 +111,14 @@ export function buildLegacyFeeBreakdown(feesByPurpose: Record<string, number>): 
 
 export class EbayFinancesClient {
   private accessToken: string;
+  private jwe: string;
+  private privateKey: string;
   private baseUrl = "https://apiz.ebay.com/sell/finances/v1";
 
-  constructor(accessToken: string) {
+  constructor(accessToken: string, jwe: string, privateKey: string) {
     this.accessToken = accessToken;
+    this.jwe = jwe;
+    this.privateKey = privateKey;
   }
 
   private async get(path: string, params: Record<string, string> = {}): Promise<any> {
@@ -122,11 +126,21 @@ export class EbayFinancesClient {
     for (const [k, v] of Object.entries(params)) {
       url.searchParams.set(k, v);
     }
+
+    const sigHeaders = await signEbayRequest(
+      "GET",
+      url.toString(),
+      null,
+      this.jwe,
+      this.privateKey,
+    );
+
     const res = await fetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         Accept: "application/json",
         "Content-Type": "application/json",
+        ...sigHeaders,
       },
     });
     if (!res.ok) {
