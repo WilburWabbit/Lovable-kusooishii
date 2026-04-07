@@ -1,36 +1,30 @@
 
 
-# Fix: Reconcile Sales — Wrong Column Name
+# Fix: Sales Reconciliation Comparing Net vs Gross
 
 ## Root Cause
 
-The `reconcile-sales` action in `admin-data/index.ts` queries `sales_order` with a non-existent column `total_amount` (line 2154). The `sales_order` table uses `gross_total` instead.
+Line 2164 of `admin-data/index.ts` compares QBO's `TotalAmt` against the app's `gross_total`. Because all sales receipts use `GlobalTaxCalculation: TaxExcluded`, QBO's `TotalAmt` is the **net** (ex-VAT) amount, while the app's `gross_total` is **VAT-inclusive**.
 
-PostgREST returns a 400 error for this query, so `appRecords` is `null`. The `appMap` is built from an empty array, and **every** QBO SalesReceipt is incorrectly flagged as "In QBO but missing from app" — even though all 331 records exist in the app with correct `qbo_sales_receipt_id` values.
-
-The sales orders are NOT actually missing. This is purely a reporting bug in the reconciliation tool.
+Example: QBO 631 has `TotalAmt: 69.95` + `TotalTax: 11.66` = 81.61 gross. The app correctly stores `gross_total: 81.61`. The reconciliation reports a mismatch because it compares 69.95 vs 81.61.
 
 ## Fix
 
-**File**: `supabase/functions/admin-data/index.ts`
+**File**: `supabase/functions/admin-data/index.ts`, line 2164
 
-Line 2154 — change:
-```
-.select("id, qbo_sales_receipt_id, total_amount, origin_channel, order_number")
-```
-to:
-```
-.select("id, qbo_sales_receipt_id, gross_total, origin_channel, order_number")
-```
+Change the QBO total calculation to include tax:
 
-Line 2165 — change:
-```
-const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
-```
-to:
-```
-const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
+```typescript
+// Before (line 2164):
+const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
+
+// After:
+const qboNet = Number(qbo.TotalAmt ?? 0);
+const qboTax = Number(qbo.TxnTaxDetail?.TotalTax ?? 0);
+const qboTotal = Math.round((qboNet + qboTax) * 100) / 100;
 ```
 
-No other files need changes. The purchases reconcile (`inbound_receipt.total_amount`) is correct — that table does have `total_amount`.
+This makes the comparison apples-to-apples (both gross/VAT-inclusive), which is exactly how the app stores these values.
+
+One file change, one line expanded to three. No other files affected.
 
