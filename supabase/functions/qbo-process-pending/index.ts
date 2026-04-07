@@ -873,6 +873,8 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
       // ── Match-first: try to find an existing order to enrich ──
       const docNumber = receipt.DocNumber ?? null;
+      let matchedOrderId: string | null = null;
+
       if (docNumber) {
         // Check by origin_reference (eBay order ID, KO- number, etc)
         const { data: byRef } = await admin.from("sales_order")
@@ -883,33 +885,56 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
             qbo_sync_status: "synced",
           };
           await admin.from("sales_order").update(enrichFields).eq("id", byRef.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
+          // Check if this order has line items — if not, fall through to create them
+          const { count: lineCount } = await admin.from("sales_order_line")
+            .select("id", { count: "exact", head: true }).eq("sales_order_id", byRef.id);
+          if ((lineCount ?? 0) > 0) {
+            await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
+            processed++;
+            continue;
+          }
+          console.log(`Matched order ${byRef.id} has 0 line items — will backfill from QBO receipt`);
+          matchedOrderId = byRef.id;
         }
 
-        // Check by doc_number
-        const { data: byDocNumber } = await admin.from("sales_order")
-          .select("id").eq("doc_number", docNumber).maybeSingle();
-        if (byDocNumber) {
-          await admin.from("sales_order").update({
-            qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-          }).eq("id", byDocNumber.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
+        if (!matchedOrderId) {
+          // Check by doc_number
+          const { data: byDocNumber } = await admin.from("sales_order")
+            .select("id").eq("doc_number", docNumber).maybeSingle();
+          if (byDocNumber) {
+            await admin.from("sales_order").update({
+              qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
+            }).eq("id", byDocNumber.id);
+            const { count: lineCount } = await admin.from("sales_order_line")
+              .select("id", { count: "exact", head: true }).eq("sales_order_id", byDocNumber.id);
+            if ((lineCount ?? 0) > 0) {
+              await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
+              processed++;
+              continue;
+            }
+            console.log(`Matched order ${byDocNumber.id} by doc_number has 0 lines — will backfill`);
+            matchedOrderId = byDocNumber.id;
+          }
         }
 
-        // Check by order_number
-        const { data: byOrderNumber } = await admin.from("sales_order")
-          .select("id").eq("order_number", docNumber).maybeSingle();
-        if (byOrderNumber) {
-          await admin.from("sales_order").update({
-            qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-          }).eq("id", byOrderNumber.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
+        if (!matchedOrderId) {
+          // Check by order_number
+          const { data: byOrderNumber } = await admin.from("sales_order")
+            .select("id").eq("order_number", docNumber).maybeSingle();
+          if (byOrderNumber) {
+            await admin.from("sales_order").update({
+              qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
+            }).eq("id", byOrderNumber.id);
+            const { count: lineCount } = await admin.from("sales_order_line")
+              .select("id", { count: "exact", head: true }).eq("sales_order_id", byOrderNumber.id);
+            if ((lineCount ?? 0) > 0) {
+              await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
+              processed++;
+              continue;
+            }
+            console.log(`Matched order ${byOrderNumber.id} by order_number has 0 lines — will backfill`);
+            matchedOrderId = byOrderNumber.id;
+          }
         }
       }
 
