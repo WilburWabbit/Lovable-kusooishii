@@ -1013,13 +1013,16 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         // Use TxnDate for created_at so orders sort by actual transaction date
         const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
 
+        const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
+
         const orderPayload: Record<string, any> = {
           origin_channel: originChannel, origin_reference: originRef,
           status: "complete", guest_name: customerName,
           guest_email: `qbo-sale-${qboId}@imported.local`,
           shipping_name: customerName,
           merchandise_subtotal: merchandiseSubtotal, tax_total: taxTotal,
-          gross_total: grossTotal, global_tax_calculation: globalTaxCalc,
+          gross_total: grossTotal, net_amount: netAmount,
+          global_tax_calculation: globalTaxCalc,
           currency, customer_id: customerId, txn_date: txnDate,
           doc_number: docNumber,
           created_at: orderCreatedAt,
@@ -1087,11 +1090,18 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
           for (let i = 0; i < qty; i++) {
             const stockUnitId = unitIds[i] ?? null;
+            // Fetch landed_cost for COGS if we have a stock unit
+            let cogs: number | null = null;
+            if (stockUnitId) {
+              const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+              cogs = unitData?.landed_cost ?? null;
+            }
             const { error: lineErr } = await admin.from("sales_order_line").insert({
               sales_order_id: order.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
               stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
               vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
+              cogs,
             });
             if (lineErr) {
               throw lineErr;

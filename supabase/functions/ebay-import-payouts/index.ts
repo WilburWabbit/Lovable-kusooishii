@@ -167,17 +167,17 @@ Deno.serve(async (req) => {
       // ─── Match local orders ─────────────────────────────────────
       // Bulk-fetch matching orders once; reused by both transaction
       // records and payout_fee attribution below.
-      type LocalOrder = { id: string; external_order_id: string; qbo_sales_receipt_id: string | null; gross_total: number | null };
+      type LocalOrder = { id: string; origin_reference: string; qbo_sales_receipt_id: string | null; gross_total: number | null };
       const orderMap = new Map<string, LocalOrder>();
 
       if (orderRefs.length > 0) {
         const { data: matchedOrders } = await admin
           .from("sales_order")
-          .select("id, external_order_id, qbo_sales_receipt_id, gross_total")
-          .in("external_order_id", orderRefs);
+          .select("id, origin_reference, qbo_sales_receipt_id, gross_total")
+          .in("origin_reference", orderRefs);
 
         for (const o of (matchedOrders ?? []) as LocalOrder[]) {
-          orderMap.set(o.external_order_id, o);
+          orderMap.set(o.origin_reference, o);
         }
       }
 
