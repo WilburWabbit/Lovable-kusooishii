@@ -938,70 +938,79 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
       }
 
-      // Same-channel dedup: delete existing order for re-creation using unified cleanup
-      const { data: existing } = await admin.from("sales_order")
-        .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
-      if (existing) {
-        await cleanupSalesOrder(admin, existing.id);
+      let order: { id: string } | null = matchedOrderId ? { id: matchedOrderId } : null;
+
+      if (!matchedOrderId) {
+        // Same-channel dedup: delete existing order for re-creation using unified cleanup
+        const { data: existing } = await admin.from("sales_order")
+          .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
+        if (existing) {
+          await cleanupSalesOrder(admin, existing.id);
+        }
+        // Also check by qbo_sales_receipt_id for legacy data
+        const { data: existingByQboId } = await admin.from("sales_order")
+          .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
+        if (existingByQboId) {
+          await cleanupSalesOrder(admin, existingByQboId.id);
+        }
+
+        const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
+        const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
+        const txnDate = receipt.TxnDate ?? null;
+        const totalAmount = receipt.TotalAmt ?? 0;
+        const currency = receipt.CurrencyRef?.value ?? "GBP";
+        const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
+        const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
+
+        let merchandiseSubtotal: number, grossTotal: number;
+        if (globalTaxCalc === "TaxInclusive") {
+          merchandiseSubtotal = totalAmount - taxTotal;
+          grossTotal = totalAmount;
+        } else {
+          merchandiseSubtotal = totalAmount;
+          grossTotal = totalAmount + taxTotal;
+        }
+
+        let customerId: string | null = null;
+        if (customerRefValue) {
+          const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", customerRefValue).maybeSingle();
+          customerId = cust?.id ?? null;
+        }
+
+        const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+
+        // Use TxnDate for created_at so orders sort by actual transaction date
+        const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
+
+        const orderPayload: Record<string, any> = {
+          origin_channel: originChannel, origin_reference: originRef,
+          status: "complete", guest_name: customerName,
+          guest_email: `qbo-sale-${qboId}@imported.local`,
+          shipping_name: customerName,
+          merchandise_subtotal: merchandiseSubtotal, tax_total: taxTotal,
+          gross_total: grossTotal, global_tax_calculation: globalTaxCalc,
+          currency, customer_id: customerId, txn_date: txnDate,
+          doc_number: docNumber,
+          created_at: orderCreatedAt,
+          notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
+          qbo_sync_status: "synced", qbo_sales_receipt_id: qboId,
+          qbo_customer_id: customerRefValue,
+        };
+
+        let orderResult: { data: any; error: any };
+        orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
+        if (orderResult.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderResult.error.message ?? "")) {
+          delete orderPayload.qbo_sync_status;
+          delete orderPayload.qbo_sales_receipt_id;
+          delete orderPayload.qbo_customer_id;
+          orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
+        }
+        if (orderResult.error) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderResult.error.message); continue; }
+        order = orderResult.data;
       }
-      // Also check by qbo_sales_receipt_id for legacy data
-      const { data: existingByQboId } = await admin.from("sales_order")
-        .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
-      if (existingByQboId) {
-        await cleanupSalesOrder(admin, existingByQboId.id);
-      }
 
-      const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
-      const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
-      const txnDate = receipt.TxnDate ?? null;
-      const totalAmount = receipt.TotalAmt ?? 0;
-      const currency = receipt.CurrencyRef?.value ?? "GBP";
-      const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
-      const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
-
-      let merchandiseSubtotal: number, grossTotal: number;
-      if (globalTaxCalc === "TaxInclusive") {
-        merchandiseSubtotal = totalAmount - taxTotal;
-        grossTotal = totalAmount;
-      } else {
-        merchandiseSubtotal = totalAmount;
-        grossTotal = totalAmount + taxTotal;
-      }
-
-      let customerId: string | null = null;
-      if (customerRefValue) {
-        const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", customerRefValue).maybeSingle();
-        customerId = cust?.id ?? null;
-      }
-
-      const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
-
-      // Use TxnDate for created_at so orders sort by actual transaction date
-      const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
-
-      const orderPayload: Record<string, any> = {
-        origin_channel: originChannel, origin_reference: originRef,
-        status: "complete", guest_name: customerName,
-        guest_email: `qbo-sale-${qboId}@imported.local`,
-        shipping_name: customerName,
-        merchandise_subtotal: merchandiseSubtotal, tax_total: taxTotal,
-        gross_total: grossTotal, global_tax_calculation: globalTaxCalc,
-        currency, customer_id: customerId, txn_date: txnDate,
-        doc_number: docNumber,
-        created_at: orderCreatedAt,
-        notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
-        qbo_sync_status: "synced", qbo_sales_receipt_id: qboId,
-        qbo_customer_id: customerRefValue,
-      };
-
-      let { data: order, error: orderErr } = await admin.from("sales_order").insert(orderPayload).select("id").single();
-      if (orderErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderErr.message ?? "")) {
-        delete orderPayload.qbo_sync_status;
-        delete orderPayload.qbo_sales_receipt_id;
-        delete orderPayload.qbo_customer_id;
-        ({ data: order, error: orderErr } = await admin.from("sales_order").insert(orderPayload).select("id").single());
-      }
-      if (orderErr) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderErr.message); continue; }
+      // Resolve vatRateId for line items (needed for both new and matched orders)
+      const vatRateIdForLines = await resolveVatRateId(admin, receipt.TxnTaxDetail);
 
       let orderStockMatched = 0;
       let orderStockMissing = 0;
