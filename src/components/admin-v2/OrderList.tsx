@@ -23,6 +23,8 @@ function getValue(row: OrderRow, key: string): unknown {
       return row.customer?.name ?? "Cash Sales";
     case "items":
       return row.lineItems.length;
+    case "ref":
+      return row.externalOrderId || row.docNumber || row.orderNumber;
     default:
       return (row as unknown as Record<string, unknown>)[key];
   }
