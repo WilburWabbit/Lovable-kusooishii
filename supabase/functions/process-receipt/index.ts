@@ -228,6 +228,7 @@ Deno.serve(async (req) => {
       }
 
       // unit_counter is already correct from the atomic reservation — no manual overwrite needed
+      await supabaseAdmin.rpc("v2_calculate_apportioned_costs", { p_batch_id: batchId });
 
     } catch (innerErr) {
       // Rollback: delete stock units, purchase line items, and batch
