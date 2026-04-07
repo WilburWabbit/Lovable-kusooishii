@@ -12,6 +12,62 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/** Fully reset a QBO purchase: delete derived stock units, receipt lines, purchase batches/line items, then reset landing to pending */
+async function resetQboPurchase(admin: any, qboPurchaseId: string, landingId: string) {
+  // 1. Find the receipt
+  const { data: receipt } = await admin
+    .from("inbound_receipt")
+    .select("id")
+    .eq("qbo_purchase_id", qboPurchaseId)
+    .maybeSingle();
+
+  if (receipt) {
+    // 2. Get real receipt line IDs
+    const { data: lines } = await admin
+      .from("inbound_receipt_line")
+      .select("id")
+      .eq("inbound_receipt_id", receipt.id);
+    const lineIds = (lines ?? []).map((l: any) => l.id);
+
+    // 3. Delete stock units linked to those lines (non-sold only; nullify sold)
+    if (lineIds.length > 0) {
+      const { data: linkedUnits } = await admin
+        .from("stock_unit")
+        .select("id, status, v2_status")
+        .in("inbound_receipt_line_id", lineIds);
+      for (const unit of (linkedUnits ?? [])) {
+        if (unit.status === "closed" || unit.v2_status === "sold") {
+          await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+        } else {
+          await admin.from("stock_unit").delete().eq("id", unit.id);
+        }
+      }
+    }
+
+    // 4. Delete receipt lines
+    await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
+
+    // 5. Reset receipt status
+    await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
+  }
+
+  // 6. Delete purchase_line_items and purchase_batches by reference
+  const { data: batches } = await admin
+    .from("purchase_batches")
+    .select("id")
+    .eq("reference", qboPurchaseId);
+  for (const b of (batches ?? [])) {
+    await admin.from("purchase_line_items").delete().eq("batch_id", b.id);
+    await admin.from("purchase_batches").delete().eq("id", b.id);
+  }
+
+  // 7. Reset landing record to pending
+  await admin
+    .from("landing_raw_qbo_purchase")
+    .update({ status: "pending", error_message: null, processed_at: null })
+    .eq("id", landingId);
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
