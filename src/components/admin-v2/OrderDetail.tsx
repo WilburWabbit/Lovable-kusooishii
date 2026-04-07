@@ -5,11 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useOrder, orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
 import { useOrderFees } from "@/hooks/admin/use-payouts";
-import { exVAT, calculateVAT } from "@/lib/utils/vat";
+import { exVAT } from "@/lib/utils/vat";
 import type { OrderLineItem, StockUnitStatus } from "@/lib/types/admin";
 import {
   SurfaceCard,
-  SummaryCard,
   Mono,
   Badge,
   StatusBadge,
@@ -49,7 +48,6 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     stockUnitIdForProfit?: string;
   }) | null>(null);
 
-  // Fetch welcome code for eBay orders (QR label printing)
   const { data: welcomeCode } = useQuery({
     queryKey: ["welcome-code", "order", orderId],
     queryFn: async () => {
@@ -70,8 +68,6 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         .update({ v2_status: "complete" } as never)
         .eq("id", orderId);
       if (error) throw error;
-
-      // Update associated stock units
       await supabase
         .from("stock_unit")
         .update({ v2_status: "complete", completed_at: new Date().toISOString() } as never)
@@ -85,75 +81,75 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     },
   });
 
-  // Aggregate fees by category
+  // Aggregate fees
   const feeTotals = orderFees.reduce<Record<string, number>>((acc, fee) => {
     acc[fee.feeCategory] = (acc[fee.feeCategory] ?? 0) + fee.amount;
     return acc;
   }, {});
   const totalOrderFees = orderFees.reduce((s, f) => s + f.amount, 0);
-
-  // COGS total
   const totalCogs = order?.lineItems.reduce((s, li) => s + (li.cogs ?? 0), 0) ?? 0;
 
-  if (isLoading) {
-    return <p className="text-zinc-500 text-sm">Loading order…</p>;
-  }
-
-  if (!order) {
-    return <p className="text-zinc-500 text-sm">Order not found.</p>;
-  }
+  if (isLoading) return <p className="text-muted-foreground text-sm">Loading order…</p>;
+  if (!order) return <p className="text-muted-foreground text-sm">Order not found.</p>;
 
   const customerName = order.customer?.name ?? "Cash Sales";
   const formattedDate = new Date(order.createdAt).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
+    day: "numeric", month: "short", year: "numeric",
   });
 
-  const qboLabel =
-    order.qboSyncStatus === "synced"
-      ? "Synced"
-      : order.qboSyncStatus === "error"
-      ? "Error"
-      : "Pending";
-  const qboColor =
-    order.qboSyncStatus === "synced"
-      ? "#22C55E"
-      : order.qboSyncStatus === "error"
-      ? "#EF4444"
-      : "#F59E0B";
+  const qboLabel = order.qboSyncStatus === "synced" ? "Synced" : order.qboSyncStatus === "error" ? "Error" : "Pending";
+  const qboColor = order.qboSyncStatus === "synced" ? "#22C55E" : order.qboSyncStatus === "error" ? "#EF4444" : "#F59E0B";
 
-  // Ex-VAT P&L: all pillars netted at 20%
-  const netRevenue = exVAT(order.total);
+  // Invoice totals
+  const subtotalExVat = order.lineItems.reduce((s, li) => s + (li.unitPrice - li.lineVat), 0);
+  const totalVat = order.lineItems.reduce((s, li) => s + li.lineVat, 0);
+  const grossTotal = order.total;
+
+  // P&L (ex-VAT)
+  const netRevenue = subtotalExVat;
   const netCogs = exVAT(totalCogs);
   const netFees = exVAT(totalOrderFees);
   const netProfit = netRevenue - netCogs - netFees;
+  const margin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
   const vatReclaimCogs = totalCogs - netCogs;
   const vatReclaimFees = totalOrderFees - netFees;
   const totalVatReclaim = vatReclaimCogs + vatReclaimFees;
+
+  const fmt = (n: number) => `£${n.toFixed(2)}`;
 
   return (
     <div className="pb-20 lg:pb-0">
       <BackButton onClick={() => navigate("/admin/orders")} label="Back to orders" />
 
-      {/* Header */}
+      {/* ── Header ────────────────────────────────── */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1 flex-wrap">
-            <h1 className="text-[22px] font-bold text-zinc-900">
+            <h1 className="text-[22px] font-bold text-foreground">
               {order.externalOrderId || order.docNumber || order.orderNumber}
             </h1>
             <OrderStatusBadge status={order.status} />
+            <Badge label={qboLabel} color={qboColor} small />
           </div>
-          <div className="flex flex-wrap gap-2 lg:gap-4 text-zinc-500 text-[13px]">
-            <span className="text-zinc-400 font-mono text-[11px]">{order.orderNumber}</span>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-[13px]">
             <span>{customerName}</span>
-            <span>{order.channel}</span>
+            <span className="capitalize">{order.channel}</span>
             <span>{formattedDate}</span>
+            {order.carrier && <span>{order.carrier} {order.trackingNumber ?? ""}</span>}
+            <span className="text-muted-foreground/50 font-mono text-[11px]">{order.orderNumber}</span>
             {order.externalOrderId && order.docNumber && order.externalOrderId !== order.docNumber && (
-              <span className="text-zinc-400 font-mono text-[11px]">QBO: {order.docNumber}</span>
+              <span className="text-muted-foreground/50 font-mono text-[11px]">QBO: {order.docNumber}</span>
             )}
           </div>
+          {welcomeCode && (
+            <div className="mt-1">
+              <Badge
+                label={welcomeCode.redeemed_at ? "Promo Redeemed" : welcomeCode.scanned_at ? `Scanned ${welcomeCode.scan_count}×` : "Promo Active"}
+                color={welcomeCode.redeemed_at ? "#22C55E" : welcomeCode.scanned_at ? "#3B82F6" : "#F59E0B"}
+                small
+              />
+            </div>
+          )}
         </div>
         <div className="hidden lg:flex gap-2">
           {welcomeCode && (
@@ -167,192 +163,104 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
             />
           )}
           {order.status === "needs_allocation" && (
-            <button
-              onClick={() => setShowAllocate(true)}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
-            >
+            <button onClick={() => setShowAllocate(true)} className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors">
               Allocate Items
             </button>
           )}
           {(order.status === "new" || order.status === "awaiting_shipment") && (
-            <button
-              onClick={() => setShowShip(true)}
-              className="bg-teal-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-teal-400 transition-colors"
-            >
+            <button onClick={() => setShowShip(true)} className="bg-teal-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-teal-400 transition-colors">
               Ship Order
             </button>
           )}
           {(order.status === "shipped" || order.status === "delivered") && (
             <>
-              <button
-                onClick={() => setShowReturn(true)}
-                className="bg-red-500/20 text-red-400 border border-red-500/30 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:bg-red-500/30 transition-colors"
-              >
+              <button onClick={() => setShowReturn(true)} className="bg-red-500/20 text-red-400 border border-red-500/30 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:bg-red-500/30 transition-colors">
                 Initiate Return
               </button>
-              <button
-                onClick={() => markComplete.mutate()}
-                disabled={markComplete.isPending}
-                className="bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-800 transition-colors disabled:opacity-50"
-              >
+              <button onClick={() => markComplete.mutate()} disabled={markComplete.isPending} className="bg-zinc-200 text-zinc-600 border border-zinc-200 rounded-md px-4 py-2 text-[13px] cursor-pointer hover:text-zinc-800 transition-colors disabled:opacity-50">
                 {markComplete.isPending ? "Completing…" : "Mark Complete"}
               </button>
             </>
           )}
           {order.status === "return_pending" && (
-            <button
-              onClick={() => setShowProcessReturn(true)}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
-            >
+            <button onClick={() => setShowProcessReturn(true)} className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors">
               Process Return
             </button>
           )}
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className={`grid gap-3 mb-5 ${welcomeCode ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2 lg:grid-cols-4"}`}>
-        <SummaryCard label="Gross Total" value={`£${order.total.toFixed(2)}`} color="#14B8A6" />
-        <SummaryCard label="Output VAT" value={`£${order.vatAmount.toFixed(2)}`} color="#A1A1AA" />
-        <SummaryCard label="Net Revenue" value={`£${netRevenue.toFixed(2)}`} />
-        <SummaryCard label="QBO" value={qboLabel} color={qboColor} />
-        {welcomeCode && (
-          <SummaryCard
-            label="Welcome Promo"
-            value={welcomeCode.redeemed_at ? "Redeemed" : welcomeCode.scanned_at ? `Scanned ${welcomeCode.scan_count}×` : "Active"}
-            color={welcomeCode.redeemed_at ? "#22C55E" : welcomeCode.scanned_at ? "#3B82F6" : "#F59E0B"}
-          />
-        )}
-      </div>
-
-      {/* P&L cards — all ex-VAT */}
-      {(totalOrderFees > 0 || totalCogs > 0) && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-          <SummaryCard label="COGS (ex-VAT)" value={`£${netCogs.toFixed(2)}`} color="#A1A1AA" />
-          <SummaryCard label="Fees (ex-VAT)" value={`£${netFees.toFixed(2)}`} color="#EF4444" />
-          <SummaryCard label="VAT Reclaim" value={`£${totalVatReclaim.toFixed(2)}`} color="#3B82F6" />
-          <SummaryCard
-            label="Net Profit"
-            value={`£${netProfit.toFixed(2)}`}
-            color={netProfit >= 0 ? "#22C55E" : "#EF4444"}
-          />
-          <SummaryCard
-            label="Margin"
-            value={netRevenue > 0 ? `${((netProfit / netRevenue) * 100).toFixed(1)}%` : "—"}
-            color={netProfit >= 0 ? "#22C55E" : "#EF4444"}
-          />
-        </div>
-      )}
-
-      {/* Fee breakdown detail */}
-      {Object.keys(feeTotals).length > 0 && (
-        <SurfaceCard className="mb-5">
-          <SectionHead>Fee Breakdown</SectionHead>
-          <div className="grid gap-1">
-            {Object.entries(feeTotals).map(([cat, amount]) => (
-              <div key={cat} className="flex justify-between py-1 border-b border-zinc-100">
-                <span className="text-zinc-600 text-xs capitalize">{cat.replace(/_/g, " ")}</span>
-                <Mono color="red" className="text-xs">£{amount.toFixed(2)}</Mono>
-              </div>
-            ))}
-          </div>
-        </SurfaceCard>
-      )}
-
-      {/* Line items table */}
-      <SurfaceCard noPadding className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-200">
-          <SectionHead>Line Items → Stock Units</SectionHead>
+      {/* ── Invoice Line Items ────────────────────── */}
+      <SurfaceCard noPadding className="overflow-hidden mb-5">
+        <div className="px-4 py-3 border-b border-border">
+          <SectionHead>Invoice</SectionHead>
         </div>
         <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-xs min-w-[640px]">
-          <thead>
-            <tr className="border-b border-zinc-200">
-              {["SKU", "Unit ID", "Unit Price", "COGS", "Status", "Tracking", "Payout", ""].map(
-                (h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2 text-left text-zinc-500 font-medium text-[10px] uppercase tracking-wider"
-                  >
+          <table className="w-full border-collapse text-xs min-w-[700px]">
+            <thead>
+              <tr className="border-b border-border">
+                {["Item", "SKU", "Qty", "Unit (ex-VAT)", "VAT", "Line Total", "COGS", ""].map((h) => (
+                  <th key={h} className={`px-3 py-2 text-[10px] uppercase tracking-wider font-medium ${
+                    ["Unit (ex-VAT)", "VAT", "Line Total", "COGS"].includes(h) ? "text-right" : "text-left"
+                  } text-muted-foreground`}>
                     {h}
                   </th>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {order.lineItems.map((item) => {
-              const isUnallocated = !item.stockUnitId;
-              const itemAny = item as unknown as Record<string, unknown>;
-              const unitStatus: StockUnitStatus = isUnallocated
-                ? "needs_allocation"
-                : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");
-              const unitUid = (itemAny._unitUid as string) ?? item.stockUnitId?.slice(0, 10);
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {order.lineItems.map((item) => {
+                const isUnallocated = !item.stockUnitId;
+                const itemAny = item as unknown as Record<string, unknown>;
+                const unitStatus: StockUnitStatus = isUnallocated
+                  ? "needs_allocation"
+                  : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");
+                const unitUid = (itemAny._unitUid as string) ?? item.stockUnitId?.slice(0, 10);
+                const unitExVat = item.unitPrice - item.lineVat;
 
-              // Determine payout status from unit lifecycle
-              const payoutStatus = isUnallocated
-                ? undefined
-                : unitStatus === "payout_received" || unitStatus === "complete"
-                ? "Received"
-                : unitStatus === "return_pending"
-                ? "Held"
-                : "Pending";
+                const payoutStatus = isUnallocated
+                  ? undefined
+                  : unitStatus === "payout_received" || unitStatus === "complete"
+                  ? "Received"
+                  : unitStatus === "return_pending"
+                  ? "Held"
+                  : "Pending";
 
-              return (
-                <tr
-                  key={item.id}
-                  className="border-b border-zinc-200"
-                  style={{
-                    background: isUnallocated
-                      ? "rgba(245,158,11,0.03)"
-                      : "transparent",
-                  }}
-                >
-                  <td className="px-3 py-2.5">
-                    <div>
-                      <Mono color={item.sku ? "amber" : "dim"}>
-                        {item.sku ?? "—"}
+                return (
+                  <tr key={item.id} className="border-b border-border" style={{ background: isUnallocated ? "rgba(245,158,11,0.03)" : "transparent" }}>
+                    <td className="px-3 py-2.5">
+                      <div>
+                        <span className="text-foreground text-[12px]">{item.name ?? "—"}</span>
+                        {isUnallocated && <StatusBadge status="needs_allocation" />}
+                        {!isUnallocated && unitUid && (
+                          <p className="text-muted-foreground/60 font-mono text-[10px] mt-0.5">{unitUid}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <Mono color={item.sku ? "amber" : "dim"}>{item.sku ?? "—"}</Mono>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="text-foreground">1</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Mono>{fmt(unitExVat)}</Mono>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Mono color="dim">{fmt(item.lineVat)}</Mono>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Mono color="teal">{fmt(item.unitPrice)}</Mono>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Mono color={item.cogs ? "default" : "dim"}>
+                        {item.cogs ? fmt(exVAT(item.cogs)) : "—"}
                       </Mono>
-                      {item.name && (
-                        <p className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-[200px]">{item.name}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <Mono color={isUnallocated ? "amber" : "default"}>
-                      {isUnallocated ? "Unallocated" : unitUid ?? "—"}
-                    </Mono>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <Mono color="teal">£{item.unitPrice.toFixed(2)}</Mono>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <Mono color={item.cogs ? "teal" : "dim"}>
-                      {item.cogs ? `£${item.cogs.toFixed(2)}` : "—"}
-                    </Mono>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <StatusBadge status={unitStatus} />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <Mono color="dim" className="text-[11px]">
-                      {order.trackingNumber ?? "—"}
-                    </Mono>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {payoutStatus === "Received" ? (
-                      <Badge label="Received" color="#22C55E" small />
-                    ) : payoutStatus === "Pending" ? (
-                      <Badge label="Pending" color="#F59E0B" small />
-                    ) : (
-                      <span className="text-zinc-500">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {item.stockUnitId && (
-                      <button
-                        onClick={() =>
-                          setSlideItem({
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {item.stockUnitId && (
+                        <button
+                          onClick={() => setSlideItem({
                             ...item,
                             unitUid: item.stockUnitId?.slice(0, 10),
                             unitStatus,
@@ -361,49 +269,110 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                             trackingNumber: order.trackingNumber,
                             payoutStatus,
                             stockUnitIdForProfit: item.stockUnitId ?? undefined,
-                          })
-                        }
-                        className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
-                      >
-                        View Unit
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {order.lineItems.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-zinc-500 text-sm">
-                  No line items.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                          })}
+                          className="bg-transparent text-muted-foreground border border-border rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-foreground transition-colors"
+                        >
+                          View
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {order.lineItems.length === 0 && (
+                <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground text-sm">No line items.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Invoice Totals ──────────────────────── */}
+        <div className="border-t border-border px-4 py-3">
+          <div className="flex flex-col items-end gap-1 text-xs">
+            <div className="flex justify-between w-56">
+              <span className="text-muted-foreground">Subtotal (ex-VAT)</span>
+              <Mono>{fmt(subtotalExVat)}</Mono>
+            </div>
+            <div className="flex justify-between w-56">
+              <span className="text-muted-foreground">VAT 20%</span>
+              <Mono>{fmt(totalVat)}</Mono>
+            </div>
+            <div className="flex justify-between w-56 pt-1 border-t border-border font-semibold">
+              <span className="text-foreground">Gross Total</span>
+              <Mono color="teal">{fmt(grossTotal)}</Mono>
+            </div>
+          </div>
         </div>
       </SurfaceCard>
 
-      {/* Mobile sticky actions */}
+      {/* ── P&L Summary ───────────────────────────── */}
+      {(totalOrderFees > 0 || totalCogs > 0) && (
+        <SurfaceCard className="mb-5">
+          <SectionHead>Profit & Loss (ex-VAT)</SectionHead>
+          <div className="grid gap-1 text-xs max-w-sm">
+            <div className="flex justify-between py-1">
+              <span className="text-muted-foreground">Net Revenue</span>
+              <Mono>{fmt(netRevenue)}</Mono>
+            </div>
+            <div className="flex justify-between py-1">
+              <span className="text-muted-foreground">COGS</span>
+              <Mono color="dim">{fmt(netCogs)}</Mono>
+            </div>
+            <div className="flex justify-between py-1">
+              <span className="text-muted-foreground">Fees</span>
+              <Mono color="dim">{fmt(netFees)}</Mono>
+            </div>
+            <div className="flex justify-between py-1.5 border-t border-border font-semibold">
+              <span className="text-foreground">Net Profit</span>
+              <span className="flex items-center gap-2">
+                <Mono color={netProfit >= 0 ? "teal" : "red"}>{fmt(netProfit)}</Mono>
+                <span className={`text-[11px] ${netProfit >= 0 ? "text-teal-600" : "text-red-500"}`}>
+                  {margin.toFixed(1)}%
+                </span>
+              </span>
+            </div>
+            {totalVatReclaim > 0 && (
+              <div className="flex justify-between py-1 text-blue-600">
+                <span>VAT Reclaim</span>
+                <Mono>{fmt(totalVatReclaim)}</Mono>
+              </div>
+            )}
+          </div>
+        </SurfaceCard>
+      )}
+
+      {/* ── Fee Breakdown ─────────────────────────── */}
+      {Object.keys(feeTotals).length > 0 && (
+        <SurfaceCard className="mb-5">
+          <SectionHead>Fee Breakdown</SectionHead>
+          <div className="grid gap-1">
+            {Object.entries(feeTotals).map(([cat, amount]) => (
+              <div key={cat} className="flex justify-between py-1 border-b border-border text-xs">
+                <span className="text-muted-foreground capitalize">{cat.replace(/_/g, " ")}</span>
+                <div className="flex gap-3">
+                  <Mono color="dim">{fmt(exVAT(amount))} net</Mono>
+                  <Mono color="red">{fmt(amount)} gross</Mono>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      )}
+
+      {/* ── Mobile Sticky Actions ─────────────────── */}
       {order.status === "needs_allocation" && (
         <StickyActions>
-          <button onClick={() => setShowAllocate(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
-            Allocate Items
-          </button>
+          <button onClick={() => setShowAllocate(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Allocate Items</button>
         </StickyActions>
       )}
       {(order.status === "new" || order.status === "awaiting_shipment") && (
         <StickyActions>
-          <button onClick={() => setShowShip(true)} className="flex-1 bg-teal-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
-            Ship Order
-          </button>
+          <button onClick={() => setShowShip(true)} className="flex-1 bg-teal-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Ship Order</button>
         </StickyActions>
       )}
       {(order.status === "shipped" || order.status === "delivered") && (
         <StickyActions>
-          <button onClick={() => setShowReturn(true)} className="flex-1 bg-red-500/20 text-red-600 border border-red-500/30 rounded-md py-2.5 text-[13px]">
-            Return
-          </button>
+          <button onClick={() => setShowReturn(true)} className="flex-1 bg-red-500/20 text-red-600 border border-red-500/30 rounded-md py-2.5 text-[13px]">Return</button>
           <button onClick={() => markComplete.mutate()} disabled={markComplete.isPending} className="flex-1 bg-zinc-200 text-zinc-600 rounded-md py-2.5 text-[13px]">
             {markComplete.isPending ? "Completing…" : "Complete"}
           </button>
@@ -411,53 +380,16 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       )}
       {order.status === "return_pending" && (
         <StickyActions>
-          <button onClick={() => setShowProcessReturn(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">
-            Process Return
-          </button>
+          <button onClick={() => setShowProcessReturn(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Process Return</button>
         </StickyActions>
       )}
 
-      {/* Unit slide-out */}
-      <OrderUnitSlideOut
-        lineItem={slideItem}
-        open={!!slideItem}
-        onClose={() => setSlideItem(null)}
-      />
-
-      {order && showAllocate && (
-        <AllocateItemsDialog
-          open={showAllocate}
-          onClose={() => setShowAllocate(false)}
-          orderId={order.id}
-          lineItems={order.lineItems}
-        />
-      )}
-
-      {order && showShip && (
-        <ShipOrderDialog
-          open={showShip}
-          onClose={() => setShowShip(false)}
-          orderId={order.id}
-        />
-      )}
-
-      {order && showReturn && (
-        <ReturnDialog
-          open={showReturn}
-          onClose={() => setShowReturn(false)}
-          orderId={order.id}
-          lineItems={order.lineItems}
-        />
-      )}
-
-      {order && showProcessReturn && (
-        <ProcessReturnDialog
-          open={showProcessReturn}
-          onClose={() => setShowProcessReturn(false)}
-          orderId={order.id}
-          lineItems={order.lineItems}
-        />
-      )}
+      {/* ── Dialogs & Slide-out ───────────────────── */}
+      <OrderUnitSlideOut lineItem={slideItem} open={!!slideItem} onClose={() => setSlideItem(null)} />
+      {order && showAllocate && <AllocateItemsDialog open={showAllocate} onClose={() => setShowAllocate(false)} orderId={order.id} lineItems={order.lineItems} />}
+      {order && showShip && <ShipOrderDialog open={showShip} onClose={() => setShowShip(false)} orderId={order.id} />}
+      {order && showReturn && <ReturnDialog open={showReturn} onClose={() => setShowReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
+      {order && showProcessReturn && <ProcessReturnDialog open={showProcessReturn} onClose={() => setShowProcessReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
     </div>
   );
 }
