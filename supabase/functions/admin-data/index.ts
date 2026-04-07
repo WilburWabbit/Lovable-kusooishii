@@ -2162,7 +2162,7 @@ Deno.serve(async (req) => {
           } else {
             const app = appMap.get(qboId)!;
             const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
-            const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
+            const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
             if (Math.abs(qboTotal - appTotal) > 0.01) {
               mismatched++;
               details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
