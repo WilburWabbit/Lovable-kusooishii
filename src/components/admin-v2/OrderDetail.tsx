@@ -212,9 +212,9 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
 
       {/* Summary cards */}
       <div className={`grid gap-3 mb-5 ${welcomeCode ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2 lg:grid-cols-4"}`}>
-        <SummaryCard label="Total" value={`£${order.total.toFixed(2)}`} color="#14B8A6" />
-        <SummaryCard label="VAT" value={`£${order.vatAmount.toFixed(2)}`} color="#A1A1AA" />
-        <SummaryCard label="Net" value={`£${order.netAmount.toFixed(2)}`} />
+        <SummaryCard label="Gross Total" value={`£${order.total.toFixed(2)}`} color="#14B8A6" />
+        <SummaryCard label="Output VAT" value={`£${order.vatAmount.toFixed(2)}`} color="#A1A1AA" />
+        <SummaryCard label="Net Revenue" value={`£${netRevenue.toFixed(2)}`} />
         <SummaryCard label="QBO" value={qboLabel} color={qboColor} />
         {welcomeCode && (
           <SummaryCard
@@ -225,11 +225,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         )}
       </div>
 
-      {/* Fees & Profit cards */}
+      {/* P&L cards — all ex-VAT */}
       {(totalOrderFees > 0 || totalCogs > 0) && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <SummaryCard label="COGS" value={`£${totalCogs.toFixed(2)}`} color="#A1A1AA" />
-          <SummaryCard label="Fees" value={`£${totalOrderFees.toFixed(2)}`} color="#EF4444" />
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+          <SummaryCard label="COGS (ex-VAT)" value={`£${netCogs.toFixed(2)}`} color="#A1A1AA" />
+          <SummaryCard label="Fees (ex-VAT)" value={`£${netFees.toFixed(2)}`} color="#EF4444" />
+          <SummaryCard label="VAT Reclaim" value={`£${totalVatReclaim.toFixed(2)}`} color="#3B82F6" />
           <SummaryCard
             label="Net Profit"
             value={`£${netProfit.toFixed(2)}`}
@@ -237,7 +238,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           />
           <SummaryCard
             label="Margin"
-            value={order.netAmount > 0 ? `${((netProfit / order.netAmount) * 100).toFixed(1)}%` : "—"}
+            value={netRevenue > 0 ? `${((netProfit / netRevenue) * 100).toFixed(1)}%` : "—"}
             color={netProfit >= 0 ? "#22C55E" : "#EF4444"}
           />
         </div>
