@@ -421,7 +421,9 @@ export function QboSettingsCard() {
     setCleaningGhosts(true);
     try {
       const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'cleanup-ghost-units' });
-      toast.success(`Cleaned up ${(data as any)?.deleted ?? 0} ghost stock units`);
+      const deleted = (data as any)?.deleted ?? 0;
+      const resetCount = (data as any)?.resetCount ?? 0;
+      toast.success(`Cleaned up ${deleted} ghost units${resetCount > 0 ? `, reset ${resetCount} errored purchases — run Process Pending next` : ''}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Cleanup failed');
     } finally {

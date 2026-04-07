@@ -2326,7 +2326,34 @@ Deno.serve(async (req) => {
         deleted += batch.length;
       }
 
-      result = { success: true, deleted, message: `Deleted ${deleted} ghost stock units` };
+      // Reset errored purchases that failed due to UID conflicts
+      const { data: erroredPurchases } = await admin
+        .from("landing_raw_qbo_purchase")
+        .select("id, external_id")
+        .eq("status", "error")
+        .ilike("error_message", "%duplicate key%");
+
+      let resetCount = 0;
+      for (const ep of (erroredPurchases ?? [])) {
+        // Clean up partial receipt lines and stock units for this purchase
+        const { data: receipt } = await admin
+          .from("inbound_receipt")
+          .select("id")
+          .eq("qbo_purchase_id", ep.external_id)
+          .maybeSingle();
+        if (receipt) {
+          await admin.from("stock_unit").delete().eq("inbound_receipt_line_id", receipt.id);
+          await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
+        }
+        // Reset to pending
+        await admin
+          .from("landing_raw_qbo_purchase")
+          .update({ status: "pending", error_message: null, processed_at: null })
+          .eq("id", ep.id);
+        resetCount++;
+      }
+
+      result = { success: true, deleted, resetCount, message: `Deleted ${deleted} ghost stock units, reset ${resetCount} errored purchases to pending` };
 
     } else if (action === "recalc-avg-cost") {
       // Recalculate avg_cost on all SKUs from their linked stock units
