@@ -556,6 +556,15 @@ export function QboSettingsCard() {
             </div>
           </div>
 
+          {/* Data Cleanup */}
+          <div>
+            <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Data Cleanup</p>
+            <div className="flex flex-wrap gap-1.5">
+              <Btn onClick={cleanupGhostUnits} busy={cleaningGhosts}>Cleanup Ghost Units</Btn>
+              <Btn onClick={recalcAvgCost} busy={recalcingCost}>Recalc Avg Cost</Btn>
+            </div>
+          </div>
+
           {/* Admin */}
           <div>
             <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Admin</p>
