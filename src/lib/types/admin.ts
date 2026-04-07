@@ -70,12 +70,7 @@ export interface SharedCosts {
 
 // ─── Fee Breakdown (Payouts) ────────────────────────────────
 
-export interface FeeBreakdown {
-  fvf: number;
-  promoted_listings: number;
-  international: number;
-  processing: number;
-}
+export type FeeBreakdown = Record<string, number>;
 
 // ─── 2.1 Purchase Batch ────────────────────────────────────
 
