@@ -1,86 +1,78 @@
 
 
-# Fix Floor Price Calculations: VAT Netting + Auto-Markdown Fee Access
+# Add CRUD for Channel Fees, Shipping Rates, and Selling Cost Defaults
 
-## Clarification
+## Problem
 
-The pricing engine (`admin-data/index.ts`) **does** already query `channel_fee_schedule` and `shipping_rate_table` — the fee schedule data is available. The two problems are:
+The pricing engine relies on three configuration tables — `channel_fee_schedule`, `shipping_rate_table`, and `selling_cost_defaults` — but there is no UI to manage them. Currently they can only be edited via direct database access. The existing `PricingSettingsCard` only covers the `pricing_settings` table (markdown thresholds and margin targets).
 
-1. **The floor formula ignores output VAT** — it treats the full gross price as available revenue, but only `price / 1.2` is actual revenue after VAT. The denominator on line 945 should subtract the VAT take.
+## Data already in place
 
-2. **Auto-markdown uses a naive `cost × 1.25` floor** (line 147) instead of querying the fee schedule and shipping rates like the pricing engine does.
+All three tables exist with correct schemas and RLS policies (staff/admin ALL access). No migrations needed.
+
+- **`channel_fee_schedule`** (5 rows): channel, fee_name, rate_percent, fixed_amount, applies_to, min/max_amount, active, notes
+- **`shipping_rate_table`** (12+ rows): carrier, service_name, size_band, max_weight_kg, dimensions, cost/price_ex_vat/price_inc_vat, tracked, active
+- **`selling_cost_defaults`** (8 rows): key-value pairs for packaging_cost, risk_reserve_rate, condition multipliers, min margin, min profit
+
+## Design
+
+Break Settings into dedicated sub-pages with sidebar entries, keeping it manageable:
+
+### Option A: Separate pages (cleaner, matches the "Settings separate from operations" principle)
+
+Add three new sidebar entries under a "Settings" group:
+- **Settings** (existing — integrations + pricing engine params)
+- **Selling Fees** → `/admin/selling-fees`
+- **Shipping Rates** → `/admin/shipping-rates`
+
+`selling_cost_defaults` fits naturally into the existing PricingSettingsCard (same key-value pattern as `pricing_settings`), so add it there.
+
+### New pages
+
+#### 1. Channel Fees Page (`/admin/selling-fees`)
+- Table view grouped by channel (eBay, BrickLink, Web)
+- Columns: Fee Name, Rate %, Fixed £, Applies To, Min/Max, Active, Notes
+- Inline editing (click to edit, Enter to save — same pattern as PricingSettingsCard)
+- Add new fee row button per channel
+- Toggle active/inactive
+- Delete with confirmation
+
+#### 2. Shipping Rates Page (`/admin/shipping-rates`)
+- Table view grouped by carrier (Evri, Royal Mail)
+- Columns: Service, Size Band, Max Weight, Dimensions (L×W×D), Cost (ex-VAT), Price (inc-VAT), Tracked, Active
+- Inline editing for cost/price fields
+- Add new rate button
+- Toggle active/inactive
+
+#### 3. Selling Cost Defaults (added to existing PricingSettingsCard)
+- Add `selling_cost_defaults` rows below `pricing_settings` rows in the same card
+- Same inline edit pattern — they're both key-value tables
 
 ## Changes
 
-### 1. `supabase/functions/admin-data/index.ts` — Fix floor formula for VAT
+### New files
+| File | Purpose |
+|------|---------|
+| `src/hooks/admin/use-channel-fees.ts` | CRUD hooks for `channel_fee_schedule` |
+| `src/hooks/admin/use-shipping-rates.ts` | CRUD hooks for `shipping_rate_table` |
+| `src/hooks/admin/use-selling-cost-defaults.ts` | CRUD hooks for `selling_cost_defaults` |
+| `src/pages/admin-v2/ChannelFeesPage.tsx` | Channel fees management page |
+| `src/pages/admin-v2/ShippingRatesPage.tsx` | Shipping rates management page |
 
-Current (line 945-946):
-```typescript
-const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
-let floorPrice = (costBase + minProfit + fixedFeeCosts) / denominator;
-```
-
-The formula solves `price - margin×price - fees×price - risk×price = costBase + minProfit + fixedFees`, treating `price` as revenue. But revenue is actually `price / 1.2`.
-
-Fix: multiply the revenue side by `1/1.2` and net the fee rates through VAT too (since fee VAT is reclaimable):
-
-```typescript
-// Revenue from price P is P/1.2 (output VAT goes to HMRC)
-// Fee cost from price P is feeRate×P/1.2 (input VAT reclaimable)
-// Equation: P/1.2 - margin×(P/1.2) - feeRate×P/1.2 - risk×(P/1.2) >= costBase + minProfit + fixedFees/1.2
-// Solve: P >= 1.2 × (costBase + minProfit + netFixedFees) / (1 - margin - effectiveFeeRate - riskRate)
-const netFixedFees = fixedFeeCosts / 1.2;
-const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
-let floorPrice = Math.round((1.2 * (costBase + minProfit + netFixedFees) / denominator) * 100) / 100;
-```
-
-Also fix the post-check loop (lines 949-964) to compare against ex-VAT revenue:
-```typescript
-const requiredRevenue = costBase + minProfit + (totalFees / 1.2) + riskReserve;
-const neededPrice = 1.2 * requiredRevenue / (1 - effectiveMargin);
-```
-
-### 2. `supabase/functions/auto-markdown-prices/index.ts` — Use real fees and shipping
-
-Replace the naive `cost × (1 + MARGIN_TARGET)` floor with a proper calculation that:
-- Queries `channel_fee_schedule` for the listing's channel (eBay by default for listed items)
-- Queries `shipping_rate_table` for estimated shipping cost
-- Queries `selling_cost_defaults` for packaging and risk reserve
-- Applies the same VAT-aware floor formula as the pricing engine
-
-This means extracting the floor calculation into a shared helper or inlining the same logic. The function already has the `admin` client, so it just needs the additional queries per SKU group.
-
-### 3. Shared floor calculation helper
-
-To avoid duplicating the formula, extract a `calculateFloorPrice` function into `supabase/functions/_shared/pricing.ts`:
-
-```typescript
-export function calculateFloorPrice(params: {
-  costBase: number;        // carrying_value + packaging + shipping (all ex-VAT)
-  minProfit: number;
-  effectiveFeeRate: number; // aggregated rate from fee schedule
-  fixedFeeCosts: number;    // aggregated fixed fees
-  riskRate: number;
-  minMargin: number;
-  fees: FeeScheduleRow[];   // for post-check iteration
-  shippingCost: number;
-}): number
-```
-
-Both `admin-data` and `auto-markdown-prices` call this shared function.
-
-## Files changed
-
+### Modified files
 | File | Change |
 |------|--------|
-| `supabase/functions/_shared/pricing.ts` | New shared floor price calculator with VAT netting |
-| `supabase/functions/admin-data/index.ts` | Use shared calculator; fix floor formula and post-check |
-| `supabase/functions/auto-markdown-prices/index.ts` | Replace `cost × 1.25` with real fee/shipping/VAT-aware floor |
+| `src/App.tsx` | Add routes for `/admin/selling-fees` and `/admin/shipping-rates` |
+| `src/components/admin-v2/AdminV2Sidebar.tsx` | Add sidebar entries for Selling Fees and Shipping Rates under Settings group |
+| `src/components/admin-v2/PricingSettingsCard.tsx` | Add `selling_cost_defaults` section below pricing_settings |
 
-## Expected outcome
+## Technical approach
 
-For the 10349-1.1 example (cost £9.03 ex-VAT, eBay channel ~15% fees):
-- Old floor: £11.29 (`9.03 × 1.25`, ignores fees and VAT)
-- New floor: ~£17-18 (ensures `price/1.2 - fees/1.2 - shipping - packaging - risk >= cost + minProfit`)
-- A sale at £15.99 would correctly show as below floor, preventing loss-making listings
+- All hooks follow existing patterns: TanStack Query for reads, mutations for writes, `as never` casts for tables not yet in generated types
+- Inline editing pattern matches PricingSettingsCard (click value to edit, Enter/Escape, Save/Cancel buttons)
+- Channel fees grouped by channel with collapsible sections
+- Shipping rates grouped by carrier
+- "Add row" opens a form row at the bottom of each group
+- Delete uses a confirmation dialog (shadcn AlertDialog)
+- All mutations invalidate the relevant query key on success
 
