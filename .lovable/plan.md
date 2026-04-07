@@ -1,65 +1,62 @@
 
 
-# Rebuild Payouts UI and Surface Fees Across Relevant Screens
+# External References as Primary Identifiers Across Admin UI
 
 ## Problem
 
-1. **PayoutView** uses hardcoded fee categories (`fvf`, `promoted_listings`, `international`, `processing`) that don't match real data (`ebay_selling_fees`, `ebay_shipping`, `ebay_other_fees`). The detail slide-out shows zeros for everything.
-2. The reconcile button gives no feedback about what it does or did.
-3. Linked orders per payout are not shown despite `payout_orders` having real data.
-4. Three hooks already exist (`useOrderFees`, `usePayoutFees`, `useUnitProfit`) but are **never used** in any component. Fee and profit data is invisible across all screens.
+Internal identifiers (`KO-NNNNNNN`, `PO-NNN`) are shown prominently while external references are hidden. The app is an integration hub — users need to see the identifiers that match eBay and QBO.
+
+**Key data insight**: Cash/in-person sales have a QBO-generated `doc_number` (e.g., `14-14455-15044`) returned by the API — these should be used as their primary reference, not just for eBay orders.
 
 ## What changes
 
-### 1. PayoutView — Rebuild with real data
+### 1. Types and hooks — map `docNumber`
 
-**File: `src/components/admin-v2/PayoutView.tsx`**
+**`src/lib/types/admin.ts`** — Add `docNumber: string | null` to `Order` interface.
 
-- **FeeBreakdown type**: Change from hardcoded 4-field interface to `Record<string, number>`. Update `src/lib/types/admin.ts` accordingly.
-- **Main table columns**: Remove hardcoded FVF/Promoted/International/Processing columns. Replace with a single "Selling Fees" / "Shipping" / "Other" set matching real `fee_breakdown` keys, or just keep Gross/Fees/Net and add a `reconciliation_status` column.
-- **Detail slide-out**: Rebuild with three sections:
-  1. **Totals** — Gross, Fees, Net, Reconciliation status badge
-  2. **Fee Breakdown** — Dynamically render from `fee_breakdown` JSONB keys with formatted labels (e.g., `ebay_selling_fees` → "Selling Fees")
-  3. **Linked Orders** — Use `usePayoutFees` to group fees by `external_order_id`, showing each order's selling fees, shipping, and other fees. Link to order detail where `sales_order_id` exists.
-- **Reconcile button**: After reconciliation completes, show result counts (matched/unmatched) in a toast. Add a status badge showing "Reconciled" vs "Pending".
-- **Create Payout dialog**: Update fee inputs to match real categories (Selling Fees, Shipping, Other) instead of FVF/Promoted/International/Processing.
+**`src/hooks/admin/use-orders.ts`** — Map `doc_number` → `docNumber` in `mapOrder`.
 
-### 2. OrderDetail — Show fees and profit per unit
+### 2. Order List — external ref as primary column
 
-**File: `src/components/admin-v2/OrderDetail.tsx`**
+**`src/components/admin-v2/OrderList.tsx`**
 
-- Add `useOrderFees(orderId)` call to fetch all `payout_fee` rows for this order.
-- Add a **Fees & Costs** summary card row showing: Total Selling Fees, Shipping Costs, Other Fees.
-- In the line items table, add a "Fees" column showing per-unit fee total (from `useUnitProfit` or aggregated from `payout_fee` by `external_order_id`).
-- Add a "Profit" summary card: Revenue - COGS - Fees = Net Profit.
+- Rename "Order" column to "Ref" and show the best external reference as the primary value:
+  - **eBay orders**: Show `externalOrderId` (eBay order number, e.g., `14-14455-15038`)
+  - **Cash/in-person/web sales**: Show `docNumber` (QBO receipt number, e.g., `14-14455-15044`)
+  - Every order will have at least a `docNumber` since all orders come through QBO
+- Move the internal `orderNumber` column to `defaultVisible: false`, renamed "Internal ID"
+- Remove the separate "External ID" column (its value is now in the primary column)
+- Search filtering includes `externalOrderId`, `docNumber`, and `orderNumber`
 
-### 3. OrderUnitSlideOut — Show unit-level P&L
+### 3. Order Detail — external ref as heading
 
-**File: `src/components/admin-v2/OrderUnitSlideOut.tsx`**
+**`src/components/admin-v2/OrderDetail.tsx`**
 
-- When a stock unit is linked, use `useUnitProfit(stockUnitId)` to show: Revenue, Landed Cost, Selling Fee, Shipping Fee, Processing Fee, Net Profit, Margin %.
+- Change heading to show the best external reference (eBay ID or DocNumber) as the primary title
+- Show `order.orderNumber` (KO-) as small secondary text
+- Add reference badges for **Channel Ref** and **QBO Doc** when both exist and differ
 
-### 4. Type updates
+### 4. Purchase List — QBO reference as primary identifier
 
-**File: `src/lib/types/admin.ts`**
+**`src/components/admin-v2/PurchaseList.tsx`**
 
-- Change `FeeBreakdown` from `{ fvf; promoted_listings; international; processing }` to `Record<string, number>`.
-- Add `reconciliationStatus` field to `Payout` interface.
+- In BatchCard, show the QBO `reference` (e.g., `814`) as the primary identifier
+- Show `PO-NNN` as secondary/smaller text
 
-### 5. Hooks mapper update
+### 5. Payout linked orders — use external refs
 
-**File: `src/hooks/admin/use-payouts.ts`**
+**`src/components/admin-v2/PayoutView.tsx`**
 
-- Update `mapPayout` to include `reconciliationStatus` from `reconciliation_status` column.
-- Update `CreatePayoutInput` fee breakdown to use dynamic keys.
+- In the linked orders table, show external order ID / doc number as the primary identifier
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `src/lib/types/admin.ts` | `FeeBreakdown` → `Record<string, number>`, add `reconciliationStatus` to `Payout` |
-| `src/hooks/admin/use-payouts.ts` | Update `mapPayout`, update `CreatePayoutInput` |
-| `src/components/admin-v2/PayoutView.tsx` | Rebuild detail slide-out with dynamic fees + linked orders; fix columns; improve create dialog; add reconciliation status |
-| `src/components/admin-v2/OrderDetail.tsx` | Add fee summary cards and profit calculation using `useOrderFees` |
-| `src/components/admin-v2/OrderUnitSlideOut.tsx` | Add unit P&L section using `useUnitProfit` |
+| `src/lib/types/admin.ts` | Add `docNumber` to `Order` |
+| `src/hooks/admin/use-orders.ts` | Map `doc_number` in `mapOrder` |
+| `src/components/admin-v2/OrderList.tsx` | External ref as primary "Ref" column, internal ID hidden |
+| `src/components/admin-v2/OrderDetail.tsx` | External ref as heading, internal ID secondary |
+| `src/components/admin-v2/PurchaseList.tsx` | QBO reference as primary in BatchCard |
+| `src/components/admin-v2/PayoutView.tsx` | External ref in linked orders table |
 
