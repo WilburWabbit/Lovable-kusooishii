@@ -3508,8 +3508,11 @@ export type Database = {
           gross_margin_pct: number | null
           gross_revenue: number | null
           landed_cost: number | null
+          net_landed_cost: number | null
           net_margin_pct: number | null
           net_profit: number | null
+          net_revenue: number | null
+          net_total_fees: number | null
           payout_id: string | null
           processing_fee: number | null
           sales_order_id: string | null
