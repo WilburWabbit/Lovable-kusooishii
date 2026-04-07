@@ -134,7 +134,7 @@ export function useOrder(orderId: string | undefined) {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code)
+            sku:sku_id(sku_code, name)
           )
         `)
         .eq('id', orderId!)
