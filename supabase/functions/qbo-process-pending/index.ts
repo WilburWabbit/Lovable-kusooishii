@@ -1060,7 +1060,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
               sales_order_id: order.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
               stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
-              vat_rate_id: vatRateId, tax_code_id: lineTaxCodeId,
+              vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
             });
             if (lineErr) {
               throw lineErr;
