@@ -694,10 +694,21 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         }
         if (shortfall <= 0) continue;
 
+        // Reserve UIDs atomically BEFORE inserting stock units
+        const { data: reservedUids, error: reserveErr } = await admin.rpc("v2_reserve_stock_unit_uids", {
+          p_batch_id: batchId,
+          p_count: shortfall,
+        });
+        if (reserveErr || !reservedUids || reservedUids.length !== shortfall) {
+          console.error(`UID reservation failed for purchase ${entry.external_id}, batch ${batchId}, count ${shortfall}:`, reserveErr);
+          throw new Error(`UID reservation failed: ${reserveErr?.message ?? "unexpected count"}`);
+        }
+
         const now = new Date().toISOString();
         const stockUnits = [];
         for (let j = 0; j < shortfall; j++) {
           stockUnits.push({
+            uid: reservedUids[j],
             sku_id: sku!.id, mpn: line.mpn, condition_grade: cg,
             status: "available",
             v2_status: "graded",
@@ -710,16 +721,14 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         }
         const { data: createdUnits, error: suErr } = await admin.from("stock_unit").insert(stockUnits).select("id");
         if (suErr) {
-          console.error(`Stock unit insert error for purchase ${entry.external_id}, batch ${batchId}, receiptLine ${receiptLineId}, attempted ${stockUnits.length} units:`, suErr);
+          console.error(`Stock unit insert error for purchase ${entry.external_id}, batch ${batchId}, receiptLine ${receiptLineId}, attempted ${stockUnits.length} units, reserved UIDs ${reservedUids[0]}..${reservedUids[reservedUids.length-1]}:`, suErr);
           throw new Error(`Stock unit insert failed: ${suErr.message}`);
         }
         for (const cu of (createdUnits ?? [])) createdStockUnitIds.push(cu.id);
         stockCreated += (createdUnits ?? []).length;
       }
 
-      // Update batch unit counter (count only units created for THIS batch)
-      const batchUnitCount = createdStockUnitIds.length;
-      await admin.from("purchase_batches").update({ unit_counter: batchUnitCount }).eq("id", batchId);
+      // unit_counter is already correct from the atomic reservation — no manual overwrite needed
 
       // Run cost apportionment
       await admin.rpc("v2_calculate_apportioned_costs", { p_batch_id: batchId });
