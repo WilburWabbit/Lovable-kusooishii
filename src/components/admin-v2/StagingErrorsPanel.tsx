@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,11 +64,10 @@ export function StagingErrorsPanel() {
 
   const resetPurchaseMutation = useMutation({
     mutationFn: async ({ externalId }: { externalId: string }) => {
-      const { data, error } = await supabase.functions.invoke("admin-data", {
-        body: { action: "reset-qbo-purchase", ids: [externalId] },
+      return await invokeWithAuth<{ message?: string }>("admin-data", {
+        action: "reset-qbo-purchase",
+        ids: [externalId],
       });
-      if (error) throw error;
-      return data;
     },
     onSuccess: (data: any) => {
       toast.success(data?.message ?? "Purchase reset — run Process Pending to retry");

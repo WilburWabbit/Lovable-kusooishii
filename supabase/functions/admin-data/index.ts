@@ -2372,7 +2372,7 @@ Deno.serve(async (req) => {
 
     } else if (action === "reset-qbo-purchase") {
       // Targeted reset for specific stuck QBO purchases
-      const ids: string[] = body.ids ?? [];
+      const ids: string[] = params.ids ?? [];
       if (ids.length === 0) throw new ValidationError("ids array required");
       let resetCount = 0;
       for (const qboPurchaseId of ids) {
