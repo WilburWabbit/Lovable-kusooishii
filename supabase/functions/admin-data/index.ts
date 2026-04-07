@@ -2161,7 +2161,9 @@ Deno.serve(async (req) => {
             details.push({ entity: qbo.DocNumber ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
           } else {
             const app = appMap.get(qboId)!;
-            const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
+            const qboNet = Number(qbo.TotalAmt ?? 0);
+            const qboTax = Number(qbo.TxnTaxDetail?.TotalTax ?? 0);
+            const qboTotal = Math.round((qboNet + qboTax) * 100) / 100;
             const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
             if (Math.abs(qboTotal - appTotal) > 0.01) {
               mismatched++;
