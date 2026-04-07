@@ -64,9 +64,12 @@ Deno.serve(async (req) => {
     const dateFrom = (body as Record<string, unknown>).dateFrom as string | undefined;
     const dateTo   = (body as Record<string, unknown>).dateTo   as string | undefined;
 
-    // Get eBay access token
+    // Get eBay access token and signing credentials
     const accessToken = await getEbayAccessToken(admin);
-    const client = new EbayFinancesClient(accessToken);
+    const jwe = Deno.env.get("EBAY_SIGNING_KEY_JWE");
+    const privateKey = Deno.env.get("EBAY_SIGNING_PRIVATE_KEY");
+    if (!jwe || !privateKey) throw new Error("eBay signing credentials not configured (EBAY_SIGNING_KEY_JWE, EBAY_SIGNING_PRIVATE_KEY)");
+    const client = new EbayFinancesClient(accessToken, jwe, privateKey);
 
     // Determine date range
     const now = new Date();
