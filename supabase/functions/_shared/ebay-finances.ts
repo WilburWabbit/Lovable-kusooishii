@@ -2,7 +2,7 @@
  * Shared eBay Finances API client and fee utilities.
  */
 
-// ── Types ────────────────────────────────────────────────────
+import { signEbayRequest } from "./ebay-digital-signature.ts";
 
 export interface EbayAmount {
   value: string;
