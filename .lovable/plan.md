@@ -1,52 +1,88 @@
 
 
-# Fix: Sales Orders Missing Line Items and Stock Allocation
+# Revised Plan: Use QBO DepartmentRef as Canonical Channel Source
 
-## Problem
+## What changes
 
-QBO sales receipt 1796 (eBay order `14-14455-15040`) exists in the database with `qbo_sync_status = synced` but has **zero line items** and **no stock allocated**. There are **23 orders** with this same problem.
+Rewrite `detectOriginChannel` to check `DepartmentRef` first. Keep the existing DocNumber regex logic as a secondary fallback (do NOT remove it). Change the final default from `in_person` to `ebay`.
 
-**Root cause**: The `processSalesReceipts` function in `qbo-process-pending` has a "match-first" path (lines 874–913) that checks if an order already exists by `origin_reference`, `doc_number`, or `order_number`. When it finds a match, it enriches the order with QBO fields (`qbo_sales_receipt_id`, `qbo_sync_status`) and commits the landing record — but **never creates line items or allocates stock**.
+Backfill existing orders where `DepartmentRef` is available in the landing payload. Orders with NULL DepartmentRef and no existing channel keep `ebay`.
 
-This happens when orders are created by eBay import (or another channel) as shell records without line items, then the QBO sales receipt comes through and the matcher assumes the order is already complete.
+## Changes
 
-## Fix
+### 1. `supabase/functions/qbo-process-pending/index.ts` — `detectOriginChannel`
 
-Modify the match-first path in `processSalesReceipts` so that when it finds an existing order, it checks whether line items exist. If the order has no line items, it should proceed to create them from the QBO receipt data and allocate stock — the same logic already used for new orders (lines 986–1037).
+Rewrite to prioritize `DepartmentRef.name`:
 
-### Changes
-
-**File: `supabase/functions/qbo-process-pending/index.ts`**
-
-In the three match-first branches (lines 880–913), after finding an existing order:
-1. Check `SELECT COUNT(*) FROM sales_order_line WHERE sales_order_id = matched_order.id`
-2. If count is 0, fall through to the line-item creation and stock allocation logic instead of continuing
-3. If count > 0, keep the current enrich-and-skip behavior
-
-This is a single logical change in one file. The line-item creation loop (lines 986–1037) already handles SKU resolution, stock allocation via `allocate_stock_units`, and individual line inserts — it just needs to be reachable when the order exists but is incomplete.
-
-### Technical detail
-
-The three match branches all follow the same pattern:
 ```
-if (byRef) {
-  // enrich with QBO fields
-  // ← ADD: check line count, if 0 set order = byRef and fall through
-  // instead of continue
+function detectOriginChannel(receipt: any): string {
+  // Primary: QBO Location/Store (DepartmentRef)
+  const deptName = receipt.DepartmentRef?.name ?? null;
+  if (deptName) {
+    if (/ebay/i.test(deptName)) return "ebay";
+    if (/square\s*space/i.test(deptName)) return "squarespace";
+    if (/kusooishii/i.test(deptName)) return "web";
+    if (/in\s*person/i.test(deptName)) return "in_person";
+    if (/etsy/i.test(deptName)) return "etsy";
+  }
+
+  // Secondary fallback: DocNumber pattern (preserved for legacy/edge cases)
+  const doc = receipt.DocNumber ?? "";
+  if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
+  if (doc.startsWith("KO-")) return "web";
+  if (doc.startsWith("SQR-")) return "in_person";
+  if (doc.startsWith("ETSY-")) return "etsy";
+  if (doc.startsWith("R-SQR-") || doc.startsWith("R-ETSY-") || doc.startsWith("R-KO-")) return "qbo_refund";
+
+  // Tertiary: PaymentMethodRef
+  const pmtName = receipt.PaymentMethodRef?.name ?? "";
+  if (/stripe/i.test(pmtName)) return "web";
+  if (/ebay/i.test(pmtName)) return "ebay";
+  if (/square/i.test(pmtName) || /cash/i.test(pmtName)) return "in_person";
+  if (/etsy/i.test(pmtName)) return "etsy";
+
+  // Default: NULL DepartmentRef = eBay
+  return "ebay";
 }
 ```
 
-A helper variable (e.g., `matchedOrderId`) can be set when a match is found with zero lines, allowing the code to skip the order INSERT but still execute the line-item loop.
+`deriveOriginReference` is untouched — it still uses DocNumber for channel-native IDs.
 
-### Deployment
+### 2. Migration — Backfill existing orders
 
-- Redeploy `qbo-process-pending`
-- Reset the 23 affected landing records back to `pending` so they reprocess
-- Run "Process Pending" (sales) to backfill line items and allocate stock
+Update `origin_channel` on existing `sales_order` rows using the QBO payload's `DepartmentRef` where available:
 
-### Expected outcome
+```sql
+UPDATE sales_order so
+SET origin_channel = CASE
+  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'ebay' THEN 'ebay'
+  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'square.*space' THEN 'squarespace'
+  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'kusooishii' THEN 'web'
+  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'in.*person' THEN 'in_person'
+  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'etsy' THEN 'etsy'
+  ELSE 'ebay'
+END
+FROM landing_raw_qbo_sales_receipt lr
+WHERE lr.external_id = so.qbo_sales_receipt_id
+  AND so.origin_channel IS DISTINCT FROM CASE
+    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'ebay' THEN 'ebay'
+    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'square.*space' THEN 'squarespace'
+    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'kusooishii' THEN 'web'
+    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'in.*person' THEN 'in_person'
+    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'etsy' THEN 'etsy'
+    ELSE 'ebay'
+  END;
+```
 
-- Receipt 1796 reprocesses → 4 line items created for `40220-1.1` → 4 of the 5 available units allocated
-- All 23 affected orders get their line items and stock allocation
-- No new orders created (existing ones are enriched in place)
+### 3. `src/components/admin-v2/OrderList.tsx` — Add `squarespace` channel display
+
+Add `squarespace` as a recognized channel label (e.g., "Square Space") wherever channel values are displayed or filtered.
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| `supabase/functions/qbo-process-pending/index.ts` | Rewrite `detectOriginChannel` — DepartmentRef first, DocNumber preserved as fallback, default → `ebay` |
+| `supabase/migrations/...` | Backfill `origin_channel` from QBO DepartmentRef |
+| `src/components/admin-v2/OrderList.tsx` | Recognize `squarespace` channel in display |
 
