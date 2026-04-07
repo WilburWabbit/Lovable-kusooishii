@@ -273,6 +273,7 @@ export function QboSettingsCard() {
   const reconcileStock = async () => {
     setReconciling(true);
     setReconcileDetails(null);
+    setReconcileType('stock');
     try {
       const d = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'reconcile-stock' });
       if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
@@ -289,6 +290,34 @@ export function QboSettingsCard() {
       setReconciling(false);
     }
   };
+
+  const reconcileEntity = async (entityAction: string, label: string) => {
+    setReconcilingEntity(entityAction);
+    setReconcileDetails(null);
+    setReconcileType(entityAction);
+    try {
+      const d = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: entityAction });
+      if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
+      const summary = [
+        `${(d as Record<string, unknown>).total_qbo ?? 0} in QBO`,
+        `${(d as Record<string, unknown>).total_app ?? 0} in app`,
+        `${(d as Record<string, unknown>).in_sync ?? 0} in sync`,
+      ];
+      if ((d as Record<string, unknown>).missing_in_app) summary.push(`${(d as Record<string, unknown>).missing_in_app} missing in app`);
+      if ((d as Record<string, unknown>).missing_in_qbo) summary.push(`${(d as Record<string, unknown>).missing_in_qbo} missing in QBO`);
+      if ((d as Record<string, unknown>).mismatched) summary.push(`${(d as Record<string, unknown>).mismatched} mismatched`);
+      if ((d as Record<string, unknown>).auto_fixed) summary.push(`${(d as Record<string, unknown>).auto_fixed} auto-fixed`);
+      toast.success(`${label}: ${summary.join(', ')}`);
+      if (((d as Record<string, unknown>).details as unknown[])?.length > 0) {
+        setReconcileDetails((d as Record<string, unknown>).details as Record<string, unknown>[]);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `${label} reconciliation failed`);
+    } finally {
+      setReconcilingEntity(null);
+    }
+  };
+
 
   const rebuildFromQbo = async () => {
     if (!confirm(
