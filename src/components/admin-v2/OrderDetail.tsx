@@ -256,7 +256,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <Mono color={item.cogs ? "default" : "dim"}>
-                        {item.cogs ? fmt(exVAT(item.cogs)) : "—"}
+                        {item.cogs ? fmt(item.cogs) : "—"}
                       </Mono>
                     </td>
                     <td className="px-3 py-2.5">
