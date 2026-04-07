@@ -2114,8 +2114,12 @@ Deno.serve(async (req) => {
 
       if (action === "reconcile-purchases") {
         const qboRecords = await queryQbo("SELECT * FROM Purchase", "Purchase");
-        totalQbo = qboRecords.length;
-        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+        // Filter to inventory-only purchases (matching processor logic)
+        const inventoryPurchases = qboRecords.filter((r: any) =>
+          (r.Line ?? []).some((l: any) => l.DetailType === "ItemBasedExpenseLineDetail")
+        );
+        totalQbo = inventoryPurchases.length;
+        const qboMap = new Map(inventoryPurchases.map((r: any) => [String(r.Id), r]));
 
         const { data: appRecords } = await admin.from("inbound_receipt").select("id, qbo_purchase_id, total_amount, vendor_name, txn_date");
         totalApp = (appRecords ?? []).length;
