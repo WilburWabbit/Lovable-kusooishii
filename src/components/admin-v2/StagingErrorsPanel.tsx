@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, SkipForward, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { RefreshCw, SkipForward, Eye, EyeOff, AlertTriangle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 interface StagingError {
@@ -61,6 +61,25 @@ export function StagingErrorsPanel() {
     onError: (err: any) => toast.error(`Skip failed: ${err.message}`),
   });
 
+  const resetPurchaseMutation = useMutation({
+    mutationFn: async ({ externalId }: { externalId: string }) => {
+      const { data, error } = await supabase.functions.invoke("admin-data", {
+        body: { action: "reset-qbo-purchase", ids: [externalId] },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data: any) => {
+      toast.success(data?.message ?? "Purchase reset — run Process Pending to retry");
+      queryClient.invalidateQueries({ queryKey: ["staging-errors"] });
+    },
+    onError: (err: any) => toast.error(`Reset failed: ${err.message}`),
+  });
+
+  const isPurchaseError = (err: StagingError) =>
+    err.table_name === "landing_raw_qbo_purchase" &&
+    err.error_message?.toLowerCase().includes("duplicate key");
+
   if (isLoading) {
     return (
       <div className="rounded-lg border border-border bg-card p-4">
@@ -96,7 +115,7 @@ export function StagingErrorsPanel() {
               <TableHead className="text-xs w-[80px]">Ext ID</TableHead>
               <TableHead className="text-xs">Error</TableHead>
               <TableHead className="text-xs w-[100px]">Received</TableHead>
-              <TableHead className="text-xs w-[120px] text-right">Actions</TableHead>
+              <TableHead className="text-xs w-[140px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -124,16 +143,29 @@ export function StagingErrorsPanel() {
                       >
                         {expandedId === err.id ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        title="Retry"
-                        onClick={() => retryMutation.mutate({ table: err.table_name, id: err.id })}
-                        disabled={retryMutation.isPending}
-                      >
-                        <RefreshCw className="h-3 w-3" />
-                      </Button>
+                      {isPurchaseError(err) ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-amber-500"
+                          title="Reset & Retry (cleans up partial data)"
+                          onClick={() => resetPurchaseMutation.mutate({ externalId: err.external_id })}
+                          disabled={resetPurchaseMutation.isPending}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Retry"
+                          onClick={() => retryMutation.mutate({ table: err.table_name, id: err.id })}
+                          disabled={retryMutation.isPending}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
