@@ -1310,15 +1310,27 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       const qboDepositId = String(deposit.Id);
       const txnDate = deposit.TxnDate ?? null;
       const totalAmt = deposit.TotalAmt ?? 0;
-      const currency = deposit.CurrencyRef?.value ?? "GBP";
       const memo = deposit.PrivateNote ?? null;
 
       // Detect channel from memo or deposit lines
-      let channel = "unknown";
+      // payout_channel enum only has 'ebay' | 'stripe'
+      let channel: "ebay" | "stripe" = "stripe"; // default
       const memoLower = (memo ?? "").toLowerCase();
       if (/ebay/i.test(memoLower)) channel = "ebay";
-      else if (/stripe/i.test(memoLower) || /web/i.test(memoLower) || /ko-/i.test(memoLower)) channel = "web";
-      else if (/square/i.test(memoLower) || /cash/i.test(memoLower)) channel = "in_person";
+
+      // Also scan deposit lines for linked SalesReceipts to detect channel
+      if (channel === "stripe") {
+        const depositLines = deposit.Line ?? [];
+        for (const dl of depositLines) {
+          const linkedType = dl.LinkedTxn?.[0]?.TxnType;
+          const linkedId = dl.LinkedTxn?.[0]?.TxnId;
+          if (linkedType === "SalesReceipt" && linkedId) {
+            const { data: linkedOrder } = await admin.from("sales_order")
+              .select("origin_channel").eq("qbo_sales_receipt_id", String(linkedId)).maybeSingle();
+            if (linkedOrder?.origin_channel === "ebay") { channel = "ebay"; break; }
+          }
+        }
+      }
 
       // Check for existing payout by qbo_deposit_id
       const { data: existingPayout } = await admin.from("payouts")
@@ -1327,16 +1339,17 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       let payoutId: string;
       if (existingPayout) {
         payoutId = existingPayout.id;
-        // Update existing
+        // Update existing — no currency column, no status column
         await admin.from("payouts").update({
-          payout_date: txnDate, net_amount: totalAmt, currency, channel,
-          notes: memo, updated_at: new Date().toISOString(),
+          payout_date: txnDate, net_amount: totalAmt, gross_amount: totalAmt,
+          channel, notes: memo, reconciliation_status: "reconciled",
+          updated_at: new Date().toISOString(),
         }).eq("id", payoutId);
       } else {
         const { data: newPayout, error: payoutErr } = await admin.from("payouts").insert({
           qbo_deposit_id: qboDepositId, payout_date: txnDate,
-          net_amount: totalAmt, currency, channel, notes: memo,
-          status: "reconciled",
+          net_amount: totalAmt, gross_amount: totalAmt, channel, notes: memo,
+          reconciliation_status: "reconciled",
         }).select("id").single();
         if (payoutErr) throw payoutErr;
         payoutId = newPayout.id;

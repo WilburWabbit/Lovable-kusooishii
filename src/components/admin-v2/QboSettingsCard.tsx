@@ -369,6 +369,40 @@ export function QboSettingsCard() {
       setRebuildPhase('Phase 3g: Processing deposits...');
       await drainPending('Processing deposits', 'deposits');
 
+      // ═══ Phase 4: Replay non-QBO landing events ═══
+      // 4a: Replay Stripe webhook events (website orders)
+      setRebuildPhase('Phase 4a: Replaying Stripe events...');
+      try {
+        for (let i = 0; i < 100; i++) {
+          const d = await invokeWithAuth<Record<string, unknown>>('stripe-webhook', { replay: true });
+          if ((d as Record<string, unknown>)?.processed === 0) break;
+        }
+      } catch (e) {
+        console.warn('Stripe replay phase:', e);
+      }
+
+      // 4b: Replay eBay order events
+      setRebuildPhase('Phase 4b: Replaying eBay orders...');
+      try {
+        for (let i = 0; i < 100; i++) {
+          const d = await invokeWithAuth<Record<string, unknown>>('ebay-process-order', { replay: true });
+          if ((d as Record<string, unknown>)?.processed === 0) break;
+        }
+      } catch (e) {
+        console.warn('eBay order replay phase:', e);
+      }
+
+      // 4c: Replay eBay payout events
+      setRebuildPhase('Phase 4c: Replaying eBay payouts...');
+      try {
+        for (let i = 0; i < 100; i++) {
+          const d = await invokeWithAuth<Record<string, unknown>>('v2-reconcile-payout', { replay: true });
+          if ((d as Record<string, unknown>)?.processed === 0) break;
+        }
+      } catch (e) {
+        console.warn('eBay payout replay phase:', e);
+      }
+
       toast.success(`Rebuild complete — ${purchasesProcessed}+ records committed from fresh QBO snapshot`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Rebuild failed');
