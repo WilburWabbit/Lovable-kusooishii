@@ -2051,6 +2051,245 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = { success: true };
 
+    } else if (action === "reconcile-purchases" || action === "reconcile-sales" ||
+               action === "reconcile-customers" || action === "reconcile-items" ||
+               action === "reconcile-vendors") {
+      // ── Generic QBO reconciliation ──
+      const clientId = Deno.env.get("QBO_CLIENT_ID");
+      const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
+      const realmId = Deno.env.get("QBO_REALM_ID");
+      if (!clientId || !clientSecret || !realmId) throw new Error("QBO credentials not configured");
+
+      const { data: conn, error: connErr } = await admin
+        .from("qbo_connection").select("*").eq("realm_id", realmId).single();
+      if (connErr || !conn) throw new Error("No QBO connection found");
+
+      let accessToken = conn.access_token;
+      if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
+        const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+        });
+        if (!tokenRes.ok) throw new Error(`Token refresh failed [${tokenRes.status}]`);
+        const tokens = await tokenRes.json();
+        const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+        await admin.from("qbo_connection").update({
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expires_at: expiresAt,
+        }).eq("realm_id", realmId);
+        accessToken = tokens.access_token;
+      }
+
+      const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+      const correlationId = crypto.randomUUID();
+
+      // Helper: paginated QBO query
+      const queryQbo = async (sql: string, entityKey: string) => {
+        const all: any[] = [];
+        let startPos = 1;
+        const pageSize = 1000;
+        while (true) {
+          const q = encodeURIComponent(`${sql} STARTPOSITION ${startPos} MAXRESULTS ${pageSize}`);
+          const res = await fetch(`${baseUrl}/query?query=${q}`, {
+            headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+          });
+          if (!res.ok) throw new Error(`QBO query failed [${res.status}]: ${await res.text()}`);
+          const data = await res.json();
+          const page = data?.QueryResponse?.[entityKey] ?? [];
+          all.push(...page);
+          if (page.length < pageSize) break;
+          startPos += pageSize;
+        }
+        return all;
+      };
+
+      const details: any[] = [];
+      let totalQbo = 0, totalApp = 0, inSync = 0, missingInApp = 0, missingInQbo = 0, mismatched = 0, autoFixed = 0;
+
+      if (action === "reconcile-purchases") {
+        const qboRecords = await queryQbo("SELECT * FROM Purchase", "Purchase");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("inbound_receipt").select("id, qbo_purchase_id, total_amount, vendor_name, txn_date");
+        totalApp = (appRecords ?? []).length;
+        const appMap = new Map((appRecords ?? []).filter((r: any) => r.qbo_purchase_id).map((r: any) => [r.qbo_purchase_id, r]));
+
+        // QBO records missing in app
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.EntityRef?.name ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
+            const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
+            if (Math.abs(qboTotal - appTotal) > 0.01) {
+              mismatched++;
+              details.push({ entity: app.vendor_name ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // App records missing in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.vendor_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-sales") {
+        const qboRecords = await queryQbo("SELECT * FROM SalesReceipt", "SalesReceipt");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("sales_order").select("id, qbo_sales_receipt_id, total_amount, origin_channel, order_number");
+        totalApp = (appRecords ?? []).length;
+        const appMap = new Map((appRecords ?? []).filter((r: any) => r.qbo_sales_receipt_id).map((r: any) => [r.qbo_sales_receipt_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DocNumber ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
+            const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
+            if (Math.abs(qboTotal - appTotal) > 0.01) {
+              mismatched++;
+              details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-customers") {
+        const qboRecords = await queryQbo("SELECT * FROM Customer WHERE Active = true", "Customer");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("customer").select("id, qbo_customer_id, display_name, email");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_customer_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_customer_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DisplayName ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            if (app.display_name !== qbo.DisplayName) {
+              mismatched++;
+              details.push({ entity: qbo.DisplayName, qbo_id: qboId, issue: `Name mismatch: QBO "${qbo.DisplayName}" vs App "${app.display_name}"`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // Delete stale app customers not in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            await admin.from("customer").delete().eq("id", app.id);
+            autoFixed++;
+            details.push({ entity: app.display_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "auto_deleted" });
+          }
+        }
+
+      } else if (action === "reconcile-items") {
+        const qboRecords = await queryQbo("SELECT * FROM Item WHERE Type = 'Inventory'", "Item");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("sku").select("id, qbo_item_id, sku_code, name");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_item_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_item_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.Name ?? qboId, qbo_id: qboId, issue: "In QBO but no matching SKU in app", action: "flag" });
+          } else {
+            inSync++;
+          }
+        }
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.sku_code ?? qboId, qbo_id: qboId, issue: "SKU in app but item deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-vendors") {
+        const qboRecords = await queryQbo("SELECT * FROM Vendor WHERE Active = true", "Vendor");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("vendor").select("id, qbo_vendor_id, display_name");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_vendor_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_vendor_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DisplayName ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            if (app.display_name !== qbo.DisplayName) {
+              mismatched++;
+              details.push({ entity: qbo.DisplayName, qbo_id: qboId, issue: `Name mismatch: QBO "${qbo.DisplayName}" vs App "${app.display_name}"`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // Delete stale app vendors not in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            await admin.from("vendor").delete().eq("id", app.id);
+            autoFixed++;
+            details.push({ entity: app.display_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "auto_deleted" });
+          }
+        }
+      }
+
+      details.sort((a: any, b: any) => {
+        const order: Record<string, number> = { auto_deleted: 0, flag: 1 };
+        return (order[a.action] ?? 2) - (order[b.action] ?? 2);
+      });
+
+      result = {
+        success: true,
+        correlation_id: correlationId,
+        total_qbo: totalQbo,
+        total_app: totalApp,
+        in_sync: inSync,
+        missing_in_app: missingInApp,
+        missing_in_qbo: missingInQbo,
+        mismatched,
+        auto_fixed: autoFixed,
+        details,
+      };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

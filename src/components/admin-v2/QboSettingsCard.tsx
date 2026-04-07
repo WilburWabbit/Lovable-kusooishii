@@ -42,6 +42,8 @@ export function QboSettingsCard() {
   const [processLabel, setProcessLabel] = useState('');
   const [reconciling, setReconciling] = useState(false);
   const [reconcileDetails, setReconcileDetails] = useState<Record<string, unknown>[] | null>(null);
+  const [reconcileType, setReconcileType] = useState<string>('stock');
+  const [reconcilingEntity, setReconcilingEntity] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildPhase, setRebuildPhase] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
