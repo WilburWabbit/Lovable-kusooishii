@@ -236,6 +236,8 @@ export interface OrderLineItem {
   name: string | null; // product/SKU name
   unitPrice: number;
   cogs: number | null; // landed cost of consumed stock unit (FIFO)
+  vatRate: number; // e.g. 20
+  lineVat: number; // VAT amount for this line
 }
 
 // ─── 2.10 Customer ────────────────────────────────────────

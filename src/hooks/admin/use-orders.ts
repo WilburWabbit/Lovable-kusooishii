@@ -65,14 +65,22 @@ function mapChannel(ch: string | null): Channel {
 
 function mapLineItem(row: Record<string, unknown>): OrderLineItem {
   const sku = row.sku as Record<string, unknown> | null;
+  const vatRateRow = row.vat_rate as Record<string, unknown> | null;
+  const ratePct = vatRateRow ? ((vatRateRow.rate_percent as number) ?? 20) : 20;
+  const unitPrice = (row.unit_price as number) ?? 0;
+  const net = unitPrice / (1 + ratePct / 100);
+  const lineVat = Math.round((unitPrice - net) * 100) / 100;
+
   return {
     id: row.id as string,
     orderId: row.sales_order_id as string,
     stockUnitId: (row.stock_unit_id as string) ?? null,
     sku: sku ? (sku.sku_code as string) : null,
     name: sku ? ((sku.name as string) ?? null) : null,
-    unitPrice: (row.unit_price as number) ?? 0,
+    unitPrice,
     cogs: (row.cogs as number) ?? null,
+    vatRate: ratePct,
+    lineVat,
   };
 }
 
@@ -89,7 +97,8 @@ export function useOrders() {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code, name)
+            sku:sku_id(sku_code, name),
+            vat_rate:vat_rate_id(rate_percent)
           )
         `)
         .order('created_at', { ascending: false });
@@ -135,7 +144,8 @@ export function useOrder(orderId: string | undefined) {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code, name)
+            sku:sku_id(sku_code, name),
+            vat_rate:vat_rate_id(rate_percent)
           )
         `)
         .eq('id', orderId!)
