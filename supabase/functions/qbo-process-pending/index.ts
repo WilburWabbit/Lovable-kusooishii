@@ -709,7 +709,10 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
           });
         }
         const { data: createdUnits, error: suErr } = await admin.from("stock_unit").insert(stockUnits).select("id");
-        if (suErr) { console.error("Stock unit insert error:", suErr); throw new Error(`Stock unit insert failed: ${suErr.message}`); }
+        if (suErr) {
+          console.error(`Stock unit insert error for purchase ${entry.external_id}, batch ${batchId}, receiptLine ${receiptLineId}, attempted ${stockUnits.length} units:`, suErr);
+          throw new Error(`Stock unit insert failed: ${suErr.message}`);
+        }
         for (const cu of (createdUnits ?? [])) createdStockUnitIds.push(cu.id);
         stockCreated += (createdUnits ?? []).length;
       }
