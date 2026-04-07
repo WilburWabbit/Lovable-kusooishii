@@ -51,7 +51,7 @@ export function QboSettingsCard() {
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || rebuilding;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding;
 
   // ── Fetch status on mount ──
   useState(() => {
