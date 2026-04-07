@@ -1,59 +1,83 @@
 
-Fix rebuild sequencing and unify purchase replay
 
-What is broken now
-- Rebuild clears `purchase_batches` and `purchase_line_items` in `admin-data`.
-- `qbo-process-pending.processPurchases()` does not recreate them; it only rebuilds `inbound_receipt`, `inbound_receipt_line`, and `stock_unit`.
-- The Purchases UI (`PurchaseList` / `usePurchaseBatches`) only reads `purchase_batches`.
-- The only path that currently creates batches is the Intake client mutation in `use-intake.ts`, which rebuild never calls.
-- Result: purchases can be marked “processed” while the actual v2 purchase model is still empty or incomplete.
+# Fix QBO Sync — Complete Root Cause Analysis and Remediation Plan
 
-Implementation plan
+## Issues Found (from database analysis)
 
-1. Create one canonical server-side purchase promotion path
-- Move purchase promotion into one shared server-side routine used by both rebuild and manual intake.
-- Input: one `inbound_receipt`.
-- Output: `purchase_batches`, `purchase_line_items`, and `stock_unit` rows with correct `batch_id`, `line_item_id`, and `inbound_receipt_line_id`.
-- Make it idempotent per QBO purchase: replaying one purchase must replace that purchase’s batch/lines/units, not append.
+### Issue 1: ALL 97 QBO Deposits Failed — Missing `currency` Column
+**Root cause**: `processDeposits()` in `qbo-process-pending` inserts `currency` into the `payouts` table, but that column does not exist. The `payouts` table has no `currency` column — every single deposit failed with: *"Could not find the 'currency' column of 'payouts' in the schema cache"*.
+**Impact**: Zero payouts created. No payout reconciliation possible. All order statuses remain stuck (never reach `payout_received`/`complete`).
+**Fix**: Remove `currency` from the deposit insert payload in `processDeposits()`. The `payouts` table tracks currency at the transaction level, not the payout level.
 
-2. Change QBO purchase processing to use that routine
-- In `qbo-process-pending`, keep QBO purchase landing/normalisation into `inbound_receipt` + lines.
-- Replace the current “create stock only + mark receipt processed” branch with “promote receipt into purchase batch”.
-- Do not mark the QBO purchase landing row committed until batch, line items, and units all succeed.
-- On error, roll back partial batch/line/unit writes and leave the record retryable.
+### Issue 2: 217 Orphan Stock Units — Backfilled Without Batch or Receipt
+**Root cause**: The "Reconcile Stock" function (`admin-data` reconcile-stock action) creates backfill stock units with `v2_status=null`, `batch_id=null`, `inbound_receipt_line_id=null` when QBO reports higher quantities than the app. These 217 units (including 96x 10349-1.1, 7x Hue-GU10-WC.2, 5x GJ2CQ, etc.) were created by reconciliation — they are the exact discrepancies shown in the screenshot.
+**Impact**: These ghost units inflate stock counts. They appear in the Stock Discrepancies panel because QBO still reports them as on-hand but they have no purchase provenance.
+**Fix**: During rebuild Phase 2, the deletion step must also delete stock units where `batch_id IS NULL` (orphan backfills). Currently only deletes all stock, but the screenshot proves some survive — likely because the rebuild ran, then reconcile-stock was run afterwards, re-creating them. Add a post-rebuild guard: do NOT run reconcile-stock automatically after a rebuild. The rebuild itself should produce correct stock levels.
 
-3. Enforce the exact rebuild order
-```text
-Tax/reference pre-step -> Customers -> Items -> Purchases -> Sales/Refunds -> Deposits
-```
-- For rebuild, stop relying on the generic mixed `drainPending()` loop as the main control path.
-- In `QboSettingsCard`, explicitly:
-  - land one phase
-  - process only that entity type until pending = 0
-  - stop if errors remain
-  - only then advance
-- Purchases must be fully promoted before any sales run; deposits must wait until all sales/refunds are committed.
+### Issue 3: 2 Purchases Failed — Duplicate UID Constraint
+**Root cause**: `stock_unit.uid` has a unique constraint. During rebuild, if the UID generation produces a collision (e.g. from a trigger or default), the insert fails. The 2 failing purchases show: *"duplicate key value violates unique constraint 'stock_unit_uid_key'"*.
+**Impact**: 2 purchases not fully processed; their stock units are missing.
+**Fix**: In `processPurchases`, do not set `uid` explicitly — let the database trigger or default handle it. If the trigger generates UIDs from batch ID + sequence, ensure it handles rebuild correctly (no stale sequence state). Alternatively, omit the `uid` field from the insert payload entirely.
 
-4. Remove the split-brain intake path
-- Update `use-intake.ts` so manual “Process into Batch” calls the same server-side purchase promotion routine instead of writing batches/units directly from the browser.
-- Align or retire `process-receipt` so there is only one authoritative receipt-to-batch implementation.
+### Issue 4: Zero Web/Stripe Orders After Rebuild
+**Root cause**: The rebuild correctly resets `landing_raw_stripe_event` to `pending` (Step 6 in admin-data), but Phase 3 in `QboSettingsCard` never replays Stripe events. It only drains QBO entity types. There is no "Phase 4" to replay Stripe/eBay landing events.
+**Impact**: All website orders disappear after rebuild. Only eBay orders (which come through QBO SalesReceipts) are recreated.
+**Fix**: Add Phase 4 to `QboSettingsCard` rebuild flow: after QBO processing completes, invoke the Stripe webhook processor and eBay order processor to replay their pending landing events. This is referenced in the approved plan but was never implemented.
 
-5. Add rebuild safety checks
-- After the Purchases phase, verify:
-  - every committed QBO purchase has one matching purchase batch
-  - batch line totals/unit counts reconcile to the receipt
-  - no stock units exist for a QBO purchase without `batch_id` and `line_item_id`
-- If any of those checks fail, stop before Sales.
+### Issue 5: Channel Attribution — No `web` Orders From QBO
+**Root cause**: QBO SalesReceipts for Stripe/website orders have DocNumber starting with `KO-`. The `detectOriginChannel` function correctly returns `"web"` for these. However, the query `select origin_channel, count(*) from sales_order group by origin_channel` shows 0 web orders. This means either (a) no QBO SalesReceipts have `KO-` DocNumbers, or (b) the match-first logic on lines 862-900 is matching them to existing orders and enriching rather than creating — but since Stripe orders were deleted in the rebuild and never replayed, there's nothing to match against.
+**Impact**: Website sales are completely missing from the app.
+**Fix**: Same as Issue 4 — replay Stripe landing events. The QBO SalesReceipts with `KO-` prefixes should then match against the recreated Stripe orders.
 
-Files to update
-- `supabase/functions/qbo-process-pending/index.ts`
-- `src/components/admin-v2/QboSettingsCard.tsx`
-- `src/hooks/admin/use-intake.ts`
-- `supabase/functions/process-receipt/index.ts` or a new shared purchase-promotion helper
-- `supabase/functions/admin-data/index.ts` for rebuild orchestration/reporting only
+### Issue 6: Customer Count May Include Stale Records
+**Current state**: 318 customers in app, 318 in landing table. The orphan cleanup appears to be working (no orphans found). However, the user reports seeing QBO-deleted customers. Since the customer sync now filters `Active = true`, this should be resolved. If any persist, they may be from pre-rebuild data that wasn't cleaned.
+**Fix**: No code change needed — verify after next rebuild. The existing orphan cleanup logic should handle this.
 
-Expected result
-- Rebuild follows the business sequence you specified.
-- Purchases are not just cleared; they are actually rebuilt into the v2 purchase model the UI uses.
-- Sales allocate against rebuilt purchase stock, and deposits reconcile only after the sales base exists.
-- One bad purchase can be purged and replayed with the same code path as the full rebuild.
+---
+
+## Implementation Plan
+
+### Step 1: Fix `processDeposits` — Remove `currency` field
+**File**: `supabase/functions/qbo-process-pending/index.ts`
+In the `processDeposits` function (~line 1336), remove `currency` from the payout insert and update payloads. The `payouts` table does not have a `currency` column.
+
+### Step 2: Fix stock unit UID collision during rebuild
+**File**: `supabase/functions/qbo-process-pending/index.ts`
+In `processPurchases` (~line 700), ensure the stock unit insert payload does NOT include a `uid` field — let the database trigger generate it. Check if any explicit `uid` is being set.
+
+### Step 3: Delete orphan stock units during rebuild
+**File**: `supabase/functions/admin-data/index.ts`
+After the main stock deletion (Step 3, ~line 1696), add an explicit deletion for any remaining stock units with `batch_id IS NULL`. This catches backfill units from prior reconciliation runs.
+
+### Step 4: Add Stripe/eBay replay phase to rebuild
+**File**: `src/components/admin-v2/QboSettingsCard.tsx`
+After Phase 3g (deposit processing), add:
+- Phase 4a: Replay Stripe landing events (call `stripe-webhook` processor or equivalent)
+- Phase 4b: Replay eBay order landing events (call `ebay-process-order` or equivalent)
+- Phase 4c: Replay eBay payout landing events (call `ebay-import-payouts` or equivalent)
+- Phase 4d: Run payout reconciliation for all created payouts
+
+### Step 5: Reset all errored deposits for reprocessing
+After deploying the fixed `processDeposits`, reset all 97 errored deposit landing records back to `pending` so they can be reprocessed on the next rebuild or manual "Process Pending" action. This is a data operation (UPDATE), not a schema change.
+
+### Step 6: Verify purchase error recovery
+After deploying the UID fix, reset the 2 errored purchase landing records back to `pending` for reprocessing.
+
+---
+
+## Files Modified
+
+1. `supabase/functions/qbo-process-pending/index.ts` — remove `currency` from deposit processing; verify no explicit `uid` in stock unit inserts
+2. `supabase/functions/admin-data/index.ts` — add orphan stock cleanup (`batch_id IS NULL`) to rebuild
+3. `src/components/admin-v2/QboSettingsCard.tsx` — add Phase 4 (Stripe/eBay replay) to rebuild flow
+
+## Expected Outcome
+
+After deploying and running "Rebuild from QBO":
+- All 97 QBO deposits process successfully into `payouts` table
+- No orphan stock units remain (backfill ghosts eliminated)
+- 2 previously failing purchases process correctly
+- Stripe/website orders are restored via landing event replay
+- Payout reconciliation runs against the complete order set
+- Stock discrepancy panel shows zero differences
+
