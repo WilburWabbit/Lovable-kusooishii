@@ -550,6 +550,11 @@ export function QboSettingsCard() {
             <div className="flex flex-wrap gap-1.5">
               <Btn onClick={processPending} busy={processing}>Process Pending</Btn>
               <Btn onClick={reconcileStock} busy={reconciling}>Reconcile Stock</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-purchases', 'Purchases')} busy={reconcilingEntity === 'reconcile-purchases'}>Reconcile Purchases</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-sales', 'Sales')} busy={reconcilingEntity === 'reconcile-sales'}>Reconcile Sales</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-customers', 'Customers')} busy={reconcilingEntity === 'reconcile-customers'}>Reconcile Customers</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-items', 'Items')} busy={reconcilingEntity === 'reconcile-items'}>Reconcile Items</Btn>
+              <Btn onClick={() => reconcileEntity('reconcile-vendors', 'Vendors')} busy={reconcilingEntity === 'reconcile-vendors'}>Reconcile Vendors</Btn>
             </div>
           </div>
 
@@ -566,28 +571,52 @@ export function QboSettingsCard() {
           {reconcileDetails && reconcileDetails.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs font-medium text-zinc-700">Stock Discrepancies</p>
+                <p className="text-xs font-medium text-zinc-700">
+                  {reconcileType === 'stock' ? 'Stock Discrepancies' : `${reconcileType.replace('reconcile-', '').replace(/^\w/, (c: string) => c.toUpperCase())} Discrepancies`}
+                </p>
                 <button onClick={() => setReconcileDetails(null)} className="text-[9px] text-zinc-400 hover:text-zinc-600">dismiss</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[10px]">
                   <thead>
                     <tr className="border-b border-zinc-200">
-                      <th className="text-left py-1 pr-2 text-zinc-500 font-medium">SKU</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">QBO</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">App</th>
-                      <th className="text-right py-1 px-2 text-zinc-500 font-medium">Diff</th>
-                      <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                      {reconcileType === 'stock' ? (
+                        <>
+                          <th className="text-left py-1 pr-2 text-zinc-500 font-medium">SKU</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">QBO</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">App</th>
+                          <th className="text-right py-1 px-2 text-zinc-500 font-medium">Diff</th>
+                          <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="text-left py-1 pr-2 text-zinc-500 font-medium">Entity</th>
+                          <th className="text-left py-1 px-2 text-zinc-500 font-medium">QBO ID</th>
+                          <th className="text-left py-1 px-2 text-zinc-500 font-medium">Issue</th>
+                          <th className="text-left py-1 pl-2 text-zinc-500 font-medium">Action</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {reconcileDetails.slice(0, 20).map((d, i) => (
+                    {reconcileDetails.slice(0, 30).map((d, i) => (
                       <tr key={i} className="border-b border-zinc-100">
-                        <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
-                        <td className="text-right py-0.5 px-2">{String(d.qbo_qty)}</td>
-                        <td className="text-right py-0.5 px-2">{String(d.app_qty)}</td>
-                        <td className="text-right py-0.5 px-2">{String(d.diff)}</td>
-                        <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                        {reconcileType === 'stock' ? (
+                          <>
+                            <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.sku_code)}</Mono></td>
+                            <td className="text-right py-0.5 px-2">{String(d.qbo_qty)}</td>
+                            <td className="text-right py-0.5 px-2">{String(d.app_qty)}</td>
+                            <td className="text-right py-0.5 px-2">{String(d.diff)}</td>
+                            <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-0.5 pr-2"><Mono className="text-[10px]">{String(d.entity)}</Mono></td>
+                            <td className="py-0.5 px-2"><Mono className="text-[10px]">{String(d.qbo_id)}</Mono></td>
+                            <td className="py-0.5 px-2 text-zinc-600 max-w-[200px] truncate">{String(d.issue)}</td>
+                            <td className="py-0.5 pl-2 text-zinc-500">{String(d.action)}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
