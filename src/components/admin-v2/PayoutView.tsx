@@ -149,7 +149,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.promoted_listings.toFixed(2)}</Mono>,
+    render: (r) => <Mono color="red">£{(r.feeBreakdown?.promoted_listings ?? 0).toFixed(2)}</Mono>,
   },
   {
     key: "internationalFee",
