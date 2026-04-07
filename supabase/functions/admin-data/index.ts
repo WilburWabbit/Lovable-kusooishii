@@ -2151,7 +2151,7 @@ Deno.serve(async (req) => {
         totalQbo = qboRecords.length;
         const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
 
-        const { data: appRecords } = await admin.from("sales_order").select("id, qbo_sales_receipt_id, total_amount, origin_channel, order_number");
+        const { data: appRecords } = await admin.from("sales_order").select("id, qbo_sales_receipt_id, gross_total, origin_channel, order_number");
         totalApp = (appRecords ?? []).length;
         const appMap = new Map((appRecords ?? []).filter((r: any) => r.qbo_sales_receipt_id).map((r: any) => [r.qbo_sales_receipt_id, r]));
 
@@ -2162,7 +2162,7 @@ Deno.serve(async (req) => {
           } else {
             const app = appMap.get(qboId)!;
             const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
-            const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
+            const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
             if (Math.abs(qboTotal - appTotal) > 0.01) {
               mismatched++;
               details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
