@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrder, orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
+import { useOrderFees } from "@/hooks/admin/use-payouts";
 import type { OrderLineItem, StockUnitStatus } from "@/lib/types/admin";
 import {
   SurfaceCard,
@@ -32,6 +33,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: order, isLoading } = useOrder(orderId);
+  const { data: orderFees = [] } = useOrderFees(orderId);
   const [showAllocate, setShowAllocate] = useState(false);
   const [showShip, setShowShip] = useState(false);
   const [showReturn, setShowReturn] = useState(false);
@@ -43,6 +45,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     carrier?: string | null;
     trackingNumber?: string | null;
     payoutStatus?: string;
+    stockUnitIdForProfit?: string;
   }) | null>(null);
 
   // Fetch welcome code for eBay orders (QR label printing)
@@ -81,6 +84,16 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     },
   });
 
+  // Aggregate fees by category
+  const feeTotals = orderFees.reduce<Record<string, number>>((acc, fee) => {
+    acc[fee.feeCategory] = (acc[fee.feeCategory] ?? 0) + fee.amount;
+    return acc;
+  }, {});
+  const totalOrderFees = orderFees.reduce((s, f) => s + f.amount, 0);
+
+  // COGS total
+  const totalCogs = order?.lineItems.reduce((s, li) => s + (li.cogs ?? 0), 0) ?? 0;
+
   if (isLoading) {
     return <p className="text-zinc-500 text-sm">Loading order…</p>;
   }
@@ -108,6 +121,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       : order.qboSyncStatus === "error"
       ? "#EF4444"
       : "#F59E0B";
+
+  const netProfit = order.netAmount - totalCogs - totalOrderFees;
 
   return (
     <div className="pb-20 lg:pb-0">
@@ -195,6 +210,39 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           />
         )}
       </div>
+
+      {/* Fees & Profit cards */}
+      {(totalOrderFees > 0 || totalCogs > 0) && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <SummaryCard label="COGS" value={`£${totalCogs.toFixed(2)}`} color="#A1A1AA" />
+          <SummaryCard label="Fees" value={`£${totalOrderFees.toFixed(2)}`} color="#EF4444" />
+          <SummaryCard
+            label="Net Profit"
+            value={`£${netProfit.toFixed(2)}`}
+            color={netProfit >= 0 ? "#22C55E" : "#EF4444"}
+          />
+          <SummaryCard
+            label="Margin"
+            value={order.netAmount > 0 ? `${((netProfit / order.netAmount) * 100).toFixed(1)}%` : "—"}
+            color={netProfit >= 0 ? "#22C55E" : "#EF4444"}
+          />
+        </div>
+      )}
+
+      {/* Fee breakdown detail */}
+      {Object.keys(feeTotals).length > 0 && (
+        <SurfaceCard className="mb-5">
+          <SectionHead>Fee Breakdown</SectionHead>
+          <div className="grid gap-1">
+            {Object.entries(feeTotals).map(([cat, amount]) => (
+              <div key={cat} className="flex justify-between py-1 border-b border-zinc-100">
+                <span className="text-zinc-600 text-xs capitalize">{cat.replace(/_/g, " ")}</span>
+                <Mono color="red" className="text-xs">£{amount.toFixed(2)}</Mono>
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      )}
 
       {/* Line items table */}
       <SurfaceCard noPadding className="overflow-hidden">
@@ -297,6 +345,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                             carrier: order.carrier,
                             trackingNumber: order.trackingNumber,
                             payoutStatus,
+                            stockUnitIdForProfit: item.stockUnitId ?? undefined,
                           })
                         }
                         className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
