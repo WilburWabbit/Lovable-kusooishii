@@ -70,7 +70,10 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     label: "Channel",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <span className="text-zinc-600">{r.channel}</span>,
+    render: (r) => {
+      const label = r.channel === "squarespace" ? "Square Space" : r.channel;
+      return <span className="text-zinc-600">{label}</span>;
+    },
   },
   {
     key: "items",

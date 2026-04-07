@@ -220,26 +220,33 @@ async function cleanupSalesOrder(admin: any, orderId: string): Promise<void> {
 // ════════════════════════════════════════════════════════════
 
 function detectOriginChannel(receipt: any): string {
+  // Primary: QBO Location/Store (DepartmentRef) — canonical source
+  const deptName = receipt.DepartmentRef?.name ?? null;
+  if (deptName) {
+    if (/ebay/i.test(deptName)) return "ebay";
+    if (/square\s*space/i.test(deptName)) return "squarespace";
+    if (/kusooishii/i.test(deptName)) return "web";
+    if (/in\s*person/i.test(deptName)) return "in_person";
+    if (/etsy/i.test(deptName)) return "etsy";
+  }
+
+  // Secondary fallback: DocNumber pattern (preserved for legacy/edge cases)
   const doc = receipt.DocNumber ?? "";
-  // eBay order IDs: XX-XXXXX-XXXXX pattern
   if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
-  // Stripe/website orders: KO- prefix
   if (doc.startsWith("KO-")) return "web";
-  // Square orders → in_person
   if (doc.startsWith("SQR-")) return "in_person";
-  // Etsy orders
   if (doc.startsWith("ETSY-")) return "etsy";
-  // Refund patterns
   if (doc.startsWith("R-SQR-") || doc.startsWith("R-ETSY-") || doc.startsWith("R-KO-")) return "qbo_refund";
 
-  // Fallback: check PaymentMethodRef
+  // Tertiary: PaymentMethodRef
   const pmtName = receipt.PaymentMethodRef?.name ?? "";
   if (/stripe/i.test(pmtName)) return "web";
   if (/ebay/i.test(pmtName)) return "ebay";
   if (/square/i.test(pmtName) || /cash/i.test(pmtName)) return "in_person";
   if (/etsy/i.test(pmtName)) return "etsy";
 
-  return "in_person";
+  // Default: NULL DepartmentRef = eBay
+  return "ebay";
 }
 
 // Derive the external reference for an order — prefer the channel-native ID

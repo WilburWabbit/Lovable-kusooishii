@@ -25,7 +25,7 @@ export type PurchaseBatchStatus = 'draft' | 'recorded';
 
 export type VendorType = 'supplier' | 'marketplace' | 'payment_processor' | 'other';
 
-export type Channel = 'ebay' | 'website' | 'bricklink' | 'brickowl' | 'in_person';
+export type Channel = 'ebay' | 'website' | 'web' | 'bricklink' | 'brickowl' | 'in_person' | 'etsy' | 'squarespace';
 
 export type ChannelListingStatus = 'draft' | 'live' | 'paused' | 'ended';
 
