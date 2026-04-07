@@ -55,7 +55,7 @@ export function PricingActionsCard() {
         try {
           const pricing = await invokeWithAuth<Record<string, any>>(
             'admin-data',
-            { action: 'calculate-selling-costs', sku_id: listing.sku_id, channel: listing.channel }
+            { action: 'calculate-pricing', sku_id: listing.sku_id, channel: listing.channel }
           );
 
           if (pricing?.floor_price != null) {
