@@ -217,6 +217,7 @@ export interface Order {
   trackingNumber: string | null;
   shippingCost: number | null;
   blueBellClub: boolean;
+  docNumber: string | null;
   qboSalesReceiptId: string | null;
   qboSyncStatus: QBOSyncStatus;
   externalOrderId: string | null;

@@ -23,6 +23,8 @@ function getValue(row: OrderRow, key: string): unknown {
       return row.customer?.name ?? "Cash Sales";
     case "items":
       return row.lineItems.length;
+    case "ref":
+      return row.externalOrderId || row.docNumber || row.orderNumber;
     default:
       return (row as unknown as Record<string, unknown>)[key];
   }
@@ -41,11 +43,22 @@ const formatDate = (iso: string | null) => {
 
 const COLUMNS: ColumnDef<OrderRow>[] = [
   {
-    key: "orderNumber",
-    label: "Order",
+    key: "ref",
+    label: "Ref",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <Mono color="amber">{r.orderNumber}</Mono>,
+    render: (r) => {
+      const ref = r.externalOrderId || r.docNumber || r.orderNumber;
+      const isInternal = !r.externalOrderId && !r.docNumber;
+      return <Mono color={isInternal ? "dim" : "amber"}>{ref}</Mono>;
+    },
+  },
+  {
+    key: "orderNumber",
+    label: "Internal ID",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.orderNumber}</Mono>,
   },
   {
     key: "customerName",
@@ -204,11 +217,11 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     },
   },
   {
-    key: "externalOrderId",
-    label: "External ID",
+    key: "docNumber",
+    label: "QBO Doc",
     defaultVisible: false,
-    sortable: false,
-    render: (r) => <Mono color="dim">{r.externalOrderId ?? "—"}</Mono>,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.docNumber ?? "—"}</Mono>,
   },
   {
     key: "shippedAt",
@@ -294,6 +307,8 @@ export function OrderList() {
       result = result.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(term) ||
+          (r.externalOrderId ?? "").toLowerCase().includes(term) ||
+          (r.docNumber ?? "").toLowerCase().includes(term) ||
           (r.customer?.name ?? "Cash Sales").toLowerCase().includes(term),
       );
     }

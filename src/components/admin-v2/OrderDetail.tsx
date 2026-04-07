@@ -132,13 +132,19 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1 flex-wrap">
-            <h1 className="text-[22px] font-bold text-zinc-900">{order.orderNumber}</h1>
+            <h1 className="text-[22px] font-bold text-zinc-900">
+              {order.externalOrderId || order.docNumber || order.orderNumber}
+            </h1>
             <OrderStatusBadge status={order.status} />
           </div>
           <div className="flex flex-wrap gap-2 lg:gap-4 text-zinc-500 text-[13px]">
+            <span className="text-zinc-400 font-mono text-[11px]">{order.orderNumber}</span>
             <span>{customerName}</span>
             <span>{order.channel}</span>
             <span>{formattedDate}</span>
+            {order.externalOrderId && order.docNumber && order.externalOrderId !== order.docNumber && (
+              <span className="text-zinc-400 font-mono text-[11px]">QBO: {order.docNumber}</span>
+            )}
           </div>
         </div>
         <div className="hidden lg:flex gap-2">

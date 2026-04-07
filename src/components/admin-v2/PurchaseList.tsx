@@ -96,7 +96,8 @@ function BatchCard({
     <SurfaceCard onClick={onClick} noPadding className="overflow-hidden">
       <div className="px-4 py-3.5 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <Mono color="amber" className="text-sm">{batch.id}</Mono>
+          <Mono color="amber" className="text-sm">{batch.reference || batch.id}</Mono>
+          {batch.reference && <Mono color="dim" className="text-[10px]">{batch.id}</Mono>}
           <span className="text-zinc-900 font-medium text-sm">{batch.supplierName}</span>
           <span className="text-zinc-500 text-xs">{formattedDate}</span>
         </div>
