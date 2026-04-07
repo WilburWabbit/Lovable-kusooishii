@@ -97,7 +97,8 @@ export function useOrders() {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code, name)
+            sku:sku_id(sku_code, name),
+            vat_rate:vat_rate_id(rate_percent)
           )
         `)
         .order('created_at', { ascending: false });
