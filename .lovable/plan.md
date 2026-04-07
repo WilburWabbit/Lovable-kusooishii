@@ -1,89 +1,52 @@
 
 
-# Use QBO Location/Store as Canonical Channel Source
+# Fix: Sales Orders Missing Line Items and Stock Allocation
 
-## Current state
+## Problem
 
-The `detectOriginChannel` function uses fragile DocNumber regex patterns and PaymentMethodRef fallbacks to guess the channel. This works most of the time but is brittle — 315 of 331 sales receipts have `DepartmentRef = NULL` (defaulting to eBay via fallback), while the remaining 16 have explicit Location values.
+QBO sales receipt 1796 (eBay order `14-14455-15040`) exists in the database with `qbo_sync_status = synced` but has **zero line items** and **no stock allocated**. There are **23 orders** with this same problem.
 
-The QBO `DepartmentRef` field is already present in every `landing_raw_qbo_sales_receipt.raw_payload`. The five Location/Store values in QBO map cleanly:
+**Root cause**: The `processSalesReceipts` function in `qbo-process-pending` has a "match-first" path (lines 874–913) that checks if an order already exists by `origin_reference`, `doc_number`, or `order_number`. When it finds a match, it enriches the order with QBO fields (`qbo_sales_receipt_id`, `qbo_sync_status`) and commits the landing record — but **never creates line items or allocates stock**.
 
-| QBO DepartmentRef.name | QBO ID | → `origin_channel` |
-|---|---|---|
-| `eBay` | 1000000001 | `ebay` |
-| `kusooishii.com` | 1000000011 | `web` |
-| `In Person Sales` | 1000000021 | `in_person` |
-| `Etsy` | 1000000031 | `etsy` |
-| `kusooishii.com:Square Space` | 1000000041 | `squarespace` |
-| NULL (no DepartmentRef) | — | `ebay` (default) |
+This happens when orders are created by eBay import (or another channel) as shell records without line items, then the QBO sales receipt comes through and the matcher assumes the order is already complete.
 
-## Changes
+## Fix
 
-### 1. Update `detectOriginChannel` in `qbo-process-pending/index.ts`
+Modify the match-first path in `processSalesReceipts` so that when it finds an existing order, it checks whether line items exist. If the order has no line items, it should proceed to create them from the QBO receipt data and allocate stock — the same logic already used for new orders (lines 986–1037).
 
-Replace the current DocNumber/PaymentMethodRef heuristic with a `DepartmentRef`-first approach:
+### Changes
 
+**File: `supabase/functions/qbo-process-pending/index.ts`**
+
+In the three match-first branches (lines 880–913), after finding an existing order:
+1. Check `SELECT COUNT(*) FROM sales_order_line WHERE sales_order_id = matched_order.id`
+2. If count is 0, fall through to the line-item creation and stock allocation logic instead of continuing
+3. If count > 0, keep the current enrich-and-skip behavior
+
+This is a single logical change in one file. The line-item creation loop (lines 986–1037) already handles SKU resolution, stock allocation via `allocate_stock_units`, and individual line inserts — it just needs to be reachable when the order exists but is incomplete.
+
+### Technical detail
+
+The three match branches all follow the same pattern:
 ```
-function detectOriginChannel(receipt: any): string {
-  const deptName = receipt.DepartmentRef?.name ?? null;
-  
-  if (deptName) {
-    if (/ebay/i.test(deptName)) return "ebay";
-    if (/square\s*space/i.test(deptName)) return "squarespace";
-    if (/kusooishii/i.test(deptName)) return "web";
-    if (/in\s*person/i.test(deptName)) return "in_person";
-    if (/etsy/i.test(deptName)) return "etsy";
-  }
-  
-  // Fallback: NULL DepartmentRef → eBay (per business rule)
-  // Keep existing DocNumber/PaymentMethodRef logic as secondary fallback
-  ...existing regex logic...
+if (byRef) {
+  // enrich with QBO fields
+  // ← ADD: check line count, if 0 set order = byRef and fall through
+  // instead of continue
 }
 ```
 
-DepartmentRef is checked first. If present, it's authoritative. If absent, the existing DocNumber/PaymentMethodRef logic runs as a safety net, with the final default remaining `ebay` instead of `in_person`.
+A helper variable (e.g., `matchedOrderId`) can be set when a match is found with zero lines, allowing the code to skip the order INSERT but still execute the line-item loop.
 
-### 2. Add `squarespace` as a recognized channel value
+### Deployment
 
-The `origin_channel` column is plain `text`, so no migration is needed. The UI channel filter and any display logic should handle `squarespace` as a label (e.g., "Square Space" or "SquareSpace"). One small update in the admin UI where channel badges/labels are rendered.
+- Redeploy `qbo-process-pending`
+- Reset the 23 affected landing records back to `pending` so they reprocess
+- Run "Process Pending" (sales) to backfill line items and allocate stock
 
-### 3. Backfill existing orders
+### Expected outcome
 
-A one-time data correction via migration to update orders that were misclassified:
-
-```sql
--- Update orders where we can re-derive channel from the QBO payload
-UPDATE sales_order so
-SET origin_channel = CASE
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'ebay' THEN 'ebay'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'square.*space' THEN 'squarespace'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'kusooishii' THEN 'web'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'in.*person' THEN 'in_person'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'etsy' THEN 'etsy'
-  ELSE so.origin_channel
-END
-FROM landing_raw_qbo_sales_receipt lr
-WHERE lr.external_id = so.qbo_sales_receipt_id
-  AND lr.raw_payload->'DepartmentRef' IS NOT NULL
-  AND lr.raw_payload->>'DepartmentRef' != 'null';
-```
-
-### 4. Fix the default fallback
-
-Change the final fallback in `detectOriginChannel` from `return "in_person"` to `return "ebay"` — matching the business rule that NULL Location = eBay.
-
-## Files changed
-
-| File | Change |
-|---|---|
-| `supabase/functions/qbo-process-pending/index.ts` | Rewrite `detectOriginChannel` to use `DepartmentRef` first, change default fallback to `ebay` |
-| `supabase/migrations/...` | Backfill `origin_channel` on existing orders using QBO payload DepartmentRef |
-| `src/components/admin-v2/OrderList.tsx` | Add `squarespace` to channel filter/badge display (if present) |
-
-## Expected outcome
-
-- All future QBO sales receipts get their channel from the authoritative QBO Location field
-- Existing orders with QBO DepartmentRef data are corrected
-- The 315 NULL-location orders remain as `ebay` (correct per business rule)
-- SquareSpace orders are distinguished from other in-person sales
+- Receipt 1796 reprocesses → 4 line items created for `40220-1.1` → 4 of the 5 available units allocated
+- All 23 affected orders get their line items and stock allocation
+- No new orders created (existing ones are enriched in place)
 
