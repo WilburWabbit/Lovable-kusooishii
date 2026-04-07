@@ -417,6 +417,30 @@ export function QboSettingsCard() {
     }
   };
 
+  const cleanupGhostUnits = async () => {
+    setCleaningGhosts(true);
+    try {
+      const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'cleanup-ghost-units' });
+      toast.success(`Cleaned up ${(data as any)?.deleted ?? 0} ghost stock units`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Cleanup failed');
+    } finally {
+      setCleaningGhosts(false);
+    }
+  };
+
+  const recalcAvgCost = async () => {
+    setRecalcingCost(true);
+    try {
+      const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'recalc-avg-cost' });
+      toast.success(`Recalculated avg cost on ${(data as any)?.updated ?? 0} SKUs`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Recalc failed');
+    } finally {
+      setRecalcingCost(false);
+    }
+  };
+
   // ── Render ──
 
   const Btn = ({ onClick, disabled, busy, children }: {
