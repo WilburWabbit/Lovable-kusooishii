@@ -625,6 +625,30 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       const totalStockCost = stockLines.reduce((s, l) => s + Number(l.line_total), 0);
       const validGrades = ["1", "2", "3", "4", "5"];
 
+      // ── Cleanup existing purchase batches for this QBO purchase (prevents duplicates on reprocessing) ──
+      const { data: existingBatches } = await admin.from("purchase_batches")
+        .select("id").eq("reference", qboPurchaseId);
+      if (existingBatches && existingBatches.length > 0) {
+        const oldBatchIds = existingBatches.map((b: any) => b.id);
+        console.log(`Cleaning up ${oldBatchIds.length} existing batch(es) for QBO purchase ${qboPurchaseId}: ${oldBatchIds.join(", ")}`);
+
+        // Find stock units linked to these batches
+        const { data: batchUnits } = await admin.from("stock_unit")
+          .select("id, status, v2_status").in("batch_id", oldBatchIds);
+        for (const unit of (batchUnits ?? [])) {
+          if (unit.status === "closed" || unit.v2_status === "sold") {
+            // Sold — nullify batch link but preserve unit
+            await admin.from("stock_unit").update({ batch_id: null, line_item_id: null }).eq("id", unit.id);
+          } else {
+            await admin.from("stock_unit").delete().eq("id", unit.id);
+          }
+        }
+
+        // Delete purchase line items then batches
+        await admin.from("purchase_line_items").delete().in("batch_id", oldBatchIds);
+        await admin.from("purchase_batches").delete().in("id", oldBatchIds);
+      }
+
       // ── Create purchase batch (v2 purchase model) ──
       const sharedCosts = JSON.stringify({ shipping: 0, broker_fee: 0, other: Math.round(totalOverhead * 100) / 100 });
       const { data: batch, error: batchErr } = await admin.from("purchase_batches").insert({
