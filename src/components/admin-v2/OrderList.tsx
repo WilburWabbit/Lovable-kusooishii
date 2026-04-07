@@ -41,11 +41,22 @@ const formatDate = (iso: string | null) => {
 
 const COLUMNS: ColumnDef<OrderRow>[] = [
   {
-    key: "orderNumber",
-    label: "Order",
+    key: "ref",
+    label: "Ref",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <Mono color="amber">{r.orderNumber}</Mono>,
+    render: (r) => {
+      const ref = r.externalOrderId || r.docNumber || r.orderNumber;
+      const isInternal = !r.externalOrderId && !r.docNumber;
+      return <Mono color={isInternal ? "dim" : "amber"}>{ref}</Mono>;
+    },
+  },
+  {
+    key: "orderNumber",
+    label: "Internal ID",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.orderNumber}</Mono>,
   },
   {
     key: "customerName",
