@@ -38,6 +38,11 @@ export function OrderUnitSlideOut({ lineItem, open, onClose }: OrderUnitSlideOut
       ]
     : [];
 
+  // Calculate input VAT reclaim for this unit
+  const vatReclaimCost = profit ? profit.landedCost - profit.netLandedCost : 0;
+  const vatReclaimFees = profit ? profit.totalFeesPerUnit - profit.netTotalFees : 0;
+  const totalVatReclaim = vatReclaimCost + vatReclaimFees;
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
@@ -71,46 +76,50 @@ export function OrderUnitSlideOut({ lineItem, open, onClose }: OrderUnitSlideOut
               </div>
             )}
 
-            {/* Unit P&L */}
+            {/* Unit P&L — all ex-VAT */}
             {profit && (
               <div>
-                <SectionHead>Unit P&amp;L</SectionHead>
+                <SectionHead>Unit P&amp;L (ex-VAT)</SectionHead>
                 <div className="grid gap-1.5 bg-zinc-50 rounded-lg p-3">
                   <div className="flex justify-between py-1 border-b border-zinc-100">
-                    <span className="text-zinc-600 text-xs">Revenue</span>
-                    <Mono color="teal" className="text-xs">£{profit.grossRevenue.toFixed(2)}</Mono>
+                    <span className="text-zinc-600 text-xs">Revenue (ex-VAT)</span>
+                    <Mono color="teal" className="text-xs">£{profit.netRevenue.toFixed(2)}</Mono>
                   </div>
                   <div className="flex justify-between py-1 border-b border-zinc-100">
-                    <span className="text-zinc-600 text-xs">Landed Cost</span>
-                    <Mono className="text-xs">£{profit.landedCost.toFixed(2)}</Mono>
+                    <span className="text-zinc-600 text-xs">Landed Cost (ex-VAT)</span>
+                    <Mono className="text-xs">£{profit.netLandedCost.toFixed(2)}</Mono>
                   </div>
                   {profit.sellingFee > 0 && (
                     <div className="flex justify-between py-1 border-b border-zinc-100">
-                      <span className="text-zinc-600 text-xs">Selling Fee</span>
-                      <Mono color="red" className="text-xs">£{profit.sellingFee.toFixed(2)}</Mono>
+                      <span className="text-zinc-600 text-xs">Selling Fee (ex-VAT)</span>
+                      <Mono color="red" className="text-xs">£{(profit.sellingFee / 1.2).toFixed(2)}</Mono>
                     </div>
                   )}
                   {profit.shippingFee > 0 && (
                     <div className="flex justify-between py-1 border-b border-zinc-100">
-                      <span className="text-zinc-600 text-xs">Shipping Fee</span>
-                      <Mono color="red" className="text-xs">£{profit.shippingFee.toFixed(2)}</Mono>
+                      <span className="text-zinc-600 text-xs">Shipping Fee (ex-VAT)</span>
+                      <Mono color="red" className="text-xs">£{(profit.shippingFee / 1.2).toFixed(2)}</Mono>
                     </div>
                   )}
                   {profit.advertisingFee > 0 && (
                     <div className="flex justify-between py-1 border-b border-zinc-100">
-                      <span className="text-zinc-600 text-xs">Advertising</span>
-                      <Mono color="red" className="text-xs">£{profit.advertisingFee.toFixed(2)}</Mono>
+                      <span className="text-zinc-600 text-xs">Advertising (ex-VAT)</span>
+                      <Mono color="red" className="text-xs">£{(profit.advertisingFee / 1.2).toFixed(2)}</Mono>
                     </div>
                   )}
                   {profit.processingFee > 0 && (
                     <div className="flex justify-between py-1 border-b border-zinc-100">
-                      <span className="text-zinc-600 text-xs">Processing</span>
-                      <Mono color="red" className="text-xs">£{profit.processingFee.toFixed(2)}</Mono>
+                      <span className="text-zinc-600 text-xs">Processing (ex-VAT)</span>
+                      <Mono color="red" className="text-xs">£{(profit.processingFee / 1.2).toFixed(2)}</Mono>
                     </div>
                   )}
                   <div className="flex justify-between py-1 border-b border-zinc-200 font-semibold">
-                    <span className="text-zinc-700 text-xs">Total Fees</span>
-                    <Mono color="red" className="text-xs">£{profit.totalFeesPerUnit.toFixed(2)}</Mono>
+                    <span className="text-zinc-700 text-xs">Total Fees (ex-VAT)</span>
+                    <Mono color="red" className="text-xs">£{profit.netTotalFees.toFixed(2)}</Mono>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-100">
+                    <span className="text-blue-600 text-xs">Input VAT Reclaim</span>
+                    <Mono color="default" className="text-xs text-blue-600">£{totalVatReclaim.toFixed(2)}</Mono>
                   </div>
                   <div className="flex justify-between py-1 font-bold">
                     <span className="text-zinc-900 text-xs">Net Profit</span>

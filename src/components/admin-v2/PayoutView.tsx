@@ -554,15 +554,32 @@ function PayoutDetailSheet({
               <SectionHead>Fee Breakdown</SectionHead>
               {Object.keys(payout.feeBreakdown).length > 0 ? (
                 <div className="grid gap-1.5">
-                  {Object.entries(payout.feeBreakdown).map(([key, amount]) => (
-                    <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
-                      <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
-                      <Mono color="red" className="text-xs">£{(amount ?? 0).toFixed(2)}</Mono>
+                  {Object.entries(payout.feeBreakdown).map(([key, amount]) => {
+                    const gross = amount ?? 0;
+                    const net = Math.round((gross / 1.2) * 100) / 100;
+                    return (
+                      <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
+                        <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
+                        <div className="flex gap-3">
+                          <Mono color="dim" className="text-xs">£{gross.toFixed(2)}</Mono>
+                          <Mono color="red" className="text-xs">£{net.toFixed(2)}</Mono>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex justify-between py-1 border-b border-zinc-100 text-[10px] text-zinc-400">
+                    <span />
+                    <div className="flex gap-3">
+                      <span>Gross</span>
+                      <span>Ex-VAT</span>
                     </div>
-                  ))}
+                  </div>
                   <div className="flex justify-between py-1 font-semibold">
                     <span className="text-zinc-700 text-xs">Total Fees</span>
-                    <Mono color="red" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
+                    <div className="flex gap-3">
+                      <Mono color="dim" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
+                      <Mono color="red" className="text-xs">£{(Math.round((payout.totalFees / 1.2) * 100) / 100).toFixed(2)}</Mono>
+                    </div>
                   </div>
                 </div>
               ) : (
