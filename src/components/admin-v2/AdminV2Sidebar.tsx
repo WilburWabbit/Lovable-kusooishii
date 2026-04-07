@@ -9,6 +9,8 @@ import {
   BarChart3,
   Settings,
   ArrowUpDown,
+  Receipt,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
