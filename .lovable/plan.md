@@ -1,49 +1,73 @@
 
-Root cause confirmed from the live state:
+Root cause is now clearer after reviewing the live code paths and schema:
 
-- `landing_raw_qbo_purchase` entries for `881` and `1733` are still `status = error` with:
-  `Stock unit insert failed: duplicate key value violates unique constraint "stock_unit_uid_key"`
-- Matching `inbound_receipt` rows already exist for both purchases and are `pending`, but each currently has `0` receipt lines.
-- There are no active `purchase_batches` for references `881` or `1733`, which means the system is in a half-reset state: some derived data was cleaned up, but the landing records themselves are still blocked in `error`.
-- The current cleanup logic in `supabase/functions/admin-data/index.ts` is incorrect:
-  ```ts
-  await admin.from("stock_unit").delete().eq("inbound_receipt_line_id", receipt.id)
-  ```
-  `stock_unit.inbound_receipt_line_id` references `inbound_receipt_line.id`, not `inbound_receipt.id`, so this reset path does not actually target the right stock rows.
-- `Process Pending` only processes `status = pending`, so these two purchases will not recover reliably while they remain in `error`.
+1. The reset button failure is a real code bug, not user error.
+   - In `supabase/functions/admin-data/index.ts`, the request body is parsed as:
+     `const { action, ...params } = await req.json()`
+   - But the `reset-qbo-purchase` branch reads `body.ids` instead of `params.ids`.
+   - That throws a server-side `ReferenceError`, which is why the UI only shows:
+     `Reset failed: Edge Function returned a non-2xx status code`.
 
-Plan:
+2. The two purchases are still blocked in staging.
+   - `landing_raw_qbo_purchase` for `881` and `1733` is still `status = error`.
+   - Their `inbound_receipt` rows are `pending`.
+   - There are currently no surviving `purchase_batches` for references `881` / `1733`, and the exact conflicting UIDs are not present now.
+   - So the immediate blocker is the broken reset action, and the processor also needs one more hardening pass so retries are deterministic.
 
-1. Fix the purchase reset logic in `supabase/functions/admin-data/index.ts`
-   - Load the receipt for a given QBO purchase id.
-   - Collect the real `inbound_receipt_line.id` values.
-   - Delete purchase-linked stock units using those line ids.
-   - Delete the matching receipt lines.
-   - Delete any related `purchase_line_items` and `purchase_batches` by `reference = qboPurchaseId`.
-   - Reset the landing row to `pending` and clear `processed_at` / `error_message`.
+Implementation plan:
 
-2. Add a targeted repair action for stuck QBO purchases
-   - Create a dedicated admin action such as `reset-qbo-purchase`.
-   - Accept one or more QBO purchase ids.
-   - Use this specifically for `881` and `1733` instead of relying on the broad ghost cleanup action.
+## 1. Fix the reset action so it actually runs
+File: `supabase/functions/admin-data/index.ts`
 
-3. Harden `qbo-process-pending`
-   - Before reprocessing an errored purchase, clear any stale derived purchase artifacts for that same QBO purchase id.
-   - Reuse the same cleanup helper so manual reset and retry follow one deterministic path.
-   - Improve the failure logging around stock-unit insert so the purchase id and batch id are captured if a UID collision ever happens again.
+- Change `body.ids` to `params.ids`.
+- Keep validation strict (`ids` must be a non-empty array).
+- Return a structured success payload per purchase id so the UI can show what happened.
+- Add clearer server-side error messages around the reset helper so future failures are diagnosable instead of generic 500s.
 
-4. Add a UI path for this repair flow
-   - In `src/components/admin-v2/StagingErrorsPanel.tsx`, add a “Reset & retry” action for QBO purchase errors.
-   - Keep the existing generic Retry button for simple staging resets, but use the targeted reset for purchase-processing failures.
+## 2. Make the UI surface the real backend error
+File: `src/components/admin-v2/StagingErrorsPanel.tsx`
 
-Files to change:
+- Switch the purchase reset call from `supabase.functions.invoke(...)` to the existing `invokeWithAuth(...)` helper.
+- That will expose the real server message instead of the generic “non-2xx” toast.
+- Keep the special amber “Reset & Retry” button, but make its toast actionable.
+
+## 3. Harden QBO purchase retries before stock is rebuilt
+File: `supabase/functions/qbo-process-pending/index.ts`
+
+- Before reprocessing a QBO purchase that has a pending receipt but incomplete derived data, run the same cleanup logic used by manual reset.
+- Do this even when receipt line count is `0`, so retries do not depend on partial state.
+- Make the cleanup path deterministic: receipt-linked units/lines, purchase line items, and purchase batches for that QBO purchase are cleared in one place before rebuild starts.
+
+## 4. Fix batch counter bookkeeping while hardening retries
+File: `supabase/functions/qbo-process-pending/index.ts`
+
+- Replace the current batch `unit_counter` write that uses the function-level cumulative `stockCreated` total.
+- Update each batch using its own actual unit count only.
+- This is separate from the reset bug, but it is wrong today and can distort batch/UID state during rebuilds.
+
+## 5. Add precise duplicate-UID diagnostics
+File: `supabase/functions/qbo-process-pending/index.ts`
+
+- When stock insert fails, log:
+  - QBO purchase id
+  - batch id
+  - receipt line id
+  - current batch unit counter
+  - the conflicting UID / collision context if available
+- This gives a single source of truth if either purchase still fails after the reset bug is fixed.
+
+## Technical details
+
+Files to update:
 - `supabase/functions/admin-data/index.ts`
 - `supabase/functions/qbo-process-pending/index.ts`
 - `src/components/admin-v2/StagingErrorsPanel.tsx`
 
 No migration is needed.
 
-Expected result:
-- Purchases `881` and `1733` move from `error` to `pending`, then process cleanly
-- Receipt lines, purchase batches, line items, and stock units are recreated from QBO in the correct order
-- The affected SKUs stop showing false stock discrepancies because the purchases are truly processed, not just landed
+## Expected outcome
+
+After deployment:
+1. Clicking “Reset & Retry” for `881` and `1733` should succeed and move both landing rows to `pending`.
+2. Running “Process Pending” should rebuild them from a clean state.
+3. If either still fails, the error will be specific enough to isolate the remaining collision source immediately instead of looping on a generic 500.
