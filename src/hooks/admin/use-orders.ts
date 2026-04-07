@@ -43,6 +43,7 @@ function mapOrder(row: Record<string, unknown>): Order {
     trackingNumber: (row.tracking_number as string) ?? null,
     shippingCost: (row.shipping_total as number) ?? null,
     blueBellClub: (row.blue_bell_club as boolean) ?? false,
+    docNumber: (row.doc_number as string) ?? null,
     qboSalesReceiptId: (row.qbo_sales_receipt_id as string) ?? null,
     qboSyncStatus: (row.qbo_sync_status as QBOSyncStatus) ?? 'pending',
     externalOrderId: (row.origin_reference as string) ?? null,
