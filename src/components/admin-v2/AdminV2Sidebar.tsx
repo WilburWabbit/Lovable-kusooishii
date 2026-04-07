@@ -9,6 +9,8 @@ import {
   BarChart3,
   Settings,
   ArrowUpDown,
+  Receipt,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
@@ -156,6 +158,18 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           label="Settings"
           to="/admin/settings"
           active={isActive("/admin/settings")}
+        />
+        <SidebarItem
+          icon={Receipt}
+          label="Selling Fees"
+          to="/admin/selling-fees"
+          active={isActive("/admin/selling-fees")}
+        />
+        <SidebarItem
+          icon={Truck}
+          label="Shipping Rates"
+          to="/admin/shipping-rates"
+          active={isActive("/admin/shipping-rates")}
         />
       </div>
 

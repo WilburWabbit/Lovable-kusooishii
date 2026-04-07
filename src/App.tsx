@@ -53,6 +53,8 @@ const PayoutListPage = lazy(() => import("./pages/admin-v2/PayoutListPage"));
 const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"));
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const AdminSettingsPage = lazy(() => import("./pages/admin-v2/SettingsPage"));
+const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
+const ShippingRatesPage = lazy(() => import("./pages/admin-v2/ShippingRatesPage"));
 const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
@@ -117,6 +119,8 @@ const App = () => (
             <Route path="/admin/customers/:customerId" element={<RequireAdmin><CustomerDetailPage /></RequireAdmin>} />
             <Route path="/admin/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
             <Route path="/admin/settings" element={<RequireAdmin><AdminSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/selling-fees" element={<RequireAdmin><ChannelFeesPage /></RequireAdmin>} />
+            <Route path="/admin/shipping-rates" element={<RequireAdmin><ShippingRatesPage /></RequireAdmin>} />
             <Route path="/admin/data-sync" element={<RequireAdmin><DataSyncPage /></RequireAdmin>} />
             <Route path="/admin/intake" element={<RequireAdmin><IntakePage /></RequireAdmin>} />
             <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
