@@ -53,6 +53,8 @@ const PayoutListPage = lazy(() => import("./pages/admin-v2/PayoutListPage"));
 const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"));
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const AdminSettingsPage = lazy(() => import("./pages/admin-v2/SettingsPage"));
+const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
+const ShippingRatesPage = lazy(() => import("./pages/admin-v2/ShippingRatesPage"));
 const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
