@@ -1,88 +1,61 @@
 
 
-# Redesign Order Detail as Invoice-Style Layout
+# Fix VAT Calculation Errors in Order P&L
 
 ## Problem
 
-The current order detail page has a confusing layout with multiple rows of summary cards followed by a flat table. The user wants it redesigned to match the purchase batch detail pattern — structured like an invoice with a clear per-line VAT breakdown.
+`landed_cost` / `cogs` is stored **ex-VAT** (confirmed: £9.03 in DB). But everywhere in the code it's divided by 1.2 as if it were gross, producing wrong COGS (£7.53 instead of £9.03), wrong VAT reclaim, and wrong net profit.
 
-## Current state
+Three specific errors:
 
-- Multiple rows of summary cards (revenue, VAT, QBO, COGS, fees, profit, margin) are scattered
-- Line items shown in a flat table with columns like "Payout", "Tracking", "Status" mixed in
-- No per-line VAT amount shown
-- Hard to read as an invoice
+1. **COGS divided by 1.2 incorrectly** — `OrderDetail.tsx` line 110: `netCogs = exVAT(totalCogs)` and line 257: `exVAT(item.cogs)`. Since cogs is already ex-VAT, this should be used as-is.
 
-## Data available
+2. **`unit_profit_view`** does `landed_cost / 1.2` for `net_landed_cost` — same error at the database level.
 
-- `sales_order_line` has `unit_price` (gross), `line_total`, `cogs`, `vat_rate_id`
-- `vat_rate` has `rate_percent` (currently 20% for all lines)
-- Per-line VAT can be computed: `unit_price / 1.2` = net, `unit_price - net` = VAT
-- Fee data already loaded via `useOrderFees`
+3. **VAT reclaim on stock** is derived from the wrong COGS (`totalCogs - netCogs`), producing £1.50 instead of £1.81 (which is `cogs × 0.2`).
 
-## Design
+### Expected values (example order)
+- COGS: £9.03 (as stored, already ex-VAT)
+- Input VAT on stock: £9.03 × 0.2 = £1.81
+- Input VAT on fees: £5.65 − £4.71 = £0.94
+- Total VAT reclaim: £2.75
+- Net profit: £13.33 − £9.03 − £4.71 = −£0.41
 
-Restructure to an invoice-style layout:
+## Changes
 
-### 1. Header — compact order info
-Keep: external ref as heading, status badge, customer, channel, date, QBO status. Remove internal order number from prominent display.
+### 1. Migration: Fix `unit_profit_view`
 
-### 2. Invoice line items table
-Replace the current table with invoice-style columns:
+Replace `landed_cost / 1.2` with `landed_cost` (it's already ex-VAT):
 
-| Item | SKU | Qty | Unit (ex-VAT) | VAT | Line Total | COGS |
-|------|-----|-----|---------------|-----|------------|------|
-
-Each row shows the product name, SKU code, quantity (always 1 currently), ex-VAT unit price, VAT amount, gross line total, and COGS if allocated.
-
-### 3. Invoice totals section
-Below the line items table, a right-aligned totals block (like a real invoice):
-
-```text
-                    Subtotal (ex-VAT):  £XX.XX
-                              VAT 20%:  £XX.XX
-                          Gross Total:  £XX.XX
+```sql
+-- net_landed_cost: use as-is (already ex-VAT)
+COALESCE(su.landed_cost, 0) AS net_landed_cost,
+-- net_profit: revenue/1.2 - landed_cost - fees/1.2
+round(sol.unit_price / 1.2 - COALESCE(su.landed_cost, 0) - ..., 4) AS net_profit
 ```
 
-### 4. P&L summary card
-A single card below the invoice replacing the scattered summary cards:
+### 2. `OrderDetail.tsx` — Fix order-level P&L
 
-```text
-  Net Revenue    £XX.XX
-  COGS (ex-VAT)  £XX.XX
-  Fees (ex-VAT)  £XX.XX
-  ──────────────────────
-  Net Profit     £XX.XX   (XX.X% margin)
-  VAT Reclaim    £XX.XX
+```typescript
+// COGS is already ex-VAT, don't divide again
+const netCogs = totalCogs;              // was: exVAT(totalCogs)
+const netFees = exVAT(totalOrderFees);  // fees ARE gross, this is correct
+
+// VAT reclaim: input VAT on stock = cost × 0.2
+const vatReclaimCogs = totalCogs * 0.2;           // was: totalCogs - netCogs
+const vatReclaimFees = totalOrderFees - netFees;   // correct as-is
 ```
 
-### 5. Fee breakdown
-Keep the existing fee breakdown card, unchanged.
+Per-line COGS display (line 257): show `item.cogs` directly instead of `exVAT(item.cogs)`.
 
-### 6. Unit detail
-The "View Unit" button stays on each line item row for the slide-out.
+### 3. `OrderUnitSlideOut.tsx` — Fix unit-level P&L
 
-## Changes required
+Lines 42-44: VAT reclaim on cost should be `landed_cost × 0.2`, not `landed_cost - net_landed_cost` (since `net_landed_cost` will now equal `landed_cost`).
 
-### `src/lib/types/admin.ts`
-- Add `vatRate` (number) and `lineVat` (number) to `OrderLineItem`
+```typescript
+const vatReclaimCost = profit ? profit.landedCost * 0.2 : 0;
+```
 
-### `src/hooks/admin/use-orders.ts`
-- Join `vat_rate` via `vat_rate_id` in the line item query
-- Map `rate_percent` into `vatRate`, compute `lineVat` from `unit_price`
+### 4. `use-payouts.ts` — No mapper changes needed
 
-### `src/components/admin-v2/OrderDetail.tsx`
-- Replace summary card rows with compact header metadata
-- Replace line items table with invoice-style table (Item, SKU, Qty, Unit ex-VAT, VAT, Line Total, COGS, action)
-- Add invoice totals section below the table
-- Add a single P&L summary card replacing the scattered cards
-- Keep fee breakdown card, action buttons, and mobile sticky actions as-is
-
-## Files changed
-
-| File | Change |
-|------|--------|
-| `src/lib/types/admin.ts` | Add `vatRate`, `lineVat` to `OrderLineItem` |
-| `src/hooks/admin/use-orders.ts` | Join `vat_rate` table, map new fields |
-| `src/components/admin-v2/OrderDetail.tsx` | Rebuild as invoice-style layout |
-
+The mapper just reads the view columns. Once the view is fixed, `netLandedCost` will carry
