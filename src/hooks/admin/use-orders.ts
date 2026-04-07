@@ -69,6 +69,7 @@ function mapLineItem(row: Record<string, unknown>): OrderLineItem {
     orderId: row.sales_order_id as string,
     stockUnitId: (row.stock_unit_id as string) ?? null,
     sku: sku ? (sku.sku_code as string) : null,
+    name: sku ? ((sku.name as string) ?? null) : null,
     unitPrice: (row.unit_price as number) ?? 0,
     cogs: (row.cogs as number) ?? null,
   };
@@ -87,7 +88,7 @@ export function useOrders() {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code)
+            sku:sku_id(sku_code, name)
           )
         `)
         .order('created_at', { ascending: false });
@@ -133,7 +134,7 @@ export function useOrder(orderId: string | undefined) {
           customer:customer_id(id, display_name, email),
           sales_order_line(
             id, sales_order_id, stock_unit_id, unit_price, cogs,
-            sku:sku_id(sku_code)
+            sku:sku_id(sku_code, name)
           )
         `)
         .eq('id', orderId!)

@@ -47,11 +47,13 @@ export function QboSettingsCard() {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildPhase, setRebuildPhase] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
+  const [cleaningGhosts, setCleaningGhosts] = useState(false);
+  const [recalcingCost, setRecalcingCost] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -415,6 +417,30 @@ export function QboSettingsCard() {
     }
   };
 
+  const cleanupGhostUnits = async () => {
+    setCleaningGhosts(true);
+    try {
+      const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'cleanup-ghost-units' });
+      toast.success(`Cleaned up ${(data as any)?.deleted ?? 0} ghost stock units`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Cleanup failed');
+    } finally {
+      setCleaningGhosts(false);
+    }
+  };
+
+  const recalcAvgCost = async () => {
+    setRecalcingCost(true);
+    try {
+      const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'recalc-avg-cost' });
+      toast.success(`Recalculated avg cost on ${(data as any)?.updated ?? 0} SKUs`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Recalc failed');
+    } finally {
+      setRecalcingCost(false);
+    }
+  };
+
   // ── Render ──
 
   const Btn = ({ onClick, disabled, busy, children }: {
@@ -527,6 +553,15 @@ export function QboSettingsCard() {
               <Btn onClick={() => reconcileEntity('reconcile-customers', 'Customers')} busy={reconcilingEntity === 'reconcile-customers'}>Reconcile Customers</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-items', 'Items')} busy={reconcilingEntity === 'reconcile-items'}>Reconcile Items</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-vendors', 'Vendors')} busy={reconcilingEntity === 'reconcile-vendors'}>Reconcile Vendors</Btn>
+            </div>
+          </div>
+
+          {/* Data Cleanup */}
+          <div>
+            <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Data Cleanup</p>
+            <div className="flex flex-wrap gap-1.5">
+              <Btn onClick={cleanupGhostUnits} busy={cleaningGhosts}>Cleanup Ghost Units</Btn>
+              <Btn onClick={recalcAvgCost} busy={recalcingCost}>Recalc Avg Cost</Btn>
             </div>
           </div>
 
