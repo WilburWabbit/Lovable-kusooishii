@@ -3800,6 +3800,10 @@ export type Database = {
         Args: { p_sku_code: string }
         Returns: undefined
       }
+      v2_reserve_stock_unit_uids: {
+        Args: { p_batch_id: string; p_count: number }
+        Returns: string[]
+      }
     }
     Enums: {
       app_role: "admin" | "staff" | "member"
