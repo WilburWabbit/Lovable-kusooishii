@@ -1,88 +1,43 @@
 
 
-# Revised Plan: Use QBO DepartmentRef as Canonical Channel Source
+# Fix: Duplicate Purchase Batches on QBO Reprocessing
 
-## What changes
+## Problem
 
-Rewrite `detectOriginChannel` to check `DepartmentRef` first. Keep the existing DocNumber regex logic as a secondary fallback (do NOT remove it). Change the final default from `in_person` to `ebay`.
+When QBO purchase 1733 is updated (via webhook), the landing record is reset to `pending` and reprocessed. Each reprocessing run creates a **new** `purchase_batches` row because the code does a blind `INSERT` without checking if a batch with the same `reference` (QBO purchase ID) already exists. This has produced three duplicate batches: PO-603, PO-665, PO-666 — all with `reference = '1733'`.
 
-Backfill existing orders where `DepartmentRef` is available in the landing payload. Orders with NULL DepartmentRef and no existing channel keep `ebay`.
+## Root cause
 
-## Changes
+In `qbo-process-pending/index.ts`, the reprocessing cleanup (lines 487-510) correctly deletes old receipt lines and stock units, but:
+1. It never checks for or deletes existing `purchase_batches` with the same `reference`
+2. It never deletes linked `purchase_line_items`
+3. The batch creation at line 630 is a blind `INSERT` with no upsert or existence check
 
-### 1. `supabase/functions/qbo-process-pending/index.ts` — `detectOriginChannel`
+## Fix
 
-Rewrite to prioritize `DepartmentRef.name`:
+**File: `supabase/functions/qbo-process-pending/index.ts`**
 
-```
-function detectOriginChannel(receipt: any): string {
-  // Primary: QBO Location/Store (DepartmentRef)
-  const deptName = receipt.DepartmentRef?.name ?? null;
-  if (deptName) {
-    if (/ebay/i.test(deptName)) return "ebay";
-    if (/square\s*space/i.test(deptName)) return "squarespace";
-    if (/kusooishii/i.test(deptName)) return "web";
-    if (/in\s*person/i.test(deptName)) return "in_person";
-    if (/etsy/i.test(deptName)) return "etsy";
-  }
+Add cleanup of existing purchase batches during reprocessing. Before creating a new batch (around line 628), check for and delete any existing `purchase_batches` rows with `reference = qboPurchaseId`:
 
-  // Secondary fallback: DocNumber pattern (preserved for legacy/edge cases)
-  const doc = receipt.DocNumber ?? "";
-  if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
-  if (doc.startsWith("KO-")) return "web";
-  if (doc.startsWith("SQR-")) return "in_person";
-  if (doc.startsWith("ETSY-")) return "etsy";
-  if (doc.startsWith("R-SQR-") || doc.startsWith("R-ETSY-") || doc.startsWith("R-KO-")) return "qbo_refund";
+1. Query `purchase_batches` where `reference = qboPurchaseId`
+2. For each found batch:
+   - Delete linked `stock_unit` rows that are not sold (same pattern as receipt line cleanup)
+   - Nullify links on sold stock units
+   - Delete `purchase_line_items` for the batch
+   - Delete the batch itself
+3. Then proceed with the normal `INSERT`
 
-  // Tertiary: PaymentMethodRef
-  const pmtName = receipt.PaymentMethodRef?.name ?? "";
-  if (/stripe/i.test(pmtName)) return "web";
-  if (/ebay/i.test(pmtName)) return "ebay";
-  if (/square/i.test(pmtName) || /cash/i.test(pmtName)) return "in_person";
-  if (/etsy/i.test(pmtName)) return "etsy";
+This ensures that when a QBO purchase is updated and reprocessed, the old v2 model artifacts are cleaned up before new ones are created.
 
-  // Default: NULL DepartmentRef = eBay
-  return "ebay";
-}
-```
+## Data cleanup
 
-`deriveOriginReference` is untouched — it still uses DocNumber for channel-native IDs.
-
-### 2. Migration — Backfill existing orders
-
-Update `origin_channel` on existing `sales_order` rows using the QBO payload's `DepartmentRef` where available:
-
-```sql
-UPDATE sales_order so
-SET origin_channel = CASE
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'ebay' THEN 'ebay'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'square.*space' THEN 'squarespace'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'kusooishii' THEN 'web'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'in.*person' THEN 'in_person'
-  WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'etsy' THEN 'etsy'
-  ELSE 'ebay'
-END
-FROM landing_raw_qbo_sales_receipt lr
-WHERE lr.external_id = so.qbo_sales_receipt_id
-  AND so.origin_channel IS DISTINCT FROM CASE
-    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'ebay' THEN 'ebay'
-    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'square.*space' THEN 'squarespace'
-    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'kusooishii' THEN 'web'
-    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'in.*person' THEN 'in_person'
-    WHEN lr.raw_payload->'DepartmentRef'->>'name' ~* 'etsy' THEN 'etsy'
-    ELSE 'ebay'
-  END;
-```
-
-### 3. `src/components/admin-v2/OrderList.tsx` — Add `squarespace` channel display
-
-Add `squarespace` as a recognized channel label (e.g., "Square Space") wherever channel values are displayed or filtered.
+After deploying, delete the two orphan batches (PO-665 and PO-666) and their linked purchase_line_items and stock units. PO-603 is the original and should be kept if it has the correct data, or all three can be purged and purchase 1733 reset to `pending` for a clean reprocess.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/qbo-process-pending/index.ts` | Rewrite `detectOriginChannel` — DepartmentRef first, DocNumber preserved as fallback, default → `ebay` |
-| `supabase/migrations/...` | Backfill `origin_channel` from QBO DepartmentRef |
-| `src/components/admin-v2/OrderList.tsx` | Recognize `squarespace` channel in display |
+| `supabase/functions/qbo-process-pending/index.ts` | Add batch cleanup before batch creation in `processPurchases` |
+
+No migration needed — data cleanup will be done via the existing reset mechanism after the code fix is deployed.
 
