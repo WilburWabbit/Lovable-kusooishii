@@ -1,61 +1,86 @@
 
 
-# Fix VAT Calculation Errors in Order P&L
+# Fix Floor Price Calculations: VAT Netting + Auto-Markdown Fee Access
 
-## Problem
+## Clarification
 
-`landed_cost` / `cogs` is stored **ex-VAT** (confirmed: £9.03 in DB). But everywhere in the code it's divided by 1.2 as if it were gross, producing wrong COGS (£7.53 instead of £9.03), wrong VAT reclaim, and wrong net profit.
+The pricing engine (`admin-data/index.ts`) **does** already query `channel_fee_schedule` and `shipping_rate_table` — the fee schedule data is available. The two problems are:
 
-Three specific errors:
+1. **The floor formula ignores output VAT** — it treats the full gross price as available revenue, but only `price / 1.2` is actual revenue after VAT. The denominator on line 945 should subtract the VAT take.
 
-1. **COGS divided by 1.2 incorrectly** — `OrderDetail.tsx` line 110: `netCogs = exVAT(totalCogs)` and line 257: `exVAT(item.cogs)`. Since cogs is already ex-VAT, this should be used as-is.
-
-2. **`unit_profit_view`** does `landed_cost / 1.2` for `net_landed_cost` — same error at the database level.
-
-3. **VAT reclaim on stock** is derived from the wrong COGS (`totalCogs - netCogs`), producing £1.50 instead of £1.81 (which is `cogs × 0.2`).
-
-### Expected values (example order)
-- COGS: £9.03 (as stored, already ex-VAT)
-- Input VAT on stock: £9.03 × 0.2 = £1.81
-- Input VAT on fees: £5.65 − £4.71 = £0.94
-- Total VAT reclaim: £2.75
-- Net profit: £13.33 − £9.03 − £4.71 = −£0.41
+2. **Auto-markdown uses a naive `cost × 1.25` floor** (line 147) instead of querying the fee schedule and shipping rates like the pricing engine does.
 
 ## Changes
 
-### 1. Migration: Fix `unit_profit_view`
+### 1. `supabase/functions/admin-data/index.ts` — Fix floor formula for VAT
 
-Replace `landed_cost / 1.2` with `landed_cost` (it's already ex-VAT):
-
-```sql
--- net_landed_cost: use as-is (already ex-VAT)
-COALESCE(su.landed_cost, 0) AS net_landed_cost,
--- net_profit: revenue/1.2 - landed_cost - fees/1.2
-round(sol.unit_price / 1.2 - COALESCE(su.landed_cost, 0) - ..., 4) AS net_profit
+Current (line 945-946):
+```typescript
+const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+let floorPrice = (costBase + minProfit + fixedFeeCosts) / denominator;
 ```
 
-### 2. `OrderDetail.tsx` — Fix order-level P&L
+The formula solves `price - margin×price - fees×price - risk×price = costBase + minProfit + fixedFees`, treating `price` as revenue. But revenue is actually `price / 1.2`.
+
+Fix: multiply the revenue side by `1/1.2` and net the fee rates through VAT too (since fee VAT is reclaimable):
 
 ```typescript
-// COGS is already ex-VAT, don't divide again
-const netCogs = totalCogs;              // was: exVAT(totalCogs)
-const netFees = exVAT(totalOrderFees);  // fees ARE gross, this is correct
-
-// VAT reclaim: input VAT on stock = cost × 0.2
-const vatReclaimCogs = totalCogs * 0.2;           // was: totalCogs - netCogs
-const vatReclaimFees = totalOrderFees - netFees;   // correct as-is
+// Revenue from price P is P/1.2 (output VAT goes to HMRC)
+// Fee cost from price P is feeRate×P/1.2 (input VAT reclaimable)
+// Equation: P/1.2 - margin×(P/1.2) - feeRate×P/1.2 - risk×(P/1.2) >= costBase + minProfit + fixedFees/1.2
+// Solve: P >= 1.2 × (costBase + minProfit + netFixedFees) / (1 - margin - effectiveFeeRate - riskRate)
+const netFixedFees = fixedFeeCosts / 1.2;
+const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+let floorPrice = Math.round((1.2 * (costBase + minProfit + netFixedFees) / denominator) * 100) / 100;
 ```
 
-Per-line COGS display (line 257): show `item.cogs` directly instead of `exVAT(item.cogs)`.
+Also fix the post-check loop (lines 949-964) to compare against ex-VAT revenue:
+```typescript
+const requiredRevenue = costBase + minProfit + (totalFees / 1.2) + riskReserve;
+const neededPrice = 1.2 * requiredRevenue / (1 - effectiveMargin);
+```
 
-### 3. `OrderUnitSlideOut.tsx` — Fix unit-level P&L
+### 2. `supabase/functions/auto-markdown-prices/index.ts` — Use real fees and shipping
 
-Lines 42-44: VAT reclaim on cost should be `landed_cost × 0.2`, not `landed_cost - net_landed_cost` (since `net_landed_cost` will now equal `landed_cost`).
+Replace the naive `cost × (1 + MARGIN_TARGET)` floor with a proper calculation that:
+- Queries `channel_fee_schedule` for the listing's channel (eBay by default for listed items)
+- Queries `shipping_rate_table` for estimated shipping cost
+- Queries `selling_cost_defaults` for packaging and risk reserve
+- Applies the same VAT-aware floor formula as the pricing engine
+
+This means extracting the floor calculation into a shared helper or inlining the same logic. The function already has the `admin` client, so it just needs the additional queries per SKU group.
+
+### 3. Shared floor calculation helper
+
+To avoid duplicating the formula, extract a `calculateFloorPrice` function into `supabase/functions/_shared/pricing.ts`:
 
 ```typescript
-const vatReclaimCost = profit ? profit.landedCost * 0.2 : 0;
+export function calculateFloorPrice(params: {
+  costBase: number;        // carrying_value + packaging + shipping (all ex-VAT)
+  minProfit: number;
+  effectiveFeeRate: number; // aggregated rate from fee schedule
+  fixedFeeCosts: number;    // aggregated fixed fees
+  riskRate: number;
+  minMargin: number;
+  fees: FeeScheduleRow[];   // for post-check iteration
+  shippingCost: number;
+}): number
 ```
 
-### 4. `use-payouts.ts` — No mapper changes needed
+Both `admin-data` and `auto-markdown-prices` call this shared function.
 
-The mapper just reads the view columns. Once the view is fixed, `netLandedCost` will carry
+## Files changed
+
+| File | Change |
+|------|--------|
+| `supabase/functions/_shared/pricing.ts` | New shared floor price calculator with VAT netting |
+| `supabase/functions/admin-data/index.ts` | Use shared calculator; fix floor formula and post-check |
+| `supabase/functions/auto-markdown-prices/index.ts` | Replace `cost × 1.25` with real fee/shipping/VAT-aware floor |
+
+## Expected outcome
+
+For the 10349-1.1 example (cost £9.03 ex-VAT, eBay channel ~15% fees):
+- Old floor: £11.29 (`9.03 × 1.25`, ignores fees and VAT)
+- New floor: ~£17-18 (ensures `price/1.2 - fees/1.2 - shipping - packaging - risk >= cost + minProfit`)
+- A sale at £15.99 would correctly show as below floor, preventing loss-making listings
+
