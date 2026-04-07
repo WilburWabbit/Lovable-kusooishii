@@ -159,6 +159,18 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/settings"
           active={isActive("/admin/settings")}
         />
+        <SidebarItem
+          icon={Receipt}
+          label="Selling Fees"
+          to="/admin/selling-fees"
+          active={isActive("/admin/selling-fees")}
+        />
+        <SidebarItem
+          icon={Truck}
+          label="Shipping Rates"
+          to="/admin/shipping-rates"
+          active={isActive("/admin/shipping-rates")}
+        />
       </div>
 
       {/* Connection Status Footer */}
