@@ -200,9 +200,19 @@ Deno.serve(async (req) => {
         const shortfall = line.quantity - (existingCount ?? 0);
         if (shortfall <= 0) continue;
 
+        // Reserve UIDs atomically BEFORE inserting stock units
+        const { data: reservedUids, error: reserveErr } = await supabaseAdmin.rpc("v2_reserve_stock_unit_uids", {
+          p_batch_id: batchId,
+          p_count: shortfall,
+        });
+        if (reserveErr || !reservedUids || reservedUids.length !== shortfall) {
+          throw new Error(`UID reservation failed: ${reserveErr?.message ?? "unexpected count"}`);
+        }
+
         const stockUnits = [];
         for (let i = 0; i < shortfall; i++) {
           stockUnits.push({
+            uid: reservedUids[i],
             sku_id: sku!.id, mpn, condition_grade: conditionGrade,
             status: "available", v2_status: "graded", graded_at: new Date().toISOString(),
             landed_cost: landedCost,
