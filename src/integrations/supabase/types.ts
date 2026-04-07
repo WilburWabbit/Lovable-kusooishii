@@ -3504,8 +3504,6 @@ export type Database = {
         Row: {
           advertising_fee: number | null
           batch_id: string | null
-          fee_pct: number | null
-          gross_margin_pct: number | null
           gross_revenue: number | null
           landed_cost: number | null
           net_landed_cost: number | null

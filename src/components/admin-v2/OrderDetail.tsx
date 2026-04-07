@@ -107,11 +107,13 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
 
   // P&L (ex-VAT)
   const netRevenue = subtotalExVat;
-  const netCogs = exVAT(totalCogs);
+  // COGS is already stored ex-VAT — use as-is
+  const netCogs = totalCogs;
   const netFees = exVAT(totalOrderFees);
   const netProfit = netRevenue - netCogs - netFees;
   const margin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
-  const vatReclaimCogs = totalCogs - netCogs;
+  // Input VAT on stock = ex-VAT cost × 20%
+  const vatReclaimCogs = totalCogs * 0.2;
   const vatReclaimFees = totalOrderFees - netFees;
   const totalVatReclaim = vatReclaimCogs + vatReclaimFees;
 
@@ -254,7 +256,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <Mono color={item.cogs ? "default" : "dim"}>
-                        {item.cogs ? fmt(exVAT(item.cogs)) : "—"}
+                        {item.cogs ? fmt(item.cogs) : "—"}
                       </Mono>
                     </td>
                     <td className="px-3 py-2.5">

@@ -39,7 +39,8 @@ export function OrderUnitSlideOut({ lineItem, open, onClose }: OrderUnitSlideOut
     : [];
 
   // Calculate input VAT reclaim for this unit
-  const vatReclaimCost = profit ? profit.landedCost - profit.netLandedCost : 0;
+  // landed_cost is already ex-VAT; input VAT = cost × 20%
+  const vatReclaimCost = profit ? profit.landedCost * 0.2 : 0;
   const vatReclaimFees = profit ? profit.totalFeesPerUnit - profit.netTotalFees : 0;
   const totalVatReclaim = vatReclaimCost + vatReclaimFees;
 
