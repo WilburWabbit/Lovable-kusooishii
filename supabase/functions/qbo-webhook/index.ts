@@ -363,21 +363,37 @@ async function processWebhookInBackground(body: string, correlationId: string) {
     }
   }
 
-  // Auto-trigger the processor
-  try {
-    const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
-    const processRes = await fetchWithTimeout(processUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "x-webhook-trigger": "true",
-      },
-      body: JSON.stringify({ batch_size: 15 }),
-    });
-    log.info("Auto-triggered processor", { status: processRes.status });
-  } catch (err: any) {
-    log.warn("Failed to auto-trigger processor (non-fatal)", { error: err.message });
+  // Auto-trigger processor with retry loop to drain all pending records
+  const maxAttempts = 3;
+  await new Promise(r => setTimeout(r, 3000)); // let concurrent webhooks finish landing
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
+      const processRes = await fetchWithTimeout(processUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "x-webhook-trigger": "true",
+        },
+        body: JSON.stringify({ batch_size: 50 }),
+      });
+      const result = await processRes.json();
+      log.info("Processor attempt completed", {
+        attempt,
+        status: processRes.status,
+        total_remaining: result.total_remaining ?? 0,
+      });
+
+      if (!result.has_more || (result.total_remaining ?? 0) === 0) break;
+
+      // More records pending — wait and retry
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err: any) {
+      log.warn("Processor attempt failed (non-fatal)", { attempt, error: err.message });
+      break;
+    }
   }
 
   log.info("Background processing complete");
