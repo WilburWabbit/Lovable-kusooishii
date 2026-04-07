@@ -141,7 +141,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.fvf.toFixed(2)}</Mono>,
+    render: (r) => <Mono color="red">£{(r.feeBreakdown?.fvf ?? 0).toFixed(2)}</Mono>,
   },
   {
     key: "promotedListings",
@@ -149,7 +149,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.promoted_listings.toFixed(2)}</Mono>,
+    render: (r) => <Mono color="red">£{(r.feeBreakdown?.promoted_listings ?? 0).toFixed(2)}</Mono>,
   },
   {
     key: "internationalFee",
@@ -157,7 +157,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.international.toFixed(2)}</Mono>,
+    render: (r) => <Mono color="red">£{(r.feeBreakdown?.international ?? 0).toFixed(2)}</Mono>,
   },
   {
     key: "processingFee",
@@ -165,7 +165,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.processing.toFixed(2)}</Mono>,
+    render: (r) => <Mono color="red">£{(r.feeBreakdown?.processing ?? 0).toFixed(2)}</Mono>,
   },
   {
     key: "externalPayoutId",
@@ -484,14 +484,14 @@ export function PayoutView() {
                 <SectionHead>Fee Breakdown</SectionHead>
                 <div className="grid gap-1.5">
                   {[
-                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown.fvf },
-                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown.promoted_listings },
-                    { label: "International", amount: selectedPayout.feeBreakdown.international },
-                    { label: "Processing", amount: selectedPayout.feeBreakdown.processing },
+                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown?.fvf },
+                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown?.promoted_listings },
+                    { label: "International", amount: selectedPayout.feeBreakdown?.international },
+                    { label: "Processing", amount: selectedPayout.feeBreakdown?.processing },
                   ].map((fee) => (
                     <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
                       <span className="text-zinc-600 text-xs">{fee.label}</span>
-                      <Mono color="red" className="text-xs">£{fee.amount.toFixed(2)}</Mono>
+                      <Mono color="red" className="text-xs">£{(fee.amount ?? 0).toFixed(2)}</Mono>
                     </div>
                   ))}
                   <div className="flex justify-between py-1 font-semibold">
