@@ -1,95 +1,76 @@
 
 
-# Fix: Payouts, Orders, COGS, and Fee Linking
+# VAT-Net P&L: Apply VAT Netting Across All Cost Components
 
-## Root Causes Found
+## Problem
 
-### 1. Payout fees never link to orders (all 80 `payout_fee` rows have `sales_order_id = NULL`)
-The `ebay-import-payouts` function queries `sales_order.external_order_id` to match eBay orders, but eBay order IDs are stored in `origin_reference`. The `external_order_id` column is always NULL, so `orderMap` is always empty and every fee is written with `sales_order_id = null`.
+The current profit calculations mix gross (VAT-inclusive) amounts. Revenue is shown gross, COGS includes reclaimable purchase VAT, and eBay fees/shipping labels include reclaimable input VAT. For a true P&L, all components must be compared on a net (ex-VAT) basis since the business reclaims input VAT.
 
-### 2. COGS is NULL on all 338 linked order lines
-The QBO processor (`qbo-process-pending`) creates order lines with stock unit links but never writes `cogs`. The `v2-process-order` function does write COGS, but it skips already-allocated lines (`if (line.stock_unit_id) continue`). Since QBO processing links the units first, COGS is never populated.
+**Current state** (example order `14-14455-15038`):
+- Revenue: £15.99 gross → should be £13.33 net
+- COGS: £9.03 (includes purchase VAT) → should be £7.53 net
+- Fees: £5.65 (eBay charges VAT on fees) → should be £4.71 net
+- Profit: currently £15.99 - £9.03 - £5.65 = £1.31 (wrong basis)
+- Correct: £13.33 - £7.53 - £4.71 = £1.09
 
-### 3. `net_amount` is NULL on all 335 orders
-No processor ever computes or writes `net_amount` to `sales_order`.
+## Design
 
-### 4. `unit_profit_view` shows all fees as zero
-The view joins on `payout_fee.sales_order_id`, which is always NULL (consequence of issue #1).
+All three cost pillars — revenue, COGS, and fees — get VAT-netted at 20%. The `exVAT()` utility already exists in both frontend (`src/lib/utils/vat.ts`) and backend (`supabase/functions/_shared/vat.ts`).
 
-## Fixes
+## Changes
 
-### Fix 1: Correct order matching in `ebay-import-payouts`
-**File: `supabase/functions/ebay-import-payouts/index.ts`**
+### 1. Update `unit_profit_view` (migration)
 
-Change the order lookup query from:
+Replace the view to compute all values ex-VAT:
+
 ```sql
-.select("id, external_order_id, qbo_sales_receipt_id, gross_total")
-.in("external_order_id", orderRefs)
-```
-to:
-```sql
-.select("id, origin_reference, qbo_sales_receipt_id, gross_total")
-.in("origin_reference", orderRefs)
-```
-Update the `LocalOrder` type and `orderMap.set()` key to use `origin_reference` instead of `external_order_id`.
-
-### Fix 2: Populate COGS when QBO processor links stock units
-**File: `supabase/functions/qbo-process-pending/index.ts`**
-
-In the sales receipt processing section, wherever a `stock_unit_id` is written to `sales_order_line`, also write `cogs: landed_cost` from the consumed stock unit.
-
-### Fix 3: Backfill COGS from linked stock units
-**File: `supabase/functions/ebay-import-payouts/index.ts`** (or a migration)
-
-Create a one-time migration to backfill existing data:
-```sql
-UPDATE sales_order_line sol
-SET cogs = su.landed_cost
-FROM stock_unit su
-WHERE sol.stock_unit_id = su.id
-  AND sol.cogs IS NULL;
+-- Revenue: unit_price / 1.2
+-- Landed cost: landed_cost / 1.2 (input VAT reclaimable)
+-- Fees: each fee / 1.2 (input VAT on eBay fees reclaimable)
+-- Net profit: net_revenue - net_cost - net_fees
 ```
 
-### Fix 4: Populate `net_amount` on sales orders
-**File: `supabase/functions/qbo-process-pending/index.ts`**
+Add explicit columns: `gross_revenue`, `net_revenue`, `net_landed_cost`, `net_total_fees`, keeping gross columns for reference.
 
-When creating/updating sales orders, compute `net_amount = gross_total - tax_total` and write it.
+### 2. Update `OrderDetail.tsx` — order-level P&L
 
-Also backfill via migration:
-```sql
-UPDATE sales_order
-SET net_amount = gross_total - COALESCE(tax_total, 0)
-WHERE net_amount IS NULL;
-```
+Currently: `netProfit = order.netAmount - totalCogs - totalOrderFees`
 
-### Fix 5: Backfill `payout_fee.sales_order_id` for existing data
-Migration to link existing payout fees to their orders:
-```sql
-UPDATE payout_fee pf
-SET sales_order_id = so.id
-FROM sales_order so
-WHERE so.origin_reference = pf.external_order_id
-  AND pf.sales_order_id IS NULL;
-```
+Change to use ex-VAT values for COGS and fees:
+- COGS displayed as ex-VAT: `exVAT(totalCogs)`
+- Fees displayed as ex-VAT: `exVAT(totalOrderFees)`
+- Profit: `order.netAmount - exVAT(totalCogs) - exVAT(totalOrderFees)`
 
-### Fix 6: Fix `v2-reconcile-payout` to also use `origin_reference`
-**File: `supabase/functions/v2-reconcile-payout/index.ts`**
+Add a "VAT Reclaim" summary row showing total reclaimable input VAT (purchase VAT + fee VAT).
 
-Verify and fix any queries that use `external_order_id` instead of `origin_reference` for matching.
+### 3. Update `OrderUnitSlideOut.tsx` — unit-level P&L
+
+The Unit P&L section currently shows gross values. Update to show:
+- Revenue (ex-VAT)
+- Landed Cost (ex-VAT)
+- Each fee category (ex-VAT)
+- Input VAT reclaim line
+- Net Profit (all ex-VAT)
+
+### 4. Update `useUnitProfit` mapper and `UnitProfit` type
+
+Add `netRevenue`, `netLandedCost`, `netTotalFees` fields from the updated view.
+
+### 5. Update `PayoutView.tsx` — payout summary
+
+Fee totals displayed in the payout detail should show both gross and net (ex-VAT) amounts.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/ebay-import-payouts/index.ts` | Fix order matching to use `origin_reference` |
-| `supabase/functions/qbo-process-pending/index.ts` | Write `cogs` when linking stock units; write `net_amount` on order creation |
-| `supabase/functions/v2-reconcile-payout/index.ts` | Fix order matching to use `origin_reference` |
-| Migration | Backfill `cogs`, `net_amount`, and `payout_fee.sales_order_id` for existing data |
+| Migration SQL | Recreate `unit_profit_view` with ex-VAT columns |
+| `src/components/admin-v2/OrderDetail.tsx` | Use `exVAT()` for COGS and fees in P&L cards; add VAT reclaim row |
+| `src/components/admin-v2/OrderUnitSlideOut.tsx` | Show ex-VAT values in unit P&L |
+| `src/hooks/admin/use-payouts.ts` | Update `UnitProfit` type and mapper for new view columns |
+| `src/components/admin-v2/PayoutView.tsx` | Show net fee amounts in payout detail |
 
 ## Expected outcome
-- Fee breakdown appears on order detail pages
-- COGS displays for all allocated line items
-- Net profit calculation works correctly
-- Payout linked orders table shows correct fees per order
-- `unit_profit_view` returns real fee and profit data
+
+All profit figures reflect true economic profit after VAT netting. Revenue, costs, and fees are all compared on the same ex-VAT basis. Reclaimable input VAT is surfaced as a separate line item for visibility.
 
