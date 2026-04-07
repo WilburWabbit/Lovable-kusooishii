@@ -217,11 +217,11 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     },
   },
   {
-    key: "externalOrderId",
-    label: "External ID",
+    key: "docNumber",
+    label: "QBO Doc",
     defaultVisible: false,
-    sortable: false,
-    render: (r) => <Mono color="dim">{r.externalOrderId ?? "—"}</Mono>,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.docNumber ?? "—"}</Mono>,
   },
   {
     key: "shippedAt",
