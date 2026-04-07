@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useOrder, orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
 import { useOrderFees } from "@/hooks/admin/use-payouts";
+import { exVAT, calculateVAT } from "@/lib/utils/vat";
 import type { OrderLineItem, StockUnitStatus } from "@/lib/types/admin";
 import {
   SurfaceCard,
