@@ -1,48 +1,52 @@
 
-Goal
 
-Fix the remaining duplicate-UID failure so purchases `881` and `1733` can process cleanly and the affected stock reconciliation can finally close.
+# Fix: Sales Orders Missing Line Items and Stock Allocation
 
-What I verified
+## Problem
 
-- Both purchases are still `error` in `landing_raw_qbo_purchase` with `stock_unit_uid_key` failures.
-- Their `inbound_receipt` rows exist and are currently `pending`.
-- There are no surviving `purchase_batches` or `stock_unit` rows for those purchases now.
-- `purchase_batch_seq` has already advanced to `581`.
-- So the current blocker is not stale leftover rows anymore; the collision is happening during the fresh stock-unit insert path itself.
+QBO sales receipt 1796 (eBay order `14-14455-15040`) exists in the database with `qbo_sync_status = synced` but has **zero line items** and **no stock allocated**. There are **23 orders** with this same problem.
 
-Implementation plan
+**Root cause**: The `processSalesReceipts` function in `qbo-process-pending` has a "match-first" path (lines 874–913) that checks if an order already exists by `origin_reference`, `doc_number`, or `order_number`. When it finds a match, it enriches the order with QBO fields (`qbo_sales_receipt_id`, `qbo_sync_status`) and commits the landing record — but **never creates line items or allocates stock**.
 
-1. Make UID allocation deterministic in the database
-- Add a migration that replaces the current per-row trigger counter mutation with a helper that reserves a UID range atomically for a batch.
-- Keep the trigger only as a fallback for ad hoc/manual inserts, not as the primary bulk-import mechanism.
+This happens when orders are created by eBay import (or another channel) as shell records without line items, then the QBO sales receipt comes through and the matcher assumes the order is already complete.
 
-2. Update both purchase processors to use reserved UIDs
-- `supabase/functions/qbo-process-pending/index.ts`
-- `supabase/functions/process-receipt/index.ts`
-- Before inserting stock units for a line, reserve the exact number of UIDs needed, attach those UIDs explicitly to the insert payload, and stop manually overwriting `purchase_batches.unit_counter` afterward.
-- Add better diagnostics: QBO purchase id, batch id, receipt line id, and reserved UID range.
+## Fix
 
-3. Keep reset/retry deterministic
-- `supabase/functions/admin-data/index.ts`
-- Keep the targeted reset path, but make its response report exactly what was cleared so retries are auditable.
-- After deployment, reset `881` and `1733` again, then run Process Pending from a clean state.
+Modify the match-first path in `processSalesReceipts` so that when it finds an existing order, it checks whether line items exist. If the order has no line items, it should proceed to create them from the QBO receipt data and allocate stock — the same logic already used for new orders (lines 986–1037).
 
-4. Validate end-to-end
-- `881` and `1733` move `error -> pending -> committed`
-- New batch rows and stock units are recreated with sequential `PO...` UIDs
-- `landed_cost`, SKU averages, and product/order display for `10349-1.1` repopulate correctly
-- Stock reconciliation for the affected SKUs reaches parity
+### Changes
 
-Files to change
+**File: `supabase/functions/qbo-process-pending/index.ts`**
 
-- `supabase/migrations/...` new migration for deterministic UID reservation / trigger hardening
-- `supabase/functions/qbo-process-pending/index.ts`
-- `supabase/functions/process-receipt/index.ts`
-- `supabase/functions/admin-data/index.ts`
+In the three match-first branches (lines 880–913), after finding an existing order:
+1. Check `SELECT COUNT(*) FROM sales_order_line WHERE sales_order_id = matched_order.id`
+2. If count is 0, fall through to the line-item creation and stock allocation logic instead of continuing
+3. If count > 0, keep the current enrich-and-skip behavior
 
-Technical details
+This is a single logical change in one file. The line-item creation loop (lines 986–1037) already handles SKU resolution, stock allocation via `allocate_stock_units`, and individual line inserts — it just needs to be reachable when the order exists but is incomplete.
 
-- Right now `purchase_batches.unit_counter` has mixed ownership: the DB trigger increments it per unit, while processors later overwrite it manually.
-- The live database state shows no remaining batches/units for `881` or `1733`, which means cleanup is no longer the root issue.
-- The durable fix is to make UID generation single-owner and deterministic during bulk purchase imports.
+### Technical detail
+
+The three match branches all follow the same pattern:
+```
+if (byRef) {
+  // enrich with QBO fields
+  // ← ADD: check line count, if 0 set order = byRef and fall through
+  // instead of continue
+}
+```
+
+A helper variable (e.g., `matchedOrderId`) can be set when a match is found with zero lines, allowing the code to skip the order INSERT but still execute the line-item loop.
+
+### Deployment
+
+- Redeploy `qbo-process-pending`
+- Reset the 23 affected landing records back to `pending` so they reprocess
+- Run "Process Pending" (sales) to backfill line items and allocate stock
+
+### Expected outcome
+
+- Receipt 1796 reprocesses → 4 line items created for `40220-1.1` → 4 of the 5 available units allocated
+- All 23 affected orders get their line items and stock allocation
+- No new orders created (existing ones are enriched in place)
+
