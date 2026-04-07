@@ -1,76 +1,88 @@
 
 
-# VAT-Net P&L: Apply VAT Netting Across All Cost Components
+# Redesign Order Detail as Invoice-Style Layout
 
 ## Problem
 
-The current profit calculations mix gross (VAT-inclusive) amounts. Revenue is shown gross, COGS includes reclaimable purchase VAT, and eBay fees/shipping labels include reclaimable input VAT. For a true P&L, all components must be compared on a net (ex-VAT) basis since the business reclaims input VAT.
+The current order detail page has a confusing layout with multiple rows of summary cards followed by a flat table. The user wants it redesigned to match the purchase batch detail pattern — structured like an invoice with a clear per-line VAT breakdown.
 
-**Current state** (example order `14-14455-15038`):
-- Revenue: £15.99 gross → should be £13.33 net
-- COGS: £9.03 (includes purchase VAT) → should be £7.53 net
-- Fees: £5.65 (eBay charges VAT on fees) → should be £4.71 net
-- Profit: currently £15.99 - £9.03 - £5.65 = £1.31 (wrong basis)
-- Correct: £13.33 - £7.53 - £4.71 = £1.09
+## Current state
+
+- Multiple rows of summary cards (revenue, VAT, QBO, COGS, fees, profit, margin) are scattered
+- Line items shown in a flat table with columns like "Payout", "Tracking", "Status" mixed in
+- No per-line VAT amount shown
+- Hard to read as an invoice
+
+## Data available
+
+- `sales_order_line` has `unit_price` (gross), `line_total`, `cogs`, `vat_rate_id`
+- `vat_rate` has `rate_percent` (currently 20% for all lines)
+- Per-line VAT can be computed: `unit_price / 1.2` = net, `unit_price - net` = VAT
+- Fee data already loaded via `useOrderFees`
 
 ## Design
 
-All three cost pillars — revenue, COGS, and fees — get VAT-netted at 20%. The `exVAT()` utility already exists in both frontend (`src/lib/utils/vat.ts`) and backend (`supabase/functions/_shared/vat.ts`).
+Restructure to an invoice-style layout:
 
-## Changes
+### 1. Header — compact order info
+Keep: external ref as heading, status badge, customer, channel, date, QBO status. Remove internal order number from prominent display.
 
-### 1. Update `unit_profit_view` (migration)
+### 2. Invoice line items table
+Replace the current table with invoice-style columns:
 
-Replace the view to compute all values ex-VAT:
+| Item | SKU | Qty | Unit (ex-VAT) | VAT | Line Total | COGS |
+|------|-----|-----|---------------|-----|------------|------|
 
-```sql
--- Revenue: unit_price / 1.2
--- Landed cost: landed_cost / 1.2 (input VAT reclaimable)
--- Fees: each fee / 1.2 (input VAT on eBay fees reclaimable)
--- Net profit: net_revenue - net_cost - net_fees
+Each row shows the product name, SKU code, quantity (always 1 currently), ex-VAT unit price, VAT amount, gross line total, and COGS if allocated.
+
+### 3. Invoice totals section
+Below the line items table, a right-aligned totals block (like a real invoice):
+
+```text
+                    Subtotal (ex-VAT):  £XX.XX
+                              VAT 20%:  £XX.XX
+                          Gross Total:  £XX.XX
 ```
 
-Add explicit columns: `gross_revenue`, `net_revenue`, `net_landed_cost`, `net_total_fees`, keeping gross columns for reference.
+### 4. P&L summary card
+A single card below the invoice replacing the scattered summary cards:
 
-### 2. Update `OrderDetail.tsx` — order-level P&L
+```text
+  Net Revenue    £XX.XX
+  COGS (ex-VAT)  £XX.XX
+  Fees (ex-VAT)  £XX.XX
+  ──────────────────────
+  Net Profit     £XX.XX   (XX.X% margin)
+  VAT Reclaim    £XX.XX
+```
 
-Currently: `netProfit = order.netAmount - totalCogs - totalOrderFees`
+### 5. Fee breakdown
+Keep the existing fee breakdown card, unchanged.
 
-Change to use ex-VAT values for COGS and fees:
-- COGS displayed as ex-VAT: `exVAT(totalCogs)`
-- Fees displayed as ex-VAT: `exVAT(totalOrderFees)`
-- Profit: `order.netAmount - exVAT(totalCogs) - exVAT(totalOrderFees)`
+### 6. Unit detail
+The "View Unit" button stays on each line item row for the slide-out.
 
-Add a "VAT Reclaim" summary row showing total reclaimable input VAT (purchase VAT + fee VAT).
+## Changes required
 
-### 3. Update `OrderUnitSlideOut.tsx` — unit-level P&L
+### `src/lib/types/admin.ts`
+- Add `vatRate` (number) and `lineVat` (number) to `OrderLineItem`
 
-The Unit P&L section currently shows gross values. Update to show:
-- Revenue (ex-VAT)
-- Landed Cost (ex-VAT)
-- Each fee category (ex-VAT)
-- Input VAT reclaim line
-- Net Profit (all ex-VAT)
+### `src/hooks/admin/use-orders.ts`
+- Join `vat_rate` via `vat_rate_id` in the line item query
+- Map `rate_percent` into `vatRate`, compute `lineVat` from `unit_price`
 
-### 4. Update `useUnitProfit` mapper and `UnitProfit` type
-
-Add `netRevenue`, `netLandedCost`, `netTotalFees` fields from the updated view.
-
-### 5. Update `PayoutView.tsx` — payout summary
-
-Fee totals displayed in the payout detail should show both gross and net (ex-VAT) amounts.
+### `src/components/admin-v2/OrderDetail.tsx`
+- Replace summary card rows with compact header metadata
+- Replace line items table with invoice-style table (Item, SKU, Qty, Unit ex-VAT, VAT, Line Total, COGS, action)
+- Add invoice totals section below the table
+- Add a single P&L summary card replacing the scattered cards
+- Keep fee breakdown card, action buttons, and mobile sticky actions as-is
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| Migration SQL | Recreate `unit_profit_view` with ex-VAT columns |
-| `src/components/admin-v2/OrderDetail.tsx` | Use `exVAT()` for COGS and fees in P&L cards; add VAT reclaim row |
-| `src/components/admin-v2/OrderUnitSlideOut.tsx` | Show ex-VAT values in unit P&L |
-| `src/hooks/admin/use-payouts.ts` | Update `UnitProfit` type and mapper for new view columns |
-| `src/components/admin-v2/PayoutView.tsx` | Show net fee amounts in payout detail |
-
-## Expected outcome
-
-All profit figures reflect true economic profit after VAT netting. Revenue, costs, and fees are all compared on the same ex-VAT basis. Reclaimable input VAT is surfaced as a separate line item for visibility.
+| `src/lib/types/admin.ts` | Add `vatRate`, `lineVat` to `OrderLineItem` |
+| `src/hooks/admin/use-orders.ts` | Join `vat_rate` table, map new fields |
+| `src/components/admin-v2/OrderDetail.tsx` | Rebuild as invoice-style layout |
 
