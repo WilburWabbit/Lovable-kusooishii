@@ -116,7 +116,7 @@ export function PricingActionsCard() {
 
       const pricing = await invokeWithAuth<Record<string, any>>(
         'admin-data',
-        { action: 'calculate-selling-costs', sku_id: sku.id, channel: singleChannel }
+        { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
       );
 
       setSingleResult(pricing);
