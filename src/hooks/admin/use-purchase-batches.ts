@@ -26,6 +26,8 @@ export const purchaseBatchKeys = {
 // ─── Row → Interface Mappers ────────────────────────────────
 
 function mapBatch(row: Record<string, unknown>): PurchaseBatch {
+  const lineItems = (row.purchase_line_items as { unit_cost: number; quantity: number }[] | undefined) ?? [];
+  const totalUnitCosts = lineItems.reduce((sum, li) => sum + (li.unit_cost ?? 0) * (li.quantity ?? 0), 0);
   return {
     id: row.id as string,
     supplierId: (row.supplier_id as string) ?? null,
@@ -34,7 +36,8 @@ function mapBatch(row: Record<string, unknown>): PurchaseBatch {
     reference: (row.reference as string) ?? null,
     supplierVatRegistered: row.supplier_vat_registered as boolean,
     sharedCosts: (row.shared_costs as SharedCosts) ?? { shipping: 0, broker_fee: 0, other: 0, other_label: '' },
-    totalSharedCosts: row.total_shared_costs as number,
+    totalSharedCosts: (row.total_shared_costs as number) ?? 0,
+    totalUnitCosts,
     status: row.status as PurchaseBatch['status'],
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
@@ -88,7 +91,7 @@ export function usePurchaseBatches() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('purchase_batches' as never)
-        .select('*')
+        .select('*, purchase_line_items(unit_cost, quantity)' as never)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

@@ -406,6 +406,25 @@ export function usePayoutFees(payoutId: string | undefined) {
   });
 }
 
+// ─── usePayoutUnitCount ─────────────────────────────────────
+// Count of stock units linked to a specific payout.
+
+export function usePayoutUnitCount(payoutId: string | undefined) {
+  return useQuery({
+    queryKey: ['v2', 'payout-unit-count', payoutId ?? ''] as const,
+    enabled: !!payoutId,
+    queryFn: async (): Promise<number> => {
+      const { count, error } = await supabase
+        .from('stock_unit')
+        .select('id', { count: 'exact', head: true })
+        .eq('payout_id' as never, payoutId!);
+
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+}
+
 // ─── useOrderFees ───────────────────────────────────────────
 // All payout_fee rows for a specific sales order.
 // Useful for the order detail view to show fee breakdown.

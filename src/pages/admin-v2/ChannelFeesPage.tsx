@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { AdminV2Layout } from '@/components/admin-v2/AdminV2Layout';
 import { SurfaceCard, SectionHead } from '@/components/admin-v2/ui-primitives';
+import { PricingSettingsCard } from '@/components/admin-v2/PricingSettingsCard';
+import { PricingActionsCard } from '@/components/admin-v2/PricingActionsCard';
 import { useChannelFees, useUpsertChannelFee, useDeleteChannelFee, type ChannelFee } from '@/hooks/admin/use-channel-fees';
 import { toast } from 'sonner';
 import { Plus, Trash2, Check, X } from 'lucide-react';
@@ -102,10 +104,18 @@ export default function ChannelFeesPage() {
   return (
     <AdminV2Layout>
       <div>
-        <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Selling Fees</h1>
+        <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Pricing</h1>
         <p className="text-zinc-500 text-[13px] mb-5">
           Channel fee schedules used by the pricing engine.
         </p>
+
+        <SectionHead>Pricing</SectionHead>
+        <div className="grid gap-3 mb-6">
+          <PricingActionsCard />
+          <PricingSettingsCard />
+        </div>
+
+        <SectionHead>Selling Fees</SectionHead>
 
         {channels.map((ch) => (
           <div key={ch} className="mb-6">

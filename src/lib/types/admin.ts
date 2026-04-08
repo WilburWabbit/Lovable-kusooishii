@@ -88,6 +88,7 @@ export interface PurchaseBatch {
   supplierVatRegistered: boolean;
   sharedCosts: SharedCosts;
   totalSharedCosts: number;
+  totalUnitCosts: number;
   status: PurchaseBatchStatus;
   createdAt: string;
   updatedAt: string;
@@ -274,6 +275,7 @@ export interface CustomerRow extends Customer {
   billingCountry: string | null;
   orderCount: number;
   totalSpend: number;
+  firstOrderAt: string | null;
 }
 
 // ─── 2.11 Payout ──────────────────────────────────────────
