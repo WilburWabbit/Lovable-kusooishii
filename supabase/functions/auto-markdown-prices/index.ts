@@ -90,26 +90,42 @@ Deno.serve(async (req) => {
       feesByChannel.get(ch)!.push(row);
     }
 
-    // Load selling cost defaults (packaging)
+    // Load selling cost defaults (packaging + shipping settings)
     const { data: sellingDefaults } = await admin
       .from("selling_cost_defaults")
       .select("key, value")
-      .limit(10);
+      .limit(20);
 
-    let packagingCost = 0.50; // default
+    const settingsMap: Record<string, number> = {};
     for (const d of (sellingDefaults ?? []) as { key: string; value: number }[]) {
-      if (d.key === "packaging_cost") packagingCost = d.value;
+      settingsMap[d.key] = d.value;
     }
+    const packagingCost = settingsMap["packaging_cost"] ?? 0.50;
+    const activeTierNum = settingsMap["evri_active_tier"] ?? 1;
+    const activeTier = `tier_${activeTierNum}`;
+    const preferEvriThreshold = settingsMap["shipping_prefer_evri_threshold"] ?? 1.0;
 
-    // Load shipping rates for floor estimation (cheapest active rate)
-    const { data: shippingRates } = await admin
+    // Load Evri direct rates for active tier (default channel)
+    const { data: evriDirectRates } = await admin
       .from("shipping_rate_table")
-      .select("price")
+      .select("cost, max_weight_kg, max_length_cm, max_width_cm, max_depth_cm, carrier, size_band")
+      .eq("channel", "default")
+      .eq("tier", activeTier)
+      .eq("destination", "domestic")
       .eq("active", true)
-      .order("price", { ascending: true })
-      .limit(1);
+      .order("cost", { ascending: true });
 
-    const defaultShippingCost = (shippingRates?.[0] as { price: number } | undefined)?.price ?? 3.50;
+    // Load eBay carrier rates
+    const { data: ebayCarrierRates } = await admin
+      .from("shipping_rate_table")
+      .select("cost, max_weight_kg, max_length_cm, max_width_cm, max_depth_cm, carrier, size_band")
+      .eq("channel", "ebay")
+      .eq("destination", "domestic")
+      .eq("active", true)
+      .order("cost", { ascending: true });
+
+    // Default shipping cost: cheapest Evri direct rate
+    const defaultShippingCost = (evriDirectRates?.[0] as { cost: number } | undefined)?.cost ?? 2.59;
 
     // Find listed stock units with their SKU and landed cost
     const { data: listedUnits, error: queryErr } = await admin
@@ -198,10 +214,20 @@ Deno.serve(async (req) => {
 
       if (!currentPrice || currentPrice <= 0) continue;
 
-      // Calculate VAT-aware floor price using real fees and shipping
+      // Calculate VAT-aware floor price using Evri-first shipping strategy
       const channel = skuChannel.get(skuId) ?? "ebay";
       const fees = feesByChannel.get(channel) ?? [];
-      const shippingCost = defaultShippingCost;
+
+      // Find best shipping cost using Evri-first logic
+      // (simplified: use default Evri rate, check eBay saving)
+      let shippingCost = defaultShippingCost;
+      if (channel === "ebay" && ebayCarrierRates && ebayCarrierRates.length > 0) {
+        const cheapestEbay = Number((ebayCarrierRates[0] as { cost: number }).cost);
+        const saving = shippingCost - cheapestEbay;
+        if (saving > preferEvriThreshold) {
+          shippingCost = cheapestEbay;
+        }
+      }
       const costBase = group.highestCost + packagingCost + shippingCost;
 
       const { effectiveFeeRate, fixedFeeCosts } = decomposeFees(fees, shippingCost);
