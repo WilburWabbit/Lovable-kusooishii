@@ -57,6 +57,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
   const [selectedFlags, setSelectedFlags] = useState<Set<ConditionFlag>>(
     new Set(unit?.conditionFlags ?? [])
   );
+  const [notesText, setNotesText] = useState<string>(unit?.notes ?? "");
 
   const [physical, setPhysical] = useState<PhysicalData>({
     ean: "", upc: "", isbn: "", ageMark: "", lengthCm: "", widthCm: "", heightCm: "", weightG: "",
