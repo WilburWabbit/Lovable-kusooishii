@@ -2544,6 +2544,7 @@ export type Database = {
           created_at: string
           currency: string
           customer_id: string | null
+          delivered_at: string | null
           discount_total: number
           doc_number: string | null
           external_order_id: string | null
@@ -2595,6 +2596,7 @@ export type Database = {
           created_at?: string
           currency?: string
           customer_id?: string | null
+          delivered_at?: string | null
           discount_total?: number
           doc_number?: string | null
           external_order_id?: string | null
@@ -2646,6 +2648,7 @@ export type Database = {
           created_at?: string
           currency?: string
           customer_id?: string | null
+          delivered_at?: string | null
           discount_total?: number
           doc_number?: string | null
           external_order_id?: string | null
@@ -3883,6 +3886,8 @@ export type Database = {
         | "delivered"
         | "complete"
         | "return_pending"
+        | "refunded"
+        | "cancelled"
       v2_unit_status:
         | "purchased"
         | "graded"
@@ -4086,6 +4091,8 @@ export const Constants = {
         "delivered",
         "complete",
         "return_pending",
+        "refunded",
+        "cancelled",
       ],
       v2_unit_status: [
         "purchased",
