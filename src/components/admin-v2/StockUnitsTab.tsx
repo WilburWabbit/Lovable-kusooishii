@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
-import { UnitDetailSlideOut } from "./UnitDetailSlideOut";
+import { GradeSlideOut } from "./GradeSlideOut";
 import { WriteOffDialog } from "./WriteOffDialog";
 
 interface StockUnitsTabProps {
