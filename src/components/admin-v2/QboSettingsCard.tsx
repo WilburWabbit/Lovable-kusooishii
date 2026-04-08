@@ -273,6 +273,25 @@ export function QboSettingsCard() {
     }
   };
 
+  const retryFailedPush = async () => {
+    setRetryingPush(true);
+    try {
+      const resetData = await invokeWithAuth<{ reset: number }>('admin-data', { action: 'retry-failed-qbo-push' });
+      const resetCount = resetData?.reset ?? 0;
+      if (resetCount === 0) {
+        toast.info('No failed orders to retry');
+        return;
+      }
+      toast.success(`Reset ${resetCount} failed order(s) — processing...`);
+      const d = await invokeWithAuth<Record<string, unknown>>('qbo-retry-sync');
+      const processed = (d as Record<string, unknown>)?.processed ?? 0;
+      toast.success(`Retry complete: ${processed} order(s) processed`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Retry failed push failed');
+    } finally {
+      setRetryingPush(false);
+    }
+
   const reconcileStock = async () => {
     setReconciling(true);
     setReconcileDetails(null);
