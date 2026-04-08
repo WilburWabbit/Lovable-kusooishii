@@ -158,6 +158,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
           stockUnitId: unit.id,
           grade: selectedGrade,
           conditionFlags: Array.from(selectedFlags),
+          notes: notesText,
         });
         await persistPhysical(unit.mpn);
         toast.success(`Unit ${unit.uid} graded as G${selectedGrade}`);
