@@ -49,11 +49,12 @@ export function QboSettingsCard() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [cleaningGhosts, setCleaningGhosts] = useState(false);
   const [recalcingCost, setRecalcingCost] = useState(false);
+  const [retryingPush, setRetryingPush] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -269,6 +270,26 @@ export function QboSettingsCard() {
     } finally {
       setProcessing(false);
       setProcessLabel('');
+    }
+  };
+
+  const retryFailedPush = async () => {
+    setRetryingPush(true);
+    try {
+      const resetData = await invokeWithAuth<{ reset: number }>('admin-data', { action: 'retry-failed-qbo-push' });
+      const resetCount = resetData?.reset ?? 0;
+      if (resetCount === 0) {
+        toast.info('No failed orders to retry');
+        return;
+      }
+      toast.success(`Reset ${resetCount} failed order(s) — processing...`);
+      const d = await invokeWithAuth<Record<string, unknown>>('qbo-retry-sync');
+      const processed = (d as Record<string, unknown>)?.processed ?? 0;
+      toast.success(`Retry complete: ${processed} order(s) processed`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Retry failed push failed');
+    } finally {
+      setRetryingPush(false);
     }
   };
 
@@ -549,6 +570,7 @@ export function QboSettingsCard() {
             <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Process & Reconcile</p>
             <div className="flex flex-wrap gap-1.5">
               <Btn onClick={processPending} busy={processing}>Process Pending</Btn>
+              <Btn onClick={retryFailedPush} busy={retryingPush}>Retry Failed Push</Btn>
               <Btn onClick={reconcileStock} busy={reconciling}>Reconcile Stock</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-purchases', 'Purchases')} busy={reconcilingEntity === 'reconcile-purchases'}>Reconcile Purchases</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-sales', 'Sales')} busy={reconcilingEntity === 'reconcile-sales'}>Reconcile Sales</Btn>
