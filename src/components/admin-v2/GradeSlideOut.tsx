@@ -74,6 +74,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
     setLastUnitId(unitId);
     setSelectedGrade((unit?.grade as ConditionGrade) ?? null);
     setSelectedFlags(new Set(unit?.conditionFlags ?? []));
+    setNotesText(unit?.notes ?? "");
     // Pre-populate physical fields from product data (raw DB row or typed product)
     const raw = rawProductData;
     const dims = (raw?.dimensions_cm as string) ?? product?.dimensionsCm ?? "";
