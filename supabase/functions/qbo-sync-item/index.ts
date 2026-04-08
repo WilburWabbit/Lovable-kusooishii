@@ -76,6 +76,7 @@ Deno.serve(async (req) => {
     // ─── 3. Fetch existing QBO item if updating ─────────────
     let syncToken: string | null = null;
     let existingType: string | null = null;
+    let oldQtyOnHand: number | null = null;
 
     if (existingQboItemId) {
       const getRes = await fetchWithTimeout(
@@ -92,6 +93,10 @@ Deno.serve(async (req) => {
         const getData = await getRes.json();
         syncToken = getData.Item?.SyncToken ?? null;
         existingType = getData.Item?.Type ?? null;
+        // Capture QtyOnHand for potential inventory adjustment
+        if (transferFromOldSku) {
+          oldQtyOnHand = getData.Item?.QtyOnHand ?? 0;
+        }
       }
     }
 
@@ -101,7 +106,7 @@ Deno.serve(async (req) => {
     const description = `${productName} — ${gradeLabel}`;
 
     const itemPayload: Record<string, unknown> = {
-      Name: skuCode,
+      Name: `${productName} (${skuCode})`,
       Description: description,
       PurchaseDesc: description,
       Taxable: true,
@@ -166,6 +171,38 @@ Deno.serve(async (req) => {
       console.log(`Cleared qbo_item_id from old SKU ${oldSkuCode}`);
     }
 
+    // ─── 7.5. Inventory Adjustment if transferring stock ────
+    let adjustmentResult: string | null = null;
+    if (transferFromOldSku && oldQtyOnHand && oldQtyOnHand > 0) {
+      try {
+        console.log(`Creating inventory adjustment: ${oldQtyOnHand} units from old item ${existingQboItemId} → new item ${returnedId}`);
+
+        // We need the old item's current state after the Name update.
+        // The item ID is the same (we updated in-place), so we need to
+        // create a NEW QBO item for the old SKU first, or adjust using
+        // the same item. Since we renamed the item to the new SKU,
+        // the adjustment decreases the (now-renamed) item and... 
+        // Actually, the item was renamed — there's only one QBO item.
+        // We need to check: did the old SKU get a NEW QBO item created?
+        // No — the transfer means the old SKU's QBO item is now the new SKU's item.
+        // So there's no "old" vs "new" QBO item — it's the same item, just renamed.
+        // The QtyOnHand stays with the renamed item, which is correct.
+        // No inventory adjustment is needed when it's a simple rename/transfer.
+        
+        // However, if there IS a separate QBO item for the new SKU already,
+        // we'd need to move stock. But in the transfer case, there isn't one.
+        // So we only need an adjustment if both old and new SKUs have separate QBO items.
+        
+        // In the current transfer flow, the old item IS the new item (renamed).
+        // Stock stays with it. No adjustment needed.
+        console.log(`Inventory adjustment not needed — item was renamed in-place, stock carries over.`);
+        adjustmentResult = "not_needed_rename";
+      } catch (adjErr) {
+        console.error("Inventory adjustment failed (non-fatal):", adjErr);
+        adjustmentResult = "error";
+      }
+    }
+
     // ─── 8. Land raw response ───────────────────────────────
     await admin.from("landing_raw_qbo_item" as never).upsert(
       {
@@ -183,6 +220,7 @@ Deno.serve(async (req) => {
       qbo_item_id: returnedId,
       action: (existingQboItemId && syncToken) ? "updated" : "created",
       transferred: transferFromOldSku,
+      adjustment: adjustmentResult,
       skuCode,
     });
   } catch (err) {
