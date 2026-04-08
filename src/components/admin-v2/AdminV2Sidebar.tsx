@@ -7,7 +7,6 @@ import {
   Wallet,
   Inbox,
   BarChart3,
-  Settings,
   ArrowUpDown,
   Receipt,
   Truck,
@@ -152,12 +151,6 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           label="Data Sync"
           to="/admin/data-sync"
           active={isActive("/admin/data-sync")}
-        />
-        <SidebarItem
-          icon={Settings}
-          label="Settings"
-          to="/admin/settings"
-          active={isActive("/admin/settings")}
         />
         <SidebarItem
           icon={Receipt}
