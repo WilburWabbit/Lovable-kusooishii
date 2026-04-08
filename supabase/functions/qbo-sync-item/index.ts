@@ -1,7 +1,8 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-08
 // ============================================================
 // QBO Sync Item
 // Creates or updates a QBO Item when a new SKU variant is created.
+// Supports re-grade transfers via optional oldSkuCode parameter.
 // ============================================================
 
 import {
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
     await authenticateRequest(req, admin);
     const { clientId, clientSecret, realmId } = getQBOConfig();
 
-    const { skuCode } = await req.json();
+    const { skuCode, oldSkuCode } = await req.json();
     if (!skuCode) throw new Error("skuCode is required");
 
     // ─── 1. Fetch SKU + product ─────────────────────────────
@@ -49,12 +50,32 @@ Deno.serve(async (req) => {
     const grade = (sku as Record<string, unknown>).condition_grade as string;
     const gradeLabel = GRADE_LABELS[grade] ?? `Grade ${grade}`;
 
-    // ─── 2. Check if QBO item already exists ────────────────
+    // ─── 2. Determine QBO item ID ───────────────────────────
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
-    const existingQboItemId = (sku as Record<string, unknown>).qbo_item_id as string | null;
+    let existingQboItemId = (sku as Record<string, unknown>).qbo_item_id as string | null;
+    let transferFromOldSku = false;
+
+    // If no QBO item on new SKU but oldSkuCode provided, transfer from old SKU
+    if (!existingQboItemId && oldSkuCode) {
+      const { data: oldSku } = await admin
+        .from("sku")
+        .select("qbo_item_id")
+        .eq("sku_code", oldSkuCode)
+        .maybeSingle();
+
+      const oldQboId = (oldSku as Record<string, unknown> | null)?.qbo_item_id as string | null;
+      if (oldQboId) {
+        existingQboItemId = oldQboId;
+        transferFromOldSku = true;
+        console.log(`Transferring QBO item ${oldQboId} from ${oldSkuCode} → ${skuCode}`);
+      }
+    }
+
+    // ─── 3. Fetch existing QBO item if updating ─────────────
     let syncToken: string | null = null;
+    let existingType: string | null = null;
 
     if (existingQboItemId) {
       const getRes = await fetchWithTimeout(
@@ -70,21 +91,19 @@ Deno.serve(async (req) => {
       if (getRes.ok) {
         const getData = await getRes.json();
         syncToken = getData.Item?.SyncToken ?? null;
+        existingType = getData.Item?.Type ?? null;
       }
     }
 
-    // ─── 3. Build QBO Item payload ──────────────────────────
-    // Read price from either `price` (v1) or `sale_price` (v2) column
+    // ─── 4. Build QBO Item payload ──────────────────────────
     const skuRow = sku as Record<string, unknown>;
     const salePrice = (skuRow.price as number | null) ?? (skuRow.sale_price as number | null);
+    const description = `${productName} — ${gradeLabel}`;
 
     const itemPayload: Record<string, unknown> = {
       Name: skuCode,
-      Description: `${productName} — ${gradeLabel}`,
-      PurchaseDesc: `${productName} — ${gradeLabel}`,
-      Type: "NonInventory",
-      IncomeAccountRef: { value: "1" }, // Sales income — configure via env/settings
-      ExpenseAccountRef: { value: "2" }, // COGS — configure via env/settings
+      Description: description,
+      PurchaseDesc: description,
       Taxable: true,
     };
 
@@ -92,14 +111,23 @@ Deno.serve(async (req) => {
       itemPayload.UnitPrice = exVAT(salePrice);
     }
 
-    // If updating, include Id and SyncToken
     if (existingQboItemId && syncToken) {
+      // UPDATE — sparse update, preserve existing Type, omit account refs
       itemPayload.Id = existingQboItemId;
       itemPayload.SyncToken = syncToken;
       itemPayload.sparse = true;
+      // Preserve the existing Type from QBO (e.g. "Inventory"/"NonInventory")
+      if (existingType) {
+        itemPayload.Type = existingType;
+      }
+    } else {
+      // CREATE — set Type and account refs
+      itemPayload.Type = "NonInventory";
+      itemPayload.IncomeAccountRef = { value: "1" };
+      itemPayload.ExpenseAccountRef = { value: "2" };
     }
 
-    // ─── 4. POST to QBO ─────────────────────────────────────
+    // ─── 5. POST to QBO ─────────────────────────────────────
     const qboRes = await fetchWithTimeout(`${baseUrl}/item?minorversion=65`, {
       method: "POST",
       headers: {
@@ -123,13 +151,22 @@ Deno.serve(async (req) => {
     const qboResult = await qboRes.json();
     const returnedId = String(qboResult.Item.Id);
 
-    // ─── 5. Update SKU with QBO item ID ─────────────────────
+    // ─── 6. Update new SKU with QBO item ID ─────────────────
     await admin
       .from("sku")
       .update({ qbo_item_id: returnedId } as never)
       .eq("sku_code", skuCode);
 
-    // ─── 6. Land raw response ───────────────────────────────
+    // ─── 7. Clear QBO item ID from old SKU if transferring ──
+    if (transferFromOldSku && oldSkuCode) {
+      await admin
+        .from("sku")
+        .update({ qbo_item_id: null } as never)
+        .eq("sku_code", oldSkuCode);
+      console.log(`Cleared qbo_item_id from old SKU ${oldSkuCode}`);
+    }
+
+    // ─── 8. Land raw response ───────────────────────────────
     await admin.from("landing_raw_qbo_item" as never).upsert(
       {
         external_id: returnedId,
@@ -144,7 +181,8 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       qbo_item_id: returnedId,
-      action: existingQboItemId ? "updated" : "created",
+      action: (existingQboItemId && syncToken) ? "updated" : "created",
+      transferred: transferFromOldSku,
       skuCode,
     });
   } catch (err) {
