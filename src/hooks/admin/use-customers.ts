@@ -20,6 +20,7 @@ function mapCustomerRow(
   row: Record<string, unknown>,
   orderCount: number,
   totalSpend: number,
+  firstOrderAt: string | null,
 ): CustomerRow {
   return {
     id: row.id as string,
@@ -44,6 +45,7 @@ function mapCustomerRow(
     billingCountry: (row.billing_country as string) ?? null,
     orderCount,
     totalSpend,
+    firstOrderAt,
   };
 }
 
@@ -61,27 +63,31 @@ export function useCustomers() {
 
       if (custErr) throw custErr;
 
-      // Fetch order counts and totals per customer
+      // Fetch order counts, totals, and dates per customer
       const { data: orderStats, error: orderErr } = await supabase
         .from('sales_order')
-        .select('customer_id, gross_total');
+        .select('customer_id, gross_total, created_at');
 
       if (orderErr) throw orderErr;
 
       // Aggregate order stats by customer_id
-      const statsMap = new Map<string, { count: number; total: number }>();
+      const statsMap = new Map<string, { count: number; total: number; firstOrderAt: string | null }>();
       for (const row of (orderStats ?? []) as Record<string, unknown>[]) {
         const cid = row.customer_id as string;
         if (!cid) continue;
-        const existing = statsMap.get(cid) ?? { count: 0, total: 0 };
+        const existing = statsMap.get(cid) ?? { count: 0, total: 0, firstOrderAt: null };
         existing.count += 1;
         existing.total += (row.gross_total as number) ?? 0;
+        const orderDate = row.created_at as string | null;
+        if (orderDate && (!existing.firstOrderAt || orderDate < existing.firstOrderAt)) {
+          existing.firstOrderAt = orderDate;
+        }
         statsMap.set(cid, existing);
       }
 
       return ((customerRows ?? []) as Record<string, unknown>[]).map((row) => {
-        const stats = statsMap.get(row.id as string) ?? { count: 0, total: 0 };
-        return mapCustomerRow(row, stats.count, stats.total);
+        const stats = statsMap.get(row.id as string) ?? { count: 0, total: 0, firstOrderAt: null };
+        return mapCustomerRow(row, stats.count, stats.total, stats.firstOrderAt);
       });
     },
   });
@@ -106,17 +112,22 @@ export function useCustomer(customerId: string | undefined) {
       // Get order stats for this customer
       const { data: orders } = await supabase
         .from('sales_order')
-        .select('gross_total')
+        .select('gross_total, created_at')
         .eq('customer_id', customerId!);
 
       let orderCount = 0;
       let totalSpend = 0;
+      let firstOrderAt: string | null = null;
       for (const o of (orders ?? []) as Record<string, unknown>[]) {
         orderCount += 1;
         totalSpend += (o.gross_total as number) ?? 0;
+        const orderDate = o.created_at as string | null;
+        if (orderDate && (!firstOrderAt || orderDate < firstOrderAt)) {
+          firstOrderAt = orderDate;
+        }
       }
 
-      return mapCustomerRow(row, orderCount, totalSpend);
+      return mapCustomerRow(row, orderCount, totalSpend, firstOrderAt);
     },
   });
 }

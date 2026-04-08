@@ -275,6 +275,7 @@ export interface CustomerRow extends Customer {
   billingCountry: string | null;
   orderCount: number;
   totalSpend: number;
+  firstOrderAt: string | null;
 }
 
 // ─── 2.11 Payout ──────────────────────────────────────────

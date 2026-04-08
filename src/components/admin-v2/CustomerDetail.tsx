@@ -178,7 +178,7 @@ export function CustomerDetail() {
         {!customer.active && <Badge label="Inactive" color="#71717A" small />}
       </div>
       <p className="text-muted-foreground text-[13px] mb-5">
-        {customer.orderCount} orders · £{customer.totalSpend.toFixed(2)} total spend · Customer since {formatDate(customer.createdAt)}
+        {customer.orderCount} orders · £{customer.totalSpend.toFixed(2)} total spend · Customer since {formatDate(customer.firstOrderAt ?? customer.createdAt)}
       </p>
 
       {/* Edit / Save buttons */}
