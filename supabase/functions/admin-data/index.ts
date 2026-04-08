@@ -862,32 +862,66 @@ Deno.serve(async (req) => {
         ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
         : 0;
 
-      // 4. Get shipping cost (cheapest rate that fits)
+      // 4. Get shipping cost — Evri-first strategy
       const weightKg = product.weight_kg ?? 0;
-      const { data: allRates } = await admin
-        .from("shipping_rate_table")
-        .select("*")
-        .or(`channel.eq.${channel},channel.eq.default`)
-        .eq("active", true)
-        .gte("max_weight_kg", weightKg)
-        .order("cost", { ascending: true });
-      
       const lengthCm = product.length_cm;
       const widthCm = product.width_cm;
       const heightCm = product.height_cm;
       const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
-      let matchedRate: any = null;
-      if (hasDimensions && allRates && allRates.length > 0) {
-        matchedRate = allRates.find((r: any) =>
-          (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
-          (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
-          (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
-        );
+
+      // Read Evri tier setting
+      const activeTierNum = dm["evri_active_tier"] ?? 1;
+      const activeTier = `tier_${activeTierNum}`;
+      const preferEvriThreshold = dm["shipping_prefer_evri_threshold"] ?? 1.0;
+
+      // Helper to find best-fit rate from a list
+      const findBestFit = (rates: any[]): any => {
+        if (hasDimensions && rates.length > 0) {
+          const dimMatch = rates.find((r: any) =>
+            (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
+            (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
+            (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
+          );
+          if (dimMatch) return dimMatch;
+        }
+        // Fallback: Evri Small Parcel or cheapest
+        const evriSmall = rates.filter((r: any) => r.carrier === "Evri" && r.size_band === "Small Parcel");
+        return evriSmall.length > 0 ? evriSmall[0] : (rates.length > 0 ? rates[0] : null);
+      };
+
+      // Query Evri direct rates (default channel, active tier)
+      const { data: evriRates } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .eq("channel", "default")
+        .eq("tier", activeTier)
+        .eq("destination", "domestic")
+        .eq("active", true)
+        .gte("max_weight_kg", weightKg)
+        .order("cost", { ascending: true });
+
+      let matchedRate = findBestFit(evriRates ?? []);
+
+      // For eBay channel: check if eBay carrier rate offers substantial saving
+      if (channel === "ebay" && matchedRate) {
+        const { data: ebayRates } = await admin
+          .from("shipping_rate_table")
+          .select("*")
+          .eq("channel", "ebay")
+          .eq("destination", "domestic")
+          .eq("active", true)
+          .gte("max_weight_kg", weightKg)
+          .order("cost", { ascending: true });
+
+        const ebayBest = findBestFit(ebayRates ?? []);
+        if (ebayBest) {
+          const saving = Number(matchedRate.cost) - Number(ebayBest.cost);
+          if (saving > preferEvriThreshold) {
+            matchedRate = ebayBest;
+          }
+        }
       }
-      if (!matchedRate) {
-        const evriSmall = (allRates ?? []).filter((r: any) => r.carrier === "Evri" && r.size_band === "Small Parcel");
-        matchedRate = evriSmall.length > 0 ? evriSmall[0] : (allRates && allRates.length > 0 ? allRates[0] : null);
-      }
+
       const shippingCost = matchedRate ? Number(matchedRate.cost) : 0;
 
       // 5. Get channel fees
