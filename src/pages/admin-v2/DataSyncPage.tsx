@@ -1,6 +1,8 @@
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
 import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
+import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
+import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
 import { CsvSyncPage } from "@/components/admin-v2/csv-sync/CsvSyncPage";
 import { StagingErrorsPanel } from "@/components/admin-v2/StagingErrorsPanel";
 
@@ -15,6 +17,8 @@ export default function DataSyncPage() {
           </p>
           <QboSettingsCard />
           <StripeSettingsCard />
+          <EbaySettingsCard />
+          <BrickEconomySettingsCard />
         </div>
         <CsvSyncPage />
       </div>

@@ -1,11 +1,9 @@
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { SectionHead, SurfaceCard } from "@/components/admin-v2/ui-primitives";
 import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
-import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
 import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
 import { PricingSettingsCard } from "@/components/admin-v2/PricingSettingsCard";
 import { PricingActionsCard } from "@/components/admin-v2/PricingActionsCard";
-import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
 
 export default function SettingsPage() {
   return (
@@ -19,9 +17,7 @@ export default function SettingsPage() {
         <SectionHead>Integrations</SectionHead>
         <div className="grid gap-3">
           <QboSettingsCard />
-          <EbaySettingsCard />
           <StripeSettingsCard />
-          <BrickEconomySettingsCard />
         </div>
 
         <div className="mt-6">
