@@ -154,9 +154,9 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
         />
         <SidebarItem
           icon={Receipt}
-          label="Selling Fees"
-          to="/admin/selling-fees"
-          active={isActive("/admin/selling-fees")}
+          label="Pricing"
+          to="/admin/pricing"
+          active={isActive("/admin/pricing")}
         />
         <SidebarItem
           icon={Truck}

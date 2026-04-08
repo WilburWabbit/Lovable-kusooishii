@@ -104,7 +104,7 @@ export default function ChannelFeesPage() {
   return (
     <AdminV2Layout>
       <div>
-        <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Selling Fees</h1>
+        <h1 className="text-[22px] font-bold text-zinc-900 mb-1">Pricing</h1>
         <p className="text-zinc-500 text-[13px] mb-5">
           Channel fee schedules used by the pricing engine.
         </p>

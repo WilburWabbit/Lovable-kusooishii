@@ -117,7 +117,7 @@ const App = () => (
             <Route path="/admin/customers" element={<RequireAdmin><CustomerListPage /></RequireAdmin>} />
             <Route path="/admin/customers/:customerId" element={<RequireAdmin><CustomerDetailPage /></RequireAdmin>} />
             <Route path="/admin/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
-            <Route path="/admin/selling-fees" element={<RequireAdmin><ChannelFeesPage /></RequireAdmin>} />
+            <Route path="/admin/pricing" element={<RequireAdmin><ChannelFeesPage /></RequireAdmin>} />
             <Route path="/admin/shipping-rates" element={<RequireAdmin><ShippingRatesPage /></RequireAdmin>} />
             <Route path="/admin/data-sync" element={<RequireAdmin><DataSyncPage /></RequireAdmin>} />
             <Route path="/admin/intake" element={<RequireAdmin><IntakePage /></RequireAdmin>} />
