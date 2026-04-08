@@ -10,6 +10,7 @@ import {
   ArrowUpDown,
   Receipt,
   Truck,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
@@ -20,12 +21,14 @@ interface SidebarItemProps {
   to: string;
   active: boolean;
   count?: number;
+  onNavigate?: () => void;
 }
 
-function SidebarItem({ icon: Icon, label, to, active, count }: SidebarItemProps) {
+function SidebarItem({ icon: Icon, label, to, active, count, onNavigate }: SidebarItemProps) {
   return (
     <Link
       to={to}
+      onClick={onNavigate}
       className={cn(
         "flex items-center gap-2.5 px-4 py-2.5 text-[13px] transition-colors border-l-2",
         active
@@ -54,9 +57,16 @@ function SidebarItem({ icon: Icon, label, to, active, count }: SidebarItemProps)
 interface AdminV2SidebarProps {
   ungradedCount?: number;
   actionNeededCount?: number;
+  mobileOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: AdminV2SidebarProps) {
+export function AdminV2Sidebar({
+  ungradedCount = 0,
+  actionNeededCount = 0,
+  mobileOpen = false,
+  onClose,
+}: AdminV2SidebarProps) {
   const location = useLocation();
 
   const isActive = (path: string) => {
@@ -76,10 +86,19 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
   };
 
   return (
-    <aside className="w-[220px] shrink-0 bg-[#18181B] border-r border-zinc-700/80 flex flex-col h-full">
+    <aside
+      className={cn(
+        "w-[220px] shrink-0 bg-[#18181B] border-r border-zinc-700/80 flex flex-col",
+        // Mobile: fixed drawer with slide animation
+        "fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out",
+        mobileOpen ? "translate-x-0" : "-translate-x-full",
+        // Desktop: static, always visible
+        "md:relative md:translate-x-0 md:h-full"
+      )}
+    >
       {/* Brand */}
-      <div className="px-4 py-5 border-b border-zinc-700/80">
-        <Link to="/admin/purchases" className="flex items-center gap-2">
+      <div className="px-4 py-5 border-b border-zinc-700/80 flex items-center justify-between">
+        <Link to="/admin/purchases" className="flex items-center gap-2" onClick={onClose}>
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-sm font-extrabold text-zinc-900">
             K
           </div>
@@ -88,6 +107,14 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
             <div className="text-[10px] text-zinc-500 tracking-wider uppercase">Operations</div>
           </div>
         </Link>
+        {/* Close button — mobile only */}
+        <button
+          onClick={onClose}
+          className="md:hidden text-zinc-500 hover:text-zinc-300 transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Pipeline */}
@@ -101,12 +128,14 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/purchases"
           active={isActive("/admin/purchases")}
           count={ungradedCount > 0 ? ungradedCount : undefined}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={Package}
           label="Products"
           to="/admin/products"
           active={isActive("/admin/products")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={ClipboardList}
@@ -114,18 +143,21 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           to="/admin/orders"
           active={isActive("/admin/orders")}
           count={actionNeededCount > 0 ? actionNeededCount : undefined}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={Users}
           label="Customers"
           to="/admin/customers"
           active={isActive("/admin/customers")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={Wallet}
           label="Payouts"
           to="/admin/payouts"
           active={isActive("/admin/payouts")}
+          onNavigate={onClose}
         />
       </div>
 
@@ -139,30 +171,35 @@ export function AdminV2Sidebar({ ungradedCount = 0, actionNeededCount = 0 }: Adm
           label="Intake"
           to="/admin/intake"
           active={isActive("/admin/intake")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={BarChart3}
           label="Analytics"
           to="/admin/analytics"
           active={isActive("/admin/analytics")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={ArrowUpDown}
           label="Data Sync"
           to="/admin/data-sync"
           active={isActive("/admin/data-sync")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={Receipt}
           label="Pricing"
           to="/admin/pricing"
           active={isActive("/admin/pricing")}
+          onNavigate={onClose}
         />
         <SidebarItem
           icon={Truck}
           label="Shipping Rates"
           to="/admin/shipping-rates"
           active={isActive("/admin/shipping-rates")}
+          onNavigate={onClose}
         />
       </div>
 
