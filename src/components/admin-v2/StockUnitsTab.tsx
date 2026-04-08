@@ -118,7 +118,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                     onClick={() => setSlideUnit(u)}
                     className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
                   >
-                    View
+                    Edit
                   </button>
                 </td>
               </tr>
