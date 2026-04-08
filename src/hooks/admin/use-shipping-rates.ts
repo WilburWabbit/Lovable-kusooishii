@@ -18,6 +18,8 @@ export interface ShippingRate {
   tracked: boolean;
   active: boolean;
   channel: string;
+  tier: string | null;
+  destination: string;
   est_delivery: string | null;
   max_compensation: number | null;
   created_at: string;

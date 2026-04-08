@@ -19,6 +19,12 @@ const LABELS: Record<string, string> = {
   condition_multiplier_4: 'Condition 4 Multiplier',
   minimum_margin_rate: 'Minimum Margin Rate',
   minimum_profit_amount: 'Minimum Profit (£)',
+  evri_active_tier: 'Evri Active Tier (1/2/3)',
+  evri_tier_1_threshold: 'Evri Tier 1 Threshold (parcels/month)',
+  evri_tier_2_threshold: 'Evri Tier 2 Threshold (parcels/month)',
+  evri_tier_3_threshold: 'Evri Tier 3 Threshold (parcels/month)',
+  shipping_prefer_evri_threshold: 'Prefer Evri Unless eBay Saves (£)',
+  high_value_order_threshold: 'High-Value Order Threshold (£)',
 };
 
 export function getSellingCostLabel(key: string) {
