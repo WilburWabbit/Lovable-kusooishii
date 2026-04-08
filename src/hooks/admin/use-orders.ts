@@ -34,7 +34,7 @@ function mapOrder(row: Record<string, unknown>): Order {
     orderNumber: row.order_number as string,
     customerId: (row.customer_id as string) ?? null,
     channel: mapChannel(row.origin_channel as string),
-    status: (row.v2_status as OrderStatus) ?? 'new',
+    status: (row.v2_status as OrderStatus) ?? mapLegacyStatus(row.status as string),
     total: gross,
     vatAmount: (row.tax_total as number) ?? vat.vat,
     netAmount: (row.net_amount as number) ?? vat.net,
