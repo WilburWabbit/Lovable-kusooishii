@@ -59,7 +59,10 @@ export type ConditionFlag =
   | 'bags_opened'
   | 'parts_verified'
   | 'sun_yellowing'
-  | 'price_sticker_residue';
+  | 'price_sticker_residue'
+  | 'stickers_applied'
+  | 'missing_minifigs'
+  | 'missing_instructions';
 
 // ─── Shared Cost Breakdown ──────────────────────────────────
 
