@@ -1,92 +1,96 @@
 
 
-# Fix Order Shipping + Lifecycle Statuses
+# Re-grading: SKU Reassignment + QBO & Channel Sync
 
-## Problems Identified
+## Problem
 
-### 1. "Ship Order" action fails
-The `ShipOrderDialog` writes to wrong columns:
-- Sets `status: "shipped"` (legacy `order_status` enum) instead of `v2_status: "shipped"` (the `v2_order_status` enum the app reads)
-- Sets `shipped_at` which doesn't exist — the column is `shipped_date` (type `date`)
-- Sets `carrier` which doesn't exist — the column is `shipped_via`
+When re-grading a stock unit that already has a SKU, the current code (line 144 of `use-stock-units.ts`) explicitly prevents SKU reassignment: *"If the unit already has a SKU, keep it — never change an existing SKU assignment."* This was correct for minor edits but wrong for actual grade changes on sets, where SKU = `MPN.grade` and must change.
 
-### 2. No UPDATE RLS policy on `sales_order`
-The only policies are `SELECT` (members read own) and `ALL` (staff manage). The `ALL` policy should cover updates, but let me verify the policy grants to `authenticated` — yes, the `ALL` policy uses `has_role(auth.uid(), 'admin' or 'staff')`, so staff can update. The issue is purely the wrong column names.
+Additionally, when the SKU changes, QBO and channel listings need updating:
+- **QBO Item**: The `Name`, `Description` (sale description containing product name + grade label), and `PurchaseDesc` all contain the SKU code and must be updated
+- **Channel listings**: Any live listings linked to the old SKU must be reassigned to the new SKU
 
-### 3. Missing statuses in `v2_order_status` enum
-Current enum: `needs_allocation`, `new`, `awaiting_shipment`, `shipped`, `delivered`, `complete`, `return_pending`
-Missing: `refunded`, `cancelled`
+## Scope
 
-### 4. No `delivered_at` column on `sales_order`
-The `auto-progress-orders` function tries to write `delivered_at` but the column doesn't exist.
-
-### 5. In-person sales not auto-shipped
-Cash sales create orders with `v2_status: 'new'` but should be immediately `complete` (items handed over in person).
-
-### 6. eBay orders have no v2_status
-All 317 eBay orders have `v2_status: NULL`. They're all `status: 'complete'` (legacy). Need a one-time backfill + daily eBay delivery check.
-
-### 7. No refunded status handling
-User wants refunded eBay orders marked as `refunded`. Currently no such enum value exists.
+This applies to **sets only** (not minifigs, which don't use grade-based SKUs in the same way). The `product_type` on the product record distinguishes these.
 
 ## Changes
 
-### Migration: Schema fixes
-```sql
--- Add missing enum values
-ALTER TYPE v2_order_status ADD VALUE IF NOT EXISTS 'refunded';
-ALTER TYPE v2_order_status ADD VALUE IF NOT EXISTS 'cancelled';
+### 1. `src/lib/types/admin.ts` — Add new condition flags + notes
 
--- Add delivered_at column
-ALTER TABLE sales_order ADD COLUMN IF NOT EXISTS delivered_at timestamptz;
+- Add `'stickers_applied' | 'missing_minifigs' | 'missing_instructions'` to `ConditionFlag`
+- Add `notes: string | null` to the `StockUnit` interface
+
+### 2. `src/lib/constants/unit-statuses.ts` — New flag entries
+
+Add three entries to `CONDITION_FLAGS` array:
+- `{ value: 'stickers_applied', label: 'Stickers applied' }`
+- `{ value: 'missing_minifigs', label: 'Missing minifigs' }`
+- `{ value: 'missing_instructions', label: 'Missing instructions' }`
+
+### 3. `src/hooks/admin/use-stock-units.ts` — Allow SKU reassignment on re-grade
+
+The core logic change. When a unit **already has a `sku_id`** and the grade is changing:
+
+1. Map `notes` in `mapStockUnit`
+2. Accept `notes` in `GradeInput`
+3. Remove the guard that skips SKU work when `existingSkuId` is set
+4. Compare old grade vs new grade — if different:
+   - Find or create the new SKU (`MPN.newGrade`)
+   - Reassign `sku_id` on the stock unit to the new SKU
+   - Fire-and-forget call to `qbo-sync-item` with the **new** SKU code
+   - Fire-and-forget call to `qbo-sync-item` with the **old** SKU code (to update its QBO Name/Description if needed, or just to keep it in sync)
+   - Move any `channel_listing` rows from old SKU to new SKU (update `sku_id` and `external_sku`)
+5. Include `notes` in the stock unit update payload
+
+### 4. `supabase/functions/qbo-sync-item/index.ts` — Update Name + Descriptions
+
+The function already builds `Name` and `Description` from the SKU code. Add `PurchaseDesc` to the payload so all three fields stay in sync:
+
+```typescript
+itemPayload.PurchaseDesc = `${productName} — ${gradeLabel}`;
 ```
 
-### Data backfill (via insert tool, not migration)
-```sql
--- All eBay orders with legacy status 'complete' → v2_status 'complete'
-UPDATE sales_order SET v2_status = 'complete' WHERE origin_channel = 'ebay' AND v2_status IS NULL AND status = 'complete';
+No other changes needed — the function already handles create vs update via `existingQboItemId`.
 
--- Mark any with refund indicators as 'refunded' (check qbo_sync_status or notes)
--- (Will verify if any exist — current query shows none with refund status)
+### 5. `src/components/admin-v2/GradeSlideOut.tsx` — Add notes textarea
+
+- Add `notes` state (pre-populated from `unit.notes`)
+- Render a `<textarea>` below condition flags labelled "Notes"
+- Pass `notes` through to the grade mutation
+
+### 6. `src/components/admin-v2/StockUnitsTab.tsx` — Replace UnitDetailSlideOut with GradeSlideOut
+
+- Import `GradeSlideOut` instead of `UnitDetailSlideOut`
+- Replace the component, passing the selected unit
+- Change button text from "View" to "Edit"
+
+## Technical Detail
+
+**SKU reassignment flow** (in `useGradeStockUnit`):
+
+```text
+1. Fetch unit → get current sku_id, mpn, condition_grade
+2. Compute oldSku = mpn.oldGrade, newSku = mpn.newGrade
+3. If grade unchanged → skip SKU work (just update flags/notes)
+4. If grade changed:
+   a. Find-or-create new SKU record
+   b. UPDATE stock_unit SET sku_id = newSkuId, condition_grade = newGrade
+   c. UPDATE channel_listing SET sku_id = newSkuId, external_sku = newSkuCode WHERE sku_id = oldSkuId
+   d. Fire qbo-sync-item for newSkuCode (updates QBO Name/Description/PurchaseDesc)
+   e. Recalculate old SKU's qty (may need to end listings if qty = 0)
 ```
 
-### `src/components/admin-v2/ShipOrderDialog.tsx`
-Fix column names:
-- `status: "shipped"` → `v2_status: "shipped"`
-- `shipped_at: now` → `shipped_date: now.slice(0,10)` (date column, not timestamptz)
-- `carrier` → `shipped_via`
-
-### `src/components/admin-v2/CashSaleForm.tsx`
-After successful order creation and allocation, set `v2_status` to `complete` instead of `new` (in-person sales are immediately fulfilled). Also set `shipped_date` and `shipped_via: 'In Person'`.
-
-### `src/lib/types/admin.ts`
-Add `'refunded' | 'cancelled'` to `OrderStatus` type.
-
-### `src/hooks/admin/use-orders.ts`
-- Fix `mapOrder`: read `shipped_via` for carrier (already correct: line 42 reads `shipped_via`)
-- Read `delivered_at` from row
-- Handle null `v2_status` by falling back to legacy `status` mapping for old orders
-
-### `src/components/admin-v2/ui-primitives.tsx`
-Add badge colors for `refunded` and `cancelled` statuses in `OrderStatusBadge`.
-
-### `supabase/functions/auto-progress-orders/index.ts`
-Fix: `shipped_date` is a `date` not `timestamptz`, so the `lt` comparison needs adjustment. Also add `delivered_at` write (now that column exists).
-
-### `supabase/functions/ebay-poll-orders/index.ts` (or new `ebay-check-delivery` function)
-Add a daily check against eBay Fulfillment API for orders in `shipped` status to detect delivery confirmation and update to `delivered`.
+**Channel listing update**: Only listings with `v2_status = 'live'` or `'draft'` are reassigned. Ended/sold listings stay on the old SKU for historical accuracy.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| **Migration** | Add `refunded`/`cancelled` to enum, add `delivered_at` column |
-| **Data update** | Backfill eBay orders `v2_status` |
-| `src/components/admin-v2/ShipOrderDialog.tsx` | Fix column names (`v2_status`, `shipped_date`, `shipped_via`) |
-| `src/components/admin-v2/CashSaleForm.tsx` | Auto-complete in-person sales |
-| `src/lib/types/admin.ts` | Add `refunded`, `cancelled` to `OrderStatus` |
-| `src/hooks/admin/use-orders.ts` | Handle null `v2_status` fallback, add `deliveredAt` |
-| `src/components/admin-v2/ui-primitives.tsx` | Badge colors for new statuses |
-| `supabase/functions/auto-progress-orders/index.ts` | Fix `shipped_date` comparison |
-| `supabase/functions/ebay-poll-orders/index.ts` | Add delivery status check logic |
+| `src/lib/types/admin.ts` | Add 3 condition flags, add `notes` to `StockUnit` |
+| `src/lib/constants/unit-statuses.ts` | Add 3 flag entries |
+| `src/hooks/admin/use-stock-units.ts` | SKU reassignment logic, notes support |
+| `src/components/admin-v2/GradeSlideOut.tsx` | Add notes textarea |
+| `src/components/admin-v2/StockUnitsTab.tsx` | Replace `UnitDetailSlideOut` with `GradeSlideOut` |
+| `supabase/functions/qbo-sync-item/index.ts` | Add `PurchaseDesc` to payload |
 
