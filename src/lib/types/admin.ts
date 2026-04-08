@@ -88,6 +88,7 @@ export interface PurchaseBatch {
   supplierVatRegistered: boolean;
   sharedCosts: SharedCosts;
   totalSharedCosts: number;
+  totalUnitCosts: number;
   status: PurchaseBatchStatus;
   createdAt: string;
   updatedAt: string;

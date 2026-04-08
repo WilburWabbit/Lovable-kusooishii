@@ -79,8 +79,7 @@ function BatchCard({
   summary?: BatchUnitSummary;
   onClick: () => void;
 }) {
-  const totalShared = batch.totalSharedCosts;
-  const totalCost = batch.sharedCosts.shipping + batch.sharedCosts.broker_fee + batch.sharedCosts.other;
+  const totalPurchaseValue = batch.totalUnitCosts + batch.totalSharedCosts;
 
   const formattedDate = new Date(batch.purchaseDate).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -108,14 +107,14 @@ function BatchCard({
             <Badge label="All graded" color="#22C55E" small />
           ) : null}
           <Mono color="teal">
-            £{totalShared.toFixed(2)}
+            £{totalPurchaseValue.toFixed(2)}
           </Mono>
         </div>
       </div>
       <div className="px-4 pb-3 flex gap-4 text-xs text-zinc-500">
         {totalUnits > 0 && <span>{totalUnits} units</span>}
         {mpnCount > 0 && <span>{mpnCount} MPNs</span>}
-        <span>Shared: £{totalCost.toFixed(2)}</span>
+        <span>Shared: £{batch.totalSharedCosts.toFixed(2)}</span>
         {batch.supplierVatRegistered && (
           <span className="text-teal-500">VAT reg. supplier</span>
         )}
