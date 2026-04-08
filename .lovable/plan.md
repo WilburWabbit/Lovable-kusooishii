@@ -1,46 +1,43 @@
 
 
-# Debug: In-Person Sales Not Sent to QBO
+# Add "Retry Failed QBO Push" Button
 
-## Root Cause
+## What it does
 
-The `qbo-sync-sales-receipt` edge function uses `TaxCodeRef: { value: "20.0 S" }` (line 77) — passing the **display name** instead of the **QBO numeric tax code ID**. The QBO API requires the ID.
+Adds a button to the QBO tile on `/admin/data-sync` that resets any orders with `qbo_sync_status` = `failed` or `needs_manual_review` back to `pending`, then invokes the existing `qbo-retry-sync` edge function to process them — identical pattern to "Process Pending" but for outbound pushes.
 
-From the database, the "20.0% S" tax code has `qbo_tax_code_id: 6`. The function should use `{ value: "6" }`.
+## Changes
 
-**Evidence**: Edge function logs show:
+### 1. `src/components/admin-v2/QboSettingsCard.tsx`
+
+**Add state** (near line 51):
+- `retryingPush` boolean
+
+**Add action** (near line 253, after `processPending`):
+- `retryFailedPush` function that:
+  1. Calls `invokeWithAuth('admin-data', { action: 'retry-failed-qbo-push' })` to reset `failed` / `needs_manual_review` orders to `pending`
+  2. Then calls `invokeWithAuth('qbo-retry-sync')` to process them
+  3. Toasts with count of orders reset + processed
+
+**Add button** in the "Process & Reconcile" section (line 551, after "Process Pending"):
 ```
-QBO SalesReceipt creation failed [400]:
-"Business Validation Error: Make sure all your transactions have a VAT rate before you save."
-```
-
-### Order status:
-- **KO-0009631** (`needs_manual_review`): QBO call was made but rejected due to invalid tax code ref
-- **KO-0009630** (`pending`): QBO call likely failed silently (the `.catch(() => {})` in CashSaleForm swallows errors)
-
-## Fix
-
-### 1. `supabase/functions/qbo-sync-sales-receipt/index.ts`
-
-Change the hardcoded `TaxCodeRef` from the display name to the numeric QBO ID:
-
-```typescript
-// Before (line 77)
-TaxCodeRef: { value: "20.0 S" },
-
-// After
-TaxCodeRef: { value: "6" },
+<Btn onClick={retryFailedPush} busy={retryingPush}>Retry Failed Push</Btn>
 ```
 
-Ideally, look up the tax code from the `tax_code` table dynamically, but the hardcoded `"6"` matches the existing QBO configuration and is consistent with how other QBO sync functions work.
+Update `anyBusy` to include `retryingPush`.
 
-### 2. Retry the two failed orders
+### 2. `supabase/functions/admin-data/index.ts`
 
-After deploying the fix, manually retry both orders by invoking the edge function for each order ID, or provide a UI action to retry from the order detail page.
+Add a new action `retry-failed-qbo-push` that:
+1. Updates `sales_order` rows where `qbo_sync_status IN ('failed', 'needs_manual_review')` → set `qbo_sync_status = 'pending'`, reset `qbo_retry_count = 0`
+2. Returns `{ reset: <count> }`
+
+This keeps the pattern consistent: `admin-data` handles the DB mutation, and the existing `qbo-retry-sync` function handles the actual QBO API calls.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/qbo-sync-sales-receipt/index.ts` | Fix TaxCodeRef value from `"20.0 S"` to `"6"` |
+| `supabase/functions/admin-data/index.ts` | Add `retry-failed-qbo-push` action |
+| `src/components/admin-v2/QboSettingsCard.tsx` | Add retry button + handler |
 
