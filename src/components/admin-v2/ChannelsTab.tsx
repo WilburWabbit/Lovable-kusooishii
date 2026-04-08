@@ -6,12 +6,21 @@ import {
   calculateChannelPrice,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
-import type { ProductVariant, Channel, ChannelListing } from "@/lib/types/admin";
+import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 
+function defaultTitle(ch: Channel, product: Product): string {
+  if (ch === "ebay") {
+    const raw = `LEGO ${product.setNumber ?? product.mpn} ${product.name}`;
+    return raw.length > 80 ? raw.slice(0, 80) : raw;
+  }
+  return product.name;
+}
+
 interface ChannelsTabProps {
   variants: ProductVariant[];
+  product: Product;
 }
 
 const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
@@ -21,13 +30,13 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
-export function ChannelsTab({ variants }: ChannelsTabProps) {
+export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
   return (
     <div className="grid gap-4">
       {variants.map((v) => (
-        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} />
+        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} product={product} />
       ))}
     </div>
   );
@@ -36,9 +45,11 @@ export function ChannelsTab({ variants }: ChannelsTabProps) {
 function VariantChannelsCard({
   variant,
   feesMap,
+  product,
 }: {
   variant: ProductVariant;
   feesMap: Map<string, { totalFeeRate: number; fees: { name: string; rate: number; fixed: number }[] }> | undefined;
+  product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
@@ -61,7 +72,7 @@ function VariantChannelsCard({
       const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
 
       initial[ch.key] = {
-        title: existing?.listingTitle ?? "",
+        title: existing?.listingTitle ?? defaultTitle(ch.key, product),
         description: existing?.listingDescription ?? "",
         price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
       };
