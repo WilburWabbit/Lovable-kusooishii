@@ -1,41 +1,46 @@
 
 
-# Re-grade: QBO Item Name Format + Inventory Adjustment
+# Debug: In-Person Sales Not Sent to QBO
 
-## Changes
+## Root Cause
 
-### 1. `supabase/functions/qbo-sync-item/index.ts`
+The `qbo-sync-sales-receipt` edge function uses `TaxCodeRef: { value: "20.0 S" }` (line 77) — passing the **display name** instead of the **QBO numeric tax code ID**. The QBO API requires the ID.
 
-**A) Update Name format** (line 104)
+From the database, the "20.0% S" tax code has `qbo_tax_code_id: 6`. The function should use `{ value: "6" }`.
 
-Change `Name` from `skuCode` to `<productName> (<skuCode>)`:
-
-```typescript
-Name: `${productName} (${skuCode})`,
+**Evidence**: Edge function logs show:
+```
+QBO SalesReceipt creation failed [400]:
+"Business Validation Error: Make sure all your transactions have a VAT rate before you save."
 ```
 
-`Description` and `PurchaseDesc` remain as `${productName} — ${gradeLabel}`.
+### Order status:
+- **KO-0009631** (`needs_manual_review`): QBO call was made but rejected due to invalid tax code ref
+- **KO-0009630** (`pending`): QBO call likely failed silently (the `.catch(() => {})` in CashSaleForm swallows errors)
 
-**B) Inventory Adjustment on SKU transfer**
+## Fix
 
-Only when `transferFromOldSku` is true (meaning the old SKU already had a `qbo_item_id` that we're transferring), AND the existing QBO item type is `Inventory` (Stock):
+### 1. `supabase/functions/qbo-sync-sales-receipt/index.ts`
 
-After the item update succeeds (step 5), add a new step between 7 and 8:
+Change the hardcoded `TaxCodeRef` from the display name to the numeric QBO ID:
 
-1. Re-fetch the old QBO item to get its current `QtyOnHand`
-2. If `QtyOnHand > 0`, POST an `InventoryAdjustment` to QBO with two line items:
-   - **Decrease** old QBO item by the qty
-   - **Increase** new QBO item (now updated with new name) by the same qty
-3. Use the Inventory Shrinkage account ref (will need to look up the correct account value from QBO config or use a standard one)
-4. Log the adjustment result; don't fail the whole operation if adjustment fails (fire-and-forget with error logging)
+```typescript
+// Before (line 77)
+TaxCodeRef: { value: "20.0 S" },
 
-### 2. No frontend changes needed
+// After
+TaxCodeRef: { value: "6" },
+```
 
-The hook already passes `oldSkuCode`. The Name format change and stock adjustment are entirely server-side.
+Ideally, look up the tax code from the `tax_code` table dynamically, but the hardcoded `"6"` matches the existing QBO configuration and is consistent with how other QBO sync functions work.
+
+### 2. Retry the two failed orders
+
+After deploying the fix, manually retry both orders by invoking the edge function for each order ID, or provide a UI action to retry from the order detail page.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/qbo-sync-item/index.ts` | Name → `Product (SKU)` format; add inventory adjustment on transfer |
+| `supabase/functions/qbo-sync-sales-receipt/index.ts` | Fix TaxCodeRef value from `"20.0 S"` to `"6"` |
 
