@@ -1179,11 +1179,18 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
 
-      // If auto-price was applied on the web channel, also update sku.price so the storefront picks it up
-      if (auto_price_applied && updates.listed_price != null) {
-        const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
-        if (listingRow?.channel === "web" && listingRow.sku_id) {
-          await admin.from("sku").update({ price: updates.listed_price }).eq("id", listingRow.sku_id);
+      // Always sync floor_price and sale_price back to the SKU
+      const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
+      if (listingRow?.sku_id) {
+        const skuUpdates: Record<string, any> = {};
+        // Update SKU floor_price from the calculated floor
+        if (price_floor != null) skuUpdates.floor_price = price_floor;
+        // If auto-price was applied on the web channel, also update sku.price for storefront
+        if (auto_price_applied && updates.listed_price != null && listingRow.channel === "web") {
+          skuUpdates.price = updates.listed_price;
+        }
+        if (Object.keys(skuUpdates).length > 0) {
+          await admin.from("sku").update(skuUpdates).eq("id", listingRow.sku_id);
         }
       }
 
