@@ -25,6 +25,14 @@ export const orderKeys = {
 
 // ─── Row → Interface Mappers ────────────────────────────────
 
+function mapLegacyStatus(status: string | null): OrderStatus {
+  if (!status) return 'new';
+  if (status === 'complete' || status === 'paid' || status === 'delivered') return 'complete';
+  if (status === 'shipped') return 'shipped';
+  if (status === 'refunded') return 'refunded';
+  return 'new';
+}
+
 function mapOrder(row: Record<string, unknown>): Order {
   const gross = (row.gross_total as number) ?? 0;
   const vat = calculateVAT(gross);
