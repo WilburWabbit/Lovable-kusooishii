@@ -150,10 +150,10 @@ export function useGradeStockUnit() {
       if (gradeChanged) {
         const { data: prod } = await supabase
           .from('product')
-          .select('product_type' as never)
+          .select('product_type')
           .eq('mpn', mpn)
           .maybeSingle();
-        productType = ((prod as Record<string, unknown> | null)?.product_type as string) ?? 'set';
+        productType = ((prod as unknown as Record<string, unknown> | null)?.product_type as string) ?? 'set';
       }
 
       // Determine if we need to find/create a SKU
