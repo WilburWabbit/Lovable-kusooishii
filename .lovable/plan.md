@@ -1,74 +1,92 @@
 
 
-# Fix: Allow Cash Sales to Allocate Graded (Unlisted) Stock
+# Fix Order Shipping + Lifecycle Statuses
 
-## Problem
+## Problems Identified
 
-The cash sale form calls `v2_consume_fifo_unit`, which only matches stock units with `v2_status = 'listed'`. The items you tried to sell (SKU `75682-1.1`) have 2 units in `graded` status — they were graded but never listed on any channel. The FIFO function raises an exception, the catch block sets `allAllocated = false`, and the order ends up with `v2_status: needs_allocation`.
+### 1. "Ship Order" action fails
+The `ShipOrderDialog` writes to wrong columns:
+- Sets `status: "shipped"` (legacy `order_status` enum) instead of `v2_status: "shipped"` (the `v2_order_status` enum the app reads)
+- Sets `shipped_at` which doesn't exist — the column is `shipped_date` (type `date`)
+- Sets `carrier` which doesn't exist — the column is `shipped_via`
 
-This is a workflow gap: in-person sales should be able to consume graded stock, not just listed stock.
+### 2. No UPDATE RLS policy on `sales_order`
+The only policies are `SELECT` (members read own) and `ALL` (staff manage). The `ALL` policy should cover updates, but let me verify the policy grants to `authenticated` — yes, the `ALL` policy uses `has_role(auth.uid(), 'admin' or 'staff')`, so staff can update. The issue is purely the wrong column names.
 
-## Solution
+### 3. Missing statuses in `v2_order_status` enum
+Current enum: `needs_allocation`, `new`, `awaiting_shipment`, `shipped`, `delivered`, `complete`, `return_pending`
+Missing: `refunded`, `cancelled`
 
-Modify the `v2_consume_fifo_unit` database function to accept both `graded` and `listed` units, preferring `listed` first (since those are already advertised and priced), then falling back to `graded`. This is the correct fix because:
+### 4. No `delivered_at` column on `sales_order`
+The `auto-progress-orders` function tries to write `delivered_at` but the column doesn't exist.
 
-- The function is already used by `v2-process-order` (edge function) and `useAllocateOrderItems` (manual allocation hook) — all callers benefit from the same fix
-- Graded units are saleable inventory; the only reason they aren't listed is timing
-- The lifecycle transition `graded → sold` is valid (it just skips the `listed` step)
+### 5. In-person sales not auto-shipped
+Cash sales create orders with `v2_status: 'new'` but should be immediately `complete` (items handed over in person).
+
+### 6. eBay orders have no v2_status
+All 317 eBay orders have `v2_status: NULL`. They're all `status: 'complete'` (legacy). Need a one-time backfill + daily eBay delivery check.
+
+### 7. No refunded status handling
+User wants refunded eBay orders marked as `refunded`. Currently no such enum value exists.
 
 ## Changes
 
-### 1. Database migration: Update `v2_consume_fifo_unit`
-
-Replace the WHERE clause to match both statuses with a preference order:
-
+### Migration: Schema fixes
 ```sql
-CREATE OR REPLACE FUNCTION public.v2_consume_fifo_unit(p_sku_code text)
-RETURNS public.stock_unit
-LANGUAGE plpgsql
-AS $$
-DECLARE v_unit public.stock_unit;
-BEGIN
-  SELECT su.* INTO v_unit
-  FROM public.stock_unit su
-  JOIN public.sku sk ON sk.id = su.sku_id
-  WHERE sk.sku_code = p_sku_code
-    AND su.v2_status IN ('listed', 'graded')
-  ORDER BY
-    CASE su.v2_status WHEN 'listed' THEN 0 ELSE 1 END,
-    su.created_at ASC
-  LIMIT 1
-  FOR UPDATE OF su;
+-- Add missing enum values
+ALTER TYPE v2_order_status ADD VALUE IF NOT EXISTS 'refunded';
+ALTER TYPE v2_order_status ADD VALUE IF NOT EXISTS 'cancelled';
 
-  IF v_unit.id IS NULL THEN
-    RAISE EXCEPTION 'No available stock units for SKU %', p_sku_code;
-  END IF;
-
-  UPDATE public.stock_unit
-  SET v2_status = 'sold', sold_at = now()
-  WHERE id = v_unit.id;
-
-  RETURN v_unit;
-END;
-$$;
+-- Add delivered_at column
+ALTER TABLE sales_order ADD COLUMN IF NOT EXISTS delivered_at timestamptz;
 ```
 
-**Key changes:**
-- `v2_status = 'listed'` → `v2_status IN ('listed', 'graded')`
-- Added `ORDER BY CASE` to prefer listed units over graded ones
-- Updated error message from "No listed stock units" to "No available stock units"
+### Data backfill (via insert tool, not migration)
+```sql
+-- All eBay orders with legacy status 'complete' → v2_status 'complete'
+UPDATE sales_order SET v2_status = 'complete' WHERE origin_channel = 'ebay' AND v2_status IS NULL AND status = 'complete';
 
-### 2. No frontend changes needed
+-- Mark any with refund indicators as 'refunded' (check qbo_sync_status or notes)
+-- (Will verify if any exist — current query shows none with refund status)
+```
 
-The `CashSaleForm.tsx` allocation logic is correct — it calls the RPC, handles failures gracefully, and sets the order status accordingly. Once the DB function accepts graded units, existing cash sales will work.
+### `src/components/admin-v2/ShipOrderDialog.tsx`
+Fix column names:
+- `status: "shipped"` → `v2_status: "shipped"`
+- `shipped_at: now` → `shipped_date: now.slice(0,10)` (date column, not timestamptz)
+- `carrier` → `shipped_via`
 
-## Immediate fix for KO-0009628
+### `src/components/admin-v2/CashSaleForm.tsx`
+After successful order creation and allocation, set `v2_status` to `complete` instead of `new` (in-person sales are immediately fulfilled). Also set `shipped_date` and `shipped_via: 'In Person'`.
 
-After deploying the migration, you can use the existing "Allocate Items" dialog on the order detail page to manually allocate the units. Alternatively, we could add a one-time fix to re-run allocation for that order.
+### `src/lib/types/admin.ts`
+Add `'refunded' | 'cancelled'` to `OrderStatus` type.
+
+### `src/hooks/admin/use-orders.ts`
+- Fix `mapOrder`: read `shipped_via` for carrier (already correct: line 42 reads `shipped_via`)
+- Read `delivered_at` from row
+- Handle null `v2_status` by falling back to legacy `status` mapping for old orders
+
+### `src/components/admin-v2/ui-primitives.tsx`
+Add badge colors for `refunded` and `cancelled` statuses in `OrderStatusBadge`.
+
+### `supabase/functions/auto-progress-orders/index.ts`
+Fix: `shipped_date` is a `date` not `timestamptz`, so the `lt` comparison needs adjustment. Also add `delivered_at` write (now that column exists).
+
+### `supabase/functions/ebay-poll-orders/index.ts` (or new `ebay-check-delivery` function)
+Add a daily check against eBay Fulfillment API for orders in `shipped` status to detect delivery confirmation and update to `delivered`.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| **Migration** | Update `v2_consume_fifo_unit` to accept `graded` and `listed` units |
+| **Migration** | Add `refunded`/`cancelled` to enum, add `delivered_at` column |
+| **Data update** | Backfill eBay orders `v2_status` |
+| `src/components/admin-v2/ShipOrderDialog.tsx` | Fix column names (`v2_status`, `shipped_date`, `shipped_via`) |
+| `src/components/admin-v2/CashSaleForm.tsx` | Auto-complete in-person sales |
+| `src/lib/types/admin.ts` | Add `refunded`, `cancelled` to `OrderStatus` |
+| `src/hooks/admin/use-orders.ts` | Handle null `v2_status` fallback, add `deliveredAt` |
+| `src/components/admin-v2/ui-primitives.tsx` | Badge colors for new statuses |
+| `supabase/functions/auto-progress-orders/index.ts` | Fix `shipped_date` comparison |
+| `supabase/functions/ebay-poll-orders/index.ts` | Add delivery status check logic |
 
