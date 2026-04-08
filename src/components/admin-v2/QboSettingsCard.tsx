@@ -49,6 +49,7 @@ export function QboSettingsCard() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [cleaningGhosts, setCleaningGhosts] = useState(false);
   const [recalcingCost, setRecalcingCost] = useState(false);
+  const [retryingPush, setRetryingPush] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
