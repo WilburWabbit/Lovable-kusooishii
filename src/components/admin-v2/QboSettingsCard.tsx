@@ -291,6 +291,7 @@ export function QboSettingsCard() {
     } finally {
       setRetryingPush(false);
     }
+  };
 
   const reconcileStock = async () => {
     setReconciling(true);
