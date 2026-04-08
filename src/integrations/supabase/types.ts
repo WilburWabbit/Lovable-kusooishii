@@ -3684,6 +3684,17 @@ export type Database = {
         }
         Returns: string
       }
+      get_my_order_lines: {
+        Args: { p_order_id: string }
+        Returns: {
+          id: string
+          line_total: number
+          quantity: number
+          sales_order_id: string
+          sku_id: string
+          unit_price: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
