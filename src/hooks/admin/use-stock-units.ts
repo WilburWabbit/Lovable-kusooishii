@@ -122,6 +122,7 @@ interface GradeInput {
   stockUnitId: string;
   grade: ConditionGrade;
   conditionFlags?: ConditionFlag[];
+  notes?: string;
 }
 
 export function useGradeStockUnit() {
