@@ -278,14 +278,17 @@ export function QboSettingsCard() {
     try {
       const resetData = await invokeWithAuth<{ reset: number }>('admin-data', { action: 'retry-failed-qbo-push' });
       const resetCount = resetData?.reset ?? 0;
-      if (resetCount === 0) {
-        toast.info('No failed orders to retry');
-        return;
+      if (resetCount > 0) {
+        toast.success(`Reset ${resetCount} failed order(s) — processing...`);
       }
-      toast.success(`Reset ${resetCount} failed order(s) — processing...`);
       const d = await invokeWithAuth<Record<string, unknown>>('qbo-retry-sync');
-      const processed = (d as Record<string, unknown>)?.processed ?? 0;
-      toast.success(`Retry complete: ${processed} order(s) processed`);
+      const synced = (d as Record<string, unknown>)?.synced ?? 0;
+      const pending = (d as Record<string, unknown>)?.total_pending ?? 0;
+      if (synced === 0 && pending === 0 && resetCount === 0) {
+        toast.info('No orders pending QBO sync');
+      } else {
+        toast.success(`Retry complete: ${synced}/${pending} order(s) synced`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Retry failed push failed');
     } finally {
