@@ -1,96 +1,65 @@
 
 
-# Re-grading: SKU Reassignment + QBO & Channel Sync
+# Fix: QBO Item Sync Fails on Re-grade
 
-## Problem
+## Root Cause
 
-When re-grading a stock unit that already has a SKU, the current code (line 144 of `use-stock-units.ts`) explicitly prevents SKU reassignment: *"If the unit already has a SKU, keep it — never change an existing SKU assignment."* This was correct for minor edits but wrong for actual grade changes on sets, where SKU = `MPN.grade` and must change.
+Two issues found in the `qbo-sync-item` edge function:
 
-Additionally, when the SKU changes, QBO and channel listings need updating:
-- **QBO Item**: The `Name`, `Description` (sale description containing product name + grade label), and `PurchaseDesc` all contain the SKU code and must be updated
-- **Channel listings**: Any live listings linked to the old SKU must be reassigned to the new SKU
+1. **Type mismatch**: The function always sets `Type: "NonInventory"`, but the existing QBO items are type `Stock` (Inventory). QBO forbids changing an item's type, so every update to an existing item fails with `"Item of type Stock cannot be changed to Noninventory item type"`.
 
-## Scope
+2. **Re-grade doesn't transfer QBO item ID**: When a set is re-graded from e.g. grade 2 → grade 3, the frontend creates/finds the new SKU (`76442-1.3`) but that new SKU has no `qbo_item_id`. The old SKU (`76442-1.2`) keeps the `qbo_item_id`. So the sync call for the new SKU tries to **create** a new QBO item instead of **updating** the existing one. Meanwhile the QBO item retains the old name/descriptions.
 
-This applies to **sets only** (not minifigs, which don't use grade-based SKUs in the same way). The `product_type` on the product record distinguishes these.
+## Fix
 
-## Changes
+### `supabase/functions/qbo-sync-item/index.ts`
 
-### 1. `src/lib/types/admin.ts` — Add new condition flags + notes
+**A) Preserve existing item type on update**: When updating an existing QBO item (i.e. `existingQboItemId` is set), read the current `Type` from the fetched item and use it in the payload. Only set `Type: "NonInventory"` when creating a brand new item.
 
-- Add `'stickers_applied' | 'missing_minifigs' | 'missing_instructions'` to `ConditionFlag`
-- Add `notes: string | null` to the `StockUnit` interface
+**B) Support `oldSkuCode` parameter for re-grade**: Accept an optional `oldSkuCode` in the request body. When provided:
+- Look up the old SKU's `qbo_item_id`
+- Use that QBO item ID to **update** the existing QBO item with the new SKU code as `Name`, and new descriptions
+- Transfer `qbo_item_id` from the old SKU to the new SKU
+- Clear `qbo_item_id` on the old SKU
 
-### 2. `src/lib/constants/unit-statuses.ts` — New flag entries
+**C) Remove hardcoded `Type` on updates**: When doing a sparse update, omit `Type` entirely (QBO won't change it and won't reject).
 
-Add three entries to `CONDITION_FLAGS` array:
-- `{ value: 'stickers_applied', label: 'Stickers applied' }`
-- `{ value: 'missing_minifigs', label: 'Missing minifigs' }`
-- `{ value: 'missing_instructions', label: 'Missing instructions' }`
+### `src/hooks/admin/use-stock-units.ts`
 
-### 3. `src/hooks/admin/use-stock-units.ts` — Allow SKU reassignment on re-grade
-
-The core logic change. When a unit **already has a `sku_id`** and the grade is changing:
-
-1. Map `notes` in `mapStockUnit`
-2. Accept `notes` in `GradeInput`
-3. Remove the guard that skips SKU work when `existingSkuId` is set
-4. Compare old grade vs new grade — if different:
-   - Find or create the new SKU (`MPN.newGrade`)
-   - Reassign `sku_id` on the stock unit to the new SKU
-   - Fire-and-forget call to `qbo-sync-item` with the **new** SKU code
-   - Fire-and-forget call to `qbo-sync-item` with the **old** SKU code (to update its QBO Name/Description if needed, or just to keep it in sync)
-   - Move any `channel_listing` rows from old SKU to new SKU (update `sku_id` and `external_sku`)
-5. Include `notes` in the stock unit update payload
-
-### 4. `supabase/functions/qbo-sync-item/index.ts` — Update Name + Descriptions
-
-The function already builds `Name` and `Description` from the SKU code. Add `PurchaseDesc` to the payload so all three fields stay in sync:
+Pass `oldSkuCode` to the `qbo-sync-item` invocation so the edge function knows to look up and transfer the QBO item:
 
 ```typescript
-itemPayload.PurchaseDesc = `${productName} — ${gradeLabel}`;
+// Line ~304: pass oldSkuCode when re-grading
+supabase.functions.invoke('qbo-sync-item', { 
+  body: { skuCode, oldSkuCode: oldSkuCode ?? undefined } 
+})
 ```
 
-No other changes needed — the function already handles create vs update via `existingQboItemId`.
+Remove the second fire-and-forget call for the old SKU (lines 312-318) since the single call now handles the transfer.
 
-### 5. `src/components/admin-v2/GradeSlideOut.tsx` — Add notes textarea
-
-- Add `notes` state (pre-populated from `unit.notes`)
-- Render a `<textarea>` below condition flags labelled "Notes"
-- Pass `notes` through to the grade mutation
-
-### 6. `src/components/admin-v2/StockUnitsTab.tsx` — Replace UnitDetailSlideOut with GradeSlideOut
-
-- Import `GradeSlideOut` instead of `UnitDetailSlideOut`
-- Replace the component, passing the selected unit
-- Change button text from "View" to "Edit"
-
-## Technical Detail
-
-**SKU reassignment flow** (in `useGradeStockUnit`):
+### Updated edge function logic
 
 ```text
-1. Fetch unit → get current sku_id, mpn, condition_grade
-2. Compute oldSku = mpn.oldGrade, newSku = mpn.newGrade
-3. If grade unchanged → skip SKU work (just update flags/notes)
-4. If grade changed:
-   a. Find-or-create new SKU record
-   b. UPDATE stock_unit SET sku_id = newSkuId, condition_grade = newGrade
-   c. UPDATE channel_listing SET sku_id = newSkuId, external_sku = newSkuCode WHERE sku_id = oldSkuId
-   d. Fire qbo-sync-item for newSkuCode (updates QBO Name/Description/PurchaseDesc)
-   e. Recalculate old SKU's qty (may need to end listings if qty = 0)
+1. Receive { skuCode, oldSkuCode? }
+2. Fetch new SKU record → check qbo_item_id
+3. If no qbo_item_id AND oldSkuCode provided:
+   a. Look up old SKU → get its qbo_item_id
+   b. Use that as existingQboItemId (transfer scenario)
+4. If existingQboItemId → GET from QBO → read SyncToken + Type
+5. Build payload:
+   - Name = skuCode (new)
+   - Description / PurchaseDesc = new product name + grade label
+   - If updating: sparse=true, preserve Type from fetched item, omit account refs
+   - If creating: Type = "NonInventory", include account refs
+6. POST to QBO
+7. Update new SKU with qbo_item_id
+8. If oldSkuCode: clear qbo_item_id on old SKU
 ```
-
-**Channel listing update**: Only listings with `v2_status = 'live'` or `'draft'` are reassigned. Ended/sold listings stay on the old SKU for historical accuracy.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `src/lib/types/admin.ts` | Add 3 condition flags, add `notes` to `StockUnit` |
-| `src/lib/constants/unit-statuses.ts` | Add 3 flag entries |
-| `src/hooks/admin/use-stock-units.ts` | SKU reassignment logic, notes support |
-| `src/components/admin-v2/GradeSlideOut.tsx` | Add notes textarea |
-| `src/components/admin-v2/StockUnitsTab.tsx` | Replace `UnitDetailSlideOut` with `GradeSlideOut` |
-| `supabase/functions/qbo-sync-item/index.ts` | Add `PurchaseDesc` to payload |
+| `supabase/functions/qbo-sync-item/index.ts` | Preserve item type on update; accept `oldSkuCode` for QBO item transfer |
+| `src/hooks/admin/use-stock-units.ts` | Pass `oldSkuCode` to single sync call; remove duplicate call |
 
