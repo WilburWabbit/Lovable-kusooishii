@@ -8,6 +8,7 @@ import {
   useTriggerPayoutQBOSync,
   useImportEbayPayouts,
   usePayoutFees,
+  usePayoutUnitCount,
   type PayoutFeeWithLines,
 } from "@/hooks/admin/use-payouts";
 import {
@@ -460,6 +461,7 @@ function PayoutDetailSheet({
   navigate: ReturnType<typeof useNavigate>;
 }) {
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payout?.id);
+  const { data: liveUnitCount, isLoading: unitCountLoading } = usePayoutUnitCount(payout?.id);
 
   // Group fees by external_order_id for linked orders view
   const orderFeeGroups = useMemo(() => {
@@ -535,11 +537,11 @@ function PayoutDetailSheet({
               </div>
               <div>
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
-                <div className="text-zinc-900 text-sm">{payout.orderCount}</div>
+                <div className="text-zinc-900 text-sm">{feesLoading ? "—" : orderFeeGroups.length}</div>
               </div>
               <div>
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
-                <div className="text-zinc-900 text-sm">{payout.unitCount}</div>
+                <div className="text-zinc-900 text-sm">{unitCountLoading ? "—" : (liveUnitCount ?? 0)}</div>
               </div>
               {payout.externalPayoutId && (
                 <div className="col-span-2">
@@ -649,6 +651,23 @@ function PayoutDetailSheet({
                         );
                       })}
                     </tbody>
+                    <tfoot>
+                      {(() => {
+                        const totSelling  = orderFeeGroups.reduce((s, g) => s + g.fees.filter(f => f.feeCategory === "selling_fee").reduce((a, f) => a + f.amount, 0), 0);
+                        const totShipping = orderFeeGroups.reduce((s, g) => s + g.fees.filter(f => f.feeCategory === "shipping_label").reduce((a, f) => a + f.amount, 0), 0);
+                        const totOther    = orderFeeGroups.reduce((s, g) => s + g.fees.filter(f => !["selling_fee", "shipping_label"].includes(f.feeCategory)).reduce((a, f) => a + f.amount, 0), 0);
+                        const totTotal    = orderFeeGroups.reduce((s, g) => s + g.fees.reduce((a, f) => a + f.amount, 0), 0);
+                        return (
+                          <tr className="border-t-2 border-zinc-200 font-semibold">
+                            <td className="px-2 py-1.5 text-xs text-zinc-500">Total</td>
+                            <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totSelling.toFixed(2)}</Mono></td>
+                            <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totShipping.toFixed(2)}</Mono></td>
+                            <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totOther.toFixed(2)}</Mono></td>
+                            <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totTotal.toFixed(2)}</Mono></td>
+                          </tr>
+                        );
+                      })()}
+                    </tfoot>
                   </table>
                 </div>
               ) : (
