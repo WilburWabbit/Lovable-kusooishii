@@ -30,13 +30,13 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
-export function ChannelsTab({ variants }: ChannelsTabProps) {
+export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
   return (
     <div className="grid gap-4">
       {variants.map((v) => (
-        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} />
+        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} product={product} />
       ))}
     </div>
   );
@@ -45,9 +45,11 @@ export function ChannelsTab({ variants }: ChannelsTabProps) {
 function VariantChannelsCard({
   variant,
   feesMap,
+  product,
 }: {
   variant: ProductVariant;
   feesMap: Map<string, { totalFeeRate: number; fees: { name: string; rate: number; fixed: number }[] }> | undefined;
+  product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
