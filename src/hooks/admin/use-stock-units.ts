@@ -299,24 +299,14 @@ export function useGradeStockUnit() {
 
       if (updateErr) throw updateErr;
 
-      // Fire-and-forget: sync new SKU to QBO
+      // Fire-and-forget: sync SKU to QBO (passes oldSkuCode for transfer on re-grade)
       supabase.functions
-        .invoke('qbo-sync-item', { body: { skuCode } })
+        .invoke('qbo-sync-item', { body: { skuCode, oldSkuCode: oldSkuCode ?? undefined } })
         .then((res) => {
           if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
           else console.log(`QBO item sync for ${skuCode}: success`);
         })
         .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
-
-      // If re-graded: also sync old SKU to QBO so its Name/Description stay accurate
-      if (oldSkuCode) {
-        supabase.functions
-          .invoke('qbo-sync-item', { body: { skuCode: oldSkuCode } })
-          .then((res) => {
-            if (res.error) console.warn(`QBO item sync for ${oldSkuCode} failed (non-blocking):`, res.error);
-          })
-          .catch(() => {});
-      }
 
       return { stockUnitId, skuCode, autoListed: hasLiveListings };
     },
