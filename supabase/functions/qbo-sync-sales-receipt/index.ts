@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
         SalesItemLineDetail: {
           Qty: 1,
           UnitPrice: unitPrice,
-          TaxCodeRef: { value: "20.0 S" }, // UK standard rate
+          TaxCodeRef: { value: "6" }, // UK 20% standard rate (QBO tax code ID)
         },
       };
 
