@@ -72,6 +72,9 @@ export const CONDITION_FLAGS: { value: ConditionFlag; label: string }[] = [
   { value: 'parts_verified',       label: 'Parts verified' },
   { value: 'sun_yellowing',        label: 'Sun yellowing' },
   { value: 'price_sticker_residue', label: 'Price sticker residue' },
+  { value: 'stickers_applied',    label: 'Stickers applied' },
+  { value: 'missing_minifigs',    label: 'Missing minifigs' },
+  { value: 'missing_instructions', label: 'Missing instructions' },
 ];
 
 // ─── Lifecycle Progression ──────────────────────────────────

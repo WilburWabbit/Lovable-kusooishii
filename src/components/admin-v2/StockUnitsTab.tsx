@@ -134,7 +134,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
         </table>
       </SurfaceCard>
 
-      <UnitDetailSlideOut
+      <GradeSlideOut
         unit={slideUnit}
         open={!!slideUnit}
         onClose={() => setSlideUnit(null)}

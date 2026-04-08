@@ -129,6 +129,7 @@ export interface StockUnit {
   shippedAt: string | null;
   deliveredAt: string | null;
   completedAt: string | null;
+  notes: string | null;
 }
 
 // ─── 2.4 Product (MPN level) ──────────────────────────────

@@ -248,6 +248,17 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
               </div>
             </div>
 
+            {/* Notes */}
+            <div>
+              <SectionHead>Notes</SectionHead>
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                placeholder="Add condition notes, observations…"
+                className="w-full px-2.5 py-2 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] min-h-[64px] resize-y"
+              />
+            </div>
+
             {/* Physical confirmation fields */}
             <div>
               <SectionHead>Physical Confirmation</SectionHead>

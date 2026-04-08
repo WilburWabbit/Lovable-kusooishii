@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
     const itemPayload: Record<string, unknown> = {
       Name: skuCode,
       Description: `${productName} — ${gradeLabel}`,
+      PurchaseDesc: `${productName} — ${gradeLabel}`,
       Type: "NonInventory",
       IncomeAccountRef: { value: "1" }, // Sales income — configure via env/settings
       ExpenseAccountRef: { value: "2" }, // COGS — configure via env/settings
