@@ -6,6 +6,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import type {
   StockUnit,
   StockUnitStatus,
@@ -307,6 +308,53 @@ export function useGradeStockUnit() {
           else console.log(`QBO item sync for ${skuCode}: success`);
         })
         .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+
+      // Fire-and-forget: run pricing for the SKU on all channels with live listings
+      if (skuId) {
+        (async () => {
+          try {
+            // Get channels this SKU is listed on
+            const { data: listings } = await supabase
+              .from('channel_listing')
+              .select('id, channel')
+              .eq('sku_id' as never, skuId)
+              .in('v2_status' as never, ['live', 'draft']);
+
+            const channels = [...new Set((listings ?? []).map((l: Record<string, unknown>) => l.channel as string))];
+            // Default to 'web' if no listings yet
+            if (channels.length === 0) channels.push('web');
+
+            for (const ch of channels) {
+              const pricing = await invokeWithAuth<Record<string, unknown>>(
+                'admin-data',
+                { action: 'calculate-pricing', sku_id: skuId, channel: ch },
+              );
+
+              if (pricing?.floor_price != null) {
+                // Find the listing for this channel to update
+                const listing = (listings ?? []).find(
+                  (l: Record<string, unknown>) => l.channel === ch,
+                );
+                if (listing) {
+                  await invokeWithAuth('admin-data', {
+                    action: 'update-listing-prices',
+                    listing_id: (listing as Record<string, unknown>).id,
+                    price_floor: pricing.floor_price,
+                    price_target: pricing.target_price,
+                    price_ceiling: pricing.ceiling_price,
+                    confidence_score: pricing.confidence_score,
+                    pricing_notes: `Auto-priced on grade: Floor £${pricing.floor_price}, Target £${pricing.target_price}, Ceiling £${pricing.ceiling_price}`,
+                    auto_price: true,
+                  });
+                }
+              }
+            }
+            console.log(`Auto-pricing for ${skuCode}: success`);
+          } catch (err) {
+            console.warn(`Auto-pricing for ${skuCode} failed (non-blocking):`, err);
+          }
+        })();
+      }
 
       return { stockUnitId, skuCode, autoListed: hasLiveListings };
     },
