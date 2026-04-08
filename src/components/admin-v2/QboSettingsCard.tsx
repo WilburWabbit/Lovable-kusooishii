@@ -550,6 +550,7 @@ export function QboSettingsCard() {
             <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Process & Reconcile</p>
             <div className="flex flex-wrap gap-1.5">
               <Btn onClick={processPending} busy={processing}>Process Pending</Btn>
+              <Btn onClick={retryFailedPush} busy={retryingPush}>Retry Failed Push</Btn>
               <Btn onClick={reconcileStock} busy={reconciling}>Reconcile Stock</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-purchases', 'Purchases')} busy={reconcilingEntity === 'reconcile-purchases'}>Reconcile Purchases</Btn>
               <Btn onClick={() => reconcileEntity('reconcile-sales', 'Sales')} busy={reconcilingEntity === 'reconcile-sales'}>Reconcile Sales</Btn>

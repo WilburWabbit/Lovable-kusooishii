@@ -2459,6 +2459,15 @@ Deno.serve(async (req) => {
 
       result = { success: true, updated, message: `Recalculated avg_cost on ${updated} SKUs` };
 
+    } else if (action === "retry-failed-qbo-push") {
+      const { data: resetRows, error: resetErr } = await admin
+        .from("sales_order")
+        .update({ qbo_sync_status: "pending", qbo_retry_count: 0 } as any)
+        .in("qbo_sync_status", ["failed", "needs_manual_review"])
+        .select("id");
+      if (resetErr) throw resetErr;
+      result = { reset: (resetRows ?? []).length };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
