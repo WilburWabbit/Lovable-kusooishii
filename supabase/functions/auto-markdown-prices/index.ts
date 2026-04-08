@@ -214,10 +214,20 @@ Deno.serve(async (req) => {
 
       if (!currentPrice || currentPrice <= 0) continue;
 
-      // Calculate VAT-aware floor price using real fees and shipping
+      // Calculate VAT-aware floor price using Evri-first shipping strategy
       const channel = skuChannel.get(skuId) ?? "ebay";
       const fees = feesByChannel.get(channel) ?? [];
-      const shippingCost = defaultShippingCost;
+
+      // Find best shipping cost using Evri-first logic
+      // (simplified: use default Evri rate, check eBay saving)
+      let shippingCost = defaultShippingCost;
+      if (channel === "ebay" && ebayCarrierRates && ebayCarrierRates.length > 0) {
+        const cheapestEbay = Number((ebayCarrierRates[0] as { cost: number }).cost);
+        const saving = shippingCost - cheapestEbay;
+        if (saving > preferEvriThreshold) {
+          shippingCost = cheapestEbay;
+        }
+      }
       const costBase = group.highestCost + packagingCost + shippingCost;
 
       const { effectiveFeeRate, fixedFeeCosts } = decomposeFees(fees, shippingCost);
