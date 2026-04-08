@@ -71,9 +71,9 @@ Deno.serve(async (req) => {
     const { error: orderUpdateErr } = await admin
       .from("sales_order")
       .update({
-        status: "delivered",
+        v2_status: "delivered",
         delivered_at: nowISO,
-      })
+      } as never)
       .in("id", orderIds);
 
     if (orderUpdateErr) {
