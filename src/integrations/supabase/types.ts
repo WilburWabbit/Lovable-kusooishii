@@ -2838,6 +2838,7 @@ export type Database = {
           channel: string
           cost: number
           created_at: string
+          destination: string
           est_delivery: string | null
           id: string
           max_compensation: number | null
@@ -2850,6 +2851,7 @@ export type Database = {
           price_inc_vat: number
           service_name: string
           size_band: string | null
+          tier: string | null
           tracked: boolean
           updated_at: string
           vat_exempt: boolean
@@ -2860,6 +2862,7 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          destination?: string
           est_delivery?: string | null
           id?: string
           max_compensation?: number | null
@@ -2872,6 +2875,7 @@ export type Database = {
           price_inc_vat?: number
           service_name: string
           size_band?: string | null
+          tier?: string | null
           tracked?: boolean
           updated_at?: string
           vat_exempt?: boolean
@@ -2882,6 +2886,7 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          destination?: string
           est_delivery?: string | null
           id?: string
           max_compensation?: number | null
@@ -2894,6 +2899,7 @@ export type Database = {
           price_inc_vat?: number
           service_name?: string
           size_band?: string | null
+          tier?: string | null
           tracked?: boolean
           updated_at?: string
           vat_exempt?: boolean
