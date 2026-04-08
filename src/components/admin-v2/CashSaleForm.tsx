@@ -594,6 +594,29 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           throw new Error(`Failed to mark order for allocation: ${statusUpdateError.message}`);
         }
       } else {
+        // In-person sales are immediately complete (items handed over)
+        const today = new Date().toISOString().slice(0, 10);
+        await supabase
+          .from("sales_order")
+          .update({
+            v2_status: "complete",
+            shipped_via: "In Person",
+            shipped_date: today,
+            delivered_at: new Date().toISOString(),
+          } as never)
+          .eq("id", orderId);
+
+        // Mark stock units as complete too
+        await supabase
+          .from("stock_unit")
+          .update({
+            v2_status: "complete",
+            shipped_at: new Date().toISOString(),
+            delivered_at: new Date().toISOString(),
+          } as never)
+          .eq("order_id" as never, orderId)
+          .in("v2_status" as never, ["sold"]);
+
         supabase.functions
           .invoke("qbo-sync-sales-receipt", { body: { orderId } })
           .catch(() => {});

@@ -36,7 +36,9 @@ export type OrderStatus =
   | 'shipped'
   | 'delivered'
   | 'complete'
-  | 'return_pending';
+  | 'return_pending'
+  | 'refunded'
+  | 'cancelled';
 
 export type PayoutChannel = 'ebay' | 'stripe';
 

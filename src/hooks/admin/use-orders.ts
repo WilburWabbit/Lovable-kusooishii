@@ -25,6 +25,14 @@ export const orderKeys = {
 
 // ─── Row → Interface Mappers ────────────────────────────────
 
+function mapLegacyStatus(status: string | null): OrderStatus {
+  if (!status) return 'new';
+  if (status === 'complete' || status === 'paid' || status === 'delivered') return 'complete';
+  if (status === 'shipped') return 'shipped';
+  if (status === 'refunded') return 'refunded';
+  return 'new';
+}
+
 function mapOrder(row: Record<string, unknown>): Order {
   const gross = (row.gross_total as number) ?? 0;
   const vat = calculateVAT(gross);
@@ -34,7 +42,7 @@ function mapOrder(row: Record<string, unknown>): Order {
     orderNumber: row.order_number as string,
     customerId: (row.customer_id as string) ?? null,
     channel: mapChannel(row.origin_channel as string),
-    status: (row.v2_status as OrderStatus) ?? 'new',
+    status: (row.v2_status as OrderStatus) ?? mapLegacyStatus(row.status as string),
     total: gross,
     vatAmount: (row.tax_total as number) ?? vat.vat,
     netAmount: (row.net_amount as number) ?? vat.net,

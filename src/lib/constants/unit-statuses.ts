@@ -38,6 +38,8 @@ export const ORDER_STATUSES: Record<OrderStatus, { label: string; color: string 
   delivered:         { label: 'Delivered',          color: '#22C55E' },
   complete:          { label: 'Complete',           color: '#71717A' },
   return_pending:    { label: 'Return Pending',     color: '#EF4444' },
+  refunded:          { label: 'Refunded',           color: '#EF4444' },
+  cancelled:         { label: 'Cancelled',          color: '#71717A' },
 };
 
 // ─── Channel Listing Statuses ───────────────────────────────
