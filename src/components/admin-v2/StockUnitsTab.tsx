@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
-import { UnitDetailSlideOut } from "./UnitDetailSlideOut";
+import { GradeSlideOut } from "./GradeSlideOut";
 import { WriteOffDialog } from "./WriteOffDialog";
 
 interface StockUnitsTabProps {
@@ -118,7 +118,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                     onClick={() => setSlideUnit(u)}
                     className="bg-transparent text-zinc-500 border border-zinc-200 rounded px-2 py-0.5 text-[10px] cursor-pointer hover:text-zinc-700 transition-colors"
                   >
-                    View
+                    Edit
                   </button>
                 </td>
               </tr>
@@ -134,7 +134,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
         </table>
       </SurfaceCard>
 
-      <UnitDetailSlideOut
+      <GradeSlideOut
         unit={slideUnit}
         open={!!slideUnit}
         onClose={() => setSlideUnit(null)}

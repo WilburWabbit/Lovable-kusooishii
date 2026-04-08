@@ -76,6 +76,7 @@ function mapStockUnit(row: Record<string, unknown>): StockUnit {
     shippedAt: (row.shipped_at as string) ?? null,
     deliveredAt: (row.delivered_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
+    notes: (row.notes as string) ?? null,
   };
 }
 

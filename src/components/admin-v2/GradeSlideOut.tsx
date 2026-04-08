@@ -57,6 +57,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
   const [selectedFlags, setSelectedFlags] = useState<Set<ConditionFlag>>(
     new Set(unit?.conditionFlags ?? [])
   );
+  const [notesText, setNotesText] = useState<string>(unit?.notes ?? "");
 
   const [physical, setPhysical] = useState<PhysicalData>({
     ean: "", upc: "", isbn: "", ageMark: "", lengthCm: "", widthCm: "", heightCm: "", weightG: "",
@@ -73,6 +74,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
     setLastUnitId(unitId);
     setSelectedGrade((unit?.grade as ConditionGrade) ?? null);
     setSelectedFlags(new Set(unit?.conditionFlags ?? []));
+    setNotesText(unit?.notes ?? "");
     // Pre-populate physical fields from product data (raw DB row or typed product)
     const raw = rawProductData;
     const dims = (raw?.dimensions_cm as string) ?? product?.dimensionsCm ?? "";
@@ -156,6 +158,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
           stockUnitId: unit.id,
           grade: selectedGrade,
           conditionFlags: Array.from(selectedFlags),
+          notes: notesText,
         });
         await persistPhysical(unit.mpn);
         toast.success(`Unit ${unit.uid} graded as G${selectedGrade}`);
@@ -243,6 +246,17 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
                   </label>
                 ))}
               </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <SectionHead>Notes</SectionHead>
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                placeholder="Add condition notes, observations…"
+                className="w-full px-2.5 py-2 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] min-h-[64px] resize-y"
+              />
             </div>
 
             {/* Physical confirmation fields */}

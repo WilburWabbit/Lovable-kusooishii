@@ -46,6 +46,7 @@ function mapStockUnit(row: Record<string, unknown>): StockUnit {
     shippedAt: (row.shipped_at as string) ?? null,
     deliveredAt: (row.delivered_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
+    notes: (row.notes as string) ?? null,
   };
 }
 
@@ -121,17 +122,18 @@ interface GradeInput {
   stockUnitId: string;
   grade: ConditionGrade;
   conditionFlags?: ConditionFlag[];
+  notes?: string;
 }
 
 export function useGradeStockUnit() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ stockUnitId, grade, conditionFlags = [] }: GradeInput) => {
-      // Fetch the unit including its current SKU assignment
+    mutationFn: async ({ stockUnitId, grade, conditionFlags = [], notes }: GradeInput) => {
+      // Fetch the unit including its current SKU assignment and grade
       const { data: unit, error: fetchErr } = await supabase
         .from('stock_unit')
-        .select('mpn, line_item_id, batch_id, sku_id' as never)
+        .select('mpn, line_item_id, batch_id, sku_id, condition_grade' as never)
         .eq('id', stockUnitId)
         .single();
 
@@ -139,13 +141,31 @@ export function useGradeStockUnit() {
       const unitData = unit as unknown as Record<string, unknown>;
       const mpn = unitData.mpn as string;
       const existingSkuId = unitData.sku_id as string | null;
+      const oldGrade = unitData.condition_grade != null ? Number(unitData.condition_grade) : null;
       const skuCode = `${mpn}.${grade}`;
+      const gradeChanged = existingSkuId && oldGrade !== grade;
 
-      // If the unit already has a SKU, keep it — never change an existing SKU assignment.
-      // Only create/assign a SKU during initial grading (no existing sku_id).
+      // Determine product type to decide SKU reassignment (sets only)
+      let productType = 'set';
+      if (gradeChanged) {
+        const { data: prod } = await supabase
+          .from('product')
+          .select('product_type')
+          .eq('mpn', mpn)
+          .maybeSingle();
+        productType = ((prod as unknown as Record<string, unknown> | null)?.product_type as string) ?? 'set';
+      }
+
+      // Determine if we need to find/create a SKU
+      const needsSkuWork = !existingSkuId || (gradeChanged && productType === 'set');
       let skuId: string | null = existingSkuId;
+      let oldSkuCode: string | null = null;
 
-      if (!existingSkuId) {
+      if (needsSkuWork) {
+        if (gradeChanged && existingSkuId) {
+          oldSkuCode = `${mpn}.${oldGrade}`;
+        }
+
         // Fetch market data from BrickEconomy for pricing
         const setNumber = mpn.split('-')[0];
         const { data: beData } = await supabase
@@ -200,7 +220,7 @@ export function useGradeStockUnit() {
           };
           if (gradeMarketPrice != null) {
             skuInsert.market_price = gradeMarketPrice;
-            skuInsert.price = gradeMarketPrice; // Initial sale_price = market_price
+            skuInsert.price = gradeMarketPrice;
           }
 
           const { data: newSku, error: skuErr } = await supabase
@@ -211,6 +231,15 @@ export function useGradeStockUnit() {
 
           if (skuErr) throw skuErr;
           skuId = (newSku as Record<string, unknown>).id as string;
+        }
+
+        // If re-grading: reassign live/draft channel listings from old SKU to new SKU
+        if (gradeChanged && existingSkuId && skuId !== existingSkuId) {
+          await supabase
+            .from('channel_listing')
+            .update({ sku_id: skuId, external_sku: skuCode } as never)
+            .eq('sku_id' as never, existingSkuId)
+            .in('v2_status' as never, ['live', 'draft']);
         }
       }
 
@@ -250,14 +279,17 @@ export function useGradeStockUnit() {
         if (hasLiveListings) statusFields.listed_at = now;
       }
 
-      // Only set sku_id on initial grading (when unit had no SKU)
       const unitUpdate: Record<string, unknown> = {
         condition_grade: String(grade),
         condition_flags: conditionFlags,
         ...statusFields,
       };
-      if (!existingSkuId && skuId) {
+      // Always set sku_id when we have one (covers both initial and re-grade)
+      if (skuId) {
         unitUpdate.sku_id = skuId;
+      }
+      if (notes !== undefined) {
+        unitUpdate.notes = notes || null;
       }
 
       const { error: updateErr } = await supabase
@@ -267,15 +299,23 @@ export function useGradeStockUnit() {
 
       if (updateErr) throw updateErr;
 
-      // Fire-and-forget: sync SKU to QBO (creates or updates the Item)
-      if (!existingSkuId) {
+      // Fire-and-forget: sync new SKU to QBO
+      supabase.functions
+        .invoke('qbo-sync-item', { body: { skuCode } })
+        .then((res) => {
+          if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
+          else console.log(`QBO item sync for ${skuCode}: success`);
+        })
+        .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+
+      // If re-graded: also sync old SKU to QBO so its Name/Description stay accurate
+      if (oldSkuCode) {
         supabase.functions
-          .invoke('qbo-sync-item', { body: { skuCode } })
+          .invoke('qbo-sync-item', { body: { skuCode: oldSkuCode } })
           .then((res) => {
-            if (res.error) console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, res.error);
-            else console.log(`QBO item sync for ${skuCode}: success`);
+            if (res.error) console.warn(`QBO item sync for ${oldSkuCode} failed (non-blocking):`, res.error);
           })
-          .catch((err) => console.warn(`QBO item sync for ${skuCode} failed (non-blocking):`, err));
+          .catch(() => {});
       }
 
       return { stockUnitId, skuCode, autoListed: hasLiveListings };
