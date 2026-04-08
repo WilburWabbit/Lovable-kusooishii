@@ -72,7 +72,7 @@ function VariantChannelsCard({
       const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
 
       initial[ch.key] = {
-        title: existing?.listingTitle ?? "",
+        title: existing?.listingTitle ?? defaultTitle(ch.key, product),
         description: existing?.listingDescription ?? "",
         price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
       };
