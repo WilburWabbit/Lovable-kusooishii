@@ -53,6 +53,22 @@ function VariantChannelsCard({
     return map;
   }, [listings]);
 
+  // Generate Cassini-optimised eBay title from product metadata
+  const defaultEbayTitle = useMemo(() => {
+    const retiredYear = product.retiredDate
+      ? new Date(product.retiredDate).getFullYear()
+      : null;
+    return generateEbayTitle({
+      name: product.name,
+      mpn: product.mpn,
+      theme: product.theme,
+      grade: variant.grade,
+      retired: !!product.retiredDate,
+      retiredYear,
+      pieceCount: product.pieceCount,
+    }).title;
+  }, [product, variant.grade]);
+
   // Per-channel local state for title, description, price
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
@@ -65,7 +81,7 @@ function VariantChannelsCard({
       const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
 
       initial[ch.key] = {
-        title: existing?.listingTitle ?? defaultTitle(ch.key, product),
+        title: existing?.listingTitle ?? (ch.key === "ebay" ? defaultEbayTitle : product.name),
         description: existing?.listingDescription ?? "",
         price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
       };
