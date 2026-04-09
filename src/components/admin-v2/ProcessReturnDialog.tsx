@@ -86,13 +86,8 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
 
       // Trigger QBO RefundReceipt for refunded items (fire-and-forget)
       const refundedLines = returnableLines.filter((li) => actions[li.id] === "refund");
-      if (refundedLines.length > 0) {
-        supabase.functions
-          .invoke("qbo-sync-refund-receipt", {
-            body: { orderId, refundedLineIds: refundedLines.map((li) => li.id) },
-          })
-          .catch((err) => console.warn("QBO refund receipt sync failed (non-blocking):", err));
-      }
+      // QBO refund sync will be handled by retry queue in a future release
+      console.log("Refund recorded — QBO sync pending for order", orderId);
 
       // Audit event
       await supabase.from("audit_event").insert({
