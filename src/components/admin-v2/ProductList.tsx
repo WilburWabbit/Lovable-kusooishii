@@ -18,6 +18,7 @@ interface ProductRow extends Product {
   purchased: number;
   unlisted: number;
   unsold: number;
+  onHand: number;
   sold: number;
 }
 
@@ -88,12 +89,12 @@ const COLUMNS: ColumnDef<ProductRow>[] = [
     render: (r) => <Mono color={r.unlisted > 0 ? "amber" : "dim"}>{r.unlisted}</Mono>,
   },
   {
-    key: "unsold",
-    label: "Unsold",
+    key: "onHand",
+    label: "On Hand",
     defaultVisible: true,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color={r.unsold > 0 ? "amber" : "dim"}>{r.unsold}</Mono>,
+    render: (r) => <Mono color={r.onHand > 0 ? "amber" : "dim"}>{r.onHand}</Mono>,
   },
   {
     key: "sold",
@@ -243,7 +244,7 @@ export function ProductList() {
   // Build flattened rows
   const rows: ProductRow[] = useMemo(() => {
     return products.map((p) => {
-      const counts: ProductStockCounts = stockCounts?.get(p.mpn) ?? { purchased: 0, unlisted: 0, unsold: 0, sold: 0 };
+      const counts: ProductStockCounts = stockCounts?.get(p.mpn) ?? { purchased: 0, unlisted: 0, unsold: 0, onHand: 0, sold: 0 };
       return { ...p, ...counts };
     });
   }, [products, stockCounts]);
