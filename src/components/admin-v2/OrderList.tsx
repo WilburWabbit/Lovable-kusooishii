@@ -72,7 +72,9 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
         <span className="text-zinc-900">
           {name}
           {isCash && r.status === "needs_allocation" && (
-            <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            <span className="text-[10px] text-amber-500 ml-1.5">
+              ⚠ {r.lineItems.length === 0 ? "Add items" : "Allocate"}
+            </span>
           )}
         </span>
       );
@@ -140,7 +142,7 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     label: "Status",
     defaultVisible: true,
     sortable: false,
-    render: (r) => <OrderStatusBadge status={r.status} />,
+    render: (r) => <OrderStatusBadge status={r.status} itemCount={r.lineItems.length} />,
   },
   {
     key: "createdAt",

@@ -62,7 +62,10 @@ export function StatusBadge({ status }: { status: StockUnitStatus }) {
 
 // ─── OrderStatusBadge ───────────────────────────────────────
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({ status, itemCount = 1 }: { status: OrderStatus; itemCount?: number }) {
+  if (status === "needs_allocation" && itemCount === 0) {
+    return <Badge label="Draft" color="#F97316" small />;
+  }
   const s = ORDER_STATUSES[status] ?? { label: status, color: "#71717A" };
   return <Badge label={s.label} color={s.color} small />;
 }
