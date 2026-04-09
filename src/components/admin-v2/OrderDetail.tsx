@@ -39,6 +39,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const [showShip, setShowShip] = useState(false);
   const [showReturn, setShowReturn] = useState(false);
   const [showProcessReturn, setShowProcessReturn] = useState(false);
+  const [showComplete, setShowComplete] = useState(false);
   const [slideItem, setSlideItem] = useState<(OrderLineItem & {
     unitUid?: string;
     unitStatus?: StockUnitStatus;
@@ -165,7 +166,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               buyerName={welcomeCode.buyer_name ?? undefined}
             />
           )}
-          {order.status === "needs_allocation" && (
+          {order.status === "needs_allocation" && order.lineItems.length === 0 && order.channel === "in_person" && (
+            <button onClick={() => setShowComplete(true)} className="bg-teal-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-teal-400 transition-colors">
+              Add Items & Complete
+            </button>
+          )}
+          {order.status === "needs_allocation" && !(order.lineItems.length === 0 && order.channel === "in_person") && (
             <button onClick={() => setShowAllocate(true)} className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors">
               Allocate Items
             </button>
