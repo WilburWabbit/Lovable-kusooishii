@@ -244,7 +244,7 @@ export function ProductList() {
   // Build flattened rows
   const rows: ProductRow[] = useMemo(() => {
     return products.map((p) => {
-      const counts: ProductStockCounts = stockCounts?.get(p.mpn) ?? { purchased: 0, unlisted: 0, unsold: 0, sold: 0 };
+      const counts: ProductStockCounts = stockCounts?.get(p.mpn) ?? { purchased: 0, unlisted: 0, unsold: 0, onHand: 0, sold: 0 };
       return { ...p, ...counts };
     });
   }, [products, stockCounts]);
