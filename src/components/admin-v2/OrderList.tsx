@@ -140,7 +140,7 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     label: "Status",
     defaultVisible: true,
     sortable: false,
-    render: (r) => <OrderStatusBadge status={r.status} />,
+    render: (r) => <OrderStatusBadge status={r.status} itemCount={r.lineItems.length} />,
   },
   {
     key: "createdAt",
