@@ -450,7 +450,15 @@ export function OrderList() {
               return (
                 <tr
                   key={row.id}
-                  onClick={() => navigate(`/admin/orders/${row.id}`)}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    const btn = target.closest("[data-complete-order]") as HTMLElement | null;
+                    if (btn) {
+                      setCompleteOrderId(btn.dataset.completeOrder!);
+                      return;
+                    }
+                    navigate(`/admin/orders/${row.id}`);
+                  }}
                   className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
                   style={{
                     background: alert ? "rgba(245,158,11,0.025)" : "transparent",
