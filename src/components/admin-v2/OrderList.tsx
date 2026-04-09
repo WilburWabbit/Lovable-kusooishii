@@ -74,9 +74,18 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
         <span className="text-zinc-900">
           {name}
           {isCash && r.status === "needs_allocation" && (
-            <span className="text-[10px] text-amber-500 ml-1.5">
-              ⚠ {r.lineItems.length === 0 ? "Add items" : "Allocate"}
-            </span>
+            isDraft ? (
+              <button
+                type="button"
+                data-complete-order={r.id}
+                className="text-[10px] text-amber-500 ml-1.5 bg-transparent border-none cursor-pointer p-0 hover:text-amber-400 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                ⚠ Add items
+              </button>
+            ) : (
+              <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            )
           )}
         </span>
       );
