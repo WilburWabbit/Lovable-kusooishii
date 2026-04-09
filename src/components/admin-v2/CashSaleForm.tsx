@@ -629,7 +629,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
       queryClient.invalidateQueries({ queryKey: ["cash-sale", "lookups"] });
       toast.success(
         result.allAllocated
-          ? `Sale ${result.orderNumber} created and queued for QBO sync`
+          ? `Sale ${result.orderNumber} created — QBO sync will follow shortly`
           : `Sale ${result.orderNumber} created. Some units still need allocation before QBO sync.`,
       );
       resetForm();
