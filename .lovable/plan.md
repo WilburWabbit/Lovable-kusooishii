@@ -1,63 +1,44 @@
 
 
-# Fix: Auto-generate Default Listing Titles in ChannelsTab
+# Build eBay Title Generator & Wire into ChannelsTab
 
 ## Problem
 
-The `ChannelsTab` component only receives `variants` (SKU-level data) but not the parent `product`. When no existing listing exists, the title field initializes as an empty string — the user has to manually type it every time. Previously there was logic to auto-generate:
-- **eBay**: `LEGO <set_number> <product_name>` truncated to 80 characters
-- **Other channels**: `<product_name>` as the default
+The `generate-ebay-title.ts` utility referenced in the wiring prompt does not exist in the current codebase (likely lost in a previous reset). It needs to be rebuilt, then wired into `ChannelsTab` per the existing prompt spec.
 
 ## Changes
 
-### 1. `src/components/admin-v2/ProductDetail.tsx`
+### 1. Create `src/lib/utils/generate-ebay-title.ts` (new file)
 
-Pass the `product` object to `ChannelsTab`:
+Build a Cassini-optimised eBay title generator with:
 
-```tsx
-{activeTab === "channels" && <ChannelsTab variants={product.variants} product={product} />}
-```
+- **Input**: `{ name, mpn, theme, grade, retired, retiredYear, pieceCount }`
+- **Output**: `{ title: string, length: number, warnings: string[] }`
+- **Core logic**: Start with `LEGO` prefix, then set number/MPN, then product name. Append descriptors in priority order until 80-char limit is reached:
+  1. Grade marker — grade 1: `SEALED` / `BNIB`; grade 2: `COMPLETE`
+  2. `RETIRED` flag (if retired)
+  3. Piece count (e.g. `1234 Pieces`)
+  4. Theme name
+  5. Retired year (e.g. `Retired 2023`)
+- **Truncation**: Hard limit at 80 characters; truncate name (not descriptors) if needed
+- **Validation**: `validateTitle()` checks for eBay banned terms (e.g. "rare", "must have", "look", "wow", "L@@K")
+- **Pure function** — no React dependencies, fully testable
 
-### 2. `src/components/admin-v2/ChannelsTab.tsx`
+### 2. Update `src/components/admin-v2/ChannelsTab.tsx`
 
-**A) Update props** to accept `product`:
+- Import `generateEbayTitle` from the new utility
+- Add a `useMemo` inside `VariantChannelsCard` that calls `generateEbayTitle()` with product metadata
+- Change the `useState` initialiser so eBay titles default to the generated title instead of using the simple `defaultTitle()` function; other channels keep using `product.name`
+- Remove or replace the existing `defaultTitle()` helper since the generator supersedes it for eBay
 
-```tsx
-import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
+### 3. No change needed to `ProductDetail.tsx`
 
-interface ChannelsTabProps {
-  variants: ProductVariant[];
-  product: Product;
-}
-```
+The `product` prop is already passed to `ChannelsTab` from a previous task.
 
-Pass `product` down to `VariantChannelsCard`.
+## Files
 
-**B) Generate default titles** in the initial state builder (line 63-64):
-
-```tsx
-// Build default title based on channel
-function defaultTitle(ch: Channel, product: Product): string {
-  if (ch === "ebay") {
-    const raw = `LEGO ${product.setNumber ?? product.mpn} ${product.name}`;
-    return raw.length > 80 ? raw.slice(0, 80) : raw;
-  }
-  return product.name;
-}
-```
-
-Use it in the initializer:
-
-```tsx
-title: existing?.listingTitle ?? defaultTitle(ch.key, product),
-```
-
-This means new listings will pre-populate with the correct channel-specific title, while existing listings keep their saved title.
-
-## Files changed
-
-| File | Change |
+| File | Action |
 |------|--------|
-| `src/components/admin-v2/ChannelsTab.tsx` | Add `product` prop; generate channel-aware default titles |
-| `src/components/admin-v2/ProductDetail.tsx` | Pass `product` to `ChannelsTab` |
+| `src/lib/utils/generate-ebay-title.ts` | Create — title generator with descriptor priority system |
+| `src/components/admin-v2/ChannelsTab.tsx` | Edit — wire generator into eBay default title |
 
