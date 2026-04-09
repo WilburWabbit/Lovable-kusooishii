@@ -369,7 +369,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       )}
 
       {/* ── Mobile Sticky Actions ─────────────────── */}
-      {order.status === "needs_allocation" && (
+      {order.status === "needs_allocation" && order.lineItems.length === 0 && order.channel === "in_person" && (
+        <StickyActions>
+          <button onClick={() => setShowComplete(true)} className="flex-1 bg-teal-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Add Items & Complete</button>
+        </StickyActions>
+      )}
+      {order.status === "needs_allocation" && !(order.lineItems.length === 0 && order.channel === "in_person") && (
         <StickyActions>
           <button onClick={() => setShowAllocate(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Allocate Items</button>
         </StickyActions>
@@ -399,6 +404,19 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       {order && showShip && <ShipOrderDialog open={showShip} onClose={() => setShowShip(false)} orderId={order.id} />}
       {order && showReturn && <ReturnDialog open={showReturn} onClose={() => setShowReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
       {order && showProcessReturn && <ProcessReturnDialog open={showProcessReturn} onClose={() => setShowProcessReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
+      {order && (
+        <CompleteOrderModal
+          open={showComplete}
+          onClose={() => setShowComplete(false)}
+          orderId={order.id}
+          orderNumber={order.orderNumber}
+          grossTotal={order.total}
+          notes={order.notes ?? null}
+          customerName={order.customer?.name ?? "Cash Sales"}
+          paymentMethod={order.paymentMethod}
+          orderDate={order.orderDate}
+        />
+      )}
     </div>
   );
 }

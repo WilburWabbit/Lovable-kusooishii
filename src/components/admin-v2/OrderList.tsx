@@ -69,6 +69,7 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     render: (r) => {
       const name = r.customer?.name ?? "Cash Sales";
       const isCash = !r.customer || name === "Cash Sales";
+      const isDraft = r.status === "needs_allocation" && r.lineItems.length === 0 && r.channel === "in_person";
       return (
         <span className="text-zinc-900">
           {name}
