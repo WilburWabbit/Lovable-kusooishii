@@ -9,14 +9,7 @@ import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
 import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
-
-function defaultTitle(ch: Channel, product: Product): string {
-  if (ch === "ebay") {
-    const raw = `LEGO ${product.setNumber ?? product.mpn} ${product.name}`;
-    return raw.length > 80 ? raw.slice(0, 80) : raw;
-  }
-  return product.name;
-}
+import { generateEbayTitle } from "@/lib/utils/generate-ebay-title";
 
 interface ChannelsTabProps {
   variants: ProductVariant[];
