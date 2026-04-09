@@ -72,7 +72,9 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
         <span className="text-zinc-900">
           {name}
           {isCash && r.status === "needs_allocation" && (
-            <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            <span className="text-[10px] text-amber-500 ml-1.5">
+              ⚠ {r.lineItems.length === 0 ? "Add items" : "Allocate"}
+            </span>
           )}
         </span>
       );
