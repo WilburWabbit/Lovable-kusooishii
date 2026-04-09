@@ -23,6 +23,7 @@ import { ShipOrderDialog } from "./ShipOrderDialog";
 import { ReturnDialog } from "./ReturnDialog";
 import { ProcessReturnDialog } from "./ProcessReturnDialog";
 import { WelcomeQrLabel } from "./WelcomeQrLabel";
+import { CompleteOrderModal } from "./CompleteOrderModal";
 import { toast } from "sonner";
 
 interface OrderDetailProps {
