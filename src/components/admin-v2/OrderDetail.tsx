@@ -23,6 +23,7 @@ import { ShipOrderDialog } from "./ShipOrderDialog";
 import { ReturnDialog } from "./ReturnDialog";
 import { ProcessReturnDialog } from "./ProcessReturnDialog";
 import { WelcomeQrLabel } from "./WelcomeQrLabel";
+import { CompleteOrderModal } from "./CompleteOrderModal";
 import { toast } from "sonner";
 
 interface OrderDetailProps {
@@ -38,6 +39,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const [showShip, setShowShip] = useState(false);
   const [showReturn, setShowReturn] = useState(false);
   const [showProcessReturn, setShowProcessReturn] = useState(false);
+  const [showComplete, setShowComplete] = useState(false);
   const [slideItem, setSlideItem] = useState<(OrderLineItem & {
     unitUid?: string;
     unitStatus?: StockUnitStatus;
@@ -164,7 +166,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               buyerName={welcomeCode.buyer_name ?? undefined}
             />
           )}
-          {order.status === "needs_allocation" && (
+          {order.status === "needs_allocation" && order.lineItems.length === 0 && order.channel === "in_person" && (
+            <button onClick={() => setShowComplete(true)} className="bg-teal-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-teal-400 transition-colors">
+              Add Items & Complete
+            </button>
+          )}
+          {order.status === "needs_allocation" && !(order.lineItems.length === 0 && order.channel === "in_person") && (
             <button onClick={() => setShowAllocate(true)} className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors">
               Allocate Items
             </button>
@@ -362,7 +369,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       )}
 
       {/* ── Mobile Sticky Actions ─────────────────── */}
-      {order.status === "needs_allocation" && (
+      {order.status === "needs_allocation" && order.lineItems.length === 0 && order.channel === "in_person" && (
+        <StickyActions>
+          <button onClick={() => setShowComplete(true)} className="flex-1 bg-teal-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Add Items & Complete</button>
+        </StickyActions>
+      )}
+      {order.status === "needs_allocation" && !(order.lineItems.length === 0 && order.channel === "in_person") && (
         <StickyActions>
           <button onClick={() => setShowAllocate(true)} className="flex-1 bg-amber-500 text-zinc-900 rounded-md py-2.5 font-bold text-[13px]">Allocate Items</button>
         </StickyActions>
@@ -392,6 +404,19 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       {order && showShip && <ShipOrderDialog open={showShip} onClose={() => setShowShip(false)} orderId={order.id} />}
       {order && showReturn && <ReturnDialog open={showReturn} onClose={() => setShowReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
       {order && showProcessReturn && <ProcessReturnDialog open={showProcessReturn} onClose={() => setShowProcessReturn(false)} orderId={order.id} lineItems={order.lineItems} />}
+      {order && (
+        <CompleteOrderModal
+          open={showComplete}
+          onClose={() => setShowComplete(false)}
+          orderId={order.id}
+          orderNumber={order.orderNumber}
+          grossTotal={order.total}
+          notes={order.notes ?? null}
+          customerName={order.customer?.name ?? "Cash Sales"}
+          paymentMethod={order.paymentMethod}
+          orderDate={order.orderDate}
+        />
+      )}
     </div>
   );
 }

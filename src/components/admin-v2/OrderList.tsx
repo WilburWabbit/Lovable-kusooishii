@@ -9,6 +9,7 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, OrderStatusBadge, Badge } from "./ui-primitives";
 import { CashSaleForm } from "./CashSaleForm";
+import { CompleteOrderModal } from "./CompleteOrderModal";
 import { Download, Search } from "lucide-react";
 
 // ─── Row type ────────────────────────────────────────────────
@@ -68,13 +69,23 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     render: (r) => {
       const name = r.customer?.name ?? "Cash Sales";
       const isCash = !r.customer || name === "Cash Sales";
+      const isDraft = r.status === "needs_allocation" && r.lineItems.length === 0 && r.channel === "in_person";
       return (
         <span className="text-zinc-900">
           {name}
           {isCash && r.status === "needs_allocation" && (
-            <span className="text-[10px] text-amber-500 ml-1.5">
-              ⚠ {r.lineItems.length === 0 ? "Add items" : "Allocate"}
-            </span>
+            isDraft ? (
+              <button
+                type="button"
+                data-complete-order={r.id}
+                className="text-[10px] text-amber-500 ml-1.5 bg-transparent border-none cursor-pointer p-0 hover:text-amber-400 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                ⚠ Add items
+              </button>
+            ) : (
+              <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            )
           )}
         </span>
       );
@@ -283,6 +294,7 @@ export function OrderList() {
   const navigate = useNavigate();
   const { data: orders = [], isLoading } = useOrders();
   const [cashSaleOpen, setCashSaleOpen] = useState(false);
+  const [completeOrderId, setCompleteOrderId] = useState<string | null>(null);
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
     "v2-orders",
     DEFAULT_VISIBLE,
@@ -378,6 +390,24 @@ export function OrderList() {
 
       <CashSaleForm open={cashSaleOpen} onClose={() => setCashSaleOpen(false)} />
 
+      {completeOrderId && (() => {
+        const cOrder = orders.find((o) => o.id === completeOrderId);
+        if (!cOrder) return null;
+        return (
+          <CompleteOrderModal
+            open={true}
+            onClose={() => setCompleteOrderId(null)}
+            orderId={cOrder.id}
+            orderNumber={cOrder.orderNumber}
+            grossTotal={cOrder.total}
+            notes={cOrder.notes ?? null}
+            customerName={cOrder.customer?.name ?? "Cash Sales"}
+            paymentMethod={cOrder.paymentMethod}
+            orderDate={cOrder.orderDate ?? cOrder.createdAt}
+          />
+        );
+      })()}
+
       <SurfaceCard noPadding className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -420,7 +450,15 @@ export function OrderList() {
               return (
                 <tr
                   key={row.id}
-                  onClick={() => navigate(`/admin/orders/${row.id}`)}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    const btn = target.closest("[data-complete-order]") as HTMLElement | null;
+                    if (btn) {
+                      setCompleteOrderId(btn.dataset.completeOrder!);
+                      return;
+                    }
+                    navigate(`/admin/orders/${row.id}`);
+                  }}
                   className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
                   style={{
                     background: alert ? "rgba(245,158,11,0.025)" : "transparent",
