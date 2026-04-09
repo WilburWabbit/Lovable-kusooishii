@@ -151,6 +151,7 @@ export interface ProductStockCounts {
   purchased: number;
   unlisted: number;
   unsold: number;
+  onHand: number;
   sold: number;
 }
 
@@ -175,13 +176,13 @@ export function useProductStockCounts() {
 
         let entry = counts.get(mpn);
         if (!entry) {
-          entry = { purchased: 0, unlisted: 0, unsold: 0, sold: 0 };
+          entry = { purchased: 0, unlisted: 0, unsold: 0, onHand: 0, sold: 0 };
           counts.set(mpn, entry);
         }
 
         entry.purchased += 1;
-        if (status === 'graded') entry.unlisted += 1;
-        else if (status === 'listed') entry.unsold += 1;
+        if (status === 'graded') { entry.unlisted += 1; entry.onHand += 1; }
+        else if (status === 'listed') { entry.unsold += 1; entry.onHand += 1; }
         else if (SOLD_STATUSES.includes(status)) entry.sold += 1;
       }
 
