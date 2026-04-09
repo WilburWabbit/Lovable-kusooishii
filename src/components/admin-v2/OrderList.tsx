@@ -285,6 +285,7 @@ export function OrderList() {
   const navigate = useNavigate();
   const { data: orders = [], isLoading } = useOrders();
   const [cashSaleOpen, setCashSaleOpen] = useState(false);
+  const [completeOrderId, setCompleteOrderId] = useState<string | null>(null);
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
     "v2-orders",
     DEFAULT_VISIBLE,
@@ -379,6 +380,24 @@ export function OrderList() {
       </p>
 
       <CashSaleForm open={cashSaleOpen} onClose={() => setCashSaleOpen(false)} />
+
+      {completeOrderId && (() => {
+        const cOrder = orders.find((o) => o.id === completeOrderId);
+        if (!cOrder) return null;
+        return (
+          <CompleteOrderModal
+            open={true}
+            onClose={() => setCompleteOrderId(null)}
+            orderId={cOrder.id}
+            orderNumber={cOrder.orderNumber}
+            grossTotal={cOrder.total}
+            notes={cOrder.notes ?? null}
+            customerName={cOrder.customer?.name ?? "Cash Sales"}
+            paymentMethod={cOrder.paymentMethod}
+            orderDate={cOrder.orderDate ?? cOrder.createdAt}
+          />
+        );
+      })()}
 
       <SurfaceCard noPadding className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
