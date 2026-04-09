@@ -617,9 +617,8 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           .eq("order_id" as never, orderId)
           .in("v2_status" as never, ["sold"]);
 
-        supabase.functions
-          .invoke("qbo-sync-sales-receipt", { body: { orderId } })
-          .catch(() => {});
+        // QBO sync handled by qbo-retry-sync cron — nudge it now
+        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
       }
 
       return { orderId, orderNumber, allAllocated };
