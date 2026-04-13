@@ -211,6 +211,53 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ─── 1b. Pre-flight: verify linked orders are synced ────
+    const { data: linkedOrders, error: loErr } = await admin
+      .from("payout_orders" as never)
+      .select("sales_order_id, order_gross")
+      .eq("payout_id" as never, payoutId);
+
+    if (loErr) throw new Error(`Failed to fetch linked orders: ${loErr.message}`);
+
+    const linkedRows = (linkedOrders ?? []) as Array<Record<string, unknown>>;
+
+    if (linkedRows.length > 0) {
+      const orderIds = linkedRows.map((r) => r.sales_order_id as string);
+      const { data: salesOrders, error: soErr } = await admin
+        .from("sales_order" as never)
+        .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+        .in("id" as never, orderIds);
+
+      if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
+
+      const soRows = (salesOrders ?? []) as Array<Record<string, unknown>>;
+      const unsynced = soRows.filter(
+        (so) => !so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "",
+      );
+
+      if (unsynced.length > 0) {
+        const refs = unsynced.map(
+          (so) => (so.origin_reference as string) ?? (so.id as string),
+        );
+        const message = `Cannot create deposit: ${unsynced.length} linked order(s) not yet synced to QBO: ${refs.join(", ")}`;
+        await persistSyncFailure(admin, payoutId, message);
+        return new Response(
+          JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: refs }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Build order → QBO SalesReceipt map for deposit lines
+      var orderQboMap = new Map<string, { qboId: string; gross: number }>();
+      for (const so of soRows) {
+        const poRow = linkedRows.find((r) => r.sales_order_id === so.id);
+        orderQboMap.set(so.id as string, {
+          qboId: so.qbo_sales_receipt_id as string,
+          gross: (poRow?.order_gross as number) ?? 0,
+        });
+      }
+    }
+
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
@@ -235,14 +282,29 @@ Deno.serve(async (req) => {
       name: validatedBankAccount.fullyQualifiedName ?? validatedBankAccount.name ?? bankAccount.name,
     };
 
-    // ─── 3. Create QBO Deposit (net amount) ─────────────────
+    // ─── 3. Create QBO Deposit ──────────────────────────────
     console.log(
       `QBO payout sync: bank=${payoutBankRef.id}:${payoutBankRef.name ?? ""}, undeposited=${undepositedFundsAccount.id}:${undepositedFundsAccount.name ?? ""}, fees=${sellingFeesAccount.id}:${sellingFeesAccount.name ?? ""}`,
     );
-    const depositPayload = {
-      TxnDate: payoutDate,
-      DepositToAccountRef: buildAccountRef(payoutBankRef),
-      Line: [
+
+    // Build deposit lines: one per linked SalesReceipt if available, else single lump sum
+    let depositLines: unknown[];
+    if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
+      depositLines = Array.from(orderQboMap.values()).map((entry) => ({
+        Amount: entry.gross,
+        DetailType: "DepositLineDetail",
+        DepositLineDetail: {
+          AccountRef: buildAccountRef(undepositedFundsAccount),
+        },
+        LinkedTxn: [
+          {
+            TxnId: entry.qboId,
+            TxnType: "SalesReceipt",
+          },
+        ],
+      }));
+    } else {
+      depositLines = [
         {
           Amount: netAmount,
           DetailType: "DepositLineDetail",
@@ -250,7 +312,13 @@ Deno.serve(async (req) => {
             AccountRef: buildAccountRef(undepositedFundsAccount),
           },
         },
-      ],
+      ];
+    }
+
+    const depositPayload = {
+      TxnDate: payoutDate,
+      DepositToAccountRef: buildAccountRef(payoutBankRef),
+      Line: depositLines,
       PrivateNote: `${channel} payout — ${p.order_count ?? 0} orders, ${p.unit_count ?? 0} units`,
     };
     console.log("QBO deposit payload:", JSON.stringify(depositPayload));
