@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { calculateVAT } from "@/lib/utils/vat";
 import {
   usePayout,
   usePayoutFees,
@@ -132,7 +133,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       </div>
 
       {/* 1. Totals */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-3 gap-3 mb-3">
         <SurfaceCard>
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Gross</div>
           <Mono className="text-lg font-bold">£{payout.grossAmount.toFixed(2)}</Mono>
@@ -144,6 +145,20 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         <SurfaceCard>
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Net</div>
           <Mono color="teal" className="text-lg font-bold">£{payout.netAmount.toFixed(2)}</Mono>
+        </SurfaceCard>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        <SurfaceCard>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Ex-VAT Revenue</div>
+          <Mono className="text-lg font-bold">£{calculateVAT(payout.grossAmount).net.toFixed(2)}</Mono>
+        </SurfaceCard>
+        <SurfaceCard>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">VAT on Fees</div>
+          <Mono color="red" className="text-lg font-bold">£{calculateVAT(payout.totalFees).vat.toFixed(2)}</Mono>
+        </SurfaceCard>
+        <SurfaceCard>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Ex-VAT Net</div>
+          <Mono color="teal" className="text-lg font-bold">£{calculateVAT(payout.netAmount).net.toFixed(2)}</Mono>
         </SurfaceCard>
       </div>
 
@@ -189,12 +204,14 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Type</th>
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Order / Memo</th>
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Buyer</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Gross</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Fees</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Net</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">App Gross</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Variance</th>
-                  <th className="text-center text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Status</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Gross</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Fees</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Net</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Ex-VAT</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">VAT on Fees</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">App Gross</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Variance</th>
+                   <th className="text-center text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -236,6 +253,8 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                         <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{tx.grossAmount.toFixed(2)}</Mono></td>
                         <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{tx.totalFees.toFixed(2)}</Mono></td>
                         <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{tx.netAmount.toFixed(2)}</Mono></td>
+                        <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{calculateVAT(tx.grossAmount).net.toFixed(2)}</Mono></td>
+                        <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{calculateVAT(tx.totalFees).vat.toFixed(2)}</Mono></td>
                         <td className="px-2 py-1.5 text-right">
                           {tx.appGross != null ? <Mono className="text-xs">£{tx.appGross.toFixed(2)}</Mono> : <span className="text-zinc-300">—</span>}
                         </td>
@@ -256,19 +275,32 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       </tr>
                       {isExpanded && hasFees && (
                         <tr key={`${tx.id}-fees`}>
-                          <td colSpan={10} className="bg-zinc-50 px-4 py-2 border-b border-zinc-100">
+                          <td colSpan={12} className="bg-zinc-50 px-4 py-2 border-b border-zinc-100">
                             <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">Fee Breakdown</div>
-                            <div className="grid gap-0.5">
-                              {feeDetails!.map((fee, idx) => {
-                                const amt = typeof fee.amount === "number" ? fee.amount : parseFloat(fee.amount?.value ?? "0");
-                                return (
-                                  <div key={idx} className="flex justify-between py-0.5">
-                                    <span className="text-zinc-600 text-xs">{formatFeeType(fee.feeType ?? "Unknown")}</span>
-                                    <Mono color="red" className="text-xs">£{amt.toFixed(2)}</Mono>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                            <table className="w-full">
+                              <thead>
+                                <tr>
+                                  <th className="text-left text-[10px] text-zinc-400 uppercase tracking-wider py-0.5">Fee Type</th>
+                                  <th className="text-right text-[10px] text-zinc-400 uppercase tracking-wider py-0.5">Gross</th>
+                                  <th className="text-right text-[10px] text-zinc-400 uppercase tracking-wider py-0.5">Ex-VAT</th>
+                                  <th className="text-right text-[10px] text-zinc-400 uppercase tracking-wider py-0.5">VAT</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {feeDetails!.map((fee, idx) => {
+                                  const amt = typeof fee.amount === "number" ? fee.amount : parseFloat(fee.amount?.value ?? "0");
+                                  const { net, vat } = calculateVAT(amt);
+                                  return (
+                                    <tr key={idx}>
+                                      <td className="text-zinc-600 text-xs py-0.5">{formatFeeType(fee.feeType ?? "Unknown")}</td>
+                                      <td className="text-right py-0.5"><Mono color="red" className="text-xs">£{amt.toFixed(2)}</Mono></td>
+                                      <td className="text-right py-0.5"><Mono color="dim" className="text-xs">£{net.toFixed(2)}</Mono></td>
+                                      <td className="text-right py-0.5"><Mono color="dim" className="text-xs">£{vat.toFixed(2)}</Mono></td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </td>
                         </tr>
                       )}
@@ -282,6 +314,8 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                   const totFees = transactions.reduce((s, t) => s + t.totalFees, 0);
                   const totNet = transactions.reduce((s, t) => s + t.netAmount, 0);
                   const matchedCount = transactions.filter((t) => t.matched).length;
+                  const totExVat = calculateVAT(totGross).net;
+                  const totVatOnFees = calculateVAT(totFees).vat;
                   return (
                     <tr className="border-t-2 border-zinc-200 font-semibold">
                       <td className="px-1 py-1.5" />
@@ -290,6 +324,8 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{totGross.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totFees.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{totNet.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{totExVat.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totVatOnFees.toFixed(2)}</Mono></td>
                       <td colSpan={3} />
                     </tr>
                   );
@@ -316,7 +352,8 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Selling</th>
                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Shipping</th>
                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Other</th>
-                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Total</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Total</th>
+                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Ex-VAT</th>
                 </tr>
               </thead>
               <tbody>
@@ -345,6 +382,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       <td className="px-2 py-1.5 text-right"><Mono color="red">£{shipping.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red">£{other.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red">£{total.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="dim">£{calculateVAT(total).net.toFixed(2)}</Mono></td>
                     </tr>
                   );
                 })}
@@ -362,6 +400,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totShipping.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totOther.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totTotal.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="dim" className="text-xs">£{calculateVAT(totTotal).net.toFixed(2)}</Mono></td>
                     </tr>
                   );
                 })()}
@@ -380,13 +419,14 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
           <div className="grid gap-1.5">
             {Object.entries(payout.feeBreakdown).map(([key, amount]) => {
               const gross = amount ?? 0;
-              const net = Math.round((gross / 1.2) * 100) / 100;
+              const { net, vat } = calculateVAT(gross);
               return (
                 <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
                   <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
                   <div className="flex gap-3">
                     <Mono color="dim" className="text-xs">£{gross.toFixed(2)}</Mono>
                     <Mono color="red" className="text-xs">£{net.toFixed(2)}</Mono>
+                    <Mono color="dim" className="text-xs">£{vat.toFixed(2)}</Mono>
                   </div>
                 </div>
               );
@@ -396,13 +436,15 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
               <div className="flex gap-3">
                 <span>Gross</span>
                 <span>Ex-VAT</span>
+                <span>VAT</span>
               </div>
             </div>
             <div className="flex justify-between py-1 font-semibold">
               <span className="text-zinc-700 text-xs">Total Fees</span>
               <div className="flex gap-3">
                 <Mono color="dim" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
-                <Mono color="red" className="text-xs">£{(Math.round((payout.totalFees / 1.2) * 100) / 100).toFixed(2)}</Mono>
+                <Mono color="red" className="text-xs">£{calculateVAT(payout.totalFees).net.toFixed(2)}</Mono>
+                <Mono color="dim" className="text-xs">£{calculateVAT(payout.totalFees).vat.toFixed(2)}</Mono>
               </div>
             </div>
           </div>
