@@ -607,8 +607,13 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
+    // Only include payout-related expenses on the deposit itself.
+    // Account-level charges like NON_SALE_CHARGE are recorded as Purchases
+    // but are not part of the sale payout sweep.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.transactionType === "NON_SALE_CHARGE") continue;
+
       depositLines.push({
         Amount: -exp.amount,
         DetailType: "DepositLineDetail",
