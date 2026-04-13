@@ -59,6 +59,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
   const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
+  const { data: qboReadiness } = usePayoutQBOReadiness(payoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
   const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
