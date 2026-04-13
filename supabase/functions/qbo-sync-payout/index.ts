@@ -108,9 +108,18 @@ Deno.serve(async (req) => {
     const baseUrl = qboBaseUrl(realmId);
 
     // ─── 2. Resolve account mappings ────────────────────────
-    const bankAccountRef = await getAccountRef(admin, "payout_bank", "1");
-    const undepositedFundsRef = await getAccountRef(admin, "undeposited_funds", "1");
-    const sellingFeesRef = await getAccountRef(admin, "selling_fees", "2");
+    const bankAccountRef = await getAccountRef(admin, "payout_bank", "");
+    const undepositedFundsRef = await getAccountRef(admin, "undeposited_funds", "");
+    const sellingFeesRef = await getAccountRef(admin, "selling_fees", "");
+
+    if (!bankAccountRef || !undepositedFundsRef || !sellingFeesRef) {
+      const missing = [
+        !bankAccountRef && "payout_bank",
+        !undepositedFundsRef && "undeposited_funds",
+        !sellingFeesRef && "selling_fees",
+      ].filter(Boolean).join(", ");
+      throw new Error(`QBO account mapping not configured for: ${missing}. Add rows to qbo_account_mapping.`);
+    }
 
     // ─── 3. Create QBO Deposit (net amount) ─────────────────
     const depositPayload = {
