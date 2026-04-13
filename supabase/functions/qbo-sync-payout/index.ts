@@ -571,8 +571,10 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
-    let depositLines: unknown[];
+    let depositLines: unknown[] = [];
+
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
+      // SalesReceipt lines (positive — gross sales)
       depositLines = Array.from(orderQboMap.values()).map((entry) => ({
         Amount: entry.gross,
         DetailType: "DepositLineDetail",
@@ -586,8 +588,8 @@ Deno.serve(async (req) => {
           },
         ],
       }));
-    } else {
-      // Fallback: single lump-sum line if no sales
+    } else if (expenseResults.length === 0) {
+      // Fallback: single lump-sum line if no sales and no expenses
       const netAmount = p.net_amount as number;
       depositLines = [
         {
@@ -598,6 +600,24 @@ Deno.serve(async (req) => {
           },
         },
       ];
+    }
+
+    // Expense (Purchase) lines — negative amounts net off the deposit
+    for (const exp of expenseResults) {
+      if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      depositLines.push({
+        Amount: -exp.amount,
+        DetailType: "DepositLineDetail",
+        DepositLineDetail: {
+          AccountRef: exp.accountRef,
+        },
+        LinkedTxn: [
+          {
+            TxnId: exp.qboPurchaseId,
+            TxnType: "Purchase",
+          },
+        ],
+      });
     }
 
     const depositPayload = {
