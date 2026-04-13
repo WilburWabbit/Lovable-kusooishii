@@ -1,9 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   usePayout,
   usePayoutFees,
-  usePayoutUnitCount,
   usePayoutTransactions,
   useReconcilePayout,
   useTriggerPayoutQBOSync,
@@ -12,7 +11,7 @@ import {
 } from "@/hooks/admin/use-payouts";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, ChevronRight, ChevronDown } from "lucide-react";
 
 const formatDate = (iso: string | null) => {
   if (!iso) return "—";
@@ -29,6 +28,14 @@ function formatFeeLabel(key: string): string {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+function formatFeeType(raw: string): string {
+  return raw
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const TX_TYPE_COLORS: Record<string, string> = {
   SALE: "#22C55E",
   SHIPPING_LABEL: "#3B82F6",
@@ -49,10 +56,24 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const navigate = useNavigate();
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
-  const { data: liveUnitCount, isLoading: unitCountLoading } = usePayoutUnitCount(payoutId);
   const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
+  const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
+
+  const toggleTx = (id: string) => {
+    setExpandedTxIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const saleCount = useMemo(
+    () => transactions.filter((t) => t.transactionType === "SALE").length,
+    [transactions]
+  );
 
   const orderFeeGroups = useMemo(() => {
     if (!payoutFees.length) return [];
@@ -71,14 +92,6 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       }
     }
     return Array.from(groups.values());
-  }, [payoutFees]);
-
-  const feeTotalsByCategory = useMemo(() => {
-    const totals: Record<string, number> = {};
-    for (const fee of payoutFees) {
-      totals[fee.feeCategory] = (totals[fee.feeCategory] ?? 0) + fee.amount;
-    }
-    return totals;
   }, [payoutFees]);
 
   if (isLoading) {
@@ -118,7 +131,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         </div>
       </div>
 
-      {/* Totals */}
+      {/* 1. Totals */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         <SurfaceCard>
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Gross</div>
@@ -134,7 +147,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         </SurfaceCard>
       </div>
 
-      {/* Meta */}
+      {/* 2. Channel Detail */}
       <SurfaceCard className="mb-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
@@ -147,11 +160,11 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
           </div>
           <div>
             <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
-            <div className="text-zinc-900 text-sm">{feesLoading ? "—" : orderFeeGroups.length}</div>
+            <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
           </div>
           <div>
             <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
-            <div className="text-zinc-900 text-sm">{unitCountLoading ? "—" : (liveUnitCount ?? 0)}</div>
+            <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
           </div>
           {payout.externalPayoutId && (
             <div className="col-span-2 sm:col-span-4">
@@ -162,60 +175,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         </div>
       </SurfaceCard>
 
-      {/* Fee Breakdown — from fee_breakdown JSONB */}
-      <SurfaceCard className="mb-5">
-        <SectionHead>Fee Breakdown</SectionHead>
-        {Object.keys(payout.feeBreakdown).length > 0 ? (
-          <div className="grid gap-1.5">
-            {Object.entries(payout.feeBreakdown).map(([key, amount]) => {
-              const gross = amount ?? 0;
-              const net = Math.round((gross / 1.2) * 100) / 100;
-              return (
-                <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
-                  <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
-                  <div className="flex gap-3">
-                    <Mono color="dim" className="text-xs">£{gross.toFixed(2)}</Mono>
-                    <Mono color="red" className="text-xs">£{net.toFixed(2)}</Mono>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex justify-between py-1 border-b border-zinc-100 text-[10px] text-zinc-400">
-              <span />
-              <div className="flex gap-3">
-                <span>Gross</span>
-                <span>Ex-VAT</span>
-              </div>
-            </div>
-            <div className="flex justify-between py-1 font-semibold">
-              <span className="text-zinc-700 text-xs">Total Fees</span>
-              <div className="flex gap-3">
-                <Mono color="dim" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
-                <Mono color="red" className="text-xs">£{(Math.round((payout.totalFees / 1.2) * 100) / 100).toFixed(2)}</Mono>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-zinc-400 text-xs">No fee breakdown available.</p>
-        )}
-      </SurfaceCard>
-
-      {/* Per-order fee detail from payout_fee table */}
-      {payoutFees.length > 0 && (
-        <SurfaceCard className="mb-5">
-          <SectionHead>Fee Detail by Category</SectionHead>
-          <div className="grid gap-1.5">
-            {Object.entries(feeTotalsByCategory).map(([cat, total]) => (
-              <div key={cat} className="flex justify-between py-1 border-b border-zinc-100">
-                <span className="text-zinc-600 text-xs">{formatFeeLabel(cat)}</span>
-                <Mono color="red" className="text-xs">£{total.toFixed(2)}</Mono>
-              </div>
-            ))}
-          </div>
-        </SurfaceCard>
-      )}
-
-      {/* Channel Transactions */}
+      {/* 3. Transactions (expandable rows) */}
       <SurfaceCard className="mb-5">
         <SectionHead>Transactions ({transactions.length})</SectionHead>
         {txLoading ? (
@@ -225,6 +185,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-zinc-200">
+                  <th className="w-6 px-1 py-1.5" />
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Type</th>
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Order / Memo</th>
                   <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Buyer</th>
@@ -239,46 +200,79 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
               <tbody>
                 {transactions.map((tx) => {
                   const variance = tx.appGross != null ? tx.grossAmount - tx.appGross : null;
+                  const isExpanded = expandedTxIds.has(tx.id);
+                  const feeDetails = tx.feeDetails as Array<{ feeType?: string; amount?: { value?: string; convertedFromValue?: string; currency?: string } }> | null;
+                  const hasFees = feeDetails && feeDetails.length > 0;
+
                   return (
-                    <tr key={tx.id} className="border-b border-zinc-100">
-                      <td className="px-2 py-1.5">
-                        <TransactionTypeBadge type={tx.transactionType} />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        {tx.matchedOrderId ? (
-                          <button
-                            onClick={() => navigate(`/admin/orders/${tx.matchedOrderId}`)}
-                            className="text-amber-600 hover:underline inline-flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs p-0"
-                          >
-                            {tx.orderId}
-                            <ExternalLink className="h-2.5 w-2.5" />
-                          </button>
-                        ) : (
-                          <Mono color="dim" className="text-xs">{tx.orderId ?? tx.memo ?? "—"}</Mono>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-zinc-600">{tx.buyerUsername ?? "—"}</td>
-                      <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{tx.grossAmount.toFixed(2)}</Mono></td>
-                      <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{tx.totalFees.toFixed(2)}</Mono></td>
-                      <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{tx.netAmount.toFixed(2)}</Mono></td>
-                      <td className="px-2 py-1.5 text-right">
-                        {tx.appGross != null ? <Mono className="text-xs">£{tx.appGross.toFixed(2)}</Mono> : <span className="text-zinc-300">—</span>}
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        {variance != null ? (
-                          <Mono color={Math.abs(variance) < 0.01 ? "teal" : "red"} className="text-xs">
-                            {variance >= 0 ? "+" : ""}£{variance.toFixed(2)}
-                          </Mono>
-                        ) : <span className="text-zinc-300">—</span>}
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <Badge
-                          label={tx.matched ? "Matched" : "Unmatched"}
-                          color={tx.matched ? "#22C55E" : "#F59E0B"}
-                          small
-                        />
-                      </td>
-                    </tr>
+                    <>
+                      <tr
+                        key={tx.id}
+                        className={`border-b border-zinc-100 ${hasFees ? "cursor-pointer hover:bg-zinc-50" : ""}`}
+                        onClick={() => hasFees && toggleTx(tx.id)}
+                      >
+                        <td className="px-1 py-1.5 text-zinc-400">
+                          {hasFees ? (
+                            isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <TransactionTypeBadge type={tx.transactionType} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {tx.matchedOrderId ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); navigate(`/admin/orders/${tx.matchedOrderId}`); }}
+                              className="text-amber-600 hover:underline inline-flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs p-0"
+                            >
+                              {tx.orderId}
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </button>
+                          ) : (
+                            <Mono color="dim" className="text-xs">{tx.orderId ?? tx.memo ?? "—"}</Mono>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-zinc-600">{tx.buyerUsername ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{tx.grossAmount.toFixed(2)}</Mono></td>
+                        <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{tx.totalFees.toFixed(2)}</Mono></td>
+                        <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{tx.netAmount.toFixed(2)}</Mono></td>
+                        <td className="px-2 py-1.5 text-right">
+                          {tx.appGross != null ? <Mono className="text-xs">£{tx.appGross.toFixed(2)}</Mono> : <span className="text-zinc-300">—</span>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          {variance != null ? (
+                            <Mono color={Math.abs(variance) < 0.01 ? "teal" : "red"} className="text-xs">
+                              {variance >= 0 ? "+" : ""}£{variance.toFixed(2)}
+                            </Mono>
+                          ) : <span className="text-zinc-300">—</span>}
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          <Badge
+                            label={tx.matched ? "Matched" : "Unmatched"}
+                            color={tx.matched ? "#22C55E" : "#F59E0B"}
+                            small
+                          />
+                        </td>
+                      </tr>
+                      {isExpanded && hasFees && (
+                        <tr key={`${tx.id}-fees`}>
+                          <td colSpan={10} className="bg-zinc-50 px-4 py-2 border-b border-zinc-100">
+                            <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">Fee Breakdown</div>
+                            <div className="grid gap-0.5">
+                              {feeDetails!.map((fee, idx) => {
+                                const amt = parseFloat(fee.amount?.value ?? "0");
+                                return (
+                                  <div key={idx} className="flex justify-between py-0.5">
+                                    <span className="text-zinc-600 text-xs">{formatFeeType(fee.feeType ?? "Unknown")}</span>
+                                    <Mono color="red" className="text-xs">£{amt.toFixed(2)}</Mono>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
@@ -290,6 +284,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                   const matchedCount = transactions.filter((t) => t.matched).length;
                   return (
                     <tr className="border-t-2 border-zinc-200 font-semibold">
+                      <td className="px-1 py-1.5" />
                       <td className="px-2 py-1.5 text-xs text-zinc-500">Total</td>
                       <td className="px-2 py-1.5 text-xs text-zinc-400" colSpan={2}>{matchedCount}/{transactions.length} matched</td>
                       <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{totGross.toFixed(2)}</Mono></td>
@@ -307,6 +302,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         )}
       </SurfaceCard>
 
+      {/* 4. Linked Orders */}
       <SurfaceCard className="mb-5">
         <SectionHead>Linked Orders ({orderFeeGroups.length})</SectionHead>
         {feesLoading ? (
@@ -377,7 +373,45 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         )}
       </SurfaceCard>
 
-      {/* Action buttons */}
+      {/* 5. Fee Breakdown — from fee_breakdown JSONB */}
+      <SurfaceCard className="mb-5">
+        <SectionHead>Fee Breakdown</SectionHead>
+        {Object.keys(payout.feeBreakdown).length > 0 ? (
+          <div className="grid gap-1.5">
+            {Object.entries(payout.feeBreakdown).map(([key, amount]) => {
+              const gross = amount ?? 0;
+              const net = Math.round((gross / 1.2) * 100) / 100;
+              return (
+                <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
+                  <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
+                  <div className="flex gap-3">
+                    <Mono color="dim" className="text-xs">£{gross.toFixed(2)}</Mono>
+                    <Mono color="red" className="text-xs">£{net.toFixed(2)}</Mono>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex justify-between py-1 border-b border-zinc-100 text-[10px] text-zinc-400">
+              <span />
+              <div className="flex gap-3">
+                <span>Gross</span>
+                <span>Ex-VAT</span>
+              </div>
+            </div>
+            <div className="flex justify-between py-1 font-semibold">
+              <span className="text-zinc-700 text-xs">Total Fees</span>
+              <div className="flex gap-3">
+                <Mono color="dim" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
+                <Mono color="red" className="text-xs">£{(Math.round((payout.totalFees / 1.2) * 100) / 100).toFixed(2)}</Mono>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-zinc-400 text-xs">No fee breakdown available.</p>
+        )}
+      </SurfaceCard>
+
+      {/* 6. Action buttons */}
       <div className="flex gap-2 pt-3">
         <button
           onClick={() => {
