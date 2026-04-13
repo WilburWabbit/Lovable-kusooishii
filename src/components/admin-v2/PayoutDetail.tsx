@@ -260,7 +260,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                             <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">Fee Breakdown</div>
                             <div className="grid gap-0.5">
                               {feeDetails!.map((fee, idx) => {
-                                const amt = parseFloat(fee.amount?.value ?? "0");
+                                const amt = typeof fee.amount === "number" ? fee.amount : parseFloat(fee.amount?.value ?? "0");
                                 return (
                                   <div key={idx} className="flex justify-between py-0.5">
                                     <span className="text-zinc-600 text-xs">{formatFeeType(fee.feeType ?? "Unknown")}</span>
