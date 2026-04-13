@@ -535,7 +535,7 @@ Deno.serve(async (req) => {
 
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
-        bankAccountRef: buildAccountRef(payoutBankRef),
+        bankAccountRef: buildAccountRef(undepositedFundsAccount),
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
         privateNote: `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
