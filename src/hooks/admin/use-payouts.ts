@@ -466,6 +466,87 @@ export function usePayoutUnitCount(payoutId: string | undefined) {
   });
 }
 
+// ─── usePayoutTransactions ──────────────────────────────────
+// Raw channel transactions (eBay/Stripe) for a payout, with matched order data.
+
+export interface PayoutTransaction {
+  id: string;
+  transactionId: string;
+  transactionType: string;
+  transactionStatus: string;
+  transactionDate: string;
+  orderId: string | null;
+  buyerUsername: string | null;
+  memo: string | null;
+  grossAmount: number;
+  totalFees: number;
+  netAmount: number;
+  feeDetails: Array<{ feeType: string; amount: number; currency: string }>;
+  currency: string;
+  matched: boolean;
+  matchedOrderId: string | null;
+  matchMethod: string | null;
+  // Joined from sales_order when matched
+  appGross: number | null;
+}
+
+export function usePayoutTransactions(externalPayoutId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['v2', 'payout-transactions', externalPayoutId ?? ''] as const,
+    enabled: !!externalPayoutId,
+    queryFn: async (): Promise<PayoutTransaction[]> => {
+      const { data, error } = await supabase
+        .from('ebay_payout_transactions')
+        .select('*')
+        .eq('payout_id', externalPayoutId!)
+        .order('transaction_date', { ascending: true });
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as Record<string, unknown>[];
+
+      // Collect matched order IDs to fetch app gross in one query
+      const matchedIds = rows
+        .map((r) => r.matched_order_id as string | null)
+        .filter(Boolean) as string[];
+
+      let orderGrossMap = new Map<string, number>();
+      if (matchedIds.length > 0) {
+        const { data: orders } = await supabase
+          .from('sales_order')
+          .select('id, gross_total')
+          .in('id', matchedIds);
+
+        for (const o of ((orders ?? []) as Record<string, unknown>[])) {
+          orderGrossMap.set(o.id as string, o.gross_total as number);
+        }
+      }
+
+      return rows.map((r) => ({
+        id: r.id as string,
+        transactionId: r.transaction_id as string,
+        transactionType: r.transaction_type as string,
+        transactionStatus: r.transaction_status as string,
+        transactionDate: r.transaction_date as string,
+        orderId: (r.order_id as string) ?? null,
+        buyerUsername: (r.buyer_username as string) ?? null,
+        memo: (r.memo as string) ?? null,
+        grossAmount: r.gross_amount as number,
+        totalFees: r.total_fees as number,
+        netAmount: r.net_amount as number,
+        feeDetails: (r.fee_details as PayoutTransaction['feeDetails']) ?? [],
+        currency: r.currency as string,
+        matched: r.matched as boolean,
+        matchedOrderId: (r.matched_order_id as string) ?? null,
+        matchMethod: (r.match_method as string) ?? null,
+        appGross: r.matched_order_id
+          ? (orderGrossMap.get(r.matched_order_id as string) ?? null)
+          : null,
+      }));
+    },
+  });
+}
+
 // ─── useOrderFees ───────────────────────────────────────────
 // All payout_fee rows for a specific sales order.
 // Useful for the order detail view to show fee breakdown.
