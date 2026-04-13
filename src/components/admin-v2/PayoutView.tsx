@@ -4,15 +4,15 @@ import {
   usePayouts,
   usePayoutSummary,
   useCreatePayout,
-  useReconcilePayout,
-  useTriggerPayoutQBOSync,
   useImportEbayPayouts,
-  usePayoutFees,
-  usePayoutUnitCount,
   type PayoutFeeWithLines,
 } from "@/hooks/admin/use-payouts";
 import {
-  Sheet,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -206,10 +206,7 @@ export function PayoutView() {
   const { data: summary, isLoading: summaryLoading } = usePayoutSummary();
   const [showCreatePayout, setShowCreatePayout] = useState(false);
   const importEbay = useImportEbayPayouts();
-  const [showCreatePayout, setShowCreatePayout] = useState(false);
-  const importEbay = useImportEbayPayouts();
-  const reconcilePayout = useReconcilePayout();
-  const triggerQBOSync = useTriggerPayoutQBOSync();
+  const { data: payouts = [], isLoading: payoutsLoading } = usePayouts();
   const { data: payouts = [], isLoading: payoutsLoading } = usePayouts();
 
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
