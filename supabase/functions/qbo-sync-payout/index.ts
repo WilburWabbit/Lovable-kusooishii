@@ -99,19 +99,23 @@ async function fetchQBOAccount(
   baseUrl: string,
   accessToken: string,
   accountId: string,
+  accountName?: string | null,
 ): Promise<QBOAccount> {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+  };
+
   // First try direct lookup by ID
   const res = await fetchWithTimeout(`${baseUrl}/account/${encodeURIComponent(accountId)}?minorversion=65`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
+    headers,
   });
 
   if (res.ok) {
     const payload = await res.json();
     const account = (payload?.Account ?? {}) as Record<string, unknown>;
+    console.log(`Direct account lookup resolved: input=${accountId}, QBO Id=${account.Id}, Name=${account.Name}, Type=${account.AccountType}`);
     return {
       id: String(account.Id ?? accountId),
       name: typeof account.Name === "string" ? account.Name : null,
@@ -123,16 +127,17 @@ async function fetchQBOAccount(
     };
   }
 
-  // If direct lookup fails, try query by name or AcctNum
+  // Fallback: query by Id, AcctNum, or Name
+  const conditions = [`Id = '${accountId}'`, `AcctNum = '${accountId}'`];
+  if (accountName) {
+    conditions.push(`Name = '${accountName}'`);
+  }
+  const queryStr = `SELECT * FROM Account WHERE ${conditions.join(" OR ")}`;
+  console.log(`Account fallback query: ${queryStr}`);
+
   const queryRes = await fetchWithTimeout(
-    `${baseUrl}/query?query=${encodeURIComponent(`SELECT * FROM Account WHERE Id = '${accountId}' OR AcctNum = '${accountId}'`)}&minorversion=65`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-    },
+    `${baseUrl}/query?query=${encodeURIComponent(queryStr)}&minorversion=65`,
+    { method: "GET", headers },
   );
 
   if (queryRes.ok) {
@@ -140,7 +145,7 @@ async function fetchQBOAccount(
     const accounts = (queryPayload?.QueryResponse?.Account ?? []) as Record<string, unknown>[];
     if (accounts.length > 0) {
       const account = accounts[0];
-      console.log(`Resolved account ${accountId} → QBO Id ${account.Id}`);
+      console.log(`Fallback resolved account ${accountId} → QBO Id=${account.Id}, Name=${account.Name}`);
       return {
         id: String(account.Id),
         name: typeof account.Name === "string" ? account.Name : null,
@@ -153,9 +158,8 @@ async function fetchQBOAccount(
     }
   }
 
-  const errBody = await res.text();
   throw new Error(
-    `Unable to validate QBO account ${accountId} [${res.status}]: ${errBody.substring(0, 500)}`,
+    `Unable to resolve QBO account: id=${accountId}, name=${accountName ?? "none"}. Check qbo_account_mapping.`,
   );
 }
 
@@ -430,7 +434,7 @@ Deno.serve(async (req) => {
       throw new Error(`QBO account mapping not configured for: ${missing}. Add rows to qbo_account_mapping.`);
     }
 
-    const validatedBankAccount = await fetchQBOAccount(baseUrl, accessToken, bankAccount.id);
+    const validatedBankAccount = await fetchQBOAccount(baseUrl, accessToken, bankAccount.id, bankAccount.name);
     assertValidDepositBankAccount(validatedBankAccount);
     const payoutBankRef = {
       id: validatedBankAccount.id,
