@@ -1,41 +1,43 @@
 
 
-# Refactor Payouts: List + Detail Page (replace slide-out)
+# Show Raw Payout Transactions on Payout Detail Page
 
-## Summary
-Extract the `PayoutDetailSheet` slide-out into a standalone `PayoutDetail` component rendered on its own page at `/admin/payouts/:payoutId`, matching the Orders pattern.
+## What this adds
+A new "Transactions" section on the payout detail page showing every raw line item from the source channel (eBay/Stripe), with the matched internal order data alongside. This gives full visibility into what the channel reported vs what the app has recorded.
 
-## Changes
+## Data source
+- **eBay**: `ebay_payout_transactions` table, joined by `payout_id` (the external payout ID string, e.g. `7438552070`)
+- **Stripe**: `landing_raw_stripe_event` filtered by payout-related event types (future — no Stripe payout transactions exist yet)
+- Each transaction row has: type (SALE, SHIPPING_LABEL, TRANSFER, NON_SALE_CHARGE), gross/fees/net, buyer, order ID, and match status
 
-### 1. New file: `src/pages/admin-v2/PayoutDetailPage.tsx`
-Thin page wrapper (identical pattern to `OrderDetailPage`):
-- Reads `payoutId` from URL params
-- Renders `AdminV2Layout > PayoutDetail`
+## Implementation
 
-### 2. New file: `src/components/admin-v2/PayoutDetail.tsx`
-Extract the content from `PayoutDetailSheet` (lines 450-727 of PayoutView.tsx) into a standalone component:
-- Props: `{ payoutId: string }`
-- Fetches payout data by ID (add `usePayout(id)` hook or inline query)
-- Same layout as the sheet interior but rendered as a full page with `BackButton`, `StickyActions`
-- Keeps: totals cards, meta grid, fee breakdown, fee detail by category, linked orders table, reconcile + QBO sync buttons
-- Replaces `Sheet`/`SheetContent` wrapper with standard page layout
+### 1. New hook: `usePayoutTransactions` in `src/hooks/admin/use-payouts.ts`
+- Query `ebay_payout_transactions` where `payout_id = payout.externalPayoutId`
+- Left-join matched order data via `matched_order_id` (or fetch separately)
+- For matched transactions, also fetch the internal order's `gross_total` to show side-by-side
+- Return typed array with transaction + optional matched order gross
 
-### 3. Update `src/components/admin-v2/PayoutView.tsx`
-- Remove `PayoutDetailSheet` component entirely
-- Remove `Sheet`/`SheetContent` imports
-- Change table row `onClick` from `setSelectedPayout(row)` to `navigate(\`/admin/payouts/${row.id}\`)`
-- Remove `selectedPayout` state
-- Keep `CreatePayoutDialog` as-is (it's a modal, not a slide-out)
+### 2. Update `src/components/admin-v2/PayoutDetail.tsx`
+- Add a new `SurfaceCard` section titled "Transactions" between the fee breakdown and linked orders sections
+- Table columns:
+  - **Type** — transaction_type badge (SALE / SHIPPING_LABEL / TRANSFER / NON_SALE_CHARGE)
+  - **Order / Memo** — eBay order ID or memo text
+  - **Buyer** — buyer_username
+  - **Gross** — from channel
+  - **Fees** — from channel
+  - **Net** — from channel
+  - **App Gross** — from matched internal order (or "—" if unmatched)
+  - **Variance** — difference between channel gross and app gross (highlighted if non-zero)
+  - **Status** — matched/unmatched badge
+- Footer row with totals
+- Clickable order ID links to internal order detail when matched
+- Transaction type shown as coloured badges (sale=green, shipping=blue, charge=amber, transfer=zinc)
 
-### 4. Update `src/hooks/admin/use-payouts.ts`
-- Add a `usePayout(payoutId: string)` hook that fetches a single payout row by ID (the list hook returns all payouts; the detail page needs one by ID)
+### 3. No database changes needed
+All data already exists in `ebay_payout_transactions` and `sales_order`.
 
-### 5. Update `src/App.tsx`
-- Add lazy import for `PayoutDetailPage`
-- Add route: `/admin/payouts/:payoutId` (between the payouts list and pricing routes)
-
-### 6. Update `src/pages/admin-v2/PayoutListPage.tsx`
-No changes needed (it just renders `PayoutView`).
-
-## No database or edge function changes required.
+## Files to change
+- `src/hooks/admin/use-payouts.ts` — add `usePayoutTransactions` hook
+- `src/components/admin-v2/PayoutDetail.tsx` — add Transactions section
 
