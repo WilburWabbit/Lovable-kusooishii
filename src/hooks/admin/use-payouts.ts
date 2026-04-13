@@ -128,6 +128,26 @@ export function usePayouts() {
   });
 }
 
+// ─── usePayout (single) ─────────────────────────────────────
+
+export function usePayout(payoutId: string) {
+  return useQuery({
+    queryKey: ['v2', 'payout', payoutId] as const,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payouts' as never)
+        .select('*')
+        .eq('id' as never, payoutId)
+        .single();
+
+      if (error) throw error;
+      return mapPayout(data as Record<string, unknown>);
+    },
+  });
+}
+
+
+
 // ─── usePayoutSummary ───────────────────────────────────────
 
 export interface PayoutSummary {

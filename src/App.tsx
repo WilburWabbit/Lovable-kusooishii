@@ -50,6 +50,7 @@ const ProductDetailAdminPage = lazy(() => import("./pages/admin-v2/ProductDetail
 const OrderListPage = lazy(() => import("./pages/admin-v2/OrderListPage"));
 const OrderDetailPage = lazy(() => import("./pages/admin-v2/OrderDetailPage"));
 const PayoutListPage = lazy(() => import("./pages/admin-v2/PayoutListPage"));
+const PayoutDetailPage = lazy(() => import("./pages/admin-v2/PayoutDetailPage"));
 const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"));
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
@@ -117,6 +118,7 @@ const App = () => (
             <Route path="/admin/customers" element={<RequireAdmin><CustomerListPage /></RequireAdmin>} />
             <Route path="/admin/customers/:customerId" element={<RequireAdmin><CustomerDetailPage /></RequireAdmin>} />
             <Route path="/admin/payouts" element={<RequireAdmin><PayoutListPage /></RequireAdmin>} />
+            <Route path="/admin/payouts/:payoutId" element={<RequireAdmin><PayoutDetailPage /></RequireAdmin>} />
             <Route path="/admin/pricing" element={<RequireAdmin><ChannelFeesPage /></RequireAdmin>} />
             <Route path="/admin/shipping-rates" element={<RequireAdmin><ShippingRatesPage /></RequireAdmin>} />
             <Route path="/admin/data-sync" element={<RequireAdmin><DataSyncPage /></RequireAdmin>} />
