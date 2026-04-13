@@ -59,7 +59,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
   const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
-  const { data: qboReadiness } = usePayoutQBOReadiness(payoutId);
+  const { data: qboReadiness } = usePayoutQBOReadiness(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
   const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
@@ -456,13 +456,18 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       </SurfaceCard>
 
       {/* 6. QBO Readiness + Action buttons */}
-      {qboReadiness && qboReadiness.total > 0 && (
+      {qboReadiness && (qboReadiness.totalOrders > 0 || qboReadiness.totalExpenses > 0) && (
         <SurfaceCard className="mb-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-zinc-600">QBO Readiness:</span>
             <Badge
-              label={`${qboReadiness.synced}/${qboReadiness.total} orders synced`}
+              label={`${qboReadiness.syncedOrders}/${qboReadiness.totalOrders} orders synced`}
               color={qboReadiness.ready ? "#22C55E" : "#F59E0B"}
+              small
+            />
+            <Badge
+              label={`${qboReadiness.createdExpenses}/${qboReadiness.totalExpenses} expenses created`}
+              color={qboReadiness.pendingExpenses.length === 0 ? "#22C55E" : "#3B82F6"}
               small
             />
           </div>
@@ -479,6 +484,16 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                   <ExternalLink className="h-2.5 w-2.5" />
                   {o.qboStatus && <span className="text-zinc-400 ml-1">({o.qboStatus})</span>}
                 </button>
+              ))}
+            </div>
+          )}
+          {qboReadiness.pendingExpenses.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] text-zinc-500">{qboReadiness.pendingExpenses.length} expense(s) will be created during sync:</p>
+              {qboReadiness.pendingExpenses.map((e) => (
+                <div key={e.transactionId} className="text-xs text-zinc-500 ml-2">
+                  {e.type.replace(/_/g, " ")} — £{e.amount.toFixed(2)}
+                </div>
               ))}
             </div>
           )}
