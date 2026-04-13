@@ -4,9 +4,11 @@ import {
   usePayout,
   usePayoutFees,
   usePayoutUnitCount,
+  usePayoutTransactions,
   useReconcilePayout,
   useTriggerPayoutQBOSync,
   type PayoutFeeWithLines,
+  type PayoutTransaction,
 } from "@/hooks/admin/use-payouts";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
@@ -27,12 +29,28 @@ function formatFeeLabel(key: string): string {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+const TX_TYPE_COLORS: Record<string, string> = {
+  SALE: "#22C55E",
+  SHIPPING_LABEL: "#3B82F6",
+  NON_SALE_CHARGE: "#F59E0B",
+  TRANSFER: "#71717A",
+  REFUND: "#EF4444",
+  DISPUTE: "#EF4444",
+  CREDIT: "#8B5CF6",
+};
+
+function TransactionTypeBadge({ type }: { type: string }) {
+  const label = type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const color = TX_TYPE_COLORS[type] ?? "#71717A";
+  return <Badge label={label} color={color} small />;
+}
 
 export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const navigate = useNavigate();
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
   const { data: liveUnitCount, isLoading: unitCountLoading } = usePayoutUnitCount(payoutId);
+  const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
 
@@ -197,7 +215,98 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         </SurfaceCard>
       )}
 
-      {/* Linked Orders */}
+      {/* Channel Transactions */}
+      <SurfaceCard className="mb-5">
+        <SectionHead>Transactions ({transactions.length})</SectionHead>
+        {txLoading ? (
+          <p className="text-zinc-400 text-xs">Loading transactions…</p>
+        ) : transactions.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-zinc-200">
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Type</th>
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Order / Memo</th>
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Buyer</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Gross</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Fees</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Net</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">App Gross</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Variance</th>
+                  <th className="text-center text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((tx) => {
+                  const variance = tx.appGross != null ? tx.grossAmount - tx.appGross : null;
+                  return (
+                    <tr key={tx.id} className="border-b border-zinc-100">
+                      <td className="px-2 py-1.5">
+                        <TransactionTypeBadge type={tx.transactionType} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {tx.matchedOrderId ? (
+                          <button
+                            onClick={() => navigate(`/admin/orders/${tx.matchedOrderId}`)}
+                            className="text-amber-600 hover:underline inline-flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs p-0"
+                          >
+                            {tx.orderId}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </button>
+                        ) : (
+                          <Mono color="dim" className="text-xs">{tx.orderId ?? tx.memo ?? "—"}</Mono>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-zinc-600">{tx.buyerUsername ?? "—"}</td>
+                      <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{tx.grossAmount.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{tx.totalFees.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{tx.netAmount.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right">
+                        {tx.appGross != null ? <Mono className="text-xs">£{tx.appGross.toFixed(2)}</Mono> : <span className="text-zinc-300">—</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        {variance != null ? (
+                          <Mono color={Math.abs(variance) < 0.01 ? "teal" : "red"} className="text-xs">
+                            {variance >= 0 ? "+" : ""}£{variance.toFixed(2)}
+                          </Mono>
+                        ) : <span className="text-zinc-300">—</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        <Badge
+                          label={tx.matched ? "Matched" : "Unmatched"}
+                          color={tx.matched ? "#22C55E" : "#F59E0B"}
+                          small
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                {(() => {
+                  const totGross = transactions.reduce((s, t) => s + t.grossAmount, 0);
+                  const totFees = transactions.reduce((s, t) => s + t.totalFees, 0);
+                  const totNet = transactions.reduce((s, t) => s + t.netAmount, 0);
+                  const matchedCount = transactions.filter((t) => t.matched).length;
+                  return (
+                    <tr className="border-t-2 border-zinc-200 font-semibold">
+                      <td className="px-2 py-1.5 text-xs text-zinc-500">Total</td>
+                      <td className="px-2 py-1.5 text-xs text-zinc-400" colSpan={2}>{matchedCount}/{transactions.length} matched</td>
+                      <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{totGross.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totFees.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{totNet.toFixed(2)}</Mono></td>
+                      <td colSpan={3} />
+                    </tr>
+                  );
+                })()}
+              </tfoot>
+            </table>
+          </div>
+        ) : (
+          <p className="text-zinc-400 text-xs">No transactions found for this payout.</p>
+        )}
+      </SurfaceCard>
+
       <SurfaceCard className="mb-5">
         <SectionHead>Linked Orders ({orderFeeGroups.length})</SectionHead>
         {feesLoading ? (
