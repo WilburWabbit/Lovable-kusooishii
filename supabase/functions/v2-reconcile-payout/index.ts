@@ -1,15 +1,9 @@
-// Redeployed: 2026-04-05
+// Redeployed: 2026-04-13
 // ============================================================
 // V2 Reconcile Payout
-// Matches a payout to orders, transitions stock units to
-// payout_received, and triggers QBO Deposit + Expense sync.
-// Called by Stripe webhook, eBay import, or admin UI.
-//
-// Phase 1 additions:
-//   2b. Late-match payout_fee rows to orders that were imported
-//       after the payout (fees arrived first, order came later).
-//   2c. Populate payout_orders.order_fees / order_net from
-//       payout_fee aggregate once linkage is established.
+// Matches a payout to orders, links stock units via payout_id,
+// transitions eligible units to payout_received, and triggers
+// QBO Deposit + Expense sync.
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
@@ -27,12 +21,11 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // ─── Auth: require service-role key or admin/staff JWT ───
+    // ─── Auth ────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") || "";
 
     if (token !== serviceRoleKey) {
-      // Not service-role — verify as admin/staff user
       const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
         global: { headers: { Authorization: `Bearer ${token}` } },
       });
@@ -58,7 +51,6 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
-
     const { payoutId } = await req.json();
     if (!payoutId) throw new Error("payoutId is required");
 
@@ -84,11 +76,11 @@ Deno.serve(async (req) => {
     const linkedOrderIds = ((payoutOrderLinks ?? []) as Record<string, unknown>[])
       .map((po) => po.sales_order_id as string);
 
-    // If no orders linked yet, try to match by channel + recent date range
     let orderIds = linkedOrderIds;
+
+    // If no orders linked yet, try to match by channel + date range
     if (orderIds.length === 0) {
       const payoutDate = p.payout_date as string;
-      // Look for delivered orders on this channel in the last 14 days
       const lookbackDate = new Date(new Date(payoutDate).getTime() - 14 * 24 * 60 * 60 * 1000)
         .toISOString().slice(0, 10);
 
@@ -101,7 +93,6 @@ Deno.serve(async (req) => {
         .lte("created_at", payoutDate + "T23:59:59Z");
 
       if (matchedOrders) {
-        // Link matched orders
         const links = ((matchedOrders) as Record<string, unknown>[]).map((o) => ({
           payout_id: payoutId,
           sales_order_id: o.id as string,
@@ -118,10 +109,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 2b. Late-match payout_fee rows ────────────────────────
-    // Fees may have arrived before the order record existed.
-    // Now that we have orderIds, link any unmatched payout_fee rows
-    // for this payout by matching external_order_id → local sales_order.id.
+    // ─── 2b. Late-match payout_fee rows ─────────────────────
     if (orderIds.length > 0) {
       const { data: externalIdRows } = await admin
         .from("sales_order")
@@ -131,7 +119,6 @@ Deno.serve(async (req) => {
       type ExternalIdRow = { id: string; origin_reference: string | null };
       for (const row of ((externalIdRows ?? []) as ExternalIdRow[])) {
         if (!row.origin_reference) continue;
-
         await admin
           .from("payout_fee" as never)
           .update({ sales_order_id: row.id, updated_at: new Date().toISOString() } as never)
@@ -142,9 +129,6 @@ Deno.serve(async (req) => {
     }
 
     // ─── 2c. Populate payout_orders fee totals ──────────────
-    // Aggregate payout_fee by order and write order_fees / order_net
-    // back to payout_orders. Safe to run on every reconciliation —
-    // upsert is idempotent.
     if (orderIds.length > 0) {
       const { data: feeRows } = await admin
         .from("payout_fee" as never)
@@ -162,7 +146,6 @@ Deno.serve(async (req) => {
       }
 
       if (orderFeeTotals.size > 0) {
-        // Fetch gross totals for update
         const { data: grossRows } = await admin
           .from("payout_orders")
           .select("sales_order_id, order_gross")
@@ -192,21 +175,42 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 3. Transition stock units to payout_received ───────
-    let unitCount = 0;
+    // ─── 3. Link & transition stock units ───────────────────
+    // Set payout_id on ALL units for linked orders (regardless of status)
+    // Then transition eligible ones (sold/shipped/delivered) to payout_received
+    let totalUnitCount = 0;
+    let unitsTransitioned = 0;
+
     if (orderIds.length > 0) {
-      const { data: units, error: unitErr } = await admin
+      // 3a. Count all units for these orders
+      const { count: allUnitsCount } = await admin
+        .from("stock_unit")
+        .select("id", { count: "exact", head: true })
+        .in("order_id" as never, orderIds);
+
+      totalUnitCount = allUnitsCount ?? 0;
+
+      // 3b. Set payout_id on all units for these orders (idempotent)
+      await admin
+        .from("stock_unit")
+        .update({ payout_id: payoutId } as never)
+        .in("order_id" as never, orderIds)
+        .is("payout_id" as never, null);
+
+      // 3c. Transition eligible units to payout_received
+      // Accept sold, shipped, delivered — these are all post-sale statuses
+      const { data: transitioned, error: transErr } = await admin
         .from("stock_unit")
         .update({
           v2_status: "payout_received",
           payout_id: payoutId,
         } as never)
         .in("order_id" as never, orderIds)
-        .eq("v2_status" as never, "delivered")
+        .in("v2_status" as never, ["sold", "shipped", "delivered"])
         .select("id");
 
-      if (!unitErr && units) {
-        unitCount = (units as unknown[]).length;
+      if (!transErr && transitioned) {
+        unitsTransitioned = (transitioned as unknown[]).length;
       }
     }
 
@@ -215,7 +219,7 @@ Deno.serve(async (req) => {
       .from("payouts")
       .update({
         order_count: orderIds.length,
-        unit_count: unitCount,
+        unit_count: totalUnitCount,
         reconciliation_status: "reconciled",
         updated_at: new Date().toISOString(),
       } as never)
@@ -236,7 +240,7 @@ Deno.serve(async (req) => {
     }
 
     console.log(
-      `v2-reconcile-payout: ${orderIds.length} orders, ${unitCount} units → payout_received`
+      `v2-reconcile-payout: ${orderIds.length} orders, ${totalUnitCount} units linked, ${unitsTransitioned} transitioned`
     );
 
     return new Response(
@@ -244,7 +248,8 @@ Deno.serve(async (req) => {
         success: true,
         payoutId,
         ordersLinked: orderIds.length,
-        unitsTransitioned: unitCount,
+        unitsLinked: totalUnitCount,
+        unitsTransitioned,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

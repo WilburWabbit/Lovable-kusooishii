@@ -682,9 +682,10 @@ function PayoutDetailSheet({
                   reconcilePayout.mutate(payout.id, {
                     onSuccess: (data) => {
                       const d = data as Record<string, unknown>;
-                      const matched = (d.matched_orders as number) ?? 0;
-                      const unmatched = (d.unmatched_transactions as number) ?? 0;
-                      toast.success(`Reconciled: ${matched} orders matched${unmatched > 0 ? `, ${unmatched} unmatched` : ""}`);
+                      const orders = (d.ordersLinked as number) ?? 0;
+                      const units = (d.unitsLinked as number) ?? 0;
+                      const transitioned = (d.unitsTransitioned as number) ?? 0;
+                      toast.success(`Reconciled: ${orders} orders, ${units} units linked, ${transitioned} transitioned`);
                     },
                     onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation failed"),
                   });
@@ -698,7 +699,14 @@ function PayoutDetailSheet({
                 <button
                   onClick={() => {
                     triggerQBOSync.mutate(payout.id, {
-                      onSuccess: () => toast.success("QBO sync triggered"),
+                      onSuccess: (data) => {
+                        const d = data as Record<string, unknown>;
+                        if (d.success) {
+                          toast.success(`QBO synced — Deposit #${d.qbo_deposit_id}${d.qbo_expense_id ? `, Expense #${d.qbo_expense_id}` : ""}`);
+                        } else {
+                          toast.error(`QBO sync failed: ${d.error ?? "Unknown error"}`);
+                        }
+                      },
                       onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
                     });
                   }}

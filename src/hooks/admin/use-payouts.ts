@@ -414,13 +414,34 @@ export function usePayoutUnitCount(payoutId: string | undefined) {
     queryKey: ['v2', 'payout-unit-count', payoutId ?? ''] as const,
     enabled: !!payoutId,
     queryFn: async (): Promise<number> => {
-      const { count, error } = await supabase
+      // First try direct payout_id link
+      const { count: directCount, error: directErr } = await supabase
         .from('stock_unit')
         .select('id', { count: 'exact', head: true })
         .eq('payout_id' as never, payoutId!);
 
-      if (error) throw error;
-      return count ?? 0;
+      if (directErr) throw directErr;
+      if ((directCount ?? 0) > 0) return directCount ?? 0;
+
+      // Fallback: count units via linked orders in payout_orders
+      const { data: poLinks } = await supabase
+        .from('payout_orders' as never)
+        .select('sales_order_id')
+        .eq('payout_id' as never, payoutId!);
+
+      const orderIds = ((poLinks ?? []) as Record<string, unknown>[])
+        .map((r) => r.sales_order_id as string)
+        .filter(Boolean);
+
+      if (orderIds.length === 0) return 0;
+
+      const { count: orderUnitCount, error: ouErr } = await supabase
+        .from('stock_unit')
+        .select('id', { count: 'exact', head: true })
+        .in('order_id' as never, orderIds);
+
+      if (ouErr) throw ouErr;
+      return orderUnitCount ?? 0;
     },
   });
 }
