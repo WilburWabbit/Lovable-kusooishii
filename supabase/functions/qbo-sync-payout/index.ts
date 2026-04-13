@@ -434,7 +434,7 @@ Deno.serve(async (req) => {
       throw new Error(`QBO account mapping not configured for: ${missing}. Add rows to qbo_account_mapping.`);
     }
 
-    const validatedBankAccount = await fetchQBOAccount(baseUrl, accessToken, bankAccount.id);
+    const validatedBankAccount = await fetchQBOAccount(baseUrl, accessToken, bankAccount.id, bankAccount.name);
     assertValidDepositBankAccount(validatedBankAccount);
     const payoutBankRef = {
       id: validatedBankAccount.id,
