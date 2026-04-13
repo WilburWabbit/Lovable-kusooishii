@@ -446,9 +446,10 @@ Deno.serve(async (req) => {
     const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string } }[] = [];
 
     for (const tx of expenseTxs) {
+      const txType = tx.transaction_type;
+
       // Skip if already has a QBO Purchase
       if (tx.qbo_purchase_id) {
-        // Sum up the expense lines to get the total amount for deposit
         const totalAmount = txType === "SALE" ? tx.total_fees : Math.abs(tx.gross_amount);
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
@@ -459,7 +460,6 @@ Deno.serve(async (req) => {
 
       // Determine expense lines based on transaction type
       const expenseLines: ExpenseLineInput[] = [];
-      const txType = tx.transaction_type;
 
       if (txType === "SALE") {
         // SALE: create expense for the fees on this sale
