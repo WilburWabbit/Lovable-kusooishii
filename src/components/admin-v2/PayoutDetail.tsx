@@ -9,7 +9,7 @@ import {
   type PayoutFeeWithLines,
 } from "@/hooks/admin/use-payouts";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
-import { StickyActions } from "./StickyActions";
+import { toast } from "sonner";
 import { toast } from "sonner";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 
