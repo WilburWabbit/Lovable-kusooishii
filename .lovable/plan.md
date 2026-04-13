@@ -1,40 +1,35 @@
 
 
-# Payout Detail Page — Expandable Transaction Rows + Card Reorder
+# Add VAT Calculations to Payout Detail Transactions
 
-## Problems to fix
-1. **No per-line fee detail** — each transaction has `fee_details` JSONB (e.g. FINAL_VALUE_FEE, REGULATORY_OPERATING_FEE) but the UI doesn't show it
-2. **Card order wrong** — user wants: Gross/Fees/Net → Channel Detail → Transactions → Linked Orders → Fee Breakdown. Remove "Fee Detail by Category" entirely
-3. **Unit count wrong** — the channel card shows 9 (from `payout_orders` join) but the payout only has 1 SALE transaction. Fix: derive unit count from transaction SALE rows, not from `payout_orders`
+## Summary
+Add VAT (ex-VAT / VAT amount) columns to the transactions table, expanded fee detail rows, and the summary totals. Default rate: 20% for all eBay channel fees and amounts, consistent with the existing fee breakdown section.
 
-## Changes
+## Changes — `src/components/admin-v2/PayoutDetail.tsx` only
 
-### 1. `src/components/admin-v2/PayoutDetail.tsx`
+### 1. Top-level summary cards
+Add a second row of 3 cards below the existing Gross/Fees/Net:
+- **Ex-VAT Revenue** — `grossAmount / 1.2`
+- **VAT on Fees** — `totalFees / 1.2 * 0.2` (reclaimable input VAT)
+- **Ex-VAT Net** — `netAmount / 1.2`
 
-**Expandable transaction rows:**
-- Add local state `expandedTxIds: Set<string>` toggled on row click
-- When a row is expanded, render a sub-row below it showing the `fee_details` array from that transaction as a mini table:
-  - Fee Type | Amount
-  - e.g. `Final Value Fee | £2.09`, `Regulatory Operating Fee | £0.07`, `Final Value Fee Fixed Per Order | £0.48`
-- Use Collapsible or simple conditional rendering with a chevron indicator on each row
+### 2. Transactions table columns
+Add two columns after "Net":
+- **Ex-VAT** — `grossAmount / 1.2` (net revenue after output VAT)
+- **VAT on Fees** — `totalFees / 1.2 * 0.2` (input VAT reclaimable on fees)
 
-**Reorder sections to:**
-1. Gross / Fees / Net cards (unchanged)
-2. Channel Detail card (meta) — fix unit count
-3. Transactions card (with expandable rows)
-4. Linked Orders card
-5. Fee Breakdown card (from JSONB)
-6. Action buttons
+Update footer totals to include these two new columns.
 
-**Remove:** "Fee Detail by Category" section entirely (lines 203-216)
+### 3. Expanded fee detail sub-rows
+For each individual fee line, show:
+- Fee Type | Gross | Ex-VAT | VAT
+- Where Ex-VAT = `amount / 1.2`, VAT = `amount - exVAT`
 
-**Fix unit count in channel card:**
-- Change from `liveUnitCount` (payout_orders-based) to counting SALE-type transactions from the `transactions` array
-- `const saleCount = transactions.filter(t => t.transactionType === 'SALE').length`
-- Display this as the unit count
+### 4. Linked Orders table
+Add an "Ex-VAT" column next to each fee total showing the net-of-VAT figure.
 
-### 2. `src/hooks/admin/use-payouts.ts`
-- No changes needed — `feeDetails` is already included in `PayoutTransaction` type and mapped from the query
+### 5. Use shared VAT utility
+Import `calculateVAT` from `@/lib/utils/vat` instead of inline `/1.2` arithmetic, for consistency with the rest of the codebase.
 
-## No database or edge function changes.
+## No database, hook, or edge function changes needed.
 
