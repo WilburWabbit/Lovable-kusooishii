@@ -571,7 +571,7 @@ export function usePayoutQBOReadiness(externalPayoutId: string | null | undefine
       // Fetch all non-TRANSFER transactions for this payout
       const { data: txData, error: txErr } = await supabase
         .from('ebay_payout_transactions')
-        .select('id, transaction_type, transaction_id, gross_amount, total_fees, matched_order_id, qbo_purchase_id, memo')
+        .select('id, transaction_type, transaction_id, order_id, gross_amount, total_fees, matched_order_id, qbo_purchase_id, memo')
         .eq('payout_id', externalPayoutId!)
         .neq('transaction_type', 'TRANSFER');
 
@@ -579,18 +579,26 @@ export function usePayoutQBOReadiness(externalPayoutId: string | null | undefine
 
       const txRows = (txData ?? []) as Record<string, unknown>[];
 
-      // Split into sales vs expenses
+      // Split into sales
       const saleTxs = txRows.filter((r) => r.transaction_type === 'SALE');
-      const expenseTxs = txRows.filter((r) => r.transaction_type !== 'SALE');
 
-      // Check SalesReceipt sync for SALE transactions
+      // --- Order matching: try matched_order_id first, fallback to order_id → origin_reference ---
       const matchedOrderIds = saleTxs
         .map((r) => r.matched_order_id as string | null)
         .filter(Boolean) as string[];
 
+      // Collect order_ids for unmatched SALE txns to attempt fallback lookup
+      const unmatchedOrderRefs = saleTxs
+        .filter((r) => !r.matched_order_id && r.order_id)
+        .map((r) => r.order_id as string);
+
       let syncedOrders = 0;
       const unsyncedOrders: { id: string; reference: string | null; qboStatus: string | null }[] = [];
 
+      // Map of order_id (origin_reference) → sales_order for fallback matching
+      const orderByRef = new Map<string, Record<string, unknown>>();
+
+      // Fetch orders by direct ID
       if (matchedOrderIds.length > 0) {
         const { data: orders, error: soErr } = await supabase
           .from('sales_order')
@@ -599,8 +607,7 @@ export function usePayoutQBOReadiness(externalPayoutId: string | null | undefine
 
         if (soErr) throw soErr;
 
-        const soRows = (orders ?? []) as Record<string, unknown>[];
-        for (const so of soRows) {
+        for (const so of ((orders ?? []) as Record<string, unknown>[])) {
           if (so.qbo_sales_receipt_id) {
             syncedOrders++;
           } else {
@@ -613,9 +620,44 @@ export function usePayoutQBOReadiness(externalPayoutId: string | null | undefine
         }
       }
 
-      // Also count unmatched SALE transactions as unsynced
-      const unmatchedSales = saleTxs.filter((r) => !r.matched_order_id);
-      for (const tx of unmatchedSales) {
+      // Fallback: lookup by origin_reference for unmatched SALE txns
+      if (unmatchedOrderRefs.length > 0) {
+        const { data: refOrders } = await supabase
+          .from('sales_order')
+          .select('id, origin_reference, qbo_sales_receipt_id, qbo_sync_status')
+          .in('origin_reference', unmatchedOrderRefs);
+
+        for (const so of ((refOrders ?? []) as Record<string, unknown>[])) {
+          orderByRef.set(so.origin_reference as string, so);
+        }
+
+        for (const tx of saleTxs.filter((r) => !r.matched_order_id && r.order_id)) {
+          const ordRef = tx.order_id as string;
+          const so = orderByRef.get(ordRef);
+          if (so) {
+            if (so.qbo_sales_receipt_id) {
+              syncedOrders++;
+            } else {
+              unsyncedOrders.push({
+                id: so.id as string,
+                reference: (so.origin_reference as string) ?? null,
+                qboStatus: (so.qbo_sync_status as string) ?? null,
+              });
+            }
+          } else {
+            // Truly unmatched — no sales order found at all
+            unsyncedOrders.push({
+              id: tx.id as string,
+              reference: ordRef,
+              qboStatus: 'unmatched',
+            });
+          }
+        }
+      }
+
+      // Also count SALE txns with neither matched_order_id nor order_id
+      const fullyUnmatched = saleTxs.filter((r) => !r.matched_order_id && !r.order_id);
+      for (const tx of fullyUnmatched) {
         unsyncedOrders.push({
           id: tx.id as string,
           reference: (tx.transaction_id as string) ?? null,
@@ -623,18 +665,33 @@ export function usePayoutQBOReadiness(externalPayoutId: string | null | undefine
         });
       }
 
-      // Expense readiness: check qbo_purchase_id on non-SALE transactions
+      // --- Expense readiness: ALL non-TRANSFER txns that need a QBO Purchase ---
+      // SALE txns with total_fees > 0 need an expense for fees
+      // SHIPPING_LABEL, NON_SALE_CHARGE, etc. need expenses for their amounts
+      const expenseTxs = txRows.filter((r) => {
+        const txType = r.transaction_type as string;
+        if (txType === 'SALE') {
+          return (r.total_fees as number) > 0;
+        }
+        return true; // all other non-TRANSFER types
+      });
+
       const createdExpenses = expenseTxs.filter((r) => !!r.qbo_purchase_id).length;
       const pendingExpenses = expenseTxs
         .filter((r) => !r.qbo_purchase_id)
-        .map((r) => ({
-          transactionId: r.transaction_id as string,
-          type: r.transaction_type as string,
-          amount: Math.abs(r.gross_amount as number),
-        }));
+        .map((r) => {
+          const txType = r.transaction_type as string;
+          return {
+            transactionId: r.transaction_id as string,
+            type: txType === 'SALE' ? 'SALE_FEES' : txType,
+            amount: txType === 'SALE'
+              ? Math.abs(r.total_fees as number)
+              : Math.abs(r.gross_amount as number),
+          };
+        });
 
       return {
-        ready: unsyncedOrders.length === 0 && saleTxs.length === (syncedOrders + 0),
+        ready: unsyncedOrders.length === 0 && saleTxs.length === syncedOrders,
         totalOrders: saleTxs.length,
         syncedOrders,
         unsyncedOrders,

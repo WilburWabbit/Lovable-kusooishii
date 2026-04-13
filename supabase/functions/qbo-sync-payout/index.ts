@@ -293,16 +293,75 @@ Deno.serve(async (req) => {
     const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
+    // Build order → QBO SalesReceipt map for deposit lines
+    var orderQboMap = new Map<string, { qboId: string; gross: number }>();
+
     if (saleTxs.length > 0) {
-      const matchedOrderIds = saleTxs
+      // Step A: Resolve orders by matched_order_id
+      const directMatchedIds = saleTxs
         .map((t) => t.matched_order_id)
         .filter(Boolean) as string[];
 
-      // Check for unmatched sales
-      const unmatchedSales = saleTxs.filter((t) => !t.matched_order_id);
-      if (unmatchedSales.length > 0) {
-        const refs = unmatchedSales.map((t) => t.order_id ?? t.transaction_id);
-        const message = `Cannot create deposit: ${unmatchedSales.length} SALE transaction(s) not matched to app orders: ${refs.join(", ")}`;
+      const soById = new Map<string, Record<string, unknown>>();
+      if (directMatchedIds.length > 0) {
+        const { data: salesOrders, error: soErr } = await admin
+          .from("sales_order" as never)
+          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+          .in("id" as never, directMatchedIds);
+
+        if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
+        for (const so of ((salesOrders ?? []) as Record<string, unknown>[])) {
+          soById.set(so.id as string, so);
+        }
+      }
+
+      // Step B: Fallback — resolve unmatched SALE txns by order_id → origin_reference
+      const unmatchedWithOrderId = saleTxs.filter((t) => !t.matched_order_id && t.order_id);
+      const orderRefs = unmatchedWithOrderId.map((t) => t.order_id!);
+
+      const soByRef = new Map<string, Record<string, unknown>>();
+      if (orderRefs.length > 0) {
+        const { data: refOrders } = await admin
+          .from("sales_order" as never)
+          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+          .in("origin_reference" as never, orderRefs);
+
+        for (const so of ((refOrders ?? []) as Record<string, unknown>[])) {
+          soByRef.set(so.origin_reference as string, so);
+        }
+      }
+
+      // Step C: Check all SALE transactions have a synced SalesReceipt
+      const unsyncedRefs: string[] = [];
+      const unmatchedRefs: string[] = [];
+
+      for (const tx of saleTxs) {
+        let so: Record<string, unknown> | undefined;
+        if (tx.matched_order_id) {
+          so = soById.get(tx.matched_order_id);
+        } else if (tx.order_id) {
+          so = soByRef.get(tx.order_id);
+        }
+
+        if (!so) {
+          unmatchedRefs.push(tx.order_id ?? tx.transaction_id);
+          continue;
+        }
+
+        if (!so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "") {
+          unsyncedRefs.push((so.origin_reference as string) ?? (so.id as string));
+          continue;
+        }
+
+        // Good — add to deposit map
+        orderQboMap.set(so.id as string, {
+          qboId: so.qbo_sales_receipt_id as string,
+          gross: tx.gross_amount,
+        });
+      }
+
+      if (unmatchedRefs.length > 0) {
+        const message = `Cannot create deposit: ${unmatchedRefs.length} SALE transaction(s) not matched to app orders: ${unmatchedRefs.join(", ")}`;
         await persistSyncFailure(admin, payoutId, message);
         return new Response(
           JSON.stringify({ success: false, error: message, payoutId }),
@@ -310,40 +369,13 @@ Deno.serve(async (req) => {
         );
       }
 
-      if (matchedOrderIds.length > 0) {
-        const { data: salesOrders, error: soErr } = await admin
-          .from("sales_order" as never)
-          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
-          .in("id" as never, matchedOrderIds);
-
-        if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
-
-        const soRows = (salesOrders ?? []) as Array<Record<string, unknown>>;
-        const unsynced = soRows.filter(
-          (so) => !so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "",
+      if (unsyncedRefs.length > 0) {
+        const message = `Cannot create deposit: ${unsyncedRefs.length} linked order(s) not yet synced to QBO: ${unsyncedRefs.join(", ")}`;
+        await persistSyncFailure(admin, payoutId, message);
+        return new Response(
+          JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: unsyncedRefs }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
-
-        if (unsynced.length > 0) {
-          const refs = unsynced.map(
-            (so) => (so.origin_reference as string) ?? (so.id as string),
-          );
-          const message = `Cannot create deposit: ${unsynced.length} linked order(s) not yet synced to QBO: ${refs.join(", ")}`;
-          await persistSyncFailure(admin, payoutId, message);
-          return new Response(
-            JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: refs }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-
-        // Build order → QBO SalesReceipt map for deposit lines
-        var orderQboMap = new Map<string, { qboId: string; gross: number }>();
-        for (const so of soRows) {
-          const saleTx = saleTxs.find((t) => t.matched_order_id === so.id);
-          orderQboMap.set(so.id as string, {
-            qboId: so.qbo_sales_receipt_id as string,
-            gross: saleTx?.gross_amount ?? 0,
-          });
-        }
       }
     }
 
