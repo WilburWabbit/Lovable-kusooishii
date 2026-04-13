@@ -20,18 +20,122 @@ import {
 
 // ─── Account mapping helper ──────────────────────────────────
 
-async function getAccountRef(
+type AccountMapping = {
+  purpose: string;
+  id: string;
+  name: string | null;
+  accountType: string | null;
+};
+
+type QBOAccount = {
+  id: string;
+  name: string | null;
+  fullyQualifiedName: string | null;
+  accountType: string | null;
+  accountSubType: string | null;
+  active: boolean | null;
+};
+
+async function getAccountMapping(
   admin: ReturnType<typeof createAdminClient>,
   purpose: string,
-  fallback: string,
-): Promise<string> {
+): Promise<AccountMapping | null> {
   const { data } = await admin
     .from("qbo_account_mapping" as never)
-    .select("qbo_account_id")
+    .select("qbo_account_id, qbo_account_name, account_type")
     .eq("purpose" as never, purpose)
     .maybeSingle();
 
-  return (data as Record<string, unknown> | null)?.qbo_account_id as string ?? fallback;
+  const row = data as Record<string, unknown> | null;
+  const accountId = row?.qbo_account_id;
+
+  if (typeof accountId !== "string" || accountId.length === 0) {
+    return null;
+  }
+
+  return {
+    purpose,
+    id: accountId,
+    name: typeof row?.qbo_account_name === "string" ? row.qbo_account_name : null,
+    accountType: typeof row?.account_type === "string" ? row.account_type : null,
+  };
+}
+
+function buildAccountRef(account: { id: string; name: string | null }) {
+  return account.name
+    ? { value: String(account.id), name: account.name }
+    : { value: String(account.id) };
+}
+
+async function fetchQBOAccount(
+  baseUrl: string,
+  accessToken: string,
+  accountId: string,
+): Promise<QBOAccount> {
+  const res = await fetchWithTimeout(`${baseUrl}/account/${encodeURIComponent(accountId)}?minorversion=65`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(
+      `Unable to validate QBO account ${accountId} [${res.status}]: ${errBody.substring(0, 500)}`,
+    );
+  }
+
+  const payload = await res.json();
+  const account = (payload?.Account ?? {}) as Record<string, unknown>;
+
+  return {
+    id: String(account.Id ?? accountId),
+    name: typeof account.Name === "string" ? account.Name : null,
+    fullyQualifiedName:
+      typeof account.FullyQualifiedName === "string" ? account.FullyQualifiedName : null,
+    accountType: typeof account.AccountType === "string" ? account.AccountType : null,
+    accountSubType: typeof account.AccountSubType === "string" ? account.AccountSubType : null,
+    active: typeof account.Active === "boolean" ? account.Active : null,
+  };
+}
+
+function assertValidDepositBankAccount(account: QBOAccount): void {
+  const label = account.fullyQualifiedName ?? account.name ?? account.id;
+
+  if (account.active === false) {
+    throw new Error(
+      `QBO payout_bank mapping points to inactive account "${label}" (${account.id}). Select an active bank account for deposits.`,
+    );
+  }
+
+  if (account.accountType !== "Bank") {
+    throw new Error(
+      `QBO payout_bank mapping points to "${label}" (${account.id}), which is ${account.accountType ?? "not a bank account"}. Deposits require a bank account.`,
+    );
+  }
+
+  if (account.accountSubType === "CashOnHand") {
+    throw new Error(
+      `QBO payout_bank mapping points to "${label}" (${account.id}), which is a Cash on hand account. QuickBooks deposits require a real bank/current account. Create or select one in QuickBooks, then update qbo_account_mapping.payout_bank.`,
+    );
+  }
+}
+
+async function persistSyncFailure(
+  admin: ReturnType<typeof createAdminClient>,
+  payoutId: string,
+  message: string,
+): Promise<void> {
+  await admin
+    .from("payouts" as never)
+    .update({
+      qbo_sync_status: "error",
+      qbo_sync_error: message,
+      sync_attempted_at: new Date().toISOString(),
+    } as never)
+    .eq("id", payoutId);
 }
 
 // ─── Normalize fee breakdown keys ────────────────────────────
@@ -69,12 +173,15 @@ function normalizeFeeBreakdown(raw: Record<string, number>): {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  let admin: ReturnType<typeof createAdminClient> | null = null;
+  let payoutId: string | null = null;
+
   try {
-    const admin = createAdminClient();
+    admin = createAdminClient();
     await authenticateRequest(req, admin);
     const { clientId, clientSecret, realmId } = getQBOConfig();
 
-    const { payoutId } = await req.json();
+    ({ payoutId } = await req.json());
     if (!payoutId) throw new Error("payoutId is required");
 
     // ─── 1. Fetch payout ────────────────────────────────────
@@ -108,30 +215,39 @@ Deno.serve(async (req) => {
     const baseUrl = qboBaseUrl(realmId);
 
     // ─── 2. Resolve account mappings ────────────────────────
-    const bankAccountRef = await getAccountRef(admin, "payout_bank", "");
-    const undepositedFundsRef = await getAccountRef(admin, "undeposited_funds", "");
-    const sellingFeesRef = await getAccountRef(admin, "selling_fees", "");
+    const bankAccount = await getAccountMapping(admin, "payout_bank");
+    const undepositedFundsAccount = await getAccountMapping(admin, "undeposited_funds");
+    const sellingFeesAccount = await getAccountMapping(admin, "selling_fees");
 
-    if (!bankAccountRef || !undepositedFundsRef || !sellingFeesRef) {
+    if (!bankAccount || !undepositedFundsAccount || !sellingFeesAccount) {
       const missing = [
-        !bankAccountRef && "payout_bank",
-        !undepositedFundsRef && "undeposited_funds",
-        !sellingFeesRef && "selling_fees",
+        !bankAccount && "payout_bank",
+        !undepositedFundsAccount && "undeposited_funds",
+        !sellingFeesAccount && "selling_fees",
       ].filter(Boolean).join(", ");
       throw new Error(`QBO account mapping not configured for: ${missing}. Add rows to qbo_account_mapping.`);
     }
 
+    const validatedBankAccount = await fetchQBOAccount(baseUrl, accessToken, bankAccount.id);
+    assertValidDepositBankAccount(validatedBankAccount);
+    const payoutBankRef = {
+      id: validatedBankAccount.id,
+      name: validatedBankAccount.fullyQualifiedName ?? validatedBankAccount.name ?? bankAccount.name,
+    };
+
     // ─── 3. Create QBO Deposit (net amount) ─────────────────
-    console.log(`QBO payout sync: bank=${bankAccountRef}, undeposited=${undepositedFundsRef}, fees=${sellingFeesRef}`);
+    console.log(
+      `QBO payout sync: bank=${payoutBankRef.id}:${payoutBankRef.name ?? ""}, undeposited=${undepositedFundsAccount.id}:${undepositedFundsAccount.name ?? ""}, fees=${sellingFeesAccount.id}:${sellingFeesAccount.name ?? ""}`,
+    );
     const depositPayload = {
       TxnDate: payoutDate,
-      DepositToAccountRef: { value: String(bankAccountRef), name: "Current" },
+      DepositToAccountRef: buildAccountRef(payoutBankRef),
       Line: [
         {
           Amount: netAmount,
           DetailType: "DepositLineDetail",
           DepositLineDetail: {
-            AccountRef: { value: String(undepositedFundsRef), name: "Undeposited Funds" },
+            AccountRef: buildAccountRef(undepositedFundsAccount),
           },
         },
       ],
@@ -172,7 +288,7 @@ Deno.serve(async (req) => {
         expenseLines.push({
           Amount: normalized.selling_fees,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: sellingFeesRef } },
+          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
           Description: `${channel} Selling fees`,
         });
       }
@@ -180,7 +296,7 @@ Deno.serve(async (req) => {
         expenseLines.push({
           Amount: normalized.shipping_fees,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: sellingFeesRef } },
+          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
           Description: `${channel} Shipping fees`,
         });
       }
@@ -188,7 +304,7 @@ Deno.serve(async (req) => {
         expenseLines.push({
           Amount: normalized.processing_fees,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: sellingFeesRef } },
+          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
           Description: `${channel} Payment processing fees`,
         });
       }
@@ -196,7 +312,7 @@ Deno.serve(async (req) => {
         expenseLines.push({
           Amount: normalized.other_fees,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: sellingFeesRef } },
+          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
           Description: `${channel} Other fees`,
         });
       }
@@ -208,7 +324,7 @@ Deno.serve(async (req) => {
         expenseLines.push({
           Amount: remainder,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: sellingFeesRef } },
+          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
           Description: `${channel} Unclassified fees`,
         });
       }
@@ -217,7 +333,7 @@ Deno.serve(async (req) => {
         const expensePayload = {
           TxnDate: payoutDate,
           PaymentType: "Cash",
-          AccountRef: { value: bankAccountRef },
+          AccountRef: buildAccountRef(payoutBankRef),
           Line: expenseLines,
           PrivateNote: `${channel} payout fees`,
         };
@@ -277,6 +393,10 @@ Deno.serve(async (req) => {
       payoutId,
     });
   } catch (err) {
+    if (admin && payoutId) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      await persistSyncFailure(admin, payoutId, message);
+    }
     return errorResponse(err);
   }
 });
