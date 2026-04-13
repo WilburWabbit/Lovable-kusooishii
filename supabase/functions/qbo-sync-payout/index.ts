@@ -122,20 +122,22 @@ Deno.serve(async (req) => {
     }
 
     // ─── 3. Create QBO Deposit (net amount) ─────────────────
+    console.log(`QBO payout sync: bank=${bankAccountRef}, undeposited=${undepositedFundsRef}, fees=${sellingFeesRef}`);
     const depositPayload = {
       TxnDate: payoutDate,
-      DepositToAccountRef: { value: bankAccountRef },
+      DepositToAccountRef: { value: String(bankAccountRef), name: "Current" },
       Line: [
         {
           Amount: netAmount,
           DetailType: "DepositLineDetail",
           DepositLineDetail: {
-            AccountRef: { value: undepositedFundsRef },
+            AccountRef: { value: String(undepositedFundsRef), name: "Undeposited Funds" },
           },
         },
       ],
       PrivateNote: `${channel} payout — ${p.order_count ?? 0} orders, ${p.unit_count ?? 0} units`,
     };
+    console.log("QBO deposit payload:", JSON.stringify(depositPayload));
 
     const depositRes = await fetchWithTimeout(`${baseUrl}/deposit?minorversion=65`, {
       method: "POST",
