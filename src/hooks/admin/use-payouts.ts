@@ -145,19 +145,8 @@ export function usePayout(payoutId: string) {
     },
   });
 }
-  return useQuery({
-    queryKey: payoutKeys.all,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('payouts' as never)
-        .select('*')
-        .order('payout_date', { ascending: false });
 
-      if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map(mapPayout);
-    },
-  });
-}
+
 
 // ─── usePayoutSummary ───────────────────────────────────────
 
