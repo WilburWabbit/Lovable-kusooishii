@@ -201,7 +201,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                 {transactions.map((tx) => {
                   const variance = tx.appGross != null ? tx.grossAmount - tx.appGross : null;
                   const isExpanded = expandedTxIds.has(tx.id);
-                  const feeDetails = tx.feeDetails as Array<{ feeType?: string; amount?: { value?: string; convertedFromValue?: string; currency?: string } }> | null;
+                  const feeDetails = tx.feeDetails as Array<{ feeType?: string; amount?: number | { value?: string }; currency?: string }> | null;
                   const hasFees = feeDetails && feeDetails.length > 0;
 
                   return (
