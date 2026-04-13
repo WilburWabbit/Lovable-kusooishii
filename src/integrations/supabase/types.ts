@@ -845,6 +845,7 @@ export type Database = {
           net_amount: number
           order_id: string | null
           payout_id: string
+          qbo_purchase_id: string | null
           qbo_sales_receipt_id: string | null
           total_fees: number
           transaction_date: string
@@ -866,6 +867,7 @@ export type Database = {
           net_amount: number
           order_id?: string | null
           payout_id: string
+          qbo_purchase_id?: string | null
           qbo_sales_receipt_id?: string | null
           total_fees?: number
           transaction_date: string
@@ -887,6 +889,7 @@ export type Database = {
           net_amount?: number
           order_id?: string | null
           payout_id?: string
+          qbo_purchase_id?: string | null
           qbo_sales_receipt_id?: string | null
           total_fees?: number
           transaction_date?: string
