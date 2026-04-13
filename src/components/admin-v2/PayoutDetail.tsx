@@ -400,6 +400,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totShipping.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totOther.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totTotal.toFixed(2)}</Mono></td>
+                      <td className="px-2 py-1.5 text-right"><Mono color="dim" className="text-xs">£{calculateVAT(totTotal).net.toFixed(2)}</Mono></td>
                     </tr>
                   );
                 })()}
@@ -418,13 +419,14 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
           <div className="grid gap-1.5">
             {Object.entries(payout.feeBreakdown).map(([key, amount]) => {
               const gross = amount ?? 0;
-              const net = Math.round((gross / 1.2) * 100) / 100;
+              const { net, vat } = calculateVAT(gross);
               return (
                 <div key={key} className="flex justify-between py-1 border-b border-zinc-100">
                   <span className="text-zinc-600 text-xs">{formatFeeLabel(key)}</span>
                   <div className="flex gap-3">
                     <Mono color="dim" className="text-xs">£{gross.toFixed(2)}</Mono>
                     <Mono color="red" className="text-xs">£{net.toFixed(2)}</Mono>
+                    <Mono color="dim" className="text-xs">£{vat.toFixed(2)}</Mono>
                   </div>
                 </div>
               );
