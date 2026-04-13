@@ -35,6 +35,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
   const { data: liveUnitCount, isLoading: unitCountLoading } = usePayoutUnitCount(payoutId);
+  const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
 
