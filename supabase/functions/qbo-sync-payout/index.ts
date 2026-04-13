@@ -1,8 +1,8 @@
 // Redeployed: 2026-04-13
 // ============================================================
 // QBO Sync Payout
-// Creates a QBO Deposit (net amount) and Expense (fees) when
-// a payout is recorded from eBay or Stripe.
+// Creates per-transaction QBO Purchases (expenses) and a QBO
+// Deposit when a payout is recorded from eBay.
 // Uses qbo_account_mapping for account refs; persists errors.
 // ============================================================
 
@@ -18,7 +18,7 @@ import {
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
 
-// ─── Account mapping helper ──────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────
 
 type AccountMapping = {
   purpose: string;
@@ -35,6 +35,34 @@ type QBOAccount = {
   accountSubType: string | null;
   active: boolean | null;
 };
+
+type EbayTransaction = {
+  id: string;
+  transaction_id: string;
+  transaction_type: string;
+  order_id: string | null;
+  gross_amount: number;
+  total_fees: number;
+  net_amount: number;
+  fee_details: Array<{ feeType?: string; amount?: number | { value?: string }; currency?: string }>;
+  matched_order_id: string | null;
+  qbo_purchase_id: string | null;
+  memo: string | null;
+  buyer_username: string | null;
+};
+
+// ─── Constants ───────────────────────────────────────────────
+
+const EBAY_VENDOR_REF = { value: "4", name: "eBay" };
+const VAT_RATE = 0.2;
+const VAT_DIVISOR = 1 + VAT_RATE;
+const QBO_TAX_CODE_REF = "6"; // 20% S
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ─── Account mapping helper ──────────────────────────────────
 
 async function getAccountMapping(
   admin: ReturnType<typeof createAdminClient>,
@@ -118,7 +146,7 @@ function assertValidDepositBankAccount(account: QBOAccount): void {
 
   if (account.accountSubType === "CashOnHand") {
     throw new Error(
-      `QBO payout_bank mapping points to "${label}" (${account.id}), which is a Cash on hand account. QuickBooks deposits require a real bank/current account. Create or select one in QuickBooks, then update qbo_account_mapping.payout_bank.`,
+      `QBO payout_bank mapping points to "${label}" (${account.id}), which is a Cash on hand account. QuickBooks deposits require a real bank/current account.`,
     );
   }
 }
@@ -138,37 +166,74 @@ async function persistSyncFailure(
     .eq("id", payoutId);
 }
 
-// ─── Normalize fee breakdown keys ────────────────────────────
+// ─── Create a QBO Purchase (Expense) ────────────────────────
 
-function normalizeFeeBreakdown(raw: Record<string, number>): {
-  selling_fees: number;
-  shipping_fees: number;
-  processing_fees: number;
-  other_fees: number;
-} {
-  const result = { selling_fees: 0, shipping_fees: 0, processing_fees: 0, other_fees: 0 };
+interface ExpenseLineInput {
+  amount: number;
+  accountRef: { value: string; name?: string };
+  description: string;
+  taxCodeRef?: string;
+}
 
-  for (const [key, val] of Object.entries(raw)) {
-    if (!val || val <= 0) continue;
-    const k = key.toLowerCase();
+async function createQBOPurchase(
+  baseUrl: string,
+  accessToken: string,
+  opts: {
+    txnDate: string;
+    bankAccountRef: { value: string; name?: string };
+    vendorRef: { value: string; name?: string };
+    lines: ExpenseLineInput[];
+    privateNote: string;
+  },
+): Promise<{ id: string } | { error: string }> {
+  const qboLines = opts.lines.map((line) => {
+    const exVat = round2(line.amount / VAT_DIVISOR);
+    const vat = round2(line.amount - exVat);
 
-    if (k.includes("selling") || k.includes("fvf") || k.includes("final_value")) {
-      result.selling_fees += val;
-    } else if (k.includes("shipping") || k.includes("postage")) {
-      result.shipping_fees += val;
-    } else if (k.includes("processing") || k.includes("stripe") || k.includes("payment")) {
-      result.processing_fees += val;
-    } else if (k.includes("promoted") || k.includes("advertising")) {
-      result.selling_fees += val; // promoted listings = selling cost
-    } else if (k.includes("international") || k.includes("intl")) {
-      result.other_fees += val;
-    } else {
-      result.other_fees += val;
-    }
+    return {
+      Amount: exVat,
+      DetailType: "AccountBasedExpenseLineDetail",
+      AccountBasedExpenseLineDetail: {
+        AccountRef: line.accountRef,
+        TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+        TaxAmount: vat,
+      },
+      Description: line.description,
+    };
+  });
+
+  const payload = {
+    TxnDate: opts.txnDate,
+    PaymentType: "Cash",
+    AccountRef: opts.bankAccountRef,
+    EntityRef: { ...opts.vendorRef, type: "Vendor" },
+    GlobalTaxCalculation: "TaxExcluded",
+    Line: qboLines,
+    PrivateNote: opts.privateNote,
+  };
+
+  console.log("QBO Purchase payload:", JSON.stringify(payload));
+
+  const res = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (res.ok) {
+    const result = await res.json();
+    return { id: String(result.Purchase.Id) };
   }
 
-  return result;
+  const errBody = await res.text();
+  return { error: `Purchase creation failed [${res.status}]: ${errBody.substring(0, 500)}` };
 }
+
+// ─── Main handler ────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -194,11 +259,9 @@ Deno.serve(async (req) => {
     if (payoutErr || !payout) throw new Error(`Payout not found: ${payoutId}`);
 
     const p = payout as Record<string, unknown>;
-    const netAmount = p.net_amount as number;
-    const totalFees = p.total_fees as number;
     const channel = p.channel as string;
     const payoutDate = (p.payout_date as string)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-    const feeBreakdown = (p.fee_breakdown as Record<string, number>) ?? {};
+    const externalPayoutId = p.external_payout_id as string | null;
 
     // Skip if already synced (idempotent)
     if ((p.qbo_deposit_id as string)) {
@@ -211,60 +274,90 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 1b. Pre-flight: verify linked orders are synced ────
-    const { data: linkedOrders, error: loErr } = await admin
-      .from("payout_orders" as never)
-      .select("sales_order_id, order_gross")
-      .eq("payout_id" as never, payoutId);
+    // ─── 2. Fetch all non-TRANSFER transactions ─────────────
+    if (!externalPayoutId) {
+      throw new Error("Payout has no external_payout_id — cannot look up transactions");
+    }
 
-    if (loErr) throw new Error(`Failed to fetch linked orders: ${loErr.message}`);
+    const { data: txData, error: txErr } = await admin
+      .from("ebay_payout_transactions" as never)
+      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username")
+      .eq("payout_id" as never, externalPayoutId)
+      .neq("transaction_type" as never, "TRANSFER");
 
-    const linkedRows = (linkedOrders ?? []) as Array<Record<string, unknown>>;
+    if (txErr) throw new Error(`Failed to fetch transactions: ${txErr.message}`);
 
-    if (linkedRows.length > 0) {
-      const orderIds = linkedRows.map((r) => r.sales_order_id as string);
-      const { data: salesOrders, error: soErr } = await admin
-        .from("sales_order" as never)
-        .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
-        .in("id" as never, orderIds);
+    const transactions = ((txData ?? []) as unknown as EbayTransaction[]);
 
-      if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
+    // ─── 3. Pre-flight: Verify SALE transactions are synced ─
+    const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
+    const expenseTxs = transactions; // all non-TRANSFER need expenses
 
-      const soRows = (salesOrders ?? []) as Array<Record<string, unknown>>;
-      const unsynced = soRows.filter(
-        (so) => !so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "",
-      );
+    if (saleTxs.length > 0) {
+      const matchedOrderIds = saleTxs
+        .map((t) => t.matched_order_id)
+        .filter(Boolean) as string[];
 
-      if (unsynced.length > 0) {
-        const refs = unsynced.map(
-          (so) => (so.origin_reference as string) ?? (so.id as string),
-        );
-        const message = `Cannot create deposit: ${unsynced.length} linked order(s) not yet synced to QBO: ${refs.join(", ")}`;
+      // Check for unmatched sales
+      const unmatchedSales = saleTxs.filter((t) => !t.matched_order_id);
+      if (unmatchedSales.length > 0) {
+        const refs = unmatchedSales.map((t) => t.order_id ?? t.transaction_id);
+        const message = `Cannot create deposit: ${unmatchedSales.length} SALE transaction(s) not matched to app orders: ${refs.join(", ")}`;
         await persistSyncFailure(admin, payoutId, message);
         return new Response(
-          JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: refs }),
+          JSON.stringify({ success: false, error: message, payoutId }),
           { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
-      // Build order → QBO SalesReceipt map for deposit lines
-      var orderQboMap = new Map<string, { qboId: string; gross: number }>();
-      for (const so of soRows) {
-        const poRow = linkedRows.find((r) => r.sales_order_id === so.id);
-        orderQboMap.set(so.id as string, {
-          qboId: so.qbo_sales_receipt_id as string,
-          gross: (poRow?.order_gross as number) ?? 0,
-        });
+      if (matchedOrderIds.length > 0) {
+        const { data: salesOrders, error: soErr } = await admin
+          .from("sales_order" as never)
+          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+          .in("id" as never, matchedOrderIds);
+
+        if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
+
+        const soRows = (salesOrders ?? []) as Array<Record<string, unknown>>;
+        const unsynced = soRows.filter(
+          (so) => !so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "",
+        );
+
+        if (unsynced.length > 0) {
+          const refs = unsynced.map(
+            (so) => (so.origin_reference as string) ?? (so.id as string),
+          );
+          const message = `Cannot create deposit: ${unsynced.length} linked order(s) not yet synced to QBO: ${refs.join(", ")}`;
+          await persistSyncFailure(admin, payoutId, message);
+          return new Response(
+            JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: refs }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // Build order → QBO SalesReceipt map for deposit lines
+        var orderQboMap = new Map<string, { qboId: string; gross: number }>();
+        for (const so of soRows) {
+          const saleTx = saleTxs.find((t) => t.matched_order_id === so.id);
+          orderQboMap.set(so.id as string, {
+            qboId: so.qbo_sales_receipt_id as string,
+            gross: saleTx?.gross_amount ?? 0,
+          });
+        }
       }
     }
 
+    // ─── 4. Get QBO token + account mappings ────────────────
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
-    // ─── 2. Resolve account mappings ────────────────────────
     const bankAccount = await getAccountMapping(admin, "payout_bank");
     const undepositedFundsAccount = await getAccountMapping(admin, "undeposited_funds");
     const sellingFeesAccount = await getAccountMapping(admin, "selling_fees");
+    const subscriptionFeesAccount = await getAccountMapping(admin, "subscription_fees");
+
+    // subscription_fees falls back to selling_fees
+    const subscriptionAccount = subscriptionFeesAccount ?? sellingFeesAccount;
 
     if (!bankAccount || !undepositedFundsAccount || !sellingFeesAccount) {
       const missing = [
@@ -282,12 +375,133 @@ Deno.serve(async (req) => {
       name: validatedBankAccount.fullyQualifiedName ?? validatedBankAccount.name ?? bankAccount.name,
     };
 
-    // ─── 3. Create QBO Deposit ──────────────────────────────
     console.log(
-      `QBO payout sync: bank=${payoutBankRef.id}:${payoutBankRef.name ?? ""}, undeposited=${undepositedFundsAccount.id}:${undepositedFundsAccount.name ?? ""}, fees=${sellingFeesAccount.id}:${sellingFeesAccount.name ?? ""}`,
+      `QBO payout sync: ${transactions.length} transactions (${saleTxs.length} sales, ${expenseTxs.length} expenses)`,
     );
 
-    // Build deposit lines: one per linked SalesReceipt if available, else single lump sum
+    // ─── 5. Create per-transaction QBO Purchases (expenses) ─
+    let syncError: string | null = null;
+    const expenseResults: { txId: string; qboPurchaseId: string }[] = [];
+
+    for (const tx of expenseTxs) {
+      // Skip if already has a QBO Purchase
+      if (tx.qbo_purchase_id) {
+        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id });
+        continue;
+      }
+
+      // Determine expense lines based on transaction type
+      const expenseLines: ExpenseLineInput[] = [];
+      const txType = tx.transaction_type;
+
+      if (txType === "SALE") {
+        // SALE: create expense for the fees on this sale
+        if (tx.total_fees > 0) {
+          // Use itemized fee_details if available
+          const feeDetails = tx.fee_details ?? [];
+          if (feeDetails.length > 0) {
+            for (const fee of feeDetails) {
+              const amt = typeof fee.amount === "number"
+                ? fee.amount
+                : parseFloat((fee.amount as { value?: string })?.value ?? "0");
+              if (amt > 0) {
+                expenseLines.push({
+                  amount: amt,
+                  accountRef: buildAccountRef(sellingFeesAccount),
+                  description: `${channel} ${(fee.feeType ?? "Fee").replace(/_/g, " ")} — order ${tx.order_id ?? tx.transaction_id}`,
+                });
+              }
+            }
+          }
+          // If no fee details or they don't sum up, add remainder as lump
+          const feeDetailSum = expenseLines.reduce((s, l) => s + l.amount, 0);
+          const remainder = round2(tx.total_fees - feeDetailSum);
+          if (remainder > 0.01) {
+            expenseLines.push({
+              amount: remainder,
+              accountRef: buildAccountRef(sellingFeesAccount),
+              description: `${channel} fees — order ${tx.order_id ?? tx.transaction_id}`,
+            });
+          }
+        }
+      } else if (txType === "SHIPPING_LABEL") {
+        // Shipping label: the gross amount is the shipping cost
+        const shippingAmount = Math.abs(tx.gross_amount);
+        if (shippingAmount > 0) {
+          expenseLines.push({
+            amount: shippingAmount,
+            accountRef: buildAccountRef(sellingFeesAccount),
+            description: `${channel} Shipping label — order ${tx.order_id ?? tx.transaction_id}`,
+          });
+        }
+      } else if (txType === "NON_SALE_CHARGE") {
+        // Non-sale charge: subscription/account-level expense
+        const chargeAmount = Math.abs(tx.gross_amount);
+        if (chargeAmount > 0) {
+          expenseLines.push({
+            amount: chargeAmount,
+            accountRef: buildAccountRef(subscriptionAccount!),
+            description: `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`,
+          });
+        }
+      } else {
+        // REFUND, CREDIT, DISPUTE, etc. — create as expense with selling_fees
+        const amount = Math.abs(tx.gross_amount);
+        if (amount > 0) {
+          expenseLines.push({
+            amount,
+            accountRef: buildAccountRef(sellingFeesAccount),
+            description: `${channel} ${txType.replace(/_/g, " ")} — ${tx.transaction_id}`,
+          });
+        }
+      }
+
+      // Skip if no expense lines (e.g., zero-fee SALE)
+      if (expenseLines.length === 0) {
+        // Mark as "no expense needed" by setting a placeholder
+        await admin
+          .from("ebay_payout_transactions" as never)
+          .update({ qbo_purchase_id: "N/A" } as never)
+          .eq("id" as never, tx.id);
+        continue;
+      }
+
+      const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
+        txnDate: payoutDate,
+        bankAccountRef: buildAccountRef(payoutBankRef),
+        vendorRef: EBAY_VENDOR_REF,
+        lines: expenseLines,
+        privateNote: `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+      });
+
+      if ("error" in purchaseResult) {
+        console.error(`QBO Purchase failed for tx ${tx.transaction_id}:`, purchaseResult.error);
+        syncError = syncError
+          ? `${syncError}; ${purchaseResult.error}`
+          : purchaseResult.error;
+        // Continue to next transaction — don't block all expenses on one failure
+        continue;
+      }
+
+      // Update the transaction with the QBO Purchase ID
+      await admin
+        .from("ebay_payout_transactions" as never)
+        .update({ qbo_purchase_id: purchaseResult.id } as never)
+        .eq("id" as never, tx.id);
+
+      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id });
+    }
+
+    // If any expense creation failed, persist error and return
+    if (syncError) {
+      await persistSyncFailure(admin, payoutId, syncError);
+      return new Response(
+        JSON.stringify({ success: false, error: syncError, payoutId, expensesCreated: expenseResults.length }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ─── 6. Create QBO Deposit ──────────────────────────────
     let depositLines: unknown[];
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
       depositLines = Array.from(orderQboMap.values()).map((entry) => ({
@@ -304,6 +518,8 @@ Deno.serve(async (req) => {
         ],
       }));
     } else {
+      // Fallback: single lump-sum line if no sales
+      const netAmount = p.net_amount as number;
       depositLines = [
         {
           Amount: netAmount,
@@ -319,7 +535,7 @@ Deno.serve(async (req) => {
       TxnDate: payoutDate,
       DepositToAccountRef: buildAccountRef(payoutBankRef),
       Line: depositLines,
-      PrivateNote: `${channel} payout — ${p.order_count ?? 0} orders, ${p.unit_count ?? 0} units`,
+      PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
     };
     console.log("QBO deposit payload:", JSON.stringify(depositPayload));
 
@@ -334,7 +550,6 @@ Deno.serve(async (req) => {
     });
 
     let qboDepositId: string | null = null;
-    let syncError: string | null = null;
 
     if (depositRes.ok) {
       const depositResult = await depositRes.json();
@@ -345,111 +560,22 @@ Deno.serve(async (req) => {
       console.error(`QBO Deposit creation failed:`, syncError);
     }
 
-    // ─── 4. Create QBO Expense (fees) ───────────────────────
-    let qboExpenseId: string | null = null;
-
-    if (totalFees > 0 && qboDepositId) {
-      const normalized = normalizeFeeBreakdown(feeBreakdown);
-      const expenseLines = [];
-
-      if (normalized.selling_fees > 0) {
-        expenseLines.push({
-          Amount: normalized.selling_fees,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
-          Description: `${channel} Selling fees`,
-        });
-      }
-      if (normalized.shipping_fees > 0) {
-        expenseLines.push({
-          Amount: normalized.shipping_fees,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
-          Description: `${channel} Shipping fees`,
-        });
-      }
-      if (normalized.processing_fees > 0) {
-        expenseLines.push({
-          Amount: normalized.processing_fees,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
-          Description: `${channel} Payment processing fees`,
-        });
-      }
-      if (normalized.other_fees > 0) {
-        expenseLines.push({
-          Amount: normalized.other_fees,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
-          Description: `${channel} Other fees`,
-        });
-      }
-
-      // Catch-all remainder
-      const breakdownTotal = normalized.selling_fees + normalized.shipping_fees + normalized.processing_fees + normalized.other_fees;
-      const remainder = Math.round((totalFees - breakdownTotal) * 100) / 100;
-      if (remainder > 0.01) {
-        expenseLines.push({
-          Amount: remainder,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: buildAccountRef(sellingFeesAccount) },
-          Description: `${channel} Unclassified fees`,
-        });
-      }
-
-      if (expenseLines.length > 0) {
-        const expensePayload = {
-          TxnDate: payoutDate,
-          PaymentType: "Cash",
-          AccountRef: buildAccountRef(payoutBankRef),
-          Line: expenseLines,
-          PrivateNote: `${channel} payout fees`,
-        };
-
-        const expenseRes = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify(expensePayload),
-        });
-
-        if (expenseRes.ok) {
-          const expenseResult = await expenseRes.json();
-          qboExpenseId = String(expenseResult.Purchase.Id);
-        } else {
-          const errBody = await expenseRes.text();
-          const expenseError = `Expense creation failed [${expenseRes.status}]: ${errBody.substring(0, 500)}`;
-          console.error(`QBO Expense creation failed:`, expenseError);
-          syncError = syncError ? `${syncError}; ${expenseError}` : expenseError;
-        }
-      }
-    }
-
-    // ─── 5. Update payout record ────────────────────────────
+    // ─── 7. Update payout record ────────────────────────────
     const updateData: Record<string, unknown> = {
       qbo_sync_status: qboDepositId ? "synced" : "error",
       qbo_sync_error: syncError,
       sync_attempted_at: new Date().toISOString(),
     };
     if (qboDepositId) updateData.qbo_deposit_id = qboDepositId;
-    if (qboExpenseId) updateData.qbo_expense_id = qboExpenseId;
 
     await admin
       .from("payouts" as never)
       .update(updateData as never)
       .eq("id", payoutId);
 
-    // If sync failed, return error so the UI knows
     if (!qboDepositId) {
       return new Response(
-        JSON.stringify({
-          success: false,
-          error: syncError,
-          payoutId,
-        }),
+        JSON.stringify({ success: false, error: syncError, payoutId }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -457,7 +583,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       qbo_deposit_id: qboDepositId,
-      qbo_expense_id: qboExpenseId,
+      expenses_created: expenseResults.length,
       payoutId,
     });
   } catch (err) {

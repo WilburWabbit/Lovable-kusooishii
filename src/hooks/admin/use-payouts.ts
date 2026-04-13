@@ -548,58 +548,99 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
 }
 
 // ─── usePayoutQBOReadiness ──────────────────────────────────
-// Checks whether all linked orders have been synced to QBO.
+// Checks whether all linked SALE transactions have synced SalesReceipts,
+// and reports expense creation status for non-TRANSFER transactions.
 
 export interface PayoutQBOReadiness {
   ready: boolean;
-  total: number;
-  synced: number;
+  // Sales
+  totalOrders: number;
+  syncedOrders: number;
   unsyncedOrders: { id: string; reference: string | null; qboStatus: string | null }[];
+  // Expenses
+  totalExpenses: number;
+  createdExpenses: number;
+  pendingExpenses: { transactionId: string; type: string; amount: number }[];
 }
 
-export function usePayoutQBOReadiness(payoutId: string | undefined) {
+export function usePayoutQBOReadiness(externalPayoutId: string | null | undefined) {
   return useQuery({
-    queryKey: ['v2', 'payout-qbo-readiness', payoutId ?? ''] as const,
-    enabled: !!payoutId,
+    queryKey: ['v2', 'payout-qbo-readiness', externalPayoutId ?? ''] as const,
+    enabled: !!externalPayoutId,
     queryFn: async (): Promise<PayoutQBOReadiness> => {
-      // Fetch linked order IDs
-      const { data: poLinks, error: poErr } = await supabase
-        .from('payout_orders' as never)
-        .select('sales_order_id')
-        .eq('payout_id' as never, payoutId!);
+      // Fetch all non-TRANSFER transactions for this payout
+      const { data: txData, error: txErr } = await supabase
+        .from('ebay_payout_transactions')
+        .select('id, transaction_type, transaction_id, gross_amount, total_fees, matched_order_id, qbo_purchase_id, memo')
+        .eq('payout_id', externalPayoutId!)
+        .neq('transaction_type', 'TRANSFER');
 
-      if (poErr) throw poErr;
+      if (txErr) throw txErr;
 
-      const orderIds = ((poLinks ?? []) as Record<string, unknown>[])
-        .map((r) => r.sales_order_id as string)
-        .filter(Boolean);
+      const txRows = (txData ?? []) as Record<string, unknown>[];
 
-      if (orderIds.length === 0) {
-        return { ready: true, total: 0, synced: 0, unsyncedOrders: [] };
+      // Split into sales vs expenses
+      const saleTxs = txRows.filter((r) => r.transaction_type === 'SALE');
+      const expenseTxs = txRows.filter((r) => r.transaction_type !== 'SALE');
+
+      // Check SalesReceipt sync for SALE transactions
+      const matchedOrderIds = saleTxs
+        .map((r) => r.matched_order_id as string | null)
+        .filter(Boolean) as string[];
+
+      let syncedOrders = 0;
+      const unsyncedOrders: { id: string; reference: string | null; qboStatus: string | null }[] = [];
+
+      if (matchedOrderIds.length > 0) {
+        const { data: orders, error: soErr } = await supabase
+          .from('sales_order')
+          .select('id, origin_reference, qbo_sales_receipt_id, qbo_sync_status')
+          .in('id', matchedOrderIds);
+
+        if (soErr) throw soErr;
+
+        const soRows = (orders ?? []) as Record<string, unknown>[];
+        for (const so of soRows) {
+          if (so.qbo_sales_receipt_id) {
+            syncedOrders++;
+          } else {
+            unsyncedOrders.push({
+              id: so.id as string,
+              reference: (so.origin_reference as string) ?? null,
+              qboStatus: (so.qbo_sync_status as string) ?? null,
+            });
+          }
+        }
       }
 
-      const { data: orders, error: soErr } = await supabase
-        .from('sales_order')
-        .select('id, origin_reference, qbo_sales_receipt_id, qbo_sync_status')
-        .in('id', orderIds);
+      // Also count unmatched SALE transactions as unsynced
+      const unmatchedSales = saleTxs.filter((r) => !r.matched_order_id);
+      for (const tx of unmatchedSales) {
+        unsyncedOrders.push({
+          id: tx.id as string,
+          reference: (tx.transaction_id as string) ?? null,
+          qboStatus: 'unmatched',
+        });
+      }
 
-      if (soErr) throw soErr;
-
-      const rows = (orders ?? []) as Record<string, unknown>[];
-      const synced = rows.filter((r) => !!r.qbo_sales_receipt_id).length;
-      const unsynced = rows
-        .filter((r) => !r.qbo_sales_receipt_id)
+      // Expense readiness: check qbo_purchase_id on non-SALE transactions
+      const createdExpenses = expenseTxs.filter((r) => !!r.qbo_purchase_id).length;
+      const pendingExpenses = expenseTxs
+        .filter((r) => !r.qbo_purchase_id)
         .map((r) => ({
-          id: r.id as string,
-          reference: (r.origin_reference as string) ?? null,
-          qboStatus: (r.qbo_sync_status as string) ?? null,
+          transactionId: r.transaction_id as string,
+          type: r.transaction_type as string,
+          amount: Math.abs(r.gross_amount as number),
         }));
 
       return {
-        ready: unsynced.length === 0,
-        total: rows.length,
-        synced,
-        unsyncedOrders: unsynced,
+        ready: unsyncedOrders.length === 0 && saleTxs.length === (syncedOrders + 0),
+        totalOrders: saleTxs.length,
+        syncedOrders,
+        unsyncedOrders,
+        totalExpenses: expenseTxs.length,
+        createdExpenses,
+        pendingExpenses,
       };
     },
   });
