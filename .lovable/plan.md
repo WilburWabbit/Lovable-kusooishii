@@ -1,40 +1,65 @@
 
 
-# Fix QBO Readiness: Match Orders by Reference + Include SALE Fees
+# Fix Payout Expenses Account + Include Expenses in Deposit
 
 ## Problems
 
-1. **Sales not identified** — The SALE transaction has `matched_order_id = null`, but the sales order exists with `origin_reference = '14-14455-15038'` and `qbo_sales_receipt_id = 1794`. The hook only checks `matched_order_id` and never falls back to matching via `order_id` against `sales_order.origin_reference`. Result: shows "0/1 orders synced (unmatched)" when it should be "1/1 synced".
+1. **Expenses created against wrong account** — The `createQBOPurchase` call on line 533 uses `bankAccountRef: buildAccountRef(payoutBankRef)` (the bank/current account). Since eBay deducts fees at source before paying out, these expenses should be posted against **Undeposited Funds** — the same account the SalesReceipt credits. This way the deposit correctly sweeps the net amount.
 
-2. **SALE fees missing from expenses** — The hook splits transactions into "sales" and "expenses" by filtering `transaction_type !== 'SALE'`. But SALE transactions have fees too (`total_fees = £2.64`) that need a QBO Purchase created. These are excluded from the expense count entirely.
+2. **Deposit only includes SalesReceipt lines** — The deposit (lines 567-594) only adds lines for SALE transactions linked to SalesReceipts. The expenses (Purchases) created in step 5 must also appear as deposit lines so the deposit reconciles the full payout (gross sales minus fees = net transfer).
 
-## Changes
+## Changes — `supabase/functions/qbo-sync-payout/index.ts` only
 
-### 1. `src/hooks/admin/use-payouts.ts` — `usePayoutQBOReadiness`
+### 1. Change expense account from bank to Undeposited Funds
 
-**Fix order matching (fallback to `order_id` → `origin_reference`):**
-- For SALE transactions where `matched_order_id` is null but `order_id` is present, query `sales_order` by `origin_reference` matching the transaction's `order_id`
-- This finds the existing order (e393778f) and its `qbo_sales_receipt_id` (1794)
+Line 533: change `bankAccountRef: buildAccountRef(payoutBankRef)` to `bankAccountRef: buildAccountRef(undepositedFundsAccount)`.
 
-**Include SALE fees in expense count:**
-- Change expense tracking to count ALL non-TRANSFER transactions that need a QBO Purchase
-- SALE transactions with `total_fees > 0` need an expense for fees
-- SHIPPING_LABEL transactions need an expense for the label cost
-- NON_SALE_CHARGE transactions need a subscription expense
-- Check `qbo_purchase_id` on each to determine if already created
+This posts the Purchase against Undeposited Funds, matching how eBay deducts fees before the payout reaches the bank.
 
-**Updated return type** — add a combined count:
+### 2. Add expense (Purchase) lines to the deposit
+
+After building the SalesReceipt deposit lines (lines 567-594), add a deposit line for each created Purchase. Each expense line:
+- `Amount`: negative (fee deducted from payout)
+- `DetailType`: `"DepositLineDetail"`
+- `DepositLineDetail.AccountRef`: the selling_fees or subscription_fees account used for that expense
+- `LinkedTxn`: `[{ TxnId: qboPurchaseId, TxnType: "Purchase" }]`
+
+This requires tracking which account was used per expense. Update `expenseResults` to also store the account ref and amount, then build deposit lines from it.
+
+### 3. Updated expenseResults structure
+
 ```typescript
-totalExpenses: number;     // all non-TRANSFER txns needing a QBO Purchase
-createdExpenses: number;   // those with qbo_purchase_id set
-pendingExpenses: [...]     // those without, including SALE fee expenses
+const expenseResults: {
+  txId: string;
+  qboPurchaseId: string;
+  amount: number;           // total gross of the expense
+  accountRef: { value: string; name?: string };
+}[] = [];
 ```
 
-### 2. `src/components/admin-v2/PayoutDetail.tsx` — No structural changes needed
-The UI already displays the readiness data correctly; it just renders wrong numbers because the hook returns wrong data.
+Populate amount and accountRef when recording each successful Purchase creation.
 
-### 3. `supabase/functions/qbo-sync-payout/index.ts` — Same fallback fix
-Apply the same `order_id` → `origin_reference` fallback in the edge function's pre-flight check so it finds the existing SalesReceipt and doesn't block the sync.
+### 4. Deposit line generation
 
-## No database changes needed.
+```typescript
+// SalesReceipt lines (existing)
+for (const entry of orderQboMap.values()) {
+  depositLines.push({ Amount: entry.gross, ... LinkedTxn SalesReceipt });
+}
+
+// Expense (Purchase) lines — negative amounts net off the deposit
+for (const exp of expenseResults) {
+  if (exp.qboPurchaseId === "N/A") continue;
+  depositLines.push({
+    Amount: -exp.amount,
+    DetailType: "DepositLineDetail",
+    DepositLineDetail: { AccountRef: exp.accountRef },
+    LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnType: "Purchase" }],
+  });
+}
+```
+
+The deposit total will equal gross sales minus expenses = net payout transferred to bank.
+
+## No database or UI changes needed.
 
