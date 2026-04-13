@@ -269,7 +269,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       </SurfaceCard>
 
       {/* Action buttons */}
-      <StickyActions>
+      <div className="flex gap-2 pt-3">
         <button
           onClick={() => {
             reconcilePayout.mutate(payoutId, {
@@ -309,7 +309,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
           </button>
         )}
-      </StickyActions>
+      </div>
       <p className="text-[10px] text-zinc-400 mt-2">
         Reconcile matches orders to this payout by date range and transitions stock units to "payout_received".
       </p>
