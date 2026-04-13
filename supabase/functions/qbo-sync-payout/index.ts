@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string } }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string }[] = [];
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
@@ -458,7 +458,7 @@ Deno.serve(async (req) => {
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
           : buildAccountRef(sellingFeesAccount);
-        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef });
+        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef, transactionType: txType });
         continue;
       }
 
@@ -562,7 +562,7 @@ Deno.serve(async (req) => {
 
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
-      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef });
+      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef, transactionType: txType });
     }
 
     // If any expense creation failed, persist error and return
@@ -607,8 +607,13 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
+    // Only include payout-related expenses on the deposit itself.
+    // Account-level charges like NON_SALE_CHARGE are recorded as Purchases
+    // but are not part of the sale payout sweep.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.transactionType === "NON_SALE_CHARGE") continue;
+
       depositLines.push({
         Amount: -exp.amount,
         DetailType: "DepositLineDetail",
