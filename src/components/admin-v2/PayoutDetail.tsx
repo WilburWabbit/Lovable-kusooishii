@@ -7,6 +7,7 @@ import {
   usePayoutTransactions,
   useReconcilePayout,
   useTriggerPayoutQBOSync,
+  usePayoutQBOReadiness,
   type PayoutFeeWithLines,
   type PayoutTransaction,
 } from "@/hooks/admin/use-payouts";
@@ -58,6 +59,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
   const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
+  const { data: qboReadiness } = usePayoutQBOReadiness(payoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
   const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
@@ -453,7 +455,36 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         )}
       </SurfaceCard>
 
-      {/* 6. Action buttons */}
+      {/* 6. QBO Readiness + Action buttons */}
+      {qboReadiness && qboReadiness.total > 0 && (
+        <SurfaceCard className="mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-zinc-600">QBO Readiness:</span>
+            <Badge
+              label={`${qboReadiness.synced}/${qboReadiness.total} orders synced`}
+              color={qboReadiness.ready ? "#22C55E" : "#F59E0B"}
+              small
+            />
+          </div>
+          {qboReadiness.unsyncedOrders.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-[10px] text-zinc-500">Orders not yet in QBO:</p>
+              {qboReadiness.unsyncedOrders.map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => navigate(`/admin/orders/${o.id}`)}
+                  className="text-amber-600 hover:underline text-xs bg-transparent border-none cursor-pointer p-0 flex items-center gap-1"
+                >
+                  {o.reference ?? o.id}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  {o.qboStatus && <span className="text-zinc-400 ml-1">({o.qboStatus})</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </SurfaceCard>
+      )}
+
       <div className="flex gap-2 pt-3">
         <button
           onClick={() => {
@@ -488,8 +519,9 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                 onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
               });
             }}
-            disabled={triggerQBOSync.isPending}
+            disabled={triggerQBOSync.isPending || (qboReadiness != null && !qboReadiness.ready)}
             className="flex-1 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-700 transition-colors"
+            title={qboReadiness && !qboReadiness.ready ? `${qboReadiness.unsyncedOrders.length} order(s) must be synced to QBO first` : undefined}
           >
             {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
           </button>

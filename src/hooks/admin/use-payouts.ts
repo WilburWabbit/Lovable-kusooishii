@@ -547,6 +547,64 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
   });
 }
 
+// ─── usePayoutQBOReadiness ──────────────────────────────────
+// Checks whether all linked orders have been synced to QBO.
+
+export interface PayoutQBOReadiness {
+  ready: boolean;
+  total: number;
+  synced: number;
+  unsyncedOrders: { id: string; reference: string | null; qboStatus: string | null }[];
+}
+
+export function usePayoutQBOReadiness(payoutId: string | undefined) {
+  return useQuery({
+    queryKey: ['v2', 'payout-qbo-readiness', payoutId ?? ''] as const,
+    enabled: !!payoutId,
+    queryFn: async (): Promise<PayoutQBOReadiness> => {
+      // Fetch linked order IDs
+      const { data: poLinks, error: poErr } = await supabase
+        .from('payout_orders' as never)
+        .select('sales_order_id')
+        .eq('payout_id' as never, payoutId!);
+
+      if (poErr) throw poErr;
+
+      const orderIds = ((poLinks ?? []) as Record<string, unknown>[])
+        .map((r) => r.sales_order_id as string)
+        .filter(Boolean);
+
+      if (orderIds.length === 0) {
+        return { ready: true, total: 0, synced: 0, unsyncedOrders: [] };
+      }
+
+      const { data: orders, error: soErr } = await supabase
+        .from('sales_order')
+        .select('id, origin_reference, qbo_sales_receipt_id, qbo_sync_status')
+        .in('id', orderIds);
+
+      if (soErr) throw soErr;
+
+      const rows = (orders ?? []) as Record<string, unknown>[];
+      const synced = rows.filter((r) => !!r.qbo_sales_receipt_id).length;
+      const unsynced = rows
+        .filter((r) => !r.qbo_sales_receipt_id)
+        .map((r) => ({
+          id: r.id as string,
+          reference: (r.origin_reference as string) ?? null,
+          qboStatus: (r.qbo_sync_status as string) ?? null,
+        }));
+
+      return {
+        ready: unsynced.length === 0,
+        total: rows.length,
+        synced,
+        unsyncedOrders: unsynced,
+      };
+    },
+  });
+}
+
 // ─── useOrderFees ───────────────────────────────────────────
 // All payout_fee rows for a specific sales order.
 // Useful for the order detail view to show fee breakdown.
