@@ -436,13 +436,15 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
               <div className="flex gap-3">
                 <span>Gross</span>
                 <span>Ex-VAT</span>
+                <span>VAT</span>
               </div>
             </div>
             <div className="flex justify-between py-1 font-semibold">
               <span className="text-zinc-700 text-xs">Total Fees</span>
               <div className="flex gap-3">
                 <Mono color="dim" className="text-xs">£{payout.totalFees.toFixed(2)}</Mono>
-                <Mono color="red" className="text-xs">£{(Math.round((payout.totalFees / 1.2) * 100) / 100).toFixed(2)}</Mono>
+                <Mono color="red" className="text-xs">£{calculateVAT(payout.totalFees).net.toFixed(2)}</Mono>
+                <Mono color="dim" className="text-xs">£{calculateVAT(payout.totalFees).vat.toFixed(2)}</Mono>
               </div>
             </div>
           </div>
