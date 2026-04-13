@@ -556,7 +556,9 @@ Deno.serve(async (req) => {
         .update({ qbo_purchase_id: purchaseResult.id } as never)
         .eq("id" as never, tx.id);
 
-      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id });
+      const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
+      const primaryAccountRef = expenseLines[0].accountRef;
+      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef });
     }
 
     // If any expense creation failed, persist error and return
