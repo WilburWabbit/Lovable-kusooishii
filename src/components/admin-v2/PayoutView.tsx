@@ -204,7 +204,8 @@ function downloadCsv(rows: PayoutRow[], visibleColumns: string[]) {
 export function PayoutView() {
   const navigate = useNavigate();
   const { data: summary, isLoading: summaryLoading } = usePayoutSummary();
-  const [selectedPayout, setSelectedPayout] = useState<Payout | null>(null);
+  const [showCreatePayout, setShowCreatePayout] = useState(false);
+  const importEbay = useImportEbayPayouts();
   const [showCreatePayout, setShowCreatePayout] = useState(false);
   const importEbay = useImportEbayPayouts();
   const reconcilePayout = useReconcilePayout();

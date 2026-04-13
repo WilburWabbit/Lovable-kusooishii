@@ -50,6 +50,7 @@ const ProductDetailAdminPage = lazy(() => import("./pages/admin-v2/ProductDetail
 const OrderListPage = lazy(() => import("./pages/admin-v2/OrderListPage"));
 const OrderDetailPage = lazy(() => import("./pages/admin-v2/OrderDetailPage"));
 const PayoutListPage = lazy(() => import("./pages/admin-v2/PayoutListPage"));
+const PayoutDetailPage = lazy(() => import("./pages/admin-v2/PayoutDetailPage"));
 const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"));
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
