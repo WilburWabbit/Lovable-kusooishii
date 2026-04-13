@@ -443,7 +443,7 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string } }[] = [];
 
     for (const tx of expenseTxs) {
       // Skip if already has a QBO Purchase
