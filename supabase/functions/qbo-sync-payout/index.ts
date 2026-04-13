@@ -100,6 +100,7 @@ async function fetchQBOAccount(
   accessToken: string,
   accountId: string,
 ): Promise<QBOAccount> {
+  // First try direct lookup by ID
   const res = await fetchWithTimeout(`${baseUrl}/account/${encodeURIComponent(accountId)}?minorversion=65`, {
     method: "GET",
     headers: {
@@ -108,25 +109,54 @@ async function fetchQBOAccount(
     },
   });
 
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(
-      `Unable to validate QBO account ${accountId} [${res.status}]: ${errBody.substring(0, 500)}`,
-    );
+  if (res.ok) {
+    const payload = await res.json();
+    const account = (payload?.Account ?? {}) as Record<string, unknown>;
+    return {
+      id: String(account.Id ?? accountId),
+      name: typeof account.Name === "string" ? account.Name : null,
+      fullyQualifiedName:
+        typeof account.FullyQualifiedName === "string" ? account.FullyQualifiedName : null,
+      accountType: typeof account.AccountType === "string" ? account.AccountType : null,
+      accountSubType: typeof account.AccountSubType === "string" ? account.AccountSubType : null,
+      active: typeof account.Active === "boolean" ? account.Active : null,
+    };
   }
 
-  const payload = await res.json();
-  const account = (payload?.Account ?? {}) as Record<string, unknown>;
+  // If direct lookup fails, try query by name or AcctNum
+  const queryRes = await fetchWithTimeout(
+    `${baseUrl}/query?query=${encodeURIComponent(`SELECT * FROM Account WHERE Id = '${accountId}' OR AcctNum = '${accountId}'`)}&minorversion=65`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    },
+  );
 
-  return {
-    id: String(account.Id ?? accountId),
-    name: typeof account.Name === "string" ? account.Name : null,
-    fullyQualifiedName:
-      typeof account.FullyQualifiedName === "string" ? account.FullyQualifiedName : null,
-    accountType: typeof account.AccountType === "string" ? account.AccountType : null,
-    accountSubType: typeof account.AccountSubType === "string" ? account.AccountSubType : null,
-    active: typeof account.Active === "boolean" ? account.Active : null,
-  };
+  if (queryRes.ok) {
+    const queryPayload = await queryRes.json();
+    const accounts = (queryPayload?.QueryResponse?.Account ?? []) as Record<string, unknown>[];
+    if (accounts.length > 0) {
+      const account = accounts[0];
+      console.log(`Resolved account ${accountId} → QBO Id ${account.Id}`);
+      return {
+        id: String(account.Id),
+        name: typeof account.Name === "string" ? account.Name : null,
+        fullyQualifiedName:
+          typeof account.FullyQualifiedName === "string" ? account.FullyQualifiedName : null,
+        accountType: typeof account.AccountType === "string" ? account.AccountType : null,
+        accountSubType: typeof account.AccountSubType === "string" ? account.AccountSubType : null,
+        active: typeof account.Active === "boolean" ? account.Active : null,
+      };
+    }
+  }
+
+  const errBody = await res.text();
+  throw new Error(
+    `Unable to validate QBO account ${accountId} [${res.status}]: ${errBody.substring(0, 500)}`,
+  );
 }
 
 function assertValidDepositBankAccount(account: QBOAccount): void {
