@@ -29,6 +29,21 @@ function formatFeeLabel(key: string): string {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+const TX_TYPE_COLORS: Record<string, string> = {
+  SALE: "#22C55E",
+  SHIPPING_LABEL: "#3B82F6",
+  NON_SALE_CHARGE: "#F59E0B",
+  TRANSFER: "#71717A",
+  REFUND: "#EF4444",
+  DISPUTE: "#EF4444",
+  CREDIT: "#8B5CF6",
+};
+
+function TransactionTypeBadge({ type }: { type: string }) {
+  const label = type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const color = TX_TYPE_COLORS[type] ?? "#71717A";
+  return <Badge label={label} color={color} small />;
+}
 
 export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const navigate = useNavigate();
