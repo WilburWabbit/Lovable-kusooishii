@@ -581,29 +581,24 @@ Deno.serve(async (req) => {
       // SalesReceipt lines (positive — gross sales)
       depositLines = Array.from(orderQboMap.values()).map((entry) => ({
         Amount: entry.gross,
-        DetailType: "DepositLineDetail",
         DepositLineDetail: {
-          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
         },
         LinkedTxn: [
           {
             TxnId: entry.qboId,
+            TxnLineId: "0",
             TxnType: "SalesReceipt",
           },
         ],
       }));
-    } else if (expenseResults.length === 0) {
-      // Fallback: single lump-sum line if no sales and no expenses
-      const netAmount = p.net_amount as number;
-      depositLines = [
-        {
-          Amount: netAmount,
-          DetailType: "DepositLineDetail",
-          DepositLineDetail: {
-            AccountRef: buildAccountRef(undepositedFundsAccount),
-          },
-        },
-      ];
+    } else {
+      const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
+      await persistSyncFailure(admin, payoutId, msg);
+      return new Response(
+        JSON.stringify({ success: false, error: msg, payoutId, expensesCreated: expenseResults.length }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
@@ -616,11 +611,10 @@ Deno.serve(async (req) => {
 
       depositLines.push({
         Amount: -exp.amount,
-        DetailType: "DepositLineDetail",
         DepositLineDetail: {
-          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
         },
-        LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnType: "Payment" }],
+        LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
       });
     }
 
@@ -636,6 +630,7 @@ Deno.serve(async (req) => {
     const depositPayload = {
       TxnDate: payoutDate,
       DepositToAccountRef: buildAccountRef(payoutBankRef),
+      GlobalTaxCalculation: "TaxExcluded",
       Line: depositLines,
       PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
     };
