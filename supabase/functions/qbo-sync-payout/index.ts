@@ -218,6 +218,7 @@ async function createQBOPurchase(
     vendorRef: { value: string; name?: string };
     lines: ExpenseLineInput[];
     privateNote: string;
+    docNumber?: string;
   },
 ): Promise<{ id: string } | { error: string }> {
   const qboLines = opts.lines.map((line) => {
@@ -236,7 +237,7 @@ async function createQBOPurchase(
     };
   });
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     TxnDate: opts.txnDate,
     PaymentType: "Cash",
     AccountRef: opts.bankAccountRef,
@@ -245,6 +246,9 @@ async function createQBOPurchase(
     Line: qboLines,
     PrivateNote: opts.privateNote,
   };
+  if (opts.docNumber) {
+    payload.DocNumber = opts.docNumber;
+  }
 
   console.log("QBO Purchase payload:", JSON.stringify(payload));
 
@@ -328,7 +332,8 @@ Deno.serve(async (req) => {
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; gross: number }>();
+    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null }>();
+    var orderNumberByTxId = new Map<string, string>();
 
     if (saleTxs.length > 0) {
       // Step A: Resolve orders by matched_order_id
@@ -340,7 +345,7 @@ Deno.serve(async (req) => {
       if (directMatchedIds.length > 0) {
         const { data: salesOrders, error: soErr } = await admin
           .from("sales_order" as never)
-          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+          .select("id, origin_reference, order_number, qbo_sales_receipt_id, qbo_sync_status")
           .in("id" as never, directMatchedIds);
 
         if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
@@ -357,7 +362,7 @@ Deno.serve(async (req) => {
       if (orderRefs.length > 0) {
         const { data: refOrders } = await admin
           .from("sales_order" as never)
-          .select("id, origin_reference, qbo_sales_receipt_id, qbo_sync_status")
+          .select("id, origin_reference, order_number, qbo_sales_receipt_id, qbo_sync_status")
           .in("origin_reference" as never, orderRefs);
 
         for (const so of ((refOrders ?? []) as Record<string, unknown>[])) {
@@ -388,10 +393,16 @@ Deno.serve(async (req) => {
         }
 
         // Good — add to deposit map
+        const orderNum = (so.order_number as string) ?? null;
         orderQboMap.set(so.id as string, {
           qboId: so.qbo_sales_receipt_id as string,
           gross: tx.gross_amount,
+          orderNumber: orderNum,
         });
+        // Map transaction ID → order number for expense DocNumber
+        if (orderNum) {
+          orderNumberByTxId.set(tx.id, orderNum);
+        }
       }
 
       if (unmatchedRefs.length > 0) {
@@ -537,12 +548,16 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // For SALE expenses, use the order number as the QBO DocNumber
+      const expenseDocNumber = txType === "SALE" ? (orderNumberByTxId.get(tx.id) ?? undefined) : undefined;
+
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
         bankAccountRef: buildAccountRef(undepositedFundsAccount),
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
         privateNote: `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+        docNumber: expenseDocNumber,
       });
 
       if ("error" in purchaseResult) {
