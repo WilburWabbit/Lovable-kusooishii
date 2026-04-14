@@ -618,14 +618,17 @@ Deno.serve(async (req) => {
         Amount: -exp.amount,
         DetailType: "DepositLineDetail",
         DepositLineDetail: {
-          AccountRef: exp.accountRef,
+          AccountRef: buildAccountRef(undepositedFundsAccount),
         },
-        LinkedTxn: [
-          {
-            TxnId: exp.qboPurchaseId,
-            TxnType: "Purchase",
-          },
-        ],
+      });
+    }
+
+    // Guard: ensure we have at least one deposit line
+    if (depositLines.length === 0) {
+      const msg = "Cannot create deposit: no deposit lines built — payout has no matched sales and no deductible expenses";
+      await persistSyncFailure(admin, payoutId, msg);
+      return new Response(JSON.stringify({ success: false, error: msg, payoutId }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
