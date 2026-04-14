@@ -18,6 +18,7 @@ export const payoutKeys = {
   all:        ['v2', 'payouts']              as const,
   summary:    ['v2', 'payouts', 'summary']   as const,
   fees:       (payoutId: string)    => ['v2', 'payouts', payoutId, 'fees']    as const,
+  orders:     (payoutId: string)    => ['v2', 'payouts', payoutId, 'orders']  as const,
   orderFees:  (orderId: string)     => ['v2', 'order-fees', orderId]          as const,
   unitProfit: (unitId?: string)     => unitId
     ? ['v2', 'unit-profit', unitId] as const
@@ -302,9 +303,10 @@ export function useReconcilePayout() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, payoutId) => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
       queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
+      queryClient.invalidateQueries({ queryKey: payoutKeys.orders(payoutId) });
     },
   });
 }
