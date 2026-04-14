@@ -224,11 +224,8 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
 
                   // Derive status: synced > matched > unmatched
                   const txStatus = (() => {
-                    if ((tx as unknown as Record<string, unknown>).qboPurchaseId && (tx as unknown as Record<string, unknown>).qboPurchaseId !== "N/A") {
+                    if (tx.qboPurchaseId && tx.qboPurchaseId !== "N/A") {
                       return { label: "Synced", color: "#22C55E" };
-                    }
-                    if ((tx as unknown as Record<string, unknown>).qboPurchaseId === "N/A" && tx.matched) {
-                      return { label: "Matched", color: "#3B82F6" };
                     }
                     if (tx.matched) {
                       return { label: "Matched", color: "#3B82F6" };
