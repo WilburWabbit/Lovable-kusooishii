@@ -627,13 +627,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    const depositPayload = {
+    const depositPayload: Record<string, unknown> = {
       TxnDate: payoutDate,
       DepositToAccountRef: buildAccountRef(payoutBankRef),
       GlobalTaxCalculation: "TaxExcluded",
       Line: depositLines,
       PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
     };
+    // Use external payout ID as the QBO deposit reference number
+    if (externalPayoutId) {
+      depositPayload.DocNumber = externalPayoutId;
+    }
     console.log("QBO deposit payload:", JSON.stringify(depositPayload));
 
     const depositRes = await fetchWithTimeout(`${baseUrl}/deposit?minorversion=65`, {
