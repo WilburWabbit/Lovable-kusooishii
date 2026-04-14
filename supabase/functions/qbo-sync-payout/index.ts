@@ -49,6 +49,7 @@ type EbayTransaction = {
   qbo_purchase_id: string | null;
   memo: string | null;
   buyer_username: string | null;
+  ebay_item_id: string | null;
 };
 
 // ─── Constants ───────────────────────────────────────────────
@@ -325,13 +326,15 @@ Deno.serve(async (req) => {
 
     const { data: txData, error: txErr } = await admin
       .from("ebay_payout_transactions" as never)
-      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username")
-      .eq("payout_id" as never, externalPayoutId)
-      .neq("transaction_type" as never, "TRANSFER");
+      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username, ebay_item_id")
+      .eq("payout_id" as never, externalPayoutId);
 
     if (txErr) throw new Error(`Failed to fetch transactions: ${txErr.message}`);
 
-    const transactions = ((txData ?? []) as unknown as EbayTransaction[]);
+    const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
+    // Separate TRANSFER transactions — they are fund movements, not expenses
+    const transferTxs = allTransactions.filter((t) => t.transaction_type === "TRANSFER");
+    const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
     const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
