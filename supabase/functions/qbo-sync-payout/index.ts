@@ -49,6 +49,7 @@ type EbayTransaction = {
   qbo_purchase_id: string | null;
   memo: string | null;
   buyer_username: string | null;
+  ebay_item_id: string | null;
 };
 
 // ─── Constants ───────────────────────────────────────────────
@@ -325,13 +326,15 @@ Deno.serve(async (req) => {
 
     const { data: txData, error: txErr } = await admin
       .from("ebay_payout_transactions" as never)
-      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username")
-      .eq("payout_id" as never, externalPayoutId)
-      .neq("transaction_type" as never, "TRANSFER");
+      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username, ebay_item_id")
+      .eq("payout_id" as never, externalPayoutId);
 
     if (txErr) throw new Error(`Failed to fetch transactions: ${txErr.message}`);
 
-    const transactions = ((txData ?? []) as unknown as EbayTransaction[]);
+    const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
+    // Separate TRANSFER transactions — they are fund movements, not expenses
+    const transferTxs = allTransactions.filter((t) => t.transaction_type === "TRANSFER");
+    const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
     const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
@@ -569,13 +572,25 @@ Deno.serve(async (req) => {
           });
         }
       } else if (txType === "NON_SALE_CHARGE") {
-        // Non-sale charge: subscription/account-level expense
+        // Split: Insertion fees → selling_fees (COGS); Subscription → subscription_fees
         const chargeAmount = Math.abs(tx.gross_amount);
+        const isInsertionFee = (tx.memo ?? "").toLowerCase().includes("insertion fee");
         if (chargeAmount > 0) {
+          let description = `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`;
+          let accountRef = buildAccountRef(subscriptionAccount!);
+
+          if (isInsertionFee) {
+            accountRef = buildAccountRef(sellingFeesAccount);
+            // Include eBay item ID for traceability
+            if (tx.ebay_item_id) {
+              description = `${channel} Insertion Fee — item ${tx.ebay_item_id} — ${tx.transaction_id}`;
+            }
+          }
+
           expenseLines.push({
             amount: chargeAmount,
-            accountRef: buildAccountRef(subscriptionAccount!),
-            description: `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`,
+            accountRef,
+            description,
           });
         }
       } else {
@@ -669,12 +684,10 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
-    // Only include payout-related expenses on the deposit itself.
-    // Account-level charges like NON_SALE_CHARGE are recorded as Purchases
-    // but are not part of the sale payout sweep.
+    // All expense types (SALE fees, SHIPPING_LABEL, NON_SALE_CHARGE) are
+    // included as deductions so the deposit total matches the net payout.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
-      if (exp.transactionType === "NON_SALE_CHARGE") continue;
 
       depositLines.push({
         Amount: -exp.amount,
@@ -682,6 +695,21 @@ Deno.serve(async (req) => {
           PaymentMethodRef: { value: "1" },
         },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
+      });
+    }
+
+    // TRANSFER lines — fund movements (e.g., subscription paid from undeposited funds)
+    // TRANSFER_FROM = positive (funds coming into payout), TRANSFER_TO = negative
+    for (const tx of transferTxs) {
+      const amt = tx.gross_amount; // already signed: positive for TRANSFER_FROM
+      if (Math.abs(amt) < 0.01) continue;
+      depositLines.push({
+        Amount: amt,
+        DepositLineDetail: {
+          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
+        },
+        Description: `${channel} fund transfer — ${tx.memo ?? tx.transaction_id}`,
       });
     }
 

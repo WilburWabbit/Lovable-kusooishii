@@ -835,6 +835,7 @@ export type Database = {
           buyer_username: string | null
           created_at: string | null
           currency: string
+          ebay_item_id: string | null
           fee_details: Json
           gross_amount: number
           id: string
@@ -857,6 +858,7 @@ export type Database = {
           buyer_username?: string | null
           created_at?: string | null
           currency?: string
+          ebay_item_id?: string | null
           fee_details?: Json
           gross_amount: number
           id?: string
@@ -879,6 +881,7 @@ export type Database = {
           buyer_username?: string | null
           created_at?: string | null
           currency?: string
+          ebay_item_id?: string | null
           fee_details?: Json
           gross_amount?: number
           id?: string

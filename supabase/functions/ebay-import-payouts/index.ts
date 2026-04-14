@@ -17,6 +17,7 @@ import {
   aggregateFees,
   buildLegacyFeeBreakdown,
   extractFeeDetails,
+  type EbayReference,
 } from "../_shared/ebay-finances.ts";
 
 const corsHeaders = {
@@ -185,11 +186,42 @@ Deno.serve(async (req) => {
       let matchedCount   = 0;
       let unmatchedCount = 0;
 
+      // ─── Resolve eBay item IDs for NON_SALE_CHARGE txns ────
+      // Collect unique item_id references from NON_SALE_CHARGE transactions
+      const itemIdRefs = new Map<string, string>(); // transactionId -> ebay item_id
+      for (const txn of transactions) {
+        if (txn.references && txn.references.length > 0) {
+          const itemRef = txn.references.find(
+            (r: EbayReference) => r.referenceType === "ITEM_ID" || r.referenceType === "item_id"
+          );
+          if (itemRef?.referenceId) {
+            itemIdRefs.set(txn.transactionId, itemRef.referenceId);
+          }
+        }
+      }
+
+      // Bulk-resolve item IDs to channel_listing for insertion fee attribution
+      const uniqueItemIds = [...new Set(itemIdRefs.values())];
+      const listingByItemId = new Map<string, { sku_id: string | null; external_listing_id: string }>();
+      if (uniqueItemIds.length > 0) {
+        const { data: listings } = await admin
+          .from("channel_listing")
+          .select("external_listing_id, sku_id")
+          .in("external_listing_id", uniqueItemIds);
+
+        for (const cl of (listings ?? []) as { external_listing_id: string; sku_id: string | null }[]) {
+          listingByItemId.set(cl.external_listing_id, cl);
+        }
+      }
+
       const txnRecords = transactions.map((txn: EbayTransaction) => {
         const matchedOrder = txn.orderId ? orderMap.get(txn.orderId) : undefined;
         const isMatched    = !!matchedOrder;
         if (isMatched) matchedCount++;
         else if (txn.transactionType === "SALE") unmatchedCount++;
+
+        // Resolve ebay_item_id from references
+        const ebayItemId = itemIdRefs.get(txn.transactionId) ?? null;
 
         return {
           payout_id:            externalId,
@@ -209,6 +241,7 @@ Deno.serve(async (req) => {
           matched:              isMatched,
           match_method:         isMatched ? "auto_ebay_order_id" : null,
           qbo_sales_receipt_id: matchedOrder?.qbo_sales_receipt_id ?? null,
+          ebay_item_id:         ebayItemId,
         };
       });
 
