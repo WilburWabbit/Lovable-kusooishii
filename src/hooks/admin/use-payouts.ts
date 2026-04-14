@@ -18,6 +18,7 @@ export const payoutKeys = {
   all:        ['v2', 'payouts']              as const,
   summary:    ['v2', 'payouts', 'summary']   as const,
   fees:       (payoutId: string)    => ['v2', 'payouts', payoutId, 'fees']    as const,
+  orders:     (payoutId: string)    => ['v2', 'payouts', payoutId, 'orders']  as const,
   orderFees:  (orderId: string)     => ['v2', 'order-fees', orderId]          as const,
   unitProfit: (unitId?: string)     => unitId
     ? ['v2', 'unit-profit', unitId] as const
@@ -142,6 +143,50 @@ export function usePayout(payoutId: string) {
 
       if (error) throw error;
       return mapPayout(data as Record<string, unknown>);
+    },
+  });
+}
+
+// ─── usePayoutOrders ────────────────────────────────────────
+// Fallback for linked orders when payout_fee data is absent.
+
+export interface PayoutOrderLink {
+  salesOrderId: string;
+  orderGross: number | null;
+  orderFees: number | null;
+  orderNet: number | null;
+  orderNumber: string | null;
+  originReference: string | null;
+  v2Status: string | null;
+}
+
+export function usePayoutOrders(payoutId: string | undefined) {
+  return useQuery({
+    queryKey: payoutKeys.orders(payoutId ?? ''),
+    enabled: !!payoutId,
+    queryFn: async (): Promise<PayoutOrderLink[]> => {
+      const { data, error } = await supabase
+        .from('payout_orders')
+        .select('sales_order_id, order_gross, order_fees, order_net, sales_order:sales_order!inner(order_number, origin_reference, v2_status)')
+        .eq('payout_id', payoutId!);
+
+      if (error) throw error;
+
+      return ((data ?? []) as unknown as Array<{
+        sales_order_id: string;
+        order_gross: number | null;
+        order_fees: number | null;
+        order_net: number | null;
+        sales_order: { order_number: string | null; origin_reference: string | null; v2_status: string | null };
+      }>).map((r) => ({
+        salesOrderId: r.sales_order_id,
+        orderGross: r.order_gross,
+        orderFees: r.order_fees,
+        orderNet: r.order_net,
+        orderNumber: r.sales_order?.order_number ?? null,
+        originReference: r.sales_order?.origin_reference ?? null,
+        v2Status: r.sales_order?.v2_status ?? null,
+      }));
     },
   });
 }
@@ -302,9 +347,10 @@ export function useReconcilePayout() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, payoutId) => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
       queryClient.invalidateQueries({ queryKey: payoutKeys.summary });
+      queryClient.invalidateQueries({ queryKey: payoutKeys.orders(payoutId) });
     },
   });
 }

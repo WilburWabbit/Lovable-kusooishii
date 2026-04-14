@@ -4,6 +4,7 @@ import { calculateVAT } from "@/lib/utils/vat";
 import {
   usePayout,
   usePayoutFees,
+  usePayoutOrders,
   usePayoutTransactions,
   useReconcilePayout,
   useTriggerPayoutQBOSync,
@@ -58,6 +59,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const navigate = useNavigate();
   const { data: payout, isLoading } = usePayout(payoutId);
   const { data: payoutFees = [], isLoading: feesLoading } = usePayoutFees(payoutId);
+  const { data: payoutOrders = [], isLoading: ordersLoading } = usePayoutOrders(payoutId);
   const { data: transactions = [], isLoading: txLoading } = usePayoutTransactions(payout?.externalPayoutId);
   const { data: qboReadiness } = usePayoutQBOReadiness(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
@@ -342,7 +344,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
 
       {/* 4. Linked Orders */}
       <SurfaceCard className="mb-5">
-        <SectionHead>Linked Orders ({orderFeeGroups.length})</SectionHead>
+        <SectionHead>Linked Orders ({orderFeeGroups.length || payoutOrders.length})</SectionHead>
         {feesLoading ? (
           <p className="text-zinc-400 text-xs">Loading order fees…</p>
         ) : orderFeeGroups.length > 0 ? (
@@ -406,6 +408,53 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                     </tr>
                   );
                 })()}
+              </tfoot>
+            </table>
+          </div>
+        ) : ordersLoading ? (
+          <p className="text-zinc-400 text-xs">Loading linked orders…</p>
+        ) : payoutOrders.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-zinc-200">
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Order</th>
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Reference</th>
+                  <th className="text-left text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Status</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Gross</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Fees</th>
+                  <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payoutOrders.map((po) => (
+                  <tr key={po.salesOrderId} className="border-b border-zinc-100">
+                    <td className="px-2 py-1.5">
+                      <button
+                        onClick={() => navigate(`/admin/orders/${po.salesOrderId}`)}
+                        className="text-amber-600 hover:underline inline-flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs p-0"
+                      >
+                        {po.orderNumber ?? po.salesOrderId.slice(0, 8)}
+                        <ExternalLink className="h-2.5 w-2.5" />
+                      </button>
+                    </td>
+                    <td className="px-2 py-1.5"><Mono color="dim">{po.originReference ?? "—"}</Mono></td>
+                    <td className="px-2 py-1.5">
+                      <Badge label={po.v2Status ?? "—"} color="#71717A" small />
+                    </td>
+                    <td className="px-2 py-1.5 text-right"><Mono>£{(po.orderGross ?? 0).toFixed(2)}</Mono></td>
+                    <td className="px-2 py-1.5 text-right"><Mono color="red">£{(po.orderFees ?? 0).toFixed(2)}</Mono></td>
+                    <td className="px-2 py-1.5 text-right"><Mono color="teal">£{(po.orderNet ?? 0).toFixed(2)}</Mono></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-zinc-200 font-semibold">
+                  <td className="px-2 py-1.5 text-xs text-zinc-500" colSpan={3}>Total ({payoutOrders.length} orders)</td>
+                  <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{payoutOrders.reduce((s, o) => s + (o.orderGross ?? 0), 0).toFixed(2)}</Mono></td>
+                  <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{payoutOrders.reduce((s, o) => s + (o.orderFees ?? 0), 0).toFixed(2)}</Mono></td>
+                  <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{payoutOrders.reduce((s, o) => s + (o.orderNet ?? 0), 0).toFixed(2)}</Mono></td>
+                </tr>
               </tfoot>
             </table>
           </div>
