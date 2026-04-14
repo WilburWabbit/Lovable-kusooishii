@@ -1400,6 +1400,14 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       const totalAmt = deposit.TotalAmt ?? 0;
       const memo = deposit.PrivateNote ?? null;
 
+      // Extract external payout ID from memo (e.g., "ebay payout 7388684270 — ...")
+      // or from DocNumber on the deposit
+      let externalPayoutId: string | null = deposit.DocNumber ? String(deposit.DocNumber) : null;
+      if (!externalPayoutId && memo) {
+        const extMatch = memo.match(/payout\s+(\S+)/i);
+        if (extMatch) externalPayoutId = extMatch[1];
+      }
+
       // Detect channel from memo or deposit lines
       let channel: "ebay" | "stripe" = "stripe";
       const memoLower = (memo ?? "").toLowerCase();
