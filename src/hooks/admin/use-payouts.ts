@@ -587,7 +587,6 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
         matchedOrderId: (r.matched_order_id as string) ?? null,
         matchMethod: (r.match_method as string) ?? null,
         qboPurchaseId: (r.qbo_purchase_id as string) ?? null,
-        matchMethod: (r.match_method as string) ?? null,
         appGross: r.matched_order_id
           ? (orderGrossMap.get(r.matched_order_id as string) ?? null)
           : null,
