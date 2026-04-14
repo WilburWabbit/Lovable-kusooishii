@@ -1,65 +1,45 @@
 
-Fix QBO Deposit Error 6000
 
-What I verified
-- I reviewed `supabase/functions/qbo-sync-payout/index.ts` and confirmed both requested bugs exist in step 6.
-- The expense deposit loop currently:
-  - sets `DepositLineDetail.AccountRef` to `exp.accountRef` (the expense category account)
-  - adds `LinkedTxn: [{ TxnType: "Purchase" }]` on negative fee lines
-- I also confirmed there is currently no guard for `depositLines.length === 0` before the Deposit POST.
-- I reviewed the design docs and QBO specs; this is a surgical edge-function fix and does not require database or auth changes.
+# Sync QBO Deposits to App — Standalone Trigger
 
-Implementation plan
-1. Update the expense deposit loop in `supabase/functions/qbo-sync-payout/index.ts`
-   - Keep the existing skip rules, including skipping `NON_SALE_CHARGE`.
-   - Change negative fee deposit lines so they always clear from Undeposited Funds:
-     - `DepositLineDetail.AccountRef: buildAccountRef(undepositedFundsAccount)`
-   - Remove the `LinkedTxn` property entirely from those expense lines.
+## Summary
+Add a "Sync Deposits" button to the QBO Settings Card that independently pulls all QBO Deposit records into the app via the existing land-and-process pipeline. This lets you import new deposits without running a full rebuild, and inspect how QBO structures deposit payloads to debug the outbound push.
 
-2. Add the empty-lines guard immediately after all deposit lines are built
-   - Insert the exact 422 failure path you provided:
-     - message: `Cannot create deposit: no deposit lines built — payout has no matched sales and no deductible expenses`
-     - call `persistSyncFailure(admin, payoutId, msg)`
-     - return the structured JSON error response with existing CORS/content-type headers.
+## What already exists
+- **`qbo-sync-deposits`** edge function — lands all QBO Deposit records into `landing_raw_qbo_deposit` (97 already committed)
+- **`qbo-process-pending`** — processes pending deposits into `payouts` + `payout_orders` tables, linking deposit lines to sales orders via QBO SalesReceipt IDs
+- Both functions are fully operational; they just lack a standalone UI trigger
 
-3. Make no other changes
-   - No changes to step 5 purchase creation
-   - No changes to sales receipt-linked deposit lines
-   - No changes to mappings, migrations, config, or other edge functions
+## Plan
 
-4. Redeploy only the `qbo-sync-payout` edge function
-   - This is required because edge-function source changes are not enough by themselves.
+### 1. Add "Sync Deposits" button to QboSettingsCard
+**File:** `src/components/admin-v2/QboSettingsCard.tsx`
 
-5. Validate the fix against the affected payout
-   - Retry the sync for payout `78f4224e-6eca-426d-9315-77a8391500d0`
-   - Confirm the deposit payload now has:
-     - positive sales lines linked to `SalesReceipt`
-     - negative fee lines using `undepositedFundsAccount`
-     - no `LinkedTxn` on fee lines
-   - Expected result: QBO returns a Deposit ID instead of error 6000.
+- Add `syncingDeposits` state variable
+- Add a button (alongside existing Sync Purchases, Sync Sales, etc.) that:
+  1. Calls `invokeWithAuth('qbo-sync-deposits')` to land raw deposits
+  2. Calls `invokeWithAuth('qbo-process-pending')` to process any newly landed deposits
+  3. Toasts the result (landed count, processed count, errors)
+- Disable during `anyBusy`
 
-Technical detail
-The corrected expense line shape in step 6 will be:
+### 2. No backend changes needed
+The edge functions already exist and work correctly. No new tables, migrations, or RLS changes required.
 
+## Technical detail
+The button handler will be ~15 lines:
 ```ts
-depositLines.push({
-  Amount: -exp.amount,
-  DetailType: "DepositLineDetail",
-  DepositLineDetail: {
-    AccountRef: buildAccountRef(undepositedFundsAccount),
-  },
-});
+async function handleSyncDeposits() {
+  setSyncingDeposits(true);
+  try {
+    const landRes = await invokeWithAuth('qbo-sync-deposits');
+    toast.info(`Landed ${landRes.landed} deposits (${landRes.skipped} unchanged)`);
+    const procRes = await invokeWithAuth('qbo-process-pending');
+    toast.success(`Processed deposits: ${procRes.deposits?.processed ?? 0} OK, ${procRes.deposits?.errors ?? 0} errors`);
+  } catch (e: any) {
+    toast.error(e.message);
+  } finally {
+    setSyncingDeposits(false);
+  }
+}
 ```
 
-Why this should resolve the error
-- The current payload mixes the clearing logic incorrectly by using the expense category account on deposit deduction lines.
-- It also attempts to link `Purchase` transactions in a way QBO Deposit does not support.
-- This fix makes the deposit consistently clear all payout components through Undeposited Funds while leaving the separately-created Purchases as standalone expense records.
-
-Files involved
-- `supabase/functions/qbo-sync-payout/index.ts`
-
-Deployment impact
-- No migration needed
-- No frontend change needed
-- Single function redeploy only
