@@ -1,45 +1,54 @@
 
 
-# Sync QBO Deposits to App — Standalone Trigger
+# Fix: Payout Detail UI Not Showing Reconciled Orders
 
-## Summary
-Add a "Sync Deposits" button to the QBO Settings Card that independently pulls all QBO Deposit records into the app via the existing land-and-process pipeline. This lets you import new deposits without running a full rebuild, and inspect how QBO structures deposit payloads to debug the outbound push.
+## Root Cause
 
-## What already exists
-- **`qbo-sync-deposits`** edge function — lands all QBO Deposit records into `landing_raw_qbo_deposit` (97 already committed)
-- **`qbo-process-pending`** — processes pending deposits into `payouts` + `payout_orders` tables, linking deposit lines to sales orders via QBO SalesReceipt IDs
-- Both functions are fully operational; they just lack a standalone UI trigger
+The Payout Detail "Linked Orders" section is driven by `payout_fee` records (grouped by order). However, `v2-reconcile-payout` only creates `payout_orders` rows — it never creates `payout_fee` rows. So reconciliation succeeds (toast shows correct counts), but the UI has no fee data to display.
 
-## Plan
+Evidence from the database:
+- Payout `4d5577f5` (Feb 22): `po_count=1`, `fee_count=0` → UI shows "No linked orders"
+- Payout `d4d92d4c` (Mar 5): `po_count=1`, `fee_count=0` → same
+- Payout `78f4224e` (Apr 7): `po_count=9`, `fee_count=3` → UI works (fees came from eBay payout transaction import, not reconciliation)
 
-### 1. Add "Sync Deposits" button to QboSettingsCard
-**File:** `src/components/admin-v2/QboSettingsCard.tsx`
+The payouts that display correctly are ones where `payout_fee` rows were created by `qbo-sync-payout` or eBay payout transaction processing — not by `v2-reconcile-payout`.
 
-- Add `syncingDeposits` state variable
-- Add a button (alongside existing Sync Purchases, Sync Sales, etc.) that:
-  1. Calls `invokeWithAuth('qbo-sync-deposits')` to land raw deposits
-  2. Calls `invokeWithAuth('qbo-process-pending')` to process any newly landed deposits
-  3. Toasts the result (landed count, processed count, errors)
-- Disable during `anyBusy`
+## Fix: Add a `payout_orders`-based fallback to the Linked Orders UI
 
-### 2. No backend changes needed
-The edge functions already exist and work correctly. No new tables, migrations, or RLS changes required.
+When `payout_fee` data is empty but `payout_orders` exist, show the linked orders from `payout_orders` instead. This requires:
 
-## Technical detail
-The button handler will be ~15 lines:
+### 1. Add `usePayoutOrders` hook
+**File:** `src/hooks/admin/use-payouts.ts`
+
+Add a new query hook that fetches `payout_orders` joined with `sales_order` for display (order number, gross, fees, net):
 ```ts
-async function handleSyncDeposits() {
-  setSyncingDeposits(true);
-  try {
-    const landRes = await invokeWithAuth('qbo-sync-deposits');
-    toast.info(`Landed ${landRes.landed} deposits (${landRes.skipped} unchanged)`);
-    const procRes = await invokeWithAuth('qbo-process-pending');
-    toast.success(`Processed deposits: ${procRes.deposits?.processed ?? 0} OK, ${procRes.deposits?.errors ?? 0} errors`);
-  } catch (e: any) {
-    toast.error(e.message);
-  } finally {
-    setSyncingDeposits(false);
-  }
+export function usePayoutOrders(payoutId: string) {
+  return useQuery({
+    queryKey: ['v2', 'payouts', payoutId, 'orders'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('payout_orders')
+        .select('sales_order_id, order_gross, order_fees, order_net, sales_order:sales_order!inner(order_number, origin_reference, v2_status)')
+        .eq('payout_id', payoutId);
+      return data ?? [];
+    },
+    enabled: !!payoutId,
+  });
 }
 ```
+
+### 2. Update PayoutDetail to use fallback
+**File:** `src/components/admin-v2/PayoutDetail.tsx`
+
+- Import and call `usePayoutOrders(payoutId)`
+- When `orderFeeGroups` is empty but `payoutOrders` has data, render a simpler table showing order reference, gross, fees, and net from `payout_orders`
+- Keep the existing fee-group table as primary when fee data exists
+
+### 3. Invalidate payout_orders query after reconciliation
+Ensure the reconcile mutation invalidates the new `payoutOrders` query key so the UI updates immediately after clicking Reconcile.
+
+## Scope
+- `src/hooks/admin/use-payouts.ts` — add hook + query key
+- `src/components/admin-v2/PayoutDetail.tsx` — add fallback table
+- No backend changes, no migrations
 
