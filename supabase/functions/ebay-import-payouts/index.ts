@@ -17,6 +17,7 @@ import {
   aggregateFees,
   buildLegacyFeeBreakdown,
   extractFeeDetails,
+  type EbayReference,
 } from "../_shared/ebay-finances.ts";
 
 const corsHeaders = {

@@ -18,6 +18,12 @@ export interface EbayBuyer {
   username?: string;
 }
 
+export interface EbayReference {
+  referenceId?: string;
+  referenceType?: string;
+  referenceNumber?: string;
+}
+
 export interface EbayTransaction {
   transactionId: string;
   transactionType: string;
@@ -35,6 +41,7 @@ export interface EbayTransaction {
     marketplaceFees?: EbayFee[];
   }>;
   transactionMemo?: string;
+  references?: EbayReference[];
 }
 
 // QBO account-purpose mapping for fee aggregation
