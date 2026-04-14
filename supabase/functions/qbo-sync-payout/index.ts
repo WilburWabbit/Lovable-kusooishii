@@ -551,6 +551,13 @@ Deno.serve(async (req) => {
             });
           }
         }
+        // Attach customer ref to all SALE expense lines
+        const custRef = customerRefByTxId.get(tx.id);
+        if (custRef) {
+          for (const line of expenseLines) {
+            line.customerRef = custRef;
+          }
+        }
       } else if (txType === "SHIPPING_LABEL") {
         // Shipping label: the gross amount is the shipping cost
         const shippingAmount = Math.abs(tx.gross_amount);
