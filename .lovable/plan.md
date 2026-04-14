@@ -1,87 +1,66 @@
 
 
-# Fix: QBO Deposit Processing Not Populating Orders, Fees, or Counts
+# Fix: Insertion Fee Allocation + Subscription/Transfer Handling
 
-## Root Cause
+## Problem Summary
 
-The `processDeposits` function in `qbo-process-pending` has four gaps that explain why imported QBO deposits show no associated data in the UI:
+1. **Insertion fees** (memo = "Insertion Fee", e.g. £0.12) are currently treated as account-level charges posted to the subscription account. They should be allocated as selling fees (COGS) against the specific listing/product they relate to.
 
-1. **`order_count` and `unit_count` never set** — The function creates `payout_orders` links but never updates the payout record's `order_count` or `unit_count` (they remain 0).
+2. **Subscription fees** (memo = date range, e.g. £32.40) appear as NON_SALE_CHARGE deductions paired with an equal TRANSFER_FROM credit. Currently TRANSFERs are excluded entirely, and NON_SALE_CHARGE expenses are excluded from the deposit. The subscription expense + transfer credit need to be included on the deposit so QBO balances correctly.
 
-2. **Fees not calculated** — Both `gross_amount` and `net_amount` are set to `TotalAmt` (identical). The function never separates the positive SalesReceipt lines (gross revenue) from the negative Purchase lines (fees/expenses), so `total_fees` stays 0.
+## Data Available
 
-3. **Purchase lines ignored** — Line 1452 skips any line where `TxnType !== "SalesReceipt"`, so negative expense lines (`TxnType: "Purchase"`) are never processed. No fee breakdown is captured.
+- eBay Finances API provides a `references` array on NON_SALE_CHARGE transactions containing `{ referenceId: "<item_id>", referenceType: "item_id" }` — this is the eBay listing item ID
+- Our `channel_listing` table has `external_listing_id` which matches this item ID
+- From `channel_listing` we can resolve to `sku_id` and then to the product
 
-4. **Stock units not linked** — The function never sets `payout_id` on `stock_unit` records for the linked orders, nor transitions eligible units to `payout_received`.
+## Changes
 
-## Fix — Enhance `processDeposits` in `supabase/functions/qbo-process-pending/index.ts`
+### 1. Capture `references` from eBay API during import
 
-### Change 1: Calculate gross, fees, and net from deposit lines
+**File**: `supabase/functions/_shared/ebay-finances.ts`
+- Add `references?: Array<{ referenceId?: string; referenceType?: string }>` to the `EbayTransaction` interface
 
-Instead of using `TotalAmt` for both gross and net, iterate the deposit lines and sum:
-- **Positive amounts** from `SalesReceipt` lines → `gross_amount`
-- **Negative amounts** from `Purchase` lines → `total_fees` (absolute value)
-- `net_amount` = `gross_amount` - `total_fees` (should equal `TotalAmt`)
+**File**: `supabase/functions/ebay-import-payouts/index.ts`
+- When building transaction records, extract the `references` array and store the item ID reference in a new field or in `fee_details` for NON_SALE_CHARGE transactions
+- For NON_SALE_CHARGE with memo "Insertion Fee", attempt to match `referenceId` against `channel_listing.external_listing_id` to resolve `sku_id` and the associated product. If matched, store the matched listing/SKU info on the transaction record (e.g. in `fee_details` or a new column)
 
-### Change 2: Process Purchase lines (expenses)
+### 2. Split NON_SALE_CHARGE handling: Insertion vs Subscription
 
-Remove the `SalesReceipt`-only filter. For `Purchase`-linked lines, look up the QBO Purchase by ID in `inbound_receipt` (or at minimum record the expense amount). This captures the fee side of the deposit.
+**File**: `supabase/functions/qbo-sync-payout/index.ts`
 
-### Change 3: Update `order_count` and `unit_count` after linking
+Currently all NON_SALE_CHARGE transactions are posted to the `subscription_fees` account and excluded from the deposit. Change to:
 
-After processing all deposit lines, count the `payout_orders` created and query `stock_unit` for linked orders:
+- **Insertion fees** (memo contains "Insertion Fee"): Post to `selling_fees` account instead of `subscription_fees`. If a listing match was found, include the product/SKU reference in the expense description and attach CustomerRef if the listing has been sold. Include on the deposit as a deduction (same as SALE fees).
+- **Subscription fees** (memo is a date range): Keep posting to `subscription_fees` account. Include on the deposit as a deduction (remove the NON_SALE_CHARGE exclusion at line 677, or make it conditional).
 
-```ts
-// After all lines processed:
-const orderCount = salesOrderIds.length;
-const { count: unitCount } = await admin.from("stock_unit")
-  .select("id", { count: "exact", head: true })
-  .in("order_id", salesOrderIds);
+### 3. Include TRANSFER_FROM transactions
 
-await admin.from("payouts").update({
-  order_count: orderCount,
-  unit_count: unitCount ?? 0,
-  gross_amount: grossTotal,
-  total_fees: Math.round(feesTotal * 100) / 100,
-  net_amount: Math.round((grossTotal - feesTotal) * 100) / 100,
-  updated_at: new Date().toISOString(),
-}).eq("id", payoutId);
+**File**: `supabase/functions/qbo-sync-payout/index.ts`
+
+- Remove the `.neq("transaction_type", "TRANSFER")` filter at line 330
+- For TRANSFER_FROM transactions: Add a positive deposit line representing eBay moving funds into the payout. This uses the `undeposited_funds` account as the source.
+- Skip creating QBO Purchase expenses for TRANSFER transactions (they're not expenses — they're fund movements)
+
+This ensures the deposit math works: `Sales - Fees - Insertion Fees - Subscription + Transfer = Net Payout`
+
+### 4. Database: Add reference data column (optional but recommended)
+
+**Migration**: Add `ebay_item_id` column to `ebay_payout_transactions` to store the resolved item reference from the eBay `references` array. This makes it queryable without parsing `fee_details`.
+
+```sql
+ALTER TABLE ebay_payout_transactions ADD COLUMN IF NOT EXISTS ebay_item_id text;
 ```
-
-### Change 4: Link stock units to payout
-
-Set `payout_id` on stock units for linked orders and transition eligible ones:
-
-```ts
-if (salesOrderIds.length > 0) {
-  await admin.from("stock_unit")
-    .update({ payout_id: payoutId })
-    .in("order_id", salesOrderIds)
-    .is("payout_id", null);
-
-  await admin.from("stock_unit")
-    .update({ v2_status: "payout_received", payout_id: payoutId })
-    .in("order_id", salesOrderIds)
-    .in("v2_status", ["sold", "shipped", "delivered"]);
-}
-```
-
-### Change 5: Populate `payout_orders` fee data per order
-
-For each SalesReceipt-linked order, calculate its share of fees from the Purchase lines (or distribute proportionally by gross) and set `order_fees` and `order_net` on the `payout_orders` row.
 
 ## Scope
 
-- **File**: `supabase/functions/qbo-process-pending/index.ts` — rewrite `processDeposits` function (~lines 1385–1481)
-- **Redeploy**: `qbo-process-pending` edge function
-- No database migrations needed
-- No frontend changes needed (the UI fallback table from the previous fix will display the now-populated data)
+- `supabase/functions/_shared/ebay-finances.ts` — add `references` to interface
+- `supabase/functions/ebay-import-payouts/index.ts` — capture references, resolve listing match for insertion fees
+- `supabase/functions/qbo-sync-payout/index.ts` — split insertion vs subscription handling, include TRANSFER_FROM
+- Migration: add `ebay_item_id` column to `ebay_payout_transactions`
+- Redeploy: `ebay-import-payouts`, `qbo-sync-payout`
 
-## Post-fix: Re-process existing deposits
+## Post-fix
 
-After deploying, reset the QBO-imported deposits back to `pending` and re-process them:
-```sql
-UPDATE landing_raw_qbo_deposit SET status = 'pending', processed_at = NULL WHERE status = 'committed';
-```
-Then trigger "Sync Deposits" from the QBO Settings Card to re-run the processor.
+Re-import affected payouts to capture the `references` data from eBay (the current records don't have it). Then re-sync to QBO.
 
