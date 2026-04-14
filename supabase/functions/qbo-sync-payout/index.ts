@@ -684,12 +684,10 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
-    // Only include payout-related expenses on the deposit itself.
-    // Account-level charges like NON_SALE_CHARGE are recorded as Purchases
-    // but are not part of the sale payout sweep.
+    // All expense types (SALE fees, SHIPPING_LABEL, NON_SALE_CHARGE) are
+    // included as deductions so the deposit total matches the net payout.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
-      if (exp.transactionType === "NON_SALE_CHARGE") continue;
 
       depositLines.push({
         Amount: -exp.amount,
@@ -697,6 +695,21 @@ Deno.serve(async (req) => {
           PaymentMethodRef: { value: "1" },
         },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
+      });
+    }
+
+    // TRANSFER lines — fund movements (e.g., subscription paid from undeposited funds)
+    // TRANSFER_FROM = positive (funds coming into payout), TRANSFER_TO = negative
+    for (const tx of transferTxs) {
+      const amt = tx.gross_amount; // already signed: positive for TRANSFER_FROM
+      if (Math.abs(amt) < 0.01) continue;
+      depositLines.push({
+        Amount: amt,
+        DepositLineDetail: {
+          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
+        },
+        Description: `${channel} fund transfer — ${tx.memo ?? tx.transaction_id}`,
       });
     }
 
