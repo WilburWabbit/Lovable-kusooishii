@@ -2468,6 +2468,42 @@ Deno.serve(async (req) => {
       if (resetErr) throw resetErr;
       result = { reset: (resetRows ?? []).length };
 
+    } else if (action === "reset_payout_sync") {
+      const { payoutId: resetPayoutId, scope } = params as { payoutId: string; scope: "expenses" | "deposit" | "all" };
+      if (!resetPayoutId) throw new ValidationError("payoutId is required");
+      if (!["expenses", "deposit", "all"].includes(scope)) throw new ValidationError("scope must be expenses, deposit, or all");
+
+      const results: Record<string, number> = {};
+
+      if (scope === "expenses" || scope === "all") {
+        const { data: updated } = await admin
+          .from("ebay_payout_transactions")
+          .update({ qbo_purchase_id: null } as never)
+          .eq("payout_id" as never, resetPayoutId)
+          .select("id");
+        results.expensesReset = (updated ?? []).length;
+      }
+
+      if (scope === "deposit" || scope === "all") {
+        // Find the payout by external_payout_id
+        const { data: payoutRow } = await admin
+          .from("payouts")
+          .select("id")
+          .eq("external_payout_id", resetPayoutId)
+          .maybeSingle();
+        if (payoutRow) {
+          await admin
+            .from("payouts")
+            .update({ qbo_deposit_id: null, qbo_expense_id: null, qbo_sync_status: "pending", qbo_sync_error: null } as never)
+            .eq("id" as never, payoutRow.id);
+          results.depositReset = 1;
+        } else {
+          results.depositReset = 0;
+        }
+      }
+
+      result = { success: true, ...results };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
