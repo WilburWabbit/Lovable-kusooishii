@@ -572,13 +572,25 @@ Deno.serve(async (req) => {
           });
         }
       } else if (txType === "NON_SALE_CHARGE") {
-        // Non-sale charge: subscription/account-level expense
+        // Split: Insertion fees → selling_fees (COGS); Subscription → subscription_fees
         const chargeAmount = Math.abs(tx.gross_amount);
+        const isInsertionFee = (tx.memo ?? "").toLowerCase().includes("insertion fee");
         if (chargeAmount > 0) {
+          let description = `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`;
+          let accountRef = buildAccountRef(subscriptionAccount!);
+
+          if (isInsertionFee) {
+            accountRef = buildAccountRef(sellingFeesAccount);
+            // Include eBay item ID for traceability
+            if (tx.ebay_item_id) {
+              description = `${channel} Insertion Fee — item ${tx.ebay_item_id} — ${tx.transaction_id}`;
+            }
+          }
+
           expenseLines.push({
             amount: chargeAmount,
-            accountRef: buildAccountRef(subscriptionAccount!),
-            description: `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`,
+            accountRef,
+            description,
           });
         }
       } else {
