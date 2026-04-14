@@ -410,6 +410,12 @@ Deno.serve(async (req) => {
         if (orderNum) {
           orderNumberByTxId.set(tx.id, orderNum);
         }
+        // Collect customer_id for QBO customer ref resolution
+        const customerId = so.customer_id as string | null;
+        if (customerId) {
+          // temporarily store customer_id keyed by tx.id — resolved below
+          customerRefByTxId.set(tx.id, { value: customerId });
+        }
       }
 
       if (unmatchedRefs.length > 0) {
