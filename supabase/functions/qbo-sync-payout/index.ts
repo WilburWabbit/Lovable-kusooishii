@@ -620,7 +620,6 @@ Deno.serve(async (req) => {
         DepositLineDetail: {
           AccountRef: buildAccountRef(undepositedFundsAccount),
         },
-        LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnType: "Payment" }],
       });
     }
 
