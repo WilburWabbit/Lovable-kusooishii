@@ -218,6 +218,7 @@ async function createQBOPurchase(
     vendorRef: { value: string; name?: string };
     lines: ExpenseLineInput[];
     privateNote: string;
+    docNumber?: string;
   },
 ): Promise<{ id: string } | { error: string }> {
   const qboLines = opts.lines.map((line) => {
@@ -236,7 +237,7 @@ async function createQBOPurchase(
     };
   });
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     TxnDate: opts.txnDate,
     PaymentType: "Cash",
     AccountRef: opts.bankAccountRef,
@@ -245,6 +246,9 @@ async function createQBOPurchase(
     Line: qboLines,
     PrivateNote: opts.privateNote,
   };
+  if (opts.docNumber) {
+    payload.DocNumber = opts.docNumber;
+  }
 
   console.log("QBO Purchase payload:", JSON.stringify(payload));
 
