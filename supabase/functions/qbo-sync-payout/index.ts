@@ -340,6 +340,7 @@ Deno.serve(async (req) => {
     // Build order → QBO SalesReceipt map for deposit lines
     var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null }>();
     var orderNumberByTxId = new Map<string, string>();
+    var customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
     if (saleTxs.length > 0) {
       // Step A: Resolve orders by matched_order_id
@@ -351,7 +352,7 @@ Deno.serve(async (req) => {
       if (directMatchedIds.length > 0) {
         const { data: salesOrders, error: soErr } = await admin
           .from("sales_order" as never)
-          .select("id, origin_reference, order_number, qbo_sales_receipt_id, qbo_sync_status")
+          .select("id, origin_reference, order_number, customer_id, qbo_sales_receipt_id, qbo_sync_status")
           .in("id" as never, directMatchedIds);
 
         if (soErr) throw new Error(`Failed to fetch sales orders: ${soErr.message}`);
@@ -368,7 +369,7 @@ Deno.serve(async (req) => {
       if (orderRefs.length > 0) {
         const { data: refOrders } = await admin
           .from("sales_order" as never)
-          .select("id, origin_reference, order_number, qbo_sales_receipt_id, qbo_sync_status")
+          .select("id, origin_reference, order_number, customer_id, qbo_sales_receipt_id, qbo_sync_status")
           .in("origin_reference" as never, orderRefs);
 
         for (const so of ((refOrders ?? []) as Record<string, unknown>[])) {
