@@ -1,66 +1,63 @@
 
 
-# Fix: Insertion Fee Allocation + Subscription/Transfer Handling
+# Fix: Deposit Construction + Reset Buttons
 
-## Problem Summary
+## Root Cause (£188.67 vs £222.06)
 
-1. **Insertion fees** (memo = "Insertion Fee", e.g. £0.12) are currently treated as account-level charges posted to the subscription account. They should be allocated as selling fees (COGS) against the specific listing/product they relate to.
+The subscription fee NON_SALE_CHARGE (-£32.40) is included as a Purchase deduction on the deposit, but the offsetting TRANSFER_FROM (+£32.40) deposit line was not deployed when the sync ran. Result: 300.89 - 112.22 = 188.67 instead of 222.06.
 
-2. **Subscription fees** (memo = date range, e.g. £32.40) appear as NON_SALE_CHARGE deductions paired with an equal TRANSFER_FROM credit. Currently TRANSFERs are excluded entirely, and NON_SALE_CHARGE expenses are excluded from the deposit. The subscription expense + transfer credit need to be included on the deposit so QBO balances correctly.
-
-## Data Available
-
-- eBay Finances API provides a `references` array on NON_SALE_CHARGE transactions containing `{ referenceId: "<item_id>", referenceType: "item_id" }` — this is the eBay listing item ID
-- Our `channel_listing` table has `external_listing_id` which matches this item ID
-- From `channel_listing` we can resolve to `sku_id` and then to the product
+Since the Purchase alone is sufficient for the subscription (it already records DR Subscription Fees / CR Undeposited Funds), neither the subscription Purchase nor the TRANSFER should appear on the QBO Deposit at all — they net to zero and are independent of the bank payout.
 
 ## Changes
 
-### 1. Capture `references` from eBay API during import
+### 1. Fix deposit line construction — `qbo-sync-payout/index.ts`
 
-**File**: `supabase/functions/_shared/ebay-finances.ts`
-- Add `references?: Array<{ referenceId?: string; referenceType?: string }>` to the `EbayTransaction` interface
+**Exclude NON_SALE_CHARGE and TRANSFER from the deposit entirely:**
 
-**File**: `supabase/functions/ebay-import-payouts/index.ts`
-- When building transaction records, extract the `references` array and store the item ID reference in a new field or in `fee_details` for NON_SALE_CHARGE transactions
-- For NON_SALE_CHARGE with memo "Insertion Fee", attempt to match `referenceId` against `channel_listing.external_listing_id` to resolve `sku_id` and the associated product. If matched, store the matched listing/SKU info on the transaction record (e.g. in `fee_details` or a new column)
+- Remove the TRANSFER deposit lines block (lines 701-714)
+- When building expense deposit lines (lines 686-699), skip expenses where the source transaction was `NON_SALE_CHARGE` — they are standalone Purchases paid from undeposited funds, not deductions from the payout
 
-### 2. Split NON_SALE_CHARGE handling: Insertion vs Subscription
+This means the deposit only contains: SalesReceipt lines (positive) + SALE/SHIPPING_LABEL fee Purchases (negative) = net payout amount.
 
-**File**: `supabase/functions/qbo-sync-payout/index.ts`
+**Track transaction type in expenseResults** to enable this filtering — the `transactionType` field already exists in the results array (line 647).
 
-Currently all NON_SALE_CHARGE transactions are posted to the `subscription_fees` account and excluded from the deposit. Change to:
+### 2. Add reset sync buttons — `PayoutDetail.tsx`
 
-- **Insertion fees** (memo contains "Insertion Fee"): Post to `selling_fees` account instead of `subscription_fees`. If a listing match was found, include the product/SKU reference in the expense description and attach CustomerRef if the listing has been sold. Include on the deposit as a deduction (same as SALE fees).
-- **Subscription fees** (memo is a date range): Keep posting to `subscription_fees` account. Include on the deposit as a deduction (remove the NON_SALE_CHARGE exclusion at line 677, or make it conditional).
+Add a "Reset Sync" section with three buttons:
+- **Reset Expenses** — clears `qbo_purchase_id` on all `ebay_payout_transactions` for this payout
+- **Reset Deposit** — clears `qbo_deposit_id` and sets `qbo_sync_status = 'pending'`
+- **Reset All** — both operations
 
-### 3. Include TRANSFER_FROM transactions
+Styled as destructive outline buttons with confirmation toast.
 
-**File**: `supabase/functions/qbo-sync-payout/index.ts`
+### 3. Add reset mutation — `use-payouts.ts`
 
-- Remove the `.neq("transaction_type", "TRANSFER")` filter at line 330
-- For TRANSFER_FROM transactions: Add a positive deposit line representing eBay moving funds into the payout. This uses the `undeposited_funds` account as the source.
-- Skip creating QBO Purchase expenses for TRANSFER transactions (they're not expenses — they're fund movements)
+Add `useResetPayoutSync` mutation that calls `admin-data` with `{ action: "reset_payout_sync", payoutId, scope }`.
 
-This ensures the deposit math works: `Sales - Fees - Insertion Fees - Subscription + Transfer = Net Payout`
+### 4. Add reset handler — `admin-data/index.ts`
 
-### 4. Database: Add reference data column (optional but recommended)
+Handle `reset_payout_sync` action:
+- `scope: 'expenses'` — update `ebay_payout_transactions` set `qbo_purchase_id = null` where `payout_id = externalPayoutId`
+- `scope: 'deposit'` — update `payouts` set `qbo_deposit_id = null, qbo_sync_status = 'pending'` where `external_payout_id = externalPayoutId`
+- `scope: 'all'` — both
 
-**Migration**: Add `ebay_item_id` column to `ebay_payout_transactions` to store the resolved item reference from the eBay `references` array. This makes it queryable without parsing `fee_details`.
+### 5. Redeploy
 
-```sql
-ALTER TABLE ebay_payout_transactions ADD COLUMN IF NOT EXISTS ebay_item_id text;
-```
+- `qbo-sync-payout`
+- `admin-data`
 
 ## Scope
 
-- `supabase/functions/_shared/ebay-finances.ts` — add `references` to interface
-- `supabase/functions/ebay-import-payouts/index.ts` — capture references, resolve listing match for insertion fees
-- `supabase/functions/qbo-sync-payout/index.ts` — split insertion vs subscription handling, include TRANSFER_FROM
-- Migration: add `ebay_item_id` column to `ebay_payout_transactions`
-- Redeploy: `ebay-import-payouts`, `qbo-sync-payout`
+| File | Change |
+|------|--------|
+| `supabase/functions/qbo-sync-payout/index.ts` | Exclude NON_SALE_CHARGE + TRANSFER from deposit lines |
+| `src/components/admin-v2/PayoutDetail.tsx` | Add reset sync buttons |
+| `src/hooks/admin/use-payouts.ts` | Add `useResetPayoutSync` mutation |
+| `supabase/functions/admin-data/index.ts` | Add `reset_payout_sync` handler |
 
 ## Post-fix
 
-Re-import affected payouts to capture the `references` data from eBay (the current records don't have it). Then re-sync to QBO.
+1. Delete QBO deposit 1859 manually
+2. Use "Reset All" on the payout detail page
+3. Re-sync — deposit should equal net payout (£222.06)
 
