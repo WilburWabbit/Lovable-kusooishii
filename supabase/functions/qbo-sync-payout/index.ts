@@ -207,6 +207,7 @@ interface ExpenseLineInput {
   accountRef: { value: string; name?: string };
   description: string;
   taxCodeRef?: string;
+  customerRef?: { value: string; name?: string };
 }
 
 async function createQBOPurchase(
@@ -225,14 +226,19 @@ async function createQBOPurchase(
     const exVat = round2(line.amount / VAT_DIVISOR);
     const vat = round2(line.amount - exVat);
 
+    const detail: Record<string, unknown> = {
+      AccountRef: line.accountRef,
+      TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+      TaxAmount: vat,
+    };
+    if (line.customerRef) {
+      detail.CustomerRef = line.customerRef;
+    }
+
     return {
       Amount: exVat,
       DetailType: "AccountBasedExpenseLineDetail",
-      AccountBasedExpenseLineDetail: {
-        AccountRef: line.accountRef,
-        TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
-        TaxAmount: vat,
-      },
+      AccountBasedExpenseLineDetail: detail,
       Description: line.description,
     };
   });
