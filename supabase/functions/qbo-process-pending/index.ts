@@ -1401,23 +1401,44 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       const memo = deposit.PrivateNote ?? null;
 
       // Detect channel from memo or deposit lines
-      // payout_channel enum only has 'ebay' | 'stripe'
-      let channel: "ebay" | "stripe" = "stripe"; // default
+      let channel: "ebay" | "stripe" = "stripe";
       const memoLower = (memo ?? "").toLowerCase();
       if (/ebay/i.test(memoLower)) channel = "ebay";
 
-      // Also scan deposit lines for linked SalesReceipts to detect channel
-      if (channel === "stripe") {
-        const depositLines = deposit.Line ?? [];
-        for (const dl of depositLines) {
-          const linkedType = dl.LinkedTxn?.[0]?.TxnType;
-          const linkedId = dl.LinkedTxn?.[0]?.TxnId;
-          if (linkedType === "SalesReceipt" && linkedId) {
-            const { data: linkedOrder } = await admin.from("sales_order")
-              .select("origin_channel").eq("qbo_sales_receipt_id", String(linkedId)).maybeSingle();
-            if (linkedOrder?.origin_channel === "ebay") { channel = "ebay"; break; }
-          }
+      // Scan deposit lines — separate SalesReceipt (gross) from Purchase (fees)
+      const lines = deposit.Line ?? [];
+      let grossTotal = 0;
+      let feesTotal = 0;
+      const salesLines: { linkedTxnId: string; amount: number }[] = [];
+      const purchaseLines: { linkedTxnId: string; amount: number }[] = [];
+
+      for (const line of lines) {
+        const linkedTxnId = line.LinkedTxn?.[0]?.TxnId;
+        const linkedTxnType = line.LinkedTxn?.[0]?.TxnType;
+        const lineAmt = line.Amount ?? 0;
+
+        if (linkedTxnType === "SalesReceipt" && linkedTxnId) {
+          grossTotal += lineAmt;
+          salesLines.push({ linkedTxnId: String(linkedTxnId), amount: lineAmt });
+        } else if (linkedTxnType === "Purchase" && linkedTxnId) {
+          // Purchase lines are negative in the deposit (fees/expenses)
+          feesTotal += Math.abs(lineAmt);
+          purchaseLines.push({ linkedTxnId: String(linkedTxnId), amount: lineAmt });
         }
+      }
+
+      // If no SalesReceipt lines found, use TotalAmt as gross (cash-only deposit)
+      if (salesLines.length === 0) {
+        grossTotal = totalAmt;
+      }
+
+      const netAmount = Math.round((grossTotal - feesTotal) * 100) / 100;
+
+      // Detect channel from linked orders if still default
+      if (channel === "stripe" && salesLines.length > 0) {
+        const { data: linkedOrder } = await admin.from("sales_order")
+          .select("origin_channel").eq("qbo_sales_receipt_id", salesLines[0].linkedTxnId).maybeSingle();
+        if (linkedOrder?.origin_channel === "ebay") channel = "ebay";
       }
 
       // Check for existing payout by qbo_deposit_id
@@ -1427,16 +1448,19 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       let payoutId: string;
       if (existingPayout) {
         payoutId = existingPayout.id;
-        // Update existing — no currency column, no status column
         await admin.from("payouts").update({
-          payout_date: txnDate, net_amount: totalAmt, gross_amount: totalAmt,
-          channel, notes: memo, reconciliation_status: "reconciled",
+          payout_date: txnDate, gross_amount: grossTotal,
+          total_fees: Math.round(feesTotal * 100) / 100,
+          net_amount: netAmount, channel, notes: memo,
+          reconciliation_status: "reconciled",
           updated_at: new Date().toISOString(),
         }).eq("id", payoutId);
       } else {
         const { data: newPayout, error: payoutErr } = await admin.from("payouts").insert({
           qbo_deposit_id: qboDepositId, payout_date: txnDate,
-          net_amount: totalAmt, gross_amount: totalAmt, channel, notes: memo,
+          gross_amount: grossTotal,
+          total_fees: Math.round(feesTotal * 100) / 100,
+          net_amount: netAmount, channel, notes: memo,
           reconciliation_status: "reconciled",
         }).select("id").single();
         if (payoutErr) throw payoutErr;
@@ -1444,29 +1468,74 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
         payoutsCreated++;
       }
 
-      // Link deposit lines to sales orders via QBO SalesReceipt IDs
-      const lines = deposit.Line ?? [];
-      for (const line of lines) {
-        const linkedTxnId = line.LinkedTxn?.[0]?.TxnId;
-        const linkedTxnType = line.LinkedTxn?.[0]?.TxnType;
-        if (!linkedTxnId || linkedTxnType !== "SalesReceipt") continue;
+      // Link SalesReceipt lines to sales orders
+      const salesOrderIds: string[] = [];
+      const orderGrossMap: Record<string, number> = {};
 
-        // Find the sales order linked to this QBO SalesReceipt
+      for (const sl of salesLines) {
         const { data: linkedOrder } = await admin.from("sales_order")
-          .select("id").eq("qbo_sales_receipt_id", String(linkedTxnId)).maybeSingle();
+          .select("id").eq("qbo_sales_receipt_id", sl.linkedTxnId).maybeSingle();
         if (!linkedOrder) continue;
 
-        // Check if payout_orders link already exists
+        salesOrderIds.push(linkedOrder.id);
+        orderGrossMap[linkedOrder.id] = sl.amount;
+
+        // Upsert payout_orders link
         const { data: existingLink } = await admin.from("payout_orders")
           .select("id").eq("payout_id", payoutId).eq("sales_order_id", linkedOrder.id).maybeSingle();
-        if (existingLink) continue;
-
-        const lineAmt = line.Amount ?? 0;
-        await admin.from("payout_orders").insert({
-          payout_id: payoutId, sales_order_id: linkedOrder.id,
-          order_gross: lineAmt,
-        });
+        if (existingLink) {
+          await admin.from("payout_orders").update({
+            order_gross: sl.amount,
+          }).eq("id", existingLink.id);
+        } else {
+          await admin.from("payout_orders").insert({
+            payout_id: payoutId, sales_order_id: linkedOrder.id,
+            order_gross: sl.amount,
+          });
+        }
       }
+
+      // Distribute fees proportionally across orders and update payout_orders
+      if (salesOrderIds.length > 0 && feesTotal > 0) {
+        for (const orderId of salesOrderIds) {
+          const orderGross = orderGrossMap[orderId] ?? 0;
+          const feeShare = grossTotal > 0
+            ? Math.round((orderGross / grossTotal) * feesTotal * 100) / 100
+            : Math.round((feesTotal / salesOrderIds.length) * 100) / 100;
+          const orderNet = Math.round((orderGross - feeShare) * 100) / 100;
+
+          await admin.from("payout_orders").update({
+            order_fees: feeShare, order_net: orderNet,
+          }).eq("payout_id", payoutId).eq("sales_order_id", orderId);
+        }
+      }
+
+      // Update order_count and unit_count on the payout
+      let unitCount = 0;
+      if (salesOrderIds.length > 0) {
+        const { count } = await admin.from("stock_unit")
+          .select("id", { count: "exact", head: true })
+          .in("order_id", salesOrderIds);
+        unitCount = count ?? 0;
+
+        // Link stock units to this payout
+        await admin.from("stock_unit")
+          .update({ payout_id: payoutId })
+          .in("order_id", salesOrderIds)
+          .is("payout_id", null);
+
+        // Transition eligible units to payout_received
+        await admin.from("stock_unit")
+          .update({ v2_status: "payout_received", payout_id: payoutId })
+          .in("order_id", salesOrderIds)
+          .in("v2_status", ["sold", "shipped", "delivered"]);
+      }
+
+      await admin.from("payouts").update({
+        order_count: salesOrderIds.length,
+        unit_count: unitCount,
+        updated_at: new Date().toISOString(),
+      }).eq("id", payoutId);
 
       await markLanding(admin, "landing_raw_qbo_deposit", entry.id, "committed");
       processed++;
