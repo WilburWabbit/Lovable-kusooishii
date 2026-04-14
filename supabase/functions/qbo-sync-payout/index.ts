@@ -437,7 +437,39 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 4. Get QBO token + account mappings ────────────────
+    // ─── 3b. Resolve customer IDs to QBO CustomerRef ────────
+    // customerRefByTxId currently holds { value: appCustomerId } — resolve to QBO refs
+    const appCustomerIds = [...new Set(
+      Array.from(customerRefByTxId.values()).map((r) => r.value)
+    )];
+    if (appCustomerIds.length > 0) {
+      const { data: customers } = await admin
+        .from("customer" as never)
+        .select("id, qbo_customer_id, display_name")
+        .in("id" as never, appCustomerIds);
+
+      const qboRefByAppId = new Map<string, { value: string; name?: string }>();
+      for (const c of ((customers ?? []) as Record<string, unknown>[])) {
+        const qboId = c.qbo_customer_id as string | null;
+        if (qboId) {
+          qboRefByAppId.set(c.id as string, {
+            value: qboId,
+            name: (c.display_name as string) ?? undefined,
+          });
+        }
+      }
+
+      // Replace app customer IDs with QBO refs
+      for (const [txId, placeholder] of customerRefByTxId.entries()) {
+        const resolved = qboRefByAppId.get(placeholder.value);
+        if (resolved) {
+          customerRefByTxId.set(txId, resolved);
+        } else {
+          customerRefByTxId.delete(txId); // no QBO customer — skip
+        }
+      }
+    }
+
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
