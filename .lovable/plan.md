@@ -1,40 +1,45 @@
 
 
-# Fix QBO Deposit Creation — Match Real Deposit Structure + Remove Lump-Sum Fallback
+# Sync QBO Deposits to App — Standalone Trigger
 
 ## Summary
-Apply three structural fixes to the deposit payload in `qbo-sync-payout` based on analysis of real QBO deposits, and remove the lump-sum fallback (replacing it with an error) since all deposits should be transaction-backed.
+Add a "Sync Deposits" button to the QBO Settings Card that independently pulls all QBO Deposit records into the app via the existing land-and-process pipeline. This lets you import new deposits without running a full rebuild, and inspect how QBO structures deposit payloads to debug the outbound push.
 
-## Changes — `supabase/functions/qbo-sync-payout/index.ts`
+## What already exists
+- **`qbo-sync-deposits`** edge function — lands all QBO Deposit records into `landing_raw_qbo_deposit` (97 already committed)
+- **`qbo-process-pending`** — processes pending deposits into `payouts` + `payout_orders` tables, linking deposit lines to sales orders via QBO SalesReceipt IDs
+- Both functions are fully operational; they just lack a standalone UI trigger
 
-### 1. Fix SalesReceipt deposit lines (~line 582-594)
-- Remove `AccountRef` from `DepositLineDetail`
-- Add `PaymentMethodRef: { value: "1" }` instead
-- Add `TxnLineId: "0"` to the `LinkedTxn` entry
+## Plan
 
-### 2. Fix expense (Purchase) deposit lines (~line 617-624)
-- Change `TxnType` from `"Payment"` back to `"Purchase"`
-- Remove `AccountRef` from `DepositLineDetail`
-- Add `PaymentMethodRef: { value: "1" }` instead
-- Add `TxnLineId: "0"` to the `LinkedTxn` entry
+### 1. Add "Sync Deposits" button to QboSettingsCard
+**File:** `src/components/admin-v2/QboSettingsCard.tsx`
 
-### 3. Remove lump-sum fallback (~line 595-607)
-Replace the `else if` fallback block with an error return:
+- Add `syncingDeposits` state variable
+- Add a button (alongside existing Sync Purchases, Sync Sales, etc.) that:
+  1. Calls `invokeWithAuth('qbo-sync-deposits')` to land raw deposits
+  2. Calls `invokeWithAuth('qbo-process-pending')` to process any newly landed deposits
+  3. Toasts the result (landed count, processed count, errors)
+- Disable during `anyBusy`
+
+### 2. No backend changes needed
+The edge functions already exist and work correctly. No new tables, migrations, or RLS changes required.
+
+## Technical detail
+The button handler will be ~15 lines:
 ```ts
-} else {
-  const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
-  await persistSyncFailure(admin, payoutId, msg);
-  return new Response(
-    JSON.stringify({ success: false, error: msg, payoutId, expensesCreated: expenseResults.length }),
-    { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
+async function handleSyncDeposits() {
+  setSyncingDeposits(true);
+  try {
+    const landRes = await invokeWithAuth('qbo-sync-deposits');
+    toast.info(`Landed ${landRes.landed} deposits (${landRes.skipped} unchanged)`);
+    const procRes = await invokeWithAuth('qbo-process-pending');
+    toast.success(`Processed deposits: ${procRes.deposits?.processed ?? 0} OK, ${procRes.deposits?.errors ?? 0} errors`);
+  } catch (e: any) {
+    toast.error(e.message);
+  } finally {
+    setSyncingDeposits(false);
+  }
 }
 ```
-
-### 4. Redeploy `qbo-sync-payout`
-
-## No other changes
-- No database migrations
-- No frontend changes
-- The empty-lines guard at line 628 remains as a secondary safety net
 
