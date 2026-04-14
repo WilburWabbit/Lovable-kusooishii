@@ -894,7 +894,7 @@ export function useUnitProfitSummary() {
           ) / 100
         : null;
 
-      return {
+  return {
         totalUnits:       rows.length,
         totalRevenue:     Math.round(totalRevenue * 100) / 100,
         totalCost:        Math.round(totalCost    * 100) / 100,
@@ -905,6 +905,25 @@ export function useUnitProfitSummary() {
         unitsBelowCost:   rows.filter((r) => r.net_profit < 0).length,
         unitsWithoutFees: rows.filter((r) => r.total_fees_per_unit === 0).length,
       };
+    },
+  });
+}
+
+// ─── Reset Payout Sync ─────────────────────────────────────
+
+export function useResetPayoutSync() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ payoutId, scope }: { payoutId: string; scope: 'expenses' | 'deposit' | 'all' }) => {
+      const { data, error } = await supabase.functions.invoke('admin-data', {
+        body: { action: 'reset_payout_sync', payoutId, scope },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: payoutKeys.all });
     },
   });
 }

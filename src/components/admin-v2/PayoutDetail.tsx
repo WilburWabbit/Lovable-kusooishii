@@ -9,6 +9,7 @@ import {
   useReconcilePayout,
   useTriggerPayoutQBOSync,
   usePayoutQBOReadiness,
+  useResetPayoutSync,
   type PayoutFeeWithLines,
   type PayoutTransaction,
 } from "@/hooks/admin/use-payouts";
@@ -64,6 +65,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
   const { data: qboReadiness } = usePayoutQBOReadiness(payout?.externalPayoutId);
   const reconcilePayout = useReconcilePayout();
   const triggerQBOSync = useTriggerPayoutQBOSync();
+  const resetSync = useResetPayoutSync();
   const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
 
   const toggleTx = (id: string) => {
@@ -592,6 +594,54 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       <p className="text-[10px] text-zinc-400 mt-2">
         Reconcile matches orders to this payout by date range and transitions stock units to "payout_received".
       </p>
+
+      {/* Reset Sync Section */}
+      {payout.externalPayoutId && (
+        <SurfaceCard className="mt-5">
+          <SectionHead>Reset Sync</SectionHead>
+          <p className="text-[10px] text-zinc-400 mb-3">
+            Clear QBO sync data so this payout can be re-synced. You must delete the corresponding QBO records manually first.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "expenses" }, {
+                  onSuccess: (d: any) => toast.success(`Reset ${d.expensesReset ?? 0} expense records`),
+                  onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
+                });
+              }}
+              disabled={resetSync.isPending}
+              className="flex-1 bg-transparent text-red-500 border border-red-300 rounded-md py-1.5 text-[11px] font-medium cursor-pointer disabled:opacity-50 hover:bg-red-50 transition-colors"
+            >
+              Reset Expenses
+            </button>
+            <button
+              onClick={() => {
+                resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "deposit" }, {
+                  onSuccess: () => toast.success("Deposit reset — ready to re-sync"),
+                  onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
+                });
+              }}
+              disabled={resetSync.isPending}
+              className="flex-1 bg-transparent text-red-500 border border-red-300 rounded-md py-1.5 text-[11px] font-medium cursor-pointer disabled:opacity-50 hover:bg-red-50 transition-colors"
+            >
+              Reset Deposit
+            </button>
+            <button
+              onClick={() => {
+                resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "all" }, {
+                  onSuccess: (d: any) => toast.success(`Full reset: ${d.expensesReset ?? 0} expenses, deposit cleared`),
+                  onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
+                });
+              }}
+              disabled={resetSync.isPending}
+              className="flex-1 bg-red-500 text-white border-none rounded-md py-1.5 text-[11px] font-bold cursor-pointer disabled:opacity-50 hover:bg-red-600 transition-colors"
+            >
+              Reset All
+            </button>
+          </div>
+        </SurfaceCard>
+      )}
     </div>
   );
 }

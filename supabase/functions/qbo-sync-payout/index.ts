@@ -684,10 +684,16 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
-    // All expense types (SALE fees, SHIPPING_LABEL, NON_SALE_CHARGE) are
-    // included as deductions so the deposit total matches the net payout.
+    // Only include SALE and SHIPPING_LABEL fee Purchases on the deposit.
+    // NON_SALE_CHARGE expenses (e.g., subscriptions) are standalone Purchases
+    // paid from undeposited funds — the Purchase alone records both sides
+    // (DR Expense / CR Undeposited Funds), so they must NOT appear on the deposit.
+    // TRANSFER transactions are excluded for the same reason — they offset
+    // NON_SALE_CHARGE Purchases and net to zero.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      // Skip NON_SALE_CHARGE and TRANSFER — they are independent of the bank deposit
+      if (exp.transactionType === "NON_SALE_CHARGE" || exp.transactionType === "TRANSFER") continue;
 
       depositLines.push({
         Amount: -exp.amount,
@@ -698,20 +704,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // TRANSFER lines — fund movements (e.g., subscription paid from undeposited funds)
-    // TRANSFER_FROM = positive (funds coming into payout), TRANSFER_TO = negative
-    for (const tx of transferTxs) {
-      const amt = tx.gross_amount; // already signed: positive for TRANSFER_FROM
-      if (Math.abs(amt) < 0.01) continue;
-      depositLines.push({
-        Amount: amt,
-        DepositLineDetail: {
-          AccountRef: buildAccountRef(undepositedFundsAccount),
-          PaymentMethodRef: { value: "1" },
-        },
-        Description: `${channel} fund transfer — ${tx.memo ?? tx.transaction_id}`,
-      });
-    }
+    // NOTE: TRANSFER lines are no longer added to the deposit.
+    // The subscription Purchase already records DR Subscription Fees / CR Undeposited Funds,
+    // so neither the Purchase nor the offsetting TRANSFER should appear on the bank deposit.
 
     // Guard: ensure we have at least one deposit line
     if (depositLines.length === 0) {
