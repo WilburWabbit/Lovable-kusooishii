@@ -548,12 +548,16 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // For SALE expenses, use the order number as the QBO DocNumber
+      const expenseDocNumber = txType === "SALE" ? (orderNumberByTxId.get(tx.id) ?? undefined) : undefined;
+
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
         bankAccountRef: buildAccountRef(undepositedFundsAccount),
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
         privateNote: `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+        docNumber: expenseDocNumber,
       });
 
       if ("error" in purchaseResult) {
