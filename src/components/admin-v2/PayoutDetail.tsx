@@ -344,7 +344,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
 
       {/* 4. Linked Orders */}
       <SurfaceCard className="mb-5">
-        <SectionHead>Linked Orders ({orderFeeGroups.length})</SectionHead>
+        <SectionHead>Linked Orders ({orderFeeGroups.length || payoutOrders.length})</SectionHead>
         {feesLoading ? (
           <p className="text-zinc-400 text-xs">Loading order fees…</p>
         ) : orderFeeGroups.length > 0 ? (
