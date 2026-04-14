@@ -1461,6 +1461,7 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
           total_fees: Math.round(feesTotal * 100) / 100,
           net_amount: netAmount, channel, notes: memo,
           reconciliation_status: "reconciled",
+          ...(externalPayoutId ? { external_payout_id: externalPayoutId } : {}),
           updated_at: new Date().toISOString(),
         }).eq("id", payoutId);
       } else {
@@ -1470,6 +1471,7 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
           total_fees: Math.round(feesTotal * 100) / 100,
           net_amount: netAmount, channel, notes: memo,
           reconciliation_status: "reconciled",
+          ...(externalPayoutId ? { external_payout_id: externalPayoutId } : {}),
         }).select("id").single();
         if (payoutErr) throw payoutErr;
         payoutId = newPayout.id;
