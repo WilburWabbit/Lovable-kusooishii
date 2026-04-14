@@ -532,6 +532,7 @@ export interface PayoutTransaction {
   matched: boolean;
   matchedOrderId: string | null;
   matchMethod: string | null;
+  qboPurchaseId: string | null;
   // Joined from sales_order when matched
   appGross: number | null;
 }
@@ -543,7 +544,7 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
     queryFn: async (): Promise<PayoutTransaction[]> => {
       const { data, error } = await supabase
         .from('ebay_payout_transactions')
-        .select('*')
+        .select('*, qbo_purchase_id')
         .eq('payout_id', externalPayoutId!)
         .order('transaction_date', { ascending: true });
 
@@ -584,6 +585,8 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
         currency: r.currency as string,
         matched: r.matched as boolean,
         matchedOrderId: (r.matched_order_id as string) ?? null,
+        matchMethod: (r.match_method as string) ?? null,
+        qboPurchaseId: (r.qbo_purchase_id as string) ?? null,
         matchMethod: (r.match_method as string) ?? null,
         appGross: r.matched_order_id
           ? (orderGrossMap.get(r.matched_order_id as string) ?? null)
