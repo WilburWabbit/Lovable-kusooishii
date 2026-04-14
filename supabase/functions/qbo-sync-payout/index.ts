@@ -582,7 +582,10 @@ Deno.serve(async (req) => {
       depositLines = Array.from(orderQboMap.values()).map((entry) => ({
         Amount: entry.gross,
         DetailType: "DepositLineDetail",
-        DepositLineDetail: {},
+        DepositLineDetail: {
+          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
+        },
         LinkedTxn: [
           {
             TxnId: entry.qboId,
@@ -612,7 +615,10 @@ Deno.serve(async (req) => {
       depositLines.push({
         Amount: -exp.amount,
         DetailType: "DepositLineDetail",
-          DepositLineDetail: {},
+        DepositLineDetail: {
+          AccountRef: buildAccountRef(undepositedFundsAccount),
+          PaymentMethodRef: { value: "1" },
+        },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
       });
     }
