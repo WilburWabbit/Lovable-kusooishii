@@ -213,17 +213,28 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                    <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Net</th>
                    <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Ex-VAT</th>
                    <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">VAT on Fees</th>
-                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">App Gross</th>
-                   <th className="text-right text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Variance</th>
                    <th className="text-center text-[10px] text-zinc-500 uppercase tracking-wider px-2 py-1.5">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.map((tx) => {
-                  const variance = tx.appGross != null ? tx.grossAmount - tx.appGross : null;
                   const isExpanded = expandedTxIds.has(tx.id);
                   const feeDetails = tx.feeDetails as Array<{ feeType?: string; amount?: number | { value?: string }; currency?: string }> | null;
                   const hasFees = feeDetails && feeDetails.length > 0;
+
+                  // Derive status: synced > matched > unmatched
+                  const txStatus = (() => {
+                    if ((tx as unknown as Record<string, unknown>).qboPurchaseId && (tx as unknown as Record<string, unknown>).qboPurchaseId !== "N/A") {
+                      return { label: "Synced", color: "#22C55E" };
+                    }
+                    if ((tx as unknown as Record<string, unknown>).qboPurchaseId === "N/A" && tx.matched) {
+                      return { label: "Matched", color: "#3B82F6" };
+                    }
+                    if (tx.matched) {
+                      return { label: "Matched", color: "#3B82F6" };
+                    }
+                    return { label: "Unmatched", color: "#F59E0B" };
+                  })();
 
                   return (
                     <>
@@ -259,27 +270,17 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                         <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{tx.netAmount.toFixed(2)}</Mono></td>
                         <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{calculateVAT(tx.grossAmount).net.toFixed(2)}</Mono></td>
                         <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{calculateVAT(tx.totalFees).vat.toFixed(2)}</Mono></td>
-                        <td className="px-2 py-1.5 text-right">
-                          {tx.appGross != null ? <Mono className="text-xs">£{tx.appGross.toFixed(2)}</Mono> : <span className="text-zinc-300">—</span>}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          {variance != null ? (
-                            <Mono color={Math.abs(variance) < 0.01 ? "teal" : "red"} className="text-xs">
-                              {variance >= 0 ? "+" : ""}£{variance.toFixed(2)}
-                            </Mono>
-                          ) : <span className="text-zinc-300">—</span>}
-                        </td>
                         <td className="px-2 py-1.5 text-center">
                           <Badge
-                            label={tx.matched ? "Matched" : "Unmatched"}
-                            color={tx.matched ? "#22C55E" : "#F59E0B"}
+                            label={txStatus.label}
+                            color={txStatus.color}
                             small
                           />
                         </td>
                       </tr>
                       {isExpanded && hasFees && (
                         <tr key={`${tx.id}-fees`}>
-                          <td colSpan={12} className="bg-zinc-50 px-4 py-2 border-b border-zinc-100">
+                          <td colSpan={10} className="bg-zinc-50 px-4 py-2 border-b border-zinc-100">
                             <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">Fee Breakdown</div>
                             <table className="w-full">
                               <thead>
@@ -330,7 +331,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                       <td className="px-2 py-1.5 text-right"><Mono color="teal" className="text-xs">£{totNet.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono className="text-xs">£{totExVat.toFixed(2)}</Mono></td>
                       <td className="px-2 py-1.5 text-right"><Mono color="red" className="text-xs">£{totVatOnFees.toFixed(2)}</Mono></td>
-                      <td colSpan={3} />
+                      <td />
                     </tr>
                   );
                 })()}
