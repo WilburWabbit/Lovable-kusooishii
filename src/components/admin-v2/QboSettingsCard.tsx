@@ -50,11 +50,12 @@ export function QboSettingsCard() {
   const [cleaningGhosts, setCleaningGhosts] = useState(false);
   const [recalcingCost, setRecalcingCost] = useState(false);
   const [retryingPush, setRetryingPush] = useState(false);
+  const [syncingDeposits, setSyncingDeposits] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -455,6 +456,25 @@ export function QboSettingsCard() {
     }
   };
 
+  const syncDepositsAction = async () => {
+    setSyncingDeposits(true);
+    try {
+      const landRes = await invokeWithAuth<Record<string, unknown>>('qbo-sync-deposits');
+      if ((landRes as Record<string, unknown>)?.error) throw new Error(String((landRes as Record<string, unknown>).error));
+      const landed = (landRes as Record<string, unknown>).landed ?? 0;
+      const skipped = (landRes as Record<string, unknown>).skipped ?? 0;
+      toast.info(`Landed ${landed} deposits (${skipped} unchanged)`);
+      if ((landed as number) > 0) {
+        const total = await drainPending('Processing deposits', 'deposits');
+        if (total > 0) toast.success(`Processed ${total} deposit records`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Deposit sync failed');
+    } finally {
+      setSyncingDeposits(false);
+    }
+  };
+
   const recalcAvgCost = async () => {
     setRecalcingCost(true);
     try {
@@ -565,6 +585,7 @@ export function QboSettingsCard() {
               <Btn onClick={syncCustomersAction} busy={syncingCustomers}>Customers</Btn>
               <Btn onClick={syncItemsAction} busy={syncingItems}>Items</Btn>
               <Btn onClick={syncVendorsAction} busy={syncingVendors}>Vendors</Btn>
+              <Btn onClick={syncDepositsAction} busy={syncingDeposits}>Deposits</Btn>
             </div>
           </div>
 
