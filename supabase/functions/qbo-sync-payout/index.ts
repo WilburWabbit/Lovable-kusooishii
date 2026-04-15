@@ -209,6 +209,7 @@ interface ExpenseLineInput {
   description: string;
   taxCodeRef?: string;
   customerRef?: { value: string; name?: string };
+  itemRef?: { value: string; name?: string };
 }
 
 async function createQBOPurchase(
@@ -226,6 +227,25 @@ async function createQBOPurchase(
   const qboLines = opts.lines.map((line) => {
     const exVat = round2(line.amount / VAT_DIVISOR);
     const vat = round2(line.amount - exVat);
+
+    if (line.itemRef) {
+      // Item-linked line — links the expense to a specific QBO Item (e.g. insertion fee
+      // against the SKU that was listed). The expense account is determined by the Item's
+      // own expense account in QBO.
+      const detail: Record<string, unknown> = {
+        ItemRef: line.itemRef,
+        Qty: 1,
+        UnitPrice: exVat,
+        TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+      };
+      if (line.customerRef) detail.CustomerRef = line.customerRef;
+      return {
+        Amount: exVat,
+        DetailType: "ItemBasedExpenseLineDetail",
+        ItemBasedExpenseLineDetail: detail,
+        Description: line.description,
+      };
+    }
 
     const detail: Record<string, unknown> = {
       AccountRef: line.accountRef,
@@ -332,8 +352,10 @@ Deno.serve(async (req) => {
     if (txErr) throw new Error(`Failed to fetch transactions: ${txErr.message}`);
 
     const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
-    // Separate TRANSFER transactions — they are fund movements, not expenses
-    const transferTxs = allTransactions.filter((t) => t.transaction_type === "TRANSFER");
+    // Exclude TRANSFER transactions from expense processing.
+    // TRANSFER = eBay collecting a fee (e.g. subscription) directly from undeposited funds.
+    // The corresponding NON_SALE_CHARGE Purchase already represents this payment from UF;
+    // adding a separate TRANSFER deposit line would double-count it.
     const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
@@ -504,6 +526,45 @@ Deno.serve(async (req) => {
       `QBO payout sync: ${transactions.length} transactions (${saleTxs.length} sales, ${expenseTxs.length} expenses)`,
     );
 
+    // ─── 4b. Resolve QBO item IDs for insertion fee NON_SALE_CHARGE transactions ─
+    // Lookup chain: tx.ebay_item_id → channel_listing.external_listing_id
+    //               → channel_listing.sku_id → sku.qbo_item_id
+    const insertionFeeItemIds = allTransactions
+      .filter((t) => t.transaction_type === "NON_SALE_CHARGE" && t.ebay_item_id &&
+        (t.memo ?? "").toLowerCase().includes("insertion fee"))
+      .map((t) => t.ebay_item_id as string);
+
+    const qboItemIdByEbayItemId = new Map<string, string>();
+
+    if (insertionFeeItemIds.length > 0) {
+      const { data: listings } = await admin
+        .from("channel_listing" as never)
+        .select("external_listing_id, sku_id")
+        .in("external_listing_id" as never, insertionFeeItemIds);
+
+      const listingRows = (listings ?? []) as { external_listing_id: string; sku_id: string | null }[];
+      const skuIds = listingRows.map((l) => l.sku_id).filter(Boolean) as string[];
+
+      if (skuIds.length > 0) {
+        const { data: skus } = await admin
+          .from("sku" as never)
+          .select("id, qbo_item_id")
+          .in("id" as never, skuIds);
+
+        const qboIdBySkuId = new Map<string, string>();
+        for (const s of ((skus ?? []) as { id: string; qbo_item_id: string | null }[])) {
+          if (s.qbo_item_id) qboIdBySkuId.set(s.id, s.qbo_item_id);
+        }
+        for (const l of listingRows) {
+          if (l.sku_id) {
+            const qboId = qboIdBySkuId.get(l.sku_id);
+            if (qboId) qboItemIdByEbayItemId.set(l.external_listing_id, qboId);
+          }
+        }
+      }
+      console.log(`Resolved ${qboItemIdByEbayItemId.size} QBO item IDs for ${insertionFeeItemIds.length} insertion fee transactions`);
+    }
+
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
     const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string }[] = [];
@@ -572,26 +633,36 @@ Deno.serve(async (req) => {
           });
         }
       } else if (txType === "NON_SALE_CHARGE") {
-        // Split: Insertion fees → selling_fees (COGS); Subscription → subscription_fees
+        // Insertion fees → selling_fees (COGS), linked to the QBO Item for the listing
+        // Subscription fees → subscription_fees (explicit detection via memo)
+        // Other charges → subscription_fees account as fallback
         const chargeAmount = Math.abs(tx.gross_amount);
-        const isInsertionFee = (tx.memo ?? "").toLowerCase().includes("insertion fee");
+        const memoLower = (tx.memo ?? "").toLowerCase();
+        const isInsertionFee = memoLower.includes("insertion fee");
+        const isSubscriptionFee = !isInsertionFee &&
+          (memoLower.includes("subscription") || memoLower.includes("store subscription"));
         if (chargeAmount > 0) {
-          let description = `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`;
+          let description: string;
           let accountRef = buildAccountRef(subscriptionAccount!);
+          let itemRef: { value: string; name?: string } | undefined;
 
           if (isInsertionFee) {
             accountRef = buildAccountRef(sellingFeesAccount);
-            // Include eBay item ID for traceability
+            description = tx.ebay_item_id
+              ? `${channel} Insertion Fee — item ${tx.ebay_item_id} — ${tx.transaction_id}`
+              : `${channel} Insertion Fee — ${tx.transaction_id}`;
+            // Resolve QBO item ID via channel_listing → sku.qbo_item_id
             if (tx.ebay_item_id) {
-              description = `${channel} Insertion Fee — item ${tx.ebay_item_id} — ${tx.transaction_id}`;
+              const qboId = qboItemIdByEbayItemId.get(tx.ebay_item_id);
+              if (qboId) itemRef = { value: qboId };
             }
+          } else if (isSubscriptionFee) {
+            description = `${channel} Store Subscription — ${tx.transaction_id}`;
+          } else {
+            description = `${channel} ${tx.memo ?? "Account charge"} — ${tx.transaction_id}`;
           }
 
-          expenseLines.push({
-            amount: chargeAmount,
-            accountRef,
-            description,
-          });
+          expenseLines.push({ amount: chargeAmount, accountRef, description, itemRef });
         }
       } else {
         // REFUND, CREDIT, DISPUTE, etc. — create as expense with selling_fees
@@ -615,15 +686,24 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // For SALE expenses, use the order number as the QBO DocNumber
-      const expenseDocNumber = txType === "SALE" ? (orderNumberByTxId.get(tx.id) ?? undefined) : undefined;
+      // DocNumber: order number for SALE, eBay item ID for insertion fees (makes them
+      // queryable in QBO by listing reference)
+      let expenseDocNumber: string | undefined;
+      if (txType === "SALE") {
+        expenseDocNumber = orderNumberByTxId.get(tx.id) ?? undefined;
+      } else if (txType === "NON_SALE_CHARGE" && tx.ebay_item_id &&
+        (tx.memo ?? "").toLowerCase().includes("insertion fee")) {
+        expenseDocNumber = tx.ebay_item_id;
+      }
 
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
         bankAccountRef: buildAccountRef(undepositedFundsAccount),
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
-        privateNote: `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+        privateNote: txType === "NON_SALE_CHARGE" && tx.ebay_item_id
+          ? `${channel} payout ${externalPayoutId} — ${txType} item ${tx.ebay_item_id} — ${tx.transaction_id}`
+          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
         docNumber: expenseDocNumber,
       });
 
@@ -683,10 +763,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Expense (Purchase) lines — negative amounts net off the deposit
-    // ALL expense types (SALE fees, SHIPPING_LABEL, NON_SALE_CHARGE) are included.
-    // Their Purchases are booked against Undeposited Funds, so they must appear
-    // on the deposit to clear that account.
+    // Expense (Purchase) lines — negative amounts net off the deposit.
+    // SALE fees, SHIPPING_LABEL, and NON_SALE_CHARGE Purchases are all booked
+    // against Undeposited Funds and must appear here to clear that account.
+    // TRANSFER transactions are excluded — each TRANSFER is eBay collecting a fee
+    // (e.g. subscription) from undeposited funds, which is already represented by
+    // the corresponding NON_SALE_CHARGE Purchase negative line. Including it again
+    // would double-count the amount and fail reconciliation.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
 
@@ -697,21 +780,6 @@ Deno.serve(async (req) => {
         },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
       });
-    }
-
-    // TRANSFER lines — eBay returns held funds (e.g., subscription offsets) into the payout.
-    // These are positive unlinked deposit lines that credit the subscription/fees account.
-    for (const tx of transferTxs) {
-      const transferAmount = Math.abs(tx.gross_amount);
-      if (transferAmount > 0) {
-        depositLines.push({
-          Amount: transferAmount,
-          DepositLineDetail: {
-            AccountRef: buildAccountRef(subscriptionAccount!),
-            PaymentMethodRef: { value: "1" },
-          },
-        });
-      }
     }
 
     // Guard: ensure we have at least one deposit line
@@ -730,7 +798,7 @@ Deno.serve(async (req) => {
     const expectedNet = p.net_amount as number;
     const delta = round2(Math.abs(constructedTotal - expectedNet));
     if (delta > 0.02) {
-      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/TRANSFER transactions.`;
+      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
       console.error(msg);
       await persistSyncFailure(admin, payoutId, msg);
       return new Response(
