@@ -717,38 +717,59 @@ Deno.serve(async (req) => {
       });
     }
 
-    const depositPayload: Record<string, unknown> = {
-      TxnDate: payoutDate,
-      DepositToAccountRef: buildAccountRef(payoutBankRef),
-      GlobalTaxCalculation: "TaxExcluded",
-      Line: depositLines,
-      PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
-    };
-    // Use external payout ID as the QBO deposit reference number
-    if (externalPayoutId) {
-      depositPayload.DocNumber = externalPayoutId;
-    }
-    console.log("QBO deposit payload:", JSON.stringify(depositPayload));
-
-    const depositRes = await fetchWithTimeout(`${baseUrl}/deposit?minorversion=65`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(depositPayload),
-    });
-
+    // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
 
-    if (depositRes.ok) {
-      const depositResult = await depositRes.json();
-      qboDepositId = String(depositResult.Deposit.Id);
-    } else {
-      const errBody = await depositRes.text();
-      syncError = `Deposit creation failed [${depositRes.status}]: ${errBody.substring(0, 500)}`;
-      console.error(`QBO Deposit creation failed:`, syncError);
+    if (externalPayoutId) {
+      const queryStr = `SELECT * FROM Deposit WHERE DocNumber = '${externalPayoutId}'`;
+      console.log(`Checking for existing QBO deposit: ${queryStr}`);
+      const existingRes = await fetchWithTimeout(
+        `${baseUrl}/query?query=${encodeURIComponent(queryStr)}&minorversion=65`,
+        { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+      );
+      if (existingRes.ok) {
+        const existingPayload = await existingRes.json();
+        const deposits = (existingPayload?.QueryResponse?.Deposit ?? []) as Record<string, unknown>[];
+        if (deposits.length > 0) {
+          qboDepositId = String(deposits[0].Id);
+          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} — skipping creation`);
+        }
+      } else {
+        await existingRes.text(); // consume body
+      }
+    }
+
+    if (!qboDepositId) {
+      const depositPayload: Record<string, unknown> = {
+        TxnDate: payoutDate,
+        DepositToAccountRef: buildAccountRef(payoutBankRef),
+        GlobalTaxCalculation: "TaxExcluded",
+        Line: depositLines,
+        PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
+      };
+      if (externalPayoutId) {
+        depositPayload.DocNumber = externalPayoutId;
+      }
+      console.log("QBO deposit payload:", JSON.stringify(depositPayload));
+
+      const depositRes = await fetchWithTimeout(`${baseUrl}/deposit?minorversion=65`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(depositPayload),
+      });
+
+      if (depositRes.ok) {
+        const depositResult = await depositRes.json();
+        qboDepositId = String(depositResult.Deposit.Id);
+      } else {
+        const errBody = await depositRes.text();
+        syncError = `Deposit creation failed [${depositRes.status}]: ${errBody.substring(0, 500)}`;
+        console.error(`QBO Deposit creation failed:`, syncError);
+      }
     }
 
     // ─── 7. Update payout record ────────────────────────────
