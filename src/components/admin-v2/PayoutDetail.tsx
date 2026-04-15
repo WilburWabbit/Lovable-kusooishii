@@ -170,30 +170,84 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
 
       {/* 2. Channel Detail */}
       <SurfaceCard className="mb-5">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Channel</div>
-            <div className="text-zinc-900 text-sm font-medium">{payout.channel}</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Date</div>
-            <div className="text-zinc-900 text-sm">{formatDate(payout.payoutDate)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
-            <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
-            <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
-          </div>
-          {payout.externalPayoutId && (
-            <div className="col-span-2 sm:col-span-4">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External ID</div>
-              <Mono color="dim" className="text-xs">{payout.externalPayoutId}</Mono>
+        {(() => {
+          // Compute eBay payout total from transactions
+          const ebayTotal = transactions.reduce((sum, tx) => {
+            // net_amount is already signed correctly from eBay:
+            // SALE positive, SHIPPING_LABEL/NON_SALE_CHARGE negative, TRANSFER positive
+            return sum + tx.netAmount;
+          }, 0);
+          const hasTransactions = transactions.length > 0;
+          const mismatch = hasTransactions && Math.abs(ebayTotal - payout.netAmount) > 0.01;
+
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Channel</div>
+                <div className="text-zinc-900 text-sm font-medium">{payout.channel}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Date</div>
+                <div className="text-zinc-900 text-sm">{formatDate(payout.payoutDate)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
+                <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
+                <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
+              </div>
+              {payout.externalPayoutId && (
+                <div className="col-span-2 sm:col-span-4">
+                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External ID</div>
+                  <Mono color="dim" className="text-xs">{payout.externalPayoutId}</Mono>
+                </div>
+              )}
+
+              {/* eBay computed total vs DB net amount */}
+              {hasTransactions && (
+                <>
+                  <div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">eBay Total</div>
+                    <Mono className={`text-sm font-semibold ${mismatch ? "text-red-600" : ""}`}>
+                      £{ebayTotal.toFixed(2)}
+                    </Mono>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">DB Net Amount</div>
+                    <Mono className={`text-sm font-semibold ${mismatch ? "text-red-600" : ""}`}>
+                      £{payout.netAmount.toFixed(2)}
+                    </Mono>
+                  </div>
+                  {mismatch && (
+                    <div className="col-span-2">
+                      <div className="text-[10px] text-red-500 uppercase tracking-wider font-bold">⚠ Mismatch</div>
+                      <Mono className="text-sm text-red-600 font-bold">
+                        £{Math.abs(ebayTotal - payout.netAmount).toFixed(2)} difference
+                      </Mono>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* QBO Deposit ID */}
+              {payout.qboDepositId && (
+                <div className="col-span-2 sm:col-span-4">
+                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">QBO Deposit</div>
+                  <div className="flex items-center gap-2">
+                    <Mono color="dim" className="text-xs">#{payout.qboDepositId}</Mono>
+                    <Badge
+                      label={payout.qboSyncStatus === "synced" ? "Synced" : payout.qboSyncStatus ?? "—"}
+                      color={payout.qboSyncStatus === "synced" ? "#22C55E" : "#F59E0B"}
+                      small
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </SurfaceCard>
 
       {/* 3. Transactions (expandable rows) */}
