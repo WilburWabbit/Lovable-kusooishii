@@ -684,16 +684,11 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit
-    // Only include SALE and SHIPPING_LABEL fee Purchases on the deposit.
-    // NON_SALE_CHARGE expenses (e.g., subscriptions) are standalone Purchases
-    // paid from undeposited funds — the Purchase alone records both sides
-    // (DR Expense / CR Undeposited Funds), so they must NOT appear on the deposit.
-    // TRANSFER transactions are excluded for the same reason — they offset
-    // NON_SALE_CHARGE Purchases and net to zero.
+    // ALL expense types (SALE fees, SHIPPING_LABEL, NON_SALE_CHARGE) are included.
+    // Their Purchases are booked against Undeposited Funds, so they must appear
+    // on the deposit to clear that account.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
-      // Skip NON_SALE_CHARGE and TRANSFER — they are independent of the bank deposit
-      if (exp.transactionType === "NON_SALE_CHARGE" || exp.transactionType === "TRANSFER") continue;
 
       depositLines.push({
         Amount: -exp.amount,
@@ -704,9 +699,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    // NOTE: TRANSFER lines are no longer added to the deposit.
-    // The subscription Purchase already records DR Subscription Fees / CR Undeposited Funds,
-    // so neither the Purchase nor the offsetting TRANSFER should appear on the bank deposit.
+    // TRANSFER lines — eBay returns held funds (e.g., subscription offsets) into the payout.
+    // These are positive unlinked deposit lines that credit the subscription/fees account.
+    for (const tx of transferTxs) {
+      const transferAmount = Math.abs(tx.gross_amount);
+      if (transferAmount > 0) {
+        depositLines.push({
+          Amount: transferAmount,
+          DepositLineDetail: {
+            AccountRef: buildAccountRef(subscriptionAccount!),
+            PaymentMethodRef: { value: "1" },
+          },
+        });
+      }
+    }
 
     // Guard: ensure we have at least one deposit line
     if (depositLines.length === 0) {
@@ -716,6 +722,23 @@ Deno.serve(async (req) => {
         status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // ─── Reconciliation guard: verify constructed deposit matches expected net ─
+    const constructedTotal = round2(
+      (depositLines as Array<{ Amount: number }>).reduce((s, l) => s + l.Amount, 0)
+    );
+    const expectedNet = p.net_amount as number;
+    const delta = round2(Math.abs(constructedTotal - expectedNet));
+    if (delta > 0.02) {
+      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/TRANSFER transactions.`;
+      console.error(msg);
+      await persistSyncFailure(admin, payoutId, msg);
+      return new Response(
+        JSON.stringify({ success: false, error: msg, payoutId }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    console.log(`Deposit reconciliation OK: constructed=${constructedTotal}, expected=${expectedNet}, delta=${delta}`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
