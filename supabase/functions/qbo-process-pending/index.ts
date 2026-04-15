@@ -1456,14 +1456,28 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
       let payoutId: string;
       if (existingPayout) {
         payoutId = existingPayout.id;
-        await admin.from("payouts").update({
-          payout_date: txnDate, gross_amount: grossTotal,
-          total_fees: Math.round(feesTotal * 100) / 100,
-          net_amount: netAmount, channel, notes: memo,
+        // Check if this payout was sourced from eBay — don't overwrite amounts
+        const { data: currentPayout } = await admin.from("payouts")
+          .select("external_payout_id").eq("id", payoutId).single();
+
+        const updatePayload: Record<string, unknown> = {
+          qbo_deposit_id: qboDepositId,
           reconciliation_status: "reconciled",
-          ...(externalPayoutId ? { external_payout_id: externalPayoutId } : {}),
+          notes: memo,
           updated_at: new Date().toISOString(),
-        }).eq("id", payoutId);
+        };
+
+        // Only overwrite amounts if NOT eBay-sourced
+        if (!currentPayout?.external_payout_id) {
+          updatePayload.payout_date = txnDate;
+          updatePayload.gross_amount = grossTotal;
+          updatePayload.total_fees = Math.round(feesTotal * 100) / 100;
+          updatePayload.net_amount = netAmount;
+          updatePayload.channel = channel;
+          if (externalPayoutId) updatePayload.external_payout_id = externalPayoutId;
+        }
+
+        await admin.from("payouts").update(updatePayload).eq("id", payoutId);
       } else {
         const { data: newPayout, error: payoutErr } = await admin.from("payouts").insert({
           qbo_deposit_id: qboDepositId, payout_date: txnDate,
