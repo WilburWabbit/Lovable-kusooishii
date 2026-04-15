@@ -723,6 +723,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ─── Reconciliation guard: verify constructed deposit matches expected net ─
+    const constructedTotal = round2(
+      (depositLines as Array<{ Amount: number }>).reduce((s, l) => s + l.Amount, 0)
+    );
+    const expectedNet = p.net_amount as number;
+    const delta = round2(Math.abs(constructedTotal - expectedNet));
+    if (delta > 0.02) {
+      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/TRANSFER transactions.`;
+      console.error(msg);
+      await persistSyncFailure(admin, payoutId, msg);
+      return new Response(
+        JSON.stringify({ success: false, error: msg, payoutId }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    console.log(`Deposit reconciliation OK: constructed=${constructedTotal}, expected=${expectedNet}, delta=${delta}`);
+
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
 
