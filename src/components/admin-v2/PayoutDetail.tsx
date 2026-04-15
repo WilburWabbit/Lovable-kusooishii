@@ -173,9 +173,17 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         {(() => {
           // Compute eBay payout total from transactions
           const ebayTotal = transactions.reduce((sum, tx) => {
-            // net_amount is already signed correctly from eBay:
-            // SALE positive, SHIPPING_LABEL/NON_SALE_CHARGE negative, TRANSFER positive
-            return sum + tx.netAmount;
+            const amt = tx.netAmount;
+            switch (tx.transactionType) {
+              case "SALE":
+              case "TRANSFER":
+                return sum + amt;
+              case "SHIPPING_LABEL":
+              case "NON_SALE_CHARGE":
+                return sum - amt;
+              default:
+                return sum + amt;
+            }
           }, 0);
           const hasTransactions = transactions.length > 0;
           const mismatch = hasTransactions && Math.abs(ebayTotal - payout.netAmount) > 0.01;
