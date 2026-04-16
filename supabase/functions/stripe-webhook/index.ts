@@ -391,6 +391,11 @@ async function handleInPersonPaymentIntent(
       customerId = newCustomer?.id ?? null;
     }
 
+    // Fall back to "Cash Sales" generic customer for true POS/walk-in sales (no email, no Stripe customer)
+    if (!customerId) {
+      customerId = CASH_SALES_CUSTOMER_ID;
+    }
+
     const notes = [
       "Auto-imported from Stripe in-person/POS payment.",
       `payment_intent=${paymentIntent.id}`,
