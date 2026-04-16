@@ -73,45 +73,77 @@ Deno.serve(async (req) => {
     const vatBreakdown = adjustLineVATRounding(grossLines);
 
     // ─── 4. Build QBO SalesReceipt payload ──────────────────
+    const orderNumber = order.order_number ?? `KO-${String(order.id).slice(0, 7)}`;
+    const channel = (order.origin_channel as string)?.toLowerCase() ?? "website";
+
+    // Resolve QBO PaymentMethod and Class refs by name (cached lookup).
+    const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
+    const baseUrl = qboBaseUrl(realmId);
+
+    async function lookupQboRef(entity: "PaymentMethod" | "Class", name: string): Promise<string | null> {
+      const query = `select Id, Name from ${entity} where Name = '${name.replace(/'/g, "\\'")}'`;
+      const url = `${baseUrl}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+      const res = await fetchWithTimeout(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      });
+      if (!res.ok) {
+        console.warn(`QBO ${entity} lookup failed for "${name}" [${res.status}]`);
+        return null;
+      }
+      const json = await res.json();
+      const row = json?.QueryResponse?.[entity]?.[0];
+      return row?.Id ? String(row.Id) : null;
+    }
+
+    // Map channel to QBO PaymentMethod NAME. Per business rule: in-person
+    // (incl. part-cash + Stripe terminal) is recorded as "Stripe".
+    const paymentMethodNameByChannel: Record<string, string> = {
+      ebay: "eBay Managed Payments",
+      website: "Stripe",
+      web: "Stripe",
+      bricklink: "BrickLink",
+      brickowl: "BrickOwl",
+      in_person: "Stripe",
+    };
+    const paymentMethodName = paymentMethodNameByChannel[channel] ?? "Stripe";
+    const paymentMethodId = await lookupQboRef("PaymentMethod", paymentMethodName);
+
+    // Class: in-person sales are tagged with the "In Person Sale" class.
+    let classId: string | null = null;
+    if (channel === "in_person") {
+      classId = await lookupQboRef("Class", "In Person Sale");
+    }
+
     const qboLines = (lineItems ?? []).map((li: Record<string, unknown>, idx: number) => {
       const sku = li.sku as Record<string, unknown> | null;
       const qty = (li.quantity as number) ?? 1;
       const lineNet = vatBreakdown[idx]?.net ?? exVAT(((li.unit_price as number) ?? 0) * qty);
       const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
 
-      const line: Record<string, unknown> = {
-        DetailType: "SalesItemLineDetail",
-        Amount: lineNet,
-        SalesItemLineDetail: {
-          Qty: qty,
-          UnitPrice: unitNet,
-          TaxCodeRef: { value: "6" }, // UK 20% standard rate (QBO tax code ID)
-        },
+      const detail: Record<string, unknown> = {
+        Qty: qty,
+        UnitPrice: unitNet,
+        TaxCodeRef: { value: "6" }, // UK 20% standard rate (QBO tax code ID)
       };
 
-      // Add ItemRef if SKU has a QBO item ID
       if (sku?.qbo_item_id) {
-        (line.SalesItemLineDetail as Record<string, unknown>).ItemRef = {
-          value: String(sku.qbo_item_id),
-        };
+        detail.ItemRef = { value: String(sku.qbo_item_id) };
+      }
+      if (classId) {
+        detail.ClassRef = { value: classId };
       }
 
-      return line;
+      return {
+        DetailType: "SalesItemLineDetail",
+        Amount: lineNet,
+        SalesItemLineDetail: detail,
+      } as Record<string, unknown>;
     });
 
     const totalVAT = vatBreakdown.reduce((sum, v) => sum + v.vat, 0);
-
-    // Map channel to payment method
-    const paymentMethodMap: Record<string, string> = {
-      ebay: "eBay Managed Payments",
-      website: "Stripe",
-      bricklink: "BrickLink",
-      brickowl: "BrickOwl",
-      in_person: "Cash",
-    };
-
-    const orderNumber = order.order_number ?? `KO-${String(order.id).slice(0, 7)}`;
-    const channel = (order.origin_channel as string)?.toLowerCase() ?? "website";
 
     const salesReceiptPayload: Record<string, unknown> = {
       DocNumber: orderNumber,
@@ -121,14 +153,18 @@ Deno.serve(async (req) => {
       TxnTaxDetail: {
         TotalTax: Math.round(totalVAT * 100) / 100,
       },
-      PaymentMethodRef: { value: paymentMethodMap[channel] ?? channel },
       CustomerRef: { value: qboCustomerRef },
     };
 
+    if (paymentMethodId) {
+      salesReceiptPayload.PaymentMethodRef = { value: paymentMethodId };
+    }
+    if (classId) {
+      salesReceiptPayload.ClassRef = { value: classId };
+    }
+
 
     // ─── 5. POST to QBO ─────────────────────────────────────
-    const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
-    const baseUrl = qboBaseUrl(realmId);
 
     const qboRes = await fetchWithTimeout(`${baseUrl}/salesreceipt?minorversion=65`, {
       method: "POST",
