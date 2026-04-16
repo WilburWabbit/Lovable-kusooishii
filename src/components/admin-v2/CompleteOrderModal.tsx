@@ -5,6 +5,8 @@ import {
   Loader2,
   Plus,
   X,
+  CreditCard,
+  Banknote,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,6 +33,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
 import { Mono, SectionHead } from "./ui-primitives";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
 // ─── Types ──────────────────────────────────────────────────
@@ -243,6 +246,10 @@ export function CompleteOrderModal({
 }: CompleteOrderModalProps) {
   const queryClient = useQueryClient();
   const [lineItems, setLineItems] = useState<LineItem[]>([createEmptyLine()]);
+  const [cardAmount, setCardAmount] = useState<string>(grossTotal.toFixed(2));
+  const [cashAmount, setCashAmount] = useState<string>("0.00");
+  const [discount, setDiscount] = useState<string>("0.00");
+  const [blueBellDonation, setBlueBellDonation] = useState(false);
 
   const lookupQuery = useQuery({
     queryKey: ["complete-order", "lookups"],
@@ -333,17 +340,18 @@ export function CompleteOrderModal({
     }, 0),
   );
 
-  const difference = roundCurrency(lineTotal - grossTotal);
-  const isMatched = Math.abs(difference) <= 0.01;
+  const discountAmount = parseCurrency(discount);
+  const netTotal = roundCurrency(lineTotal - discountAmount);
+  const cardValue = parseCurrency(cardAmount);
+  const cashValue = roundCurrency(Math.max(0, netTotal - cardValue));
+  const totalPayment = roundCurrency(cardValue + cashValue);
+  const isBalanced = Math.abs(totalPayment - netTotal) <= 0.01;
+  const hasCashPortion = cashValue > 0.01;
 
   // ─── Validation ───────────────────────────────────────────
 
-  const hasLines = lineItems.some((l) => l.skuId !== null);
-  const allLinesValid = lineItems.every(
-    (l) => l.skuId !== null || (l.skuId === null && l.unitPrice === "" && l.productName === ""),
-  );
   const validLines = lineItems.filter((l) => l.skuId !== null);
-  const canSubmit = validLines.length > 0 && lineItems.every((l) => l.skuId !== null);
+  const canSubmit = validLines.length > 0 && lineItems.every((l) => l.skuId !== null) && netTotal > 0;
 
   // ─── Mutation ─────────────────────────────────────────────
 
@@ -408,16 +416,30 @@ export function CompleteOrderModal({
         }
       }
 
-      // Recalculate order totals — Stripe grossTotal is authoritative
-      const merchandiseSubtotal = roundCurrency(grossTotal / 1.2);
-      const taxTotal = roundCurrency(grossTotal - merchandiseSubtotal);
+      // Build updated notes
+      const noteParts: string[] = [];
+      if (notes) noteParts.push(notes);
+      if (hasCashPortion) noteParts.push(`cash_amount=${cashValue.toFixed(2)}`);
+      if (discountAmount > 0) noteParts.push(`discount_applied=${discountAmount.toFixed(2)}`);
+      if (blueBellDonation) noteParts.push("blue_bell_donation=true");
+      const updatedNotes = noteParts.join(". ");
+
+      // Recalculate order totals — full sale value is authoritative
+      const saleGross = netTotal;
+      const merchandiseSubtotal = roundCurrency(saleGross / 1.2);
+      const taxTotal = roundCurrency(saleGross - merchandiseSubtotal);
 
       const { error: orderUpdateErr } = await supabase
         .from("sales_order")
         .update({
+          gross_total: saleGross,
           merchandise_subtotal: merchandiseSubtotal,
           tax_total: taxTotal,
           net_amount: merchandiseSubtotal,
+          discount_total: discountAmount > 0 ? discountAmount : 0,
+          payment_method: hasCashPortion ? "split" : (paymentMethod ?? "card"),
+          blue_bell_club: blueBellDonation,
+          notes: updatedNotes || null,
           v2_status: allAllocated ? "new" : "needs_allocation",
           qbo_sync_status: allAllocated ? "pending" : "needs_manual_review",
         } as never)
@@ -441,6 +463,7 @@ export function CompleteOrderModal({
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.all });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
       toast.success(
         result.allAllocated
@@ -489,16 +512,22 @@ export function CompleteOrderModal({
             <div className="text-zinc-500">Date</div>
             <div className="text-zinc-900">{orderDate}</div>
           </div>
-          <div className="mt-2">
-            <div className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1">
-              Memo
+          {memo && (
+            <div className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+              <div className="text-[11px] text-amber-700 uppercase tracking-wide font-medium mb-0.5">
+                Stripe Sale Note
+              </div>
+              <p className="text-[13px] text-amber-900 font-medium">{memo}</p>
             </div>
-            {memo ? (
-              <p className="text-[13px] text-zinc-700 italic">{memo}</p>
-            ) : (
+          )}
+          {!memo && (
+            <div className="mt-2">
+              <div className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1">
+                Memo
+              </div>
               <p className="text-[13px] text-zinc-500">No memo</p>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* ─── Section 2: Line Items ─────────────────────── */}
@@ -506,7 +535,7 @@ export function CompleteOrderModal({
           <SectionHead>Line Items</SectionHead>
 
           <div className="space-y-2">
-            {lineItems.map((line, idx) => (
+            {lineItems.map((line) => (
               <div
                 key={line.key}
                 className="flex items-start gap-2"
@@ -579,33 +608,120 @@ export function CompleteOrderModal({
             <Plus className="h-3.5 w-3.5" />
             Add line
           </button>
+        </div>
 
-          {/* ─── Running totals comparison ─────────────── */}
-          <div className="mt-3 pt-3 border-t border-zinc-100 space-y-1">
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-zinc-500">Line total</span>
-              <Mono className={isMatched ? "text-green-600" : "text-amber-500"}>
-                £{lineTotal.toFixed(2)}
-              </Mono>
+        {/* ─── Section 3: Discount & Blue Bell ───────────── */}
+        <div className="space-y-3 pt-4 border-t border-zinc-100 mt-4">
+          <SectionHead>Adjustments</SectionHead>
+
+          <div className="flex items-center gap-4">
+            <label className="text-[13px] text-zinc-600 w-20">Discount</label>
+            <div className="relative w-32">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-zinc-400 font-mono">£</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                className="w-full rounded-md border border-zinc-200 bg-white pl-7 pr-3 py-2 text-[13px] text-zinc-900 text-right font-mono"
+              />
             </div>
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-zinc-500">Payment</span>
-              <Mono color="teal">£{grossTotal.toFixed(2)}</Mono>
-            </div>
-            {!isMatched && lineTotal > 0 && (
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-amber-600 font-medium">
-                  {difference > 0 ? "Overage" : "Shortfall"}
-                </span>
-                <Mono color="amber">
-                  £{Math.abs(difference).toFixed(2)}
-                </Mono>
-              </div>
-            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            <label htmlFor="bluebell-toggle" className="text-[13px] text-zinc-600 flex-1">
+              Includes Blue Bell donation
+            </label>
+            <Switch
+              id="bluebell-toggle"
+              checked={blueBellDonation}
+              onCheckedChange={setBlueBellDonation}
+            />
           </div>
         </div>
 
-        {/* ─── Section 3: Footer ─────────────────────────── */}
+        {/* ─── Section 4: Payment Split ──────────────────── */}
+        <div className="space-y-3 pt-4 border-t border-zinc-100 mt-4">
+          <SectionHead>Payment Split</SectionHead>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <CreditCard className="h-4 w-4 text-zinc-400" />
+              <label className="text-[13px] text-zinc-600 w-24">Card (Stripe)</label>
+              <div className="relative w-32">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-zinc-400 font-mono">£</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={cardAmount}
+                  onChange={(e) => setCardAmount(e.target.value)}
+                  className="w-full rounded-md border border-zinc-200 bg-white pl-7 pr-3 py-2 text-[13px] text-zinc-900 text-right font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Banknote className="h-4 w-4 text-zinc-400" />
+              <label className="text-[13px] text-zinc-600 w-24">Cash</label>
+              <div className="relative w-32">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-zinc-400 font-mono">£</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={cashValue.toFixed(2)}
+                  readOnly
+                  className="w-full rounded-md border border-zinc-100 bg-zinc-50 pl-7 pr-3 py-2 text-[13px] text-zinc-700 text-right font-mono cursor-default"
+                />
+              </div>
+              {hasCashPortion && (
+                <span className="text-[11px] text-amber-600 font-medium">Split payment</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── Section 5: Totals ─────────────────────────── */}
+        <div className="mt-4 pt-3 border-t border-zinc-100 space-y-1">
+          <div className="flex items-center justify-between text-[13px]">
+            <span className="text-zinc-500">Line total</span>
+            <Mono>£{lineTotal.toFixed(2)}</Mono>
+          </div>
+          {discountAmount > 0 && (
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-zinc-500">Discount</span>
+              <Mono color="red">−£{discountAmount.toFixed(2)}</Mono>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-[13px] font-semibold pt-1 border-t border-zinc-50">
+            <span className="text-zinc-700">Net total</span>
+            <Mono color="teal">£{netTotal.toFixed(2)}</Mono>
+          </div>
+          <div className="flex items-center justify-between text-[12px] text-zinc-400">
+            <span>Card</span>
+            <Mono color="dim">£{cardValue.toFixed(2)}</Mono>
+          </div>
+          {hasCashPortion && (
+            <div className="flex items-center justify-between text-[12px] text-zinc-400">
+              <span>Cash</span>
+              <Mono color="dim">£{cashValue.toFixed(2)}</Mono>
+            </div>
+          )}
+          {!isBalanced && lineTotal > 0 && (
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-amber-600 font-medium">
+                {totalPayment > netTotal ? "Overpayment" : "Shortfall"}
+              </span>
+              <Mono color="amber">
+                £{Math.abs(roundCurrency(totalPayment - netTotal)).toFixed(2)}
+              </Mono>
+            </div>
+          )}
+        </div>
+
+        {/* ─── Section 6: Footer ─────────────────────────── */}
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 mt-4">
           <button
             type="button"
