@@ -46,6 +46,8 @@ Deno.serve(async (req) => {
     if (lineErr) throw new Error(`Failed to fetch line items: ${lineErr.message}`);
 
     // ─── 2. Fetch customer ──────────────────────────────────
+    // Default to QBO "Cash Sales" customer (id 55) for unmapped/in-person sales.
+    const CASH_SALES_QBO_ID = "55";
     let qboCustomerRef: string | null = null;
     if (order.customer_id) {
       const { data: customer } = await admin
@@ -56,24 +58,33 @@ Deno.serve(async (req) => {
 
       qboCustomerRef = customer?.qbo_customer_id ?? null;
     }
+    if (!qboCustomerRef) {
+      qboCustomerRef = CASH_SALES_QBO_ID;
+    }
 
     // ─── 3. Calculate VAT per line ──────────────────────────
+    // QBO requires SalesReceipt amounts to be tax-EXCLUSIVE; QBO then adds VAT
+    // on top via the TaxCodeRef. We send `net` (ex-VAT) line amounts and
+    // `GlobalTaxCalculation: "TaxExcluded"` so the resulting QBO total matches
+    // the app's gross-inclusive total exactly.
     const grossLines = (lineItems ?? []).map((li: Record<string, unknown>) => ({
-      gross: (li.unit_price as number) ?? 0,
+      gross: ((li.unit_price as number) ?? 0) * ((li.quantity as number) ?? 1),
     }));
     const vatBreakdown = adjustLineVATRounding(grossLines);
 
     // ─── 4. Build QBO SalesReceipt payload ──────────────────
     const qboLines = (lineItems ?? []).map((li: Record<string, unknown>, idx: number) => {
       const sku = li.sku as Record<string, unknown> | null;
-      const unitPrice = vatBreakdown[idx]?.net ?? exVAT((li.unit_price as number) ?? 0);
+      const qty = (li.quantity as number) ?? 1;
+      const lineNet = vatBreakdown[idx]?.net ?? exVAT(((li.unit_price as number) ?? 0) * qty);
+      const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
 
       const line: Record<string, unknown> = {
         DetailType: "SalesItemLineDetail",
-        Amount: unitPrice,
+        Amount: lineNet,
         SalesItemLineDetail: {
-          Qty: 1,
-          UnitPrice: unitPrice,
+          Qty: qty,
+          UnitPrice: unitNet,
           TaxCodeRef: { value: "6" }, // UK 20% standard rate (QBO tax code ID)
         },
       };
@@ -106,15 +117,14 @@ Deno.serve(async (req) => {
       DocNumber: orderNumber,
       TxnDate: order.created_at ? new Date(order.created_at as string).toISOString().slice(0, 10) : undefined,
       Line: qboLines,
+      GlobalTaxCalculation: "TaxExcluded",
       TxnTaxDetail: {
         TotalTax: Math.round(totalVAT * 100) / 100,
       },
       PaymentMethodRef: { value: paymentMethodMap[channel] ?? channel },
+      CustomerRef: { value: qboCustomerRef },
     };
 
-    if (qboCustomerRef) {
-      salesReceiptPayload.CustomerRef = { value: qboCustomerRef };
-    }
 
     // ─── 5. POST to QBO ─────────────────────────────────────
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
