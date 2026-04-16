@@ -165,8 +165,6 @@ Deno.serve(async (req) => {
 
 
     // ─── 5. POST to QBO ─────────────────────────────────────
-    const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
-    const baseUrl = qboBaseUrl(realmId);
 
     const qboRes = await fetchWithTimeout(`${baseUrl}/salesreceipt?minorversion=65`, {
       method: "POST",
