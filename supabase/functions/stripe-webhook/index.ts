@@ -329,6 +329,10 @@ async function handleInPersonPaymentIntent(
     let customerId: string | null = null;
     const stripeCustomerId = typeof paymentIntent.customer === "string" ? paymentIntent.customer : paymentIntent.customer?.id ?? null;
     let stripeCustomer: Stripe.Customer | null = null;
+
+    // Default fallback for in-person POS sales: use the canonical "Cash Sales" customer
+    // (mapped to QBO customer id 55) instead of creating a generic "Market Sale" record.
+    const CASH_SALES_CUSTOMER_ID = "e10ef315-c726-43ac-ad8d-ea4a54f067c6";
     if (stripeCustomerId) {
       const { data: existingByStripeId } = await supabase
         .from("customer")
