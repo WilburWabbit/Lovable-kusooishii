@@ -145,6 +145,15 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               <span className="text-muted-foreground/50 font-mono text-[11px]">QBO: {order.docNumber}</span>
             )}
           </div>
+          {order.channel === "in_person" && order.notes && (() => {
+            const noteMatch = order.notes?.match(/description=([^.]*?)(?:\s+\w+=|\.\s|$)/);
+            const stripeNote = noteMatch?.[1]?.trim();
+            return stripeNote ? (
+              <div className="mt-1 inline-flex items-center gap-1.5 rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[12px] text-amber-800">
+                <span className="text-amber-600 font-medium">Sale note:</span> {stripeNote}
+              </div>
+            ) : null;
+          })()}
           {welcomeCode && (
             <div className="mt-1">
               <Badge
