@@ -1,89 +1,49 @@
 
 
-# Enhance In-Person Draft Order Editing
+## Root cause
 
-## What this does
-When a Stripe tap-to-pay payment creates a draft order, the current "Add Items & Complete" modal is limited — you can only add line items and submit. This plan adds full editing capabilities: view the Stripe sale note, split payment between card and cash, add discounts, and flag Blue Bell donations.
+The payout has these moving parts:
 
-## Changes
+| Type | Amount | Purpose |
+|---|---|---|
+| 10 SALE | +£301.89 gross, −£45.55 fees | Sales receipts |
+| 10 SHIPPING_LABEL | −£33.16 | Shipping costs |
+| NON_SALE_CHARGE "Insertion Fee" (£0.12) | −£0.12 | Listing fee |
+| **NON_SALE_CHARGE "Invoice 2026-02-28 → 2026-03-30" (£32.40)** | −£32.40 | Monthly store subscription invoice |
+| **TRANSFER `TRANSFER_FROM` (£32.40)** | +£32.40 | eBay paying the invoice from undeposited funds |
 
-### 1. Enhance CompleteOrderModal with new fields
+eBay's `net_amount` of **£222.06** is the actual cash payout — it already accounts for the subscription being paid via the TRANSFER (the TRANSFER cancels the NON_SALE_CHARGE invoice).
 
-**File**: `src/components/admin-v2/CompleteOrderModal.tsx`
+The current code (lines 355–359) **excludes TRANSFERs** from expense processing on the assumption that the matching NON_SALE_CHARGE represents the same money already. The reasoning was correct in principle — you don't want to double-count — but the **direction is inverted for invoice-style charges**:
 
-Add these controls to the modal:
+- For a **subscription/invoice charge**, eBay issues an invoice (NON_SALE_CHARGE +£32.40) and then immediately pays it (TRANSFER +£32.40 OUT). Both together = zero net effect on the payout. eBay's `net_amount` reflects this zero impact.
+- The current code keeps the NON_SALE_CHARGE as a £32.40 deduction and drops the TRANSFER → the deposit is £32.40 short.
 
-- **Stripe Note display** — Already partially working (memo extraction from `description=` in notes). Make it more prominent and show the raw Stripe description directly (it's already stored in the order notes as `description=31173`).
+For an **insertion fee** (£0.12), there is no matching TRANSFER — eBay deducts it directly from this payout. So it correctly belongs as a deduction.
 
-- **Split Payment section** — Two inputs:
-  - "Card (Stripe)" — pre-filled with the Stripe `grossTotal`, editable downward
-  - "Cash" — auto-calculates as `lineTotal - cardAmount`
-  - Store the card amount via the existing `payment_reference` (Stripe PI) and add `payment_method: "split"` when cash portion > 0
-  - On save, update `gross_total` to the full line total (card + cash), keep `payment_reference` for the Stripe portion
+So the rule is: **a NON_SALE_CHARGE that has a matching TRANSFER in the same payout has already been settled and should NOT be deducted from the deposit.** The Purchase still gets created in QBO (the expense is real), but it should be booked against the bank account directly (or against an "eBay Subscriptions" liability), not against Undeposited Funds, because Undeposited Funds is never debited for it in this payout.
 
-- **Discount field** — A single numeric input for discount amount (gross, VAT-inclusive). Deducted from line total before comparing against payment. Saved to `discount_total` on the order.
+## Fix
 
-- **Blue Bell donation toggle** — A checkbox/switch that sets `blue_bell_club: true` on the order. Already exists as a column.
+### Single change in `supabase/functions/qbo-sync-payout/index.ts`
 
-### 2. Update order save logic in the mutation
+1. **Detect "settled" NON_SALE_CHARGE transactions** — for each NON_SALE_CHARGE, check if there's a TRANSFER with the same absolute `gross_amount` in `allTransactions`. Tag these as `settled_via_transfer`.
 
-**File**: `src/components/admin-v2/CompleteOrderModal.tsx`
+2. **For settled NON_SALE_CHARGEs:**
+   - Still create a QBO Purchase (the expense is real and should hit the P&L), but book it against the **bank account directly** (`payout_bank`), not Undeposited Funds. This represents "eBay paid this invoice on our behalf out of separate funds" — which in QBO terms is a direct bank-paid expense.
+   - **Skip adding it as a negative deposit line** — Undeposited Funds wasn't touched for this charge in this payout.
 
-When saving, the mutation currently uses the Stripe `grossTotal` as authoritative. Change to:
-- `gross_total` = line total − discount + cash portion (full sale value)
-- `discount_total` = discount amount entered
-- `payment_method` = "card" if no cash, "split" if cash portion > 0
-- `blue_bell_club` = toggle value
-- `notes` = append cash amount info if split payment
-- Recalculate `merchandise_subtotal`, `tax_total`, `net_amount` from the new gross total
+3. **For unsettled NON_SALE_CHARGEs (e.g. insertion fees):** keep current behaviour — Purchase against Undeposited Funds, negative line on the deposit.
 
-### 3. Add cash amount to sales_order (no schema change needed)
+4. **TRANSFER handling:** keep the existing exclusion comment, but update it to reflect the new model: TRANSFER is informational only — it tells us the matching NON_SALE_CHARGE was paid out-of-band and shouldn't reduce this payout's deposit.
 
-The existing `notes` field can record the cash portion, and `payment_method` already supports arbitrary strings. No new columns required. The split is:
-- `payment_reference` = Stripe PI (card portion tracking)  
-- `gross_total` = full sale amount  
-- `discount_total` = any discount applied  
-- `notes` = includes `cash_amount=X.XX` for audit
+### Result
+- Constructed deposit becomes 189.66 + 32.40 = **£222.06** ✓ matches `net_amount`
+- The £32.40 subscription is still recorded as a Purchase in QBO (booked to subscription_fees, paid from bank), so the P&L is unaffected
+- Undeposited Funds clears correctly: every penny that was added to UF (sales gross) is matched by either a deposit line or a Purchase debiting UF
 
-### 4. Show Stripe note on OrderDetail page
+### Files
+- `supabase/functions/qbo-sync-payout/index.ts` — add TRANSFER lookup map, branch NON_SALE_CHARGE handling on `settled_via_transfer`, change `bankAccountRef` for settled charges, skip them in the deposit-line loop.
 
-**File**: `src/components/admin-v2/OrderDetail.tsx`
-
-For `in_person` orders, extract and display the Stripe description from the notes field in the order header area (already stored as `description=31173`).
-
-## No database migrations needed
-
-All fields already exist: `discount_total`, `blue_bell_club`, `payment_method`, `notes`, `gross_total`.
-
-## Summary of UI additions to CompleteOrderModal
-
-```text
-┌─────────────────────────────────────┐
-│ Complete Order KO-0009642           │
-├─────────────────────────────────────┤
-│ Payment Summary                     │
-│   £17.00  Stripe in-person payment  │
-│   Customer: Cash Sales              │
-│   Stripe Note: 31173                │
-├─────────────────────────────────────┤
-│ Line Items                          │
-│   [SKU picker] [Price] [Qty] [x]    │
-│   + Add line                        │
-├─────────────────────────────────────┤
-│ Payment Split                       │
-│   Card (Stripe): [£17.00]           │
-│   Cash:          [£0.00]            │
-├─────────────────────────────────────┤
-│ Discount: [£0.00]                   │
-│ ☐ Includes Blue Bell donation       │
-├─────────────────────────────────────┤
-│ Line total:  £X.XX                  │
-│ Discount:   -£X.XX                  │
-│ Net total:   £X.XX                  │
-│ Card:        £17.00                 │
-│ Cash:        £X.XX                  │
-├─────────────────────────────────────┤
-│           [Cancel] [Complete Order] │
-└─────────────────────────────────────┘
-```
+No DB migrations or schema changes needed.
 
