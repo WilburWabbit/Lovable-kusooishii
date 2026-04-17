@@ -71,6 +71,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// Match tolerance for QBO returned TotalAmt vs expected gross.
+// Must be 0 — we want exact penny equality.
+const PENNY_EXACT = 0;
+
+
 // ─── Account mapping helper ──────────────────────────────────
 
 async function getAccountMapping(
