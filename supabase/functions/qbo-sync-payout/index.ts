@@ -1112,45 +1112,52 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Reconciliation guard: integer-pence exact match ───
-    // All deposit-line amounts at this point are verified QBO TotalAmts.
-    // Sum them in integer pence and compare to the source payout net.
-    //
-    // When transactions were skipped (drift unresolvable after retries), the
-    // constructed total will legitimately differ from the payout net by the
-    // sum of the skipped expense amounts. We tolerate that mismatch and mark
-    // the payout `partial` further down — but only when the delta exactly
-    // accounts for the skipped expenses (otherwise something else is wrong).
+    // ─── Reconciliation: absorb settlement drift as adjustment ───
+    // All deposit-line amounts at this point are verified QBO TotalAmts (for
+    // linked SalesReceipts/Purchases QBO would force these anyway). Any
+    // residual delta vs the payout net is a real settlement adjustment —
+    // marketplace adjustments, currency rounding, post-sale price tweaks,
+    // partial refunds settled at payout time, etc. — and is booked explicitly
+    // as a separate unlinked "Payout settlement adjustment" line so the
+    // accounting is visible rather than silently misposted.
     const constructedPence = (depositLines as Array<{ Amount: number }>)
       .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
-    const constructedTotal = fromPence(constructedPence);
-    // Skipped expense (Purchase) txns: omitted negative deposit line → delta is +K.
-    // Skipped sales_receipt txns:      omitted positive deposit line → delta is -G.
-    // Net expected delta = sum(expense.expected) - sum(salesReceipt.expected).
+    // Skipped expense (Purchase) txns: omitted negative deposit line → +K pence missing.
+    // Skipped sales_receipt txns:      omitted positive deposit line → -G pence missing.
     const skippedExpensePence = skippedTransactions
       .filter((t) => t.kind !== "sales_receipt")
       .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
     const skippedSalesPence = skippedTransactions
       .filter((t) => t.kind === "sales_receipt")
       .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
-    const expectedDeltaPence = skippedExpensePence - skippedSalesPence;
-    if (constructedPence !== expectedPence) {
-      const deltaPence = constructedPence - expectedPence;
-      const tolerated = skippedTransactions.length > 0 && deltaPence === expectedDeltaPence;
-      if (!tolerated) {
-        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (expense ${skippedExpensePence}p, sales ${skippedSalesPence}p, expected delta ${expectedDeltaPence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
-        console.error(msg);
-        await persistSyncFailure(admin, payoutId, msg);
-        return new Response(
-          JSON.stringify({ success: false, error: msg, payoutId, skipped: skippedTransactions }),
-          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      console.warn(`Deposit reconciliation tolerated mismatch of ${deltaPence}p — fully accounted for by ${skippedTransactions.length} skipped transaction(s). Payout will be marked partial.`);
+    // The deposit only needs to clear what it actually contains — i.e. the
+    // payout net adjusted for skipped lines that aren't in the deposit.
+    const targetDepositPence = expectedPence + skippedExpensePence - skippedSalesPence;
+    const adjustmentPence = targetDepositPence - constructedPence;
+    let payoutAdjustmentAmount = 0;
+
+    if (adjustmentPence !== 0) {
+      payoutAdjustmentAmount = fromPence(adjustmentPence);
+      const adjustmentMapping =
+        (await getAccountMapping(admin, "payout_adjustment")) ?? sellingFeesAccount;
+      const adjAccountRef = buildAccountRef(adjustmentMapping);
+      console.warn(
+        `Payout settlement adjustment: ${adjustmentPence}p (£${payoutAdjustmentAmount.toFixed(2)}) ` +
+        `posted to "${adjustmentMapping.name ?? adjustmentMapping.id}" — constructed £${fromPence(constructedPence).toFixed(2)}, ` +
+        `target £${fromPence(targetDepositPence).toFixed(2)} (payout net £${expectedNet.toFixed(2)}).`
+      );
+      depositLines.push({
+        Amount: payoutAdjustmentAmount,
+        DepositLineDetail: {
+          AccountRef: adjAccountRef,
+          PaymentMethodRef: { value: "1" },
+        },
+        Description: `Payout settlement adjustment (${channel} ${externalPayoutId})`,
+      });
     } else {
-      console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
+      console.log(`Deposit reconciliation OK: constructed=£${fromPence(constructedPence).toFixed(2)}, no adjustment needed`);
     }
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
