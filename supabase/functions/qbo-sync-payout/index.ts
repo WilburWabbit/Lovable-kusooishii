@@ -20,8 +20,6 @@ import {
 import {
   toPence,
   fromPence,
-  assertQBOTotalMatches,
-  QBOTotalMismatchError,
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
