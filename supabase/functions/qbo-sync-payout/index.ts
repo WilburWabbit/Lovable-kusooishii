@@ -592,7 +592,7 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
