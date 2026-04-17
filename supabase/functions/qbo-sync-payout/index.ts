@@ -1194,13 +1194,13 @@ Deno.serve(async (req) => {
     }
 
     // ─── Post-create exact-balance safeguard for the Deposit ─
-    // QBO's returned TotalAmt must match the expected payout net to the penny.
-    // If it doesn't, the deposit is wrong even though every linked doc was right
-    // (e.g. if QBO reapplied tax to the deposit header). Mark sync as error.
+    // QBO's returned TotalAmt must match the EFFECTIVE expected total — i.e.
+    // the payout net plus any skipped-expense pence the deposit didn't subtract.
+    const effectiveExpectedNet = fromPence(toPence(expectedNet) + skippedExpensePence);
     if (qboDepositId && qboDepositTotal !== null) {
       try {
         assertQBOTotalMatches({
-          expectedGross: expectedNet,
+          expectedGross: effectiveExpectedNet,
           qboTotalAmt: qboDepositTotal,
           docKind: "Deposit",
           qboDocId: qboDepositId,
@@ -1213,7 +1213,7 @@ Deno.serve(async (req) => {
           // needs to delete it manually before retry. Persist as error.
           await persistSyncFailure(admin, payoutId, e.message);
           return new Response(
-            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal }),
+            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal, skipped: skippedTransactions }),
             { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
@@ -1223,9 +1223,19 @@ Deno.serve(async (req) => {
 
 
     // ─── 7. Update payout record ────────────────────────────
+    // Status:
+    //  - synced  → deposit landed and no skipped transactions
+    //  - partial → deposit landed but ≥1 transactions skipped (drift unresolvable)
+    //  - error   → deposit creation itself failed
+    const finalStatus = qboDepositId
+      ? (skippedTransactions.length > 0 ? "partial" : "synced")
+      : "error";
+    const partialMessage = skippedTransactions.length > 0
+      ? `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
+      : null;
     const updateData: Record<string, unknown> = {
-      qbo_sync_status: qboDepositId ? "synced" : "error",
-      qbo_sync_error: syncError,
+      qbo_sync_status: finalStatus,
+      qbo_sync_error: syncError ?? partialMessage,
       sync_attempted_at: new Date().toISOString(),
     };
     if (qboDepositId) updateData.qbo_deposit_id = qboDepositId;
@@ -1237,15 +1247,18 @@ Deno.serve(async (req) => {
 
     if (!qboDepositId) {
       return new Response(
-        JSON.stringify({ success: false, error: syncError, payoutId }),
+        JSON.stringify({ success: false, error: syncError, payoutId, skipped: skippedTransactions }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     return jsonResponse({
       success: true,
+      status: finalStatus,
       qbo_deposit_id: qboDepositId,
       expenses_created: expenseResults.length,
+      skipped: skippedTransactions,
+      partial_message: partialMessage,
       payoutId,
     });
   } catch (err) {
