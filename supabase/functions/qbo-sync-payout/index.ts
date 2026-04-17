@@ -1101,22 +1101,40 @@ Deno.serve(async (req) => {
     // ─── Reconciliation guard: integer-pence exact match ───
     // All deposit-line amounts at this point are verified QBO TotalAmts.
     // Sum them in integer pence and compare to the source payout net.
+    //
+    // When transactions were skipped (drift unresolvable after retries), the
+    // constructed total will legitimately differ from the payout net by the
+    // sum of the skipped expense amounts. We tolerate that mismatch and mark
+    // the payout `partial` further down — but only when the delta exactly
+    // accounts for the skipped expenses (otherwise something else is wrong).
     const constructedPence = (depositLines as Array<{ Amount: number }>)
       .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
     const constructedTotal = fromPence(constructedPence);
+    const skippedExpensePence = skippedTransactions.reduce(
+      (s, t) => s + toPence(Math.abs(t.expected)),
+      0,
+    );
     if (constructedPence !== expectedPence) {
       const deltaPence = constructedPence - expectedPence;
-      const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
-      console.error(msg);
-      await persistSyncFailure(admin, payoutId, msg);
-      return new Response(
-        JSON.stringify({ success: false, error: msg, payoutId }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      // Skipped expenses would have been negative deposit lines. So a payout
+      // net of N with K pence of skipped expenses produces a constructed
+      // total of N + K (we didn't subtract them). delta should equal +K.
+      const tolerated = skippedTransactions.length > 0 && deltaPence === skippedExpensePence;
+      if (!tolerated) {
+        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (sum ${skippedExpensePence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+        console.error(msg);
+        await persistSyncFailure(admin, payoutId, msg);
+        return new Response(
+          JSON.stringify({ success: false, error: msg, payoutId, skipped: skippedTransactions }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      console.warn(`Deposit reconciliation tolerated mismatch of ${deltaPence}p — fully accounted for by ${skippedTransactions.length} skipped transaction(s). Payout will be marked partial.`);
+    } else {
+      console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
     }
-    console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
