@@ -236,24 +236,42 @@ async function createQBOPurchase(
     privateNote: string;
     docNumber?: string;
   },
-): Promise<{ id: string } | { error: string }> {
-  const qboLines = opts.lines.map((line) => {
-    const exVat = round2(line.amount / VAT_DIVISOR);
-    const vat = round2(line.amount - exVat);
+): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
+  // ─── TaxInclusive integer-pence math ──────────────────────
+  // Posting Purchases as TaxInclusive lets us send the *gross* fee amounts
+  // exactly as eBay reported them, with QBO deriving net+tax internally —
+  // no round-each-line floating-point drift. Every line's `Amount` is the
+  // gross (VAT-inclusive) value; `TaxInclusiveAmt` mirrors `Amount`; QBO
+  // computes `TaxAmount` from the linked tax code.
+  //
+  // We still pass an explicit `TaxAmount` per line (using the integer-pence
+  // distributor) so the line-level breakdown sums exactly to the expected
+  // total VAT and total gross — last line absorbs any 1p remainder.
+  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
+  const distributed = distributeLinesByGrossPence(grossPenceLines);
+  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+  const expectedGross = fromPence(totalGrossPence);
+
+  const qboLines = opts.lines.map((line, idx) => {
+    const d = distributed[idx];
+    const grossLine = fromPence(d.grossPence);
+    const vatLine = fromPence(d.vatPence);
 
     if (line.itemRef) {
       // Item-linked line — links the expense to a specific QBO Item (e.g. insertion fee
       // against the SKU that was listed). The expense account is determined by the Item's
       // own expense account in QBO.
+      // For TaxInclusive posting, UnitPrice is the gross unit price.
       const detail: Record<string, unknown> = {
         ItemRef: line.itemRef,
         Qty: 1,
-        UnitPrice: exVat,
+        UnitPrice: grossLine,
         TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+        TaxInclusiveAmt: grossLine,
       };
       if (line.customerRef) detail.CustomerRef = line.customerRef;
       return {
-        Amount: exVat,
+        Amount: grossLine,
         DetailType: "ItemBasedExpenseLineDetail",
         ItemBasedExpenseLineDetail: detail,
         Description: line.description,
@@ -263,14 +281,15 @@ async function createQBOPurchase(
     const detail: Record<string, unknown> = {
       AccountRef: line.accountRef,
       TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
-      TaxAmount: vat,
+      TaxAmount: vatLine,
+      TaxInclusiveAmt: grossLine,
     };
     if (line.customerRef) {
       detail.CustomerRef = line.customerRef;
     }
 
     return {
-      Amount: exVat,
+      Amount: grossLine,
       DetailType: "AccountBasedExpenseLineDetail",
       AccountBasedExpenseLineDetail: detail,
       Description: line.description,
@@ -282,7 +301,7 @@ async function createQBOPurchase(
     PaymentType: "Cash",
     AccountRef: opts.bankAccountRef,
     EntityRef: { ...opts.vendorRef, type: "Vendor" },
-    GlobalTaxCalculation: "TaxExcluded",
+    GlobalTaxCalculation: "TaxInclusive",
     Line: qboLines,
     PrivateNote: opts.privateNote,
   };
@@ -304,7 +323,31 @@ async function createQBOPurchase(
 
   if (res.ok) {
     const result = await res.json();
-    return { id: String(result.Purchase.Id) };
+    const purchase = result.Purchase ?? {};
+    const qboId = String(purchase.Id);
+    const qboTotalAmt = Number(purchase.TotalAmt ?? 0);
+
+    // ─── Exact-balance safeguard ─────────────────────────────
+    // Verify QBO accepted the document at the exact gross we sent.
+    // If QBO recalculated to a different total (e.g. due to a tax-code
+    // mismatch or rounding), abort and surface the mismatch.
+    try {
+      assertQBOTotalMatches({
+        expectedGross,
+        qboTotalAmt,
+        docKind: "Purchase",
+        qboDocId: qboId,
+      });
+    } catch (e) {
+      if (e instanceof QBOTotalMismatchError) {
+        return {
+          error: `${e.message} | payload total £${expectedGross.toFixed(2)} ≠ QBO TotalAmt £${qboTotalAmt.toFixed(2)}`,
+        };
+      }
+      throw e;
+    }
+
+    return { id: qboId, totalAmt: qboTotalAmt, expectedGross };
   }
 
   const errBody = await res.text();
