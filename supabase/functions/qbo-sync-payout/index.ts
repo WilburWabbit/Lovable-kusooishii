@@ -339,10 +339,17 @@ async function repairSalesOrderToCanonicalGross(
 
   // Rescale each line's unit_price proportionally, then absorb residual on
   // the largest line so per-line grosses sum to exactly channelGrossPence.
+  //
+  // IMPORTANT: unit_price is stored at 4dp resolution (not 2dp). This is
+  // necessary because under VAT-inclusive rounding `gross = round2(net * 1.2)`,
+  // certain 2dp gross targets (e.g. £15.99) have NO 2dp net solution
+  // (round2(13.32*1.2)=15.98, round2(13.33*1.2)=16.00; only 13.325 hits 15.99).
+  // 4dp net resolution is sufficient to hit any 2dp gross under qty>=1.
+  const round4 = (n: number) => Math.round(n * 10000) / 10000;
   const scale = channelGrossPence / currentGrossPence;
   type Adjusted = { id: string; sku_id: string | null; quantity: number; oldUnitPrice: number; newUnitPrice: number; newLineGrossPence: number };
   const adjusted: Adjusted[] = orderLines.map((l) => {
-    const newUnit = round2(l.unit_price * scale);
+    const newUnit = round4(l.unit_price * scale);
     return {
       id: l.id,
       sku_id: l.sku_id,
@@ -357,19 +364,19 @@ async function repairSalesOrderToCanonicalGross(
   let residualPence = channelGrossPence - summed;
 
   if (residualPence !== 0) {
-    // Adjust the largest line's unit_price by 1p increments until the residual
-    // is absorbed. With VAT_DIVISOR=1.2, a 1p shift on net moves gross by 1p
-    // for qty=1; for higher qty we'd move by qty*1.2 rounded — so we iterate.
-    // Sort by quantity desc then by line_gross desc so the biggest line
-    // absorbs the rounding.
+    // Adjust the largest line's unit_price by 0.0001 (1/10000 £) increments.
+    // Smallest gross movement = qty * 0.0001 * 1.2 ≈ 0.00012 per step, so
+    // up to ~10000 steps may be needed to traverse a full penny — bound at
+    // 20000 for safety.
     const sorted = [...adjusted].sort((a, b) =>
       (b.quantity - a.quantity) || (b.newLineGrossPence - a.newLineGrossPence)
     );
     const target = sorted[0];
-    let safety = 200; // 200 iterations max — covers any reasonable order
+    const STEP = 0.0001;
+    let safety = 20000;
     while (residualPence !== 0 && safety > 0) {
-      const stepPence = residualPence > 0 ? 1 : -1;
-      target.newUnitPrice = round2(target.newUnitPrice + stepPence / 100);
+      const direction = residualPence > 0 ? 1 : -1;
+      target.newUnitPrice = round4(target.newUnitPrice + direction * STEP);
       const newGross = lineGrossPence(target.newUnitPrice, target.quantity);
       const delta = newGross - target.newLineGrossPence;
       target.newLineGrossPence = newGross;
@@ -379,19 +386,21 @@ async function repairSalesOrderToCanonicalGross(
     if (residualPence !== 0) {
       return {
         repaired: false,
-        reason: `Could not converge order gross to channel gross (residual ${residualPence}p after 200 iterations)`,
+        reason: `Could not converge order gross to channel gross (residual ${residualPence}p after 20000 iterations at 0.0001 step)`,
       };
     }
   }
 
   // Persist line updates and audit log entries
   for (const a of adjusted) {
-    if (toPence(a.oldUnitPrice) === toPence(a.newUnitPrice)) continue;
+    // Compare at 4dp resolution since unit_price is now stored at 4dp
+    if (Math.round(a.oldUnitPrice * 10000) === Math.round(a.newUnitPrice * 10000)) continue;
     const { error: updErr } = await admin
       .from("sales_order_line" as never)
       .update({
         unit_price: a.newUnitPrice,
-        line_total: round2(a.newUnitPrice * a.quantity),
+        // line_total kept at 4dp; QBO sync rounds to 2dp per line at payload build.
+        line_total: Math.round(a.newUnitPrice * a.quantity * 10000) / 10000,
       } as never)
       .eq("id" as never, a.id);
     if (updErr) {
