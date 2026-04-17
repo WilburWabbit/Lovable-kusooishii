@@ -195,6 +195,28 @@ Deno.serve(async (req) => {
 
     const qboResult = await qboRes.json();
     const receiptId = String(qboResult.SalesReceipt.Id);
+    const qboTotalAmt = Number(qboResult.SalesReceipt.TotalAmt ?? 0);
+
+    // ─── Exact-balance safeguard ────────────────────────────
+    // Verify QBO accepted the SalesReceipt at the exact gross we expected.
+    // Sum of input gross lines is the source of truth.
+    const expectedGross = grossLines.reduce((s, l) => s + l.gross, 0);
+    if (toPence(qboTotalAmt) !== toPence(expectedGross)) {
+      const err = new QBOTotalMismatchError(expectedGross, qboTotalAmt, totalVAT, "SalesReceipt", receiptId);
+      console.error(err.message);
+      await admin
+        .from("sales_order")
+        .update({ qbo_sync_status: "error" } as never)
+        .eq("id", orderId);
+      return jsonResponse({
+        success: false,
+        qbo_error: err.message,
+        orderId,
+        qbo_sales_receipt_id: receiptId,
+        qbo_total_amt: qboTotalAmt,
+        expected_gross: expectedGross,
+      });
+    }
 
     // ─── 6. Update order with QBO receipt ID ────────────────
     await admin
