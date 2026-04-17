@@ -793,6 +793,12 @@ Deno.serve(async (req) => {
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
     const expenseResults: { txId: string; qboPurchaseId: string; amount: number; qboTotalAmt: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
+    // Per-transaction skips (QBO total drift unresolvable after MAX_PURCHASE_ATTEMPTS).
+    // These do NOT abort the payout — the deposit is constructed from successfully
+    // synced expenses and the payout is marked `partial` so the operator can follow up
+    // on just the handful of edge cases.
+    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number }[] = [];
+
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
