@@ -2497,8 +2497,53 @@ Deno.serve(async (req) => {
             .update({ qbo_deposit_id: null, qbo_expense_id: null, qbo_sync_status: "pending", qbo_sync_error: null } as never)
             .eq("id" as never, payoutRow.id);
           results.depositReset = 1;
+
+          // Also clear linked sales_order.qbo_sales_receipt_id so the app's view
+          // matches QBO after the user has manually deleted SalesReceipts there.
+          // Linkage is via payout_orders AND via ebay_payout_transactions (SALE rows).
+          const orderIds = new Set<string>();
+
+          const { data: linkedOrders } = await admin
+            .from("payout_orders")
+            .select("sales_order_id")
+            .eq("payout_id", payoutRow.id);
+          for (const r of (linkedOrders ?? []) as Array<{ sales_order_id: string | null }>) {
+            if (r.sales_order_id) orderIds.add(r.sales_order_id);
+          }
+
+          const { data: txnRows } = await admin
+            .from("ebay_payout_transactions")
+            .select("matched_order_id, order_id, transaction_id, transaction_type")
+            .eq("payout_id" as never, resetPayoutId);
+          const txnRefs: string[] = [];
+          for (const t of (txnRows ?? []) as Array<{ matched_order_id: string | null; order_id: string | null; transaction_id: string | null; transaction_type: string | null }>) {
+            if (t.matched_order_id) orderIds.add(t.matched_order_id);
+            if (t.order_id) txnRefs.push(t.order_id);
+            if (t.transaction_id) txnRefs.push(t.transaction_id);
+          }
+          if (txnRefs.length > 0) {
+            const { data: refOrders } = await admin
+              .from("sales_order")
+              .select("id")
+              .in("origin_reference", txnRefs);
+            for (const r of (refOrders ?? []) as Array<{ id: string }>) {
+              orderIds.add(r.id);
+            }
+          }
+
+          let salesReceiptsReset = 0;
+          if (orderIds.size > 0) {
+            const { data: clearedOrders } = await admin
+              .from("sales_order")
+              .update({ qbo_sales_receipt_id: null, qbo_sync_status: "pending", qbo_sync_error: null } as never)
+              .in("id", Array.from(orderIds))
+              .select("id");
+            salesReceiptsReset = (clearedOrders ?? []).length;
+          }
+          results.salesReceiptsReset = salesReceiptsReset;
         } else {
           results.depositReset = 0;
+          results.salesReceiptsReset = 0;
         }
       }
 
