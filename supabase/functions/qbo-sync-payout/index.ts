@@ -673,18 +673,34 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; qboTotalAmt: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
 
-      // Skip if already has a QBO Purchase
+      // Skip if already has a QBO Purchase — but verify its actual QBO TotalAmt
+      // so the deposit links to the real landed value, not a locally-computed one.
       if (tx.qbo_purchase_id) {
-        const totalAmount = txType === "SALE" ? tx.total_fees : Math.abs(tx.gross_amount);
+        if (tx.qbo_purchase_id === "N/A") continue;
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
           : buildAccountRef(sellingFeesAccount);
-        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
+        let cachedTotal = 0;
+        try {
+          cachedTotal = await fetchQBODocTotal(baseUrl, accessToken, "Purchase", tx.qbo_purchase_id);
+        } catch (e) {
+          const msg = `Cannot verify cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id}: ${e instanceof Error ? e.message : String(e)}`;
+          syncError = syncError ? `${syncError}; ${msg}` : msg;
+          continue;
+        }
+        const expectedAmount = txType === "SALE" ? round2(tx.total_fees) : round2(Math.abs(tx.gross_amount));
+        // Exact-balance safeguard for cached Purchase: must match source to the penny.
+        if (toPence(cachedTotal) !== toPence(expectedAmount)) {
+          const msg = `Cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id} has TotalAmt £${cachedTotal.toFixed(2)} but source expects £${expectedAmount.toFixed(2)}. Delete the QBO Purchase and re-run sync.`;
+          syncError = syncError ? `${syncError}; ${msg}` : msg;
+          continue;
+        }
+        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: expectedAmount, qboTotalAmt: cachedTotal, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
         continue;
       }
 
