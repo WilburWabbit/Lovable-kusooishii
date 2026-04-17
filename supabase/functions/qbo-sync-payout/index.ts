@@ -775,7 +775,7 @@ Deno.serve(async (req) => {
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null; txId: string; transactionId: string }>();
+    var orderQboMap = new Map<string, { qboId: string; channelGross: number; orderNumber: string | null; txId: string; transactionId: string; salesOrderId: string }>();
     var orderNumberByTxId = new Map<string, string>();
     var customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
@@ -836,14 +836,17 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Good — add to deposit map
+        // Good — add to deposit map. Carry the channel-recorded sale gross
+        // (canonical for this historical sale) and the salesOrderId so the
+        // deposit builder can detect drift and trigger an auto-rebuild.
         const orderNum = (so.order_number as string) ?? null;
         orderQboMap.set(so.id as string, {
           qboId: so.qbo_sales_receipt_id as string,
-          gross: tx.gross_amount,
+          channelGross: tx.gross_amount,
           orderNumber: orderNum,
           txId: tx.id,
           transactionId: tx.transaction_id,
+          salesOrderId: so.id as string,
         });
         // Map transaction ID → order number for expense DocNumber
         if (orderNum) {
