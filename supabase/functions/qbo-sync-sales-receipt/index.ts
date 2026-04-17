@@ -1,8 +1,10 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-17
 // ============================================================
 // QBO Sync Sales Receipt
 // Creates a SalesReceipt in QBO when an order is placed.
-// Handles VAT calculation (all prices VAT-inclusive → ex-VAT for QBO).
+// Uses the QBO-stable line distributor in _shared/qbo-tax.ts to
+// guarantee the resulting QBO TotalAmt matches the source gross
+// to the penny under QBO's own per-line VAT recompute.
 // ============================================================
 
 import {
@@ -16,7 +18,19 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
-import { exVAT, adjustLineVATRounding, assertQBOTotalMatches, QBOTotalMismatchError, toPence } from "../_shared/vat.ts";
+import {
+  toPence,
+  fromPence,
+  assertQBOTotalMatches,
+  QBOTotalMismatchError,
+} from "../_shared/vat.ts";
+import {
+  buildBalancedQBOLines,
+  assertQBOPayloadBalances,
+  QBOPayloadImbalanceError,
+  QBO_TAX_CODE_STANDARD_20,
+  QBO_TAX_CODE_NO_VAT,
+} from "../_shared/qbo-tax.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -62,15 +76,33 @@ Deno.serve(async (req) => {
       qboCustomerRef = CASH_SALES_QBO_ID;
     }
 
-    // ─── 3. Calculate VAT per line ──────────────────────────
-    // QBO requires SalesReceipt amounts to be tax-EXCLUSIVE; QBO then adds VAT
-    // on top via the TaxCodeRef. We send `net` (ex-VAT) line amounts and
-    // `GlobalTaxCalculation: "TaxExcluded"` so the resulting QBO total matches
-    // the app's gross-inclusive total exactly.
-    const grossLines = (lineItems ?? []).map((li: Record<string, unknown>) => ({
+    // ─── 3. Build QBO-stable line distribution ──────────────
+    // Each sales_order_line is VAT-inclusive (gross). Convert per-line gross
+    // to integer pence and let the distributor pre-solve for QBO's per-line
+    // VAT recompute. Any unavoidable ±1p residual is absorbed by an injected
+    // "Rounding adjustment" zero-tax line.
+    const sourceLines = (lineItems ?? []).map((li: Record<string, unknown>) => ({
       gross: ((li.unit_price as number) ?? 0) * ((li.quantity as number) ?? 1),
+      qty: (li.quantity as number) ?? 1,
+      sku: li.sku as Record<string, unknown> | null,
     }));
-    const vatBreakdown = adjustLineVATRounding(grossLines);
+    const grossPenceLines = sourceLines.map((l) => toPence(l.gross));
+    const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+    const expectedGross = fromPence(totalGrossPence);
+    const stableLines = buildBalancedQBOLines(grossPenceLines);
+
+    try {
+      assertQBOPayloadBalances(stableLines, totalGrossPence);
+    } catch (e) {
+      if (e instanceof QBOPayloadImbalanceError) {
+        await admin
+          .from("sales_order")
+          .update({ qbo_sync_status: "error" } as never)
+          .eq("id", orderId);
+        return jsonResponse({ success: false, qbo_error: e.message, orderId });
+      }
+      throw e;
+    }
 
     // ─── 4. Build QBO SalesReceipt payload ──────────────────
     const orderNumber = order.order_number ?? `KO-${String(order.id).slice(0, 7)}`;
@@ -117,20 +149,36 @@ Deno.serve(async (req) => {
       classId = await lookupQboRef("Class", "In Person Sale");
     }
 
-    const qboLines = (lineItems ?? []).map((li: Record<string, unknown>, idx: number) => {
-      const sku = li.sku as Record<string, unknown> | null;
-      const qty = (li.quantity as number) ?? 1;
-      const lineNet = vatBreakdown[idx]?.net ?? exVAT(((li.unit_price as number) ?? 0) * qty);
+    const qboLines = stableLines.map((s) => {
+      const lineNet = fromPence(s.netPence);
+
+      // Rounding balancer line — non-itemised, zero VAT.
+      if (s.kind === "rounding") {
+        return {
+          DetailType: "SalesItemLineDetail",
+          Amount: lineNet,
+          SalesItemLineDetail: {
+            Qty: 1,
+            UnitPrice: lineNet,
+            TaxCodeRef: { value: QBO_TAX_CODE_NO_VAT },
+            ...(classId ? { ClassRef: { value: classId } } : {}),
+          },
+          Description: "Rounding adjustment (per-line VAT recompute)",
+        } as Record<string, unknown>;
+      }
+
+      const src = sourceLines[s.sourceIndex!];
+      const qty = src.qty;
       const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
 
       const detail: Record<string, unknown> = {
         Qty: qty,
         UnitPrice: unitNet,
-        TaxCodeRef: { value: "6" }, // UK 20% standard rate (QBO tax code ID)
+        TaxCodeRef: { value: s.taxCodeRef ?? QBO_TAX_CODE_STANDARD_20 },
       };
 
-      if (sku?.qbo_item_id) {
-        detail.ItemRef = { value: String(sku.qbo_item_id) };
+      if (src.sku?.qbo_item_id) {
+        detail.ItemRef = { value: String(src.sku.qbo_item_id) };
       }
       if (classId) {
         detail.ClassRef = { value: classId };
@@ -143,16 +191,14 @@ Deno.serve(async (req) => {
       } as Record<string, unknown>;
     });
 
-    const totalVAT = vatBreakdown.reduce((sum, v) => sum + v.vat, 0);
-
     const salesReceiptPayload: Record<string, unknown> = {
       DocNumber: orderNumber,
       TxnDate: order.created_at ? new Date(order.created_at as string).toISOString().slice(0, 10) : undefined,
       Line: qboLines,
       GlobalTaxCalculation: "TaxExcluded",
-      TxnTaxDetail: {
-        TotalTax: Math.round(totalVAT * 100) / 100,
-      },
+      // NB: TxnTaxDetail.TotalTax intentionally omitted — QBO ignores it on
+      // SalesReceipts and recomputes per-line. The QBO-stable distributor
+      // above ensures sum(round(net × 0.20)) = expected tax exactly.
       CustomerRef: { value: qboCustomerRef },
     };
 
@@ -197,25 +243,33 @@ Deno.serve(async (req) => {
     const receiptId = String(qboResult.SalesReceipt.Id);
     const qboTotalAmt = Number(qboResult.SalesReceipt.TotalAmt ?? 0);
 
-    // ─── Exact-balance safeguard ────────────────────────────
-    // Verify QBO accepted the SalesReceipt at the exact gross we expected.
-    // Sum of input gross lines is the source of truth.
-    const expectedGross = grossLines.reduce((s, l) => s + l.gross, 0);
-    if (toPence(qboTotalAmt) !== toPence(expectedGross)) {
-      const err = new QBOTotalMismatchError(expectedGross, qboTotalAmt, totalVAT, "SalesReceipt", receiptId);
-      console.error(err.message);
-      await admin
-        .from("sales_order")
-        .update({ qbo_sync_status: "error" } as never)
-        .eq("id", orderId);
-      return jsonResponse({
-        success: false,
-        qbo_error: err.message,
-        orderId,
-        qbo_sales_receipt_id: receiptId,
-        qbo_total_amt: qboTotalAmt,
-        expected_gross: expectedGross,
+    // ─── Post-create defence-in-depth ────────────────────────
+    // Pre-flight already verified the math under QBO's recompute. This
+    // catches any unexpected QBO behaviour (e.g. future API changes).
+    try {
+      assertQBOTotalMatches({
+        expectedGross,
+        qboTotalAmt,
+        docKind: "SalesReceipt",
+        qboDocId: receiptId,
       });
+    } catch (e) {
+      if (e instanceof QBOTotalMismatchError) {
+        console.error(e.message);
+        await admin
+          .from("sales_order")
+          .update({ qbo_sync_status: "error" } as never)
+          .eq("id", orderId);
+        return jsonResponse({
+          success: false,
+          qbo_error: e.message,
+          orderId,
+          qbo_sales_receipt_id: receiptId,
+          qbo_total_amt: qboTotalAmt,
+          expected_gross: expectedGross,
+        });
+      }
+      throw e;
     }
 
     // ─── 6. Update order with QBO receipt ID ────────────────
@@ -243,7 +297,7 @@ Deno.serve(async (req) => {
       success: true,
       qbo_sales_receipt_id: receiptId,
       orderId,
-      totalVAT: Math.round(totalVAT * 100) / 100,
+      total_gross: expectedGross,
     });
   } catch (err) {
     return errorResponse(err);
