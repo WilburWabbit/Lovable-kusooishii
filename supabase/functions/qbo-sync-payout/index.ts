@@ -17,6 +17,14 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
+import {
+  toPence,
+  fromPence,
+  splitGrossPence,
+  distributeLinesByGrossPence,
+  assertQBOTotalMatches,
+  QBOTotalMismatchError,
+} from "../_shared/vat.ts";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -62,6 +70,11 @@ const QBO_TAX_CODE_REF = "6"; // 20% S
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+// Match tolerance for QBO returned TotalAmt vs expected gross.
+// Must be 0 — we want exact penny equality.
+const PENNY_EXACT = 0;
+
 
 // ─── Account mapping helper ──────────────────────────────────
 
@@ -201,6 +214,31 @@ async function persistSyncFailure(
     .eq("id", payoutId);
 }
 
+/**
+ * Fetch a QBO document's TotalAmt via the /query endpoint.
+ * Used to verify cached Purchases and SalesReceipts before linking
+ * them as deposit lines — guarantees the deposit math uses the
+ * actual landed totals, not locally-computed values.
+ */
+async function fetchQBODocTotal(
+  baseUrl: string,
+  accessToken: string,
+  docKind: "Purchase" | "SalesReceipt",
+  qboId: string,
+): Promise<number> {
+  const url = `${baseUrl}/${docKind.toLowerCase()}/${encodeURIComponent(qboId)}?minorversion=65`;
+  const res = await fetchWithTimeout(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch QBO ${docKind} ${qboId}: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  const doc = json[docKind] ?? {};
+  return Number(doc.TotalAmt ?? 0);
+}
+
 // ─── Create a QBO Purchase (Expense) ────────────────────────
 
 interface ExpenseLineInput {
@@ -223,24 +261,42 @@ async function createQBOPurchase(
     privateNote: string;
     docNumber?: string;
   },
-): Promise<{ id: string } | { error: string }> {
-  const qboLines = opts.lines.map((line) => {
-    const exVat = round2(line.amount / VAT_DIVISOR);
-    const vat = round2(line.amount - exVat);
+): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
+  // ─── TaxInclusive integer-pence math ──────────────────────
+  // Posting Purchases as TaxInclusive lets us send the *gross* fee amounts
+  // exactly as eBay reported them, with QBO deriving net+tax internally —
+  // no round-each-line floating-point drift. Every line's `Amount` is the
+  // gross (VAT-inclusive) value; `TaxInclusiveAmt` mirrors `Amount`; QBO
+  // computes `TaxAmount` from the linked tax code.
+  //
+  // We still pass an explicit `TaxAmount` per line (using the integer-pence
+  // distributor) so the line-level breakdown sums exactly to the expected
+  // total VAT and total gross — last line absorbs any 1p remainder.
+  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
+  const distributed = distributeLinesByGrossPence(grossPenceLines);
+  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+  const expectedGross = fromPence(totalGrossPence);
+
+  const qboLines = opts.lines.map((line, idx) => {
+    const d = distributed[idx];
+    const grossLine = fromPence(d.grossPence);
+    const vatLine = fromPence(d.vatPence);
 
     if (line.itemRef) {
       // Item-linked line — links the expense to a specific QBO Item (e.g. insertion fee
       // against the SKU that was listed). The expense account is determined by the Item's
       // own expense account in QBO.
+      // For TaxInclusive posting, UnitPrice is the gross unit price.
       const detail: Record<string, unknown> = {
         ItemRef: line.itemRef,
         Qty: 1,
-        UnitPrice: exVat,
+        UnitPrice: grossLine,
         TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+        TaxInclusiveAmt: grossLine,
       };
       if (line.customerRef) detail.CustomerRef = line.customerRef;
       return {
-        Amount: exVat,
+        Amount: grossLine,
         DetailType: "ItemBasedExpenseLineDetail",
         ItemBasedExpenseLineDetail: detail,
         Description: line.description,
@@ -250,14 +306,15 @@ async function createQBOPurchase(
     const detail: Record<string, unknown> = {
       AccountRef: line.accountRef,
       TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
-      TaxAmount: vat,
+      TaxAmount: vatLine,
+      TaxInclusiveAmt: grossLine,
     };
     if (line.customerRef) {
       detail.CustomerRef = line.customerRef;
     }
 
     return {
-      Amount: exVat,
+      Amount: grossLine,
       DetailType: "AccountBasedExpenseLineDetail",
       AccountBasedExpenseLineDetail: detail,
       Description: line.description,
@@ -269,7 +326,7 @@ async function createQBOPurchase(
     PaymentType: "Cash",
     AccountRef: opts.bankAccountRef,
     EntityRef: { ...opts.vendorRef, type: "Vendor" },
-    GlobalTaxCalculation: "TaxExcluded",
+    GlobalTaxCalculation: "TaxInclusive",
     Line: qboLines,
     PrivateNote: opts.privateNote,
   };
@@ -291,7 +348,31 @@ async function createQBOPurchase(
 
   if (res.ok) {
     const result = await res.json();
-    return { id: String(result.Purchase.Id) };
+    const purchase = result.Purchase ?? {};
+    const qboId = String(purchase.Id);
+    const qboTotalAmt = Number(purchase.TotalAmt ?? 0);
+
+    // ─── Exact-balance safeguard ─────────────────────────────
+    // Verify QBO accepted the document at the exact gross we sent.
+    // If QBO recalculated to a different total (e.g. due to a tax-code
+    // mismatch or rounding), abort and surface the mismatch.
+    try {
+      assertQBOTotalMatches({
+        expectedGross,
+        qboTotalAmt,
+        docKind: "Purchase",
+        qboDocId: qboId,
+      });
+    } catch (e) {
+      if (e instanceof QBOTotalMismatchError) {
+        return {
+          error: `${e.message} | payload total £${expectedGross.toFixed(2)} ≠ QBO TotalAmt £${qboTotalAmt.toFixed(2)}`,
+        };
+      }
+      throw e;
+    }
+
+    return { id: qboId, totalAmt: qboTotalAmt, expectedGross };
   }
 
   const errBody = await res.text();
@@ -592,18 +673,34 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; qboTotalAmt: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
 
-      // Skip if already has a QBO Purchase
+      // Skip if already has a QBO Purchase — but verify its actual QBO TotalAmt
+      // so the deposit links to the real landed value, not a locally-computed one.
       if (tx.qbo_purchase_id) {
-        const totalAmount = txType === "SALE" ? tx.total_fees : Math.abs(tx.gross_amount);
+        if (tx.qbo_purchase_id === "N/A") continue;
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
           : buildAccountRef(sellingFeesAccount);
-        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
+        let cachedTotal = 0;
+        try {
+          cachedTotal = await fetchQBODocTotal(baseUrl, accessToken, "Purchase", tx.qbo_purchase_id);
+        } catch (e) {
+          const msg = `Cannot verify cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id}: ${e instanceof Error ? e.message : String(e)}`;
+          syncError = syncError ? `${syncError}; ${msg}` : msg;
+          continue;
+        }
+        const expectedAmount = txType === "SALE" ? round2(tx.total_fees) : round2(Math.abs(tx.gross_amount));
+        // Exact-balance safeguard for cached Purchase: must match source to the penny.
+        if (toPence(cachedTotal) !== toPence(expectedAmount)) {
+          const msg = `Cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id} has TotalAmt £${cachedTotal.toFixed(2)} but source expects £${expectedAmount.toFixed(2)}. Delete the QBO Purchase and re-run sync.`;
+          syncError = syncError ? `${syncError}; ${msg}` : msg;
+          continue;
+        }
+        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: expectedAmount, qboTotalAmt: cachedTotal, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
         continue;
       }
 
@@ -757,7 +854,17 @@ Deno.serve(async (req) => {
 
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
-      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef, transactionType: txType, settledViaTransfer: isSettled });
+      // purchaseResult.totalAmt was already verified to equal expectedGross by
+      // assertQBOTotalMatches inside createQBOPurchase — safe to use directly.
+      expenseResults.push({
+        txId: tx.id,
+        qboPurchaseId: purchaseResult.id,
+        amount: round2(totalExpenseAmount),
+        qboTotalAmt: purchaseResult.totalAmt,
+        accountRef: primaryAccountRef,
+        transactionType: txType,
+        settledViaTransfer: isSettled,
+      });
     }
 
     // If any expense creation failed, persist error and return
@@ -770,24 +877,42 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
+    // CRITICAL: deposit lines must use the *actual* QBO TotalAmt for each
+    // linked Purchase and SalesReceipt, not locally-computed values. If the
+    // landed QBO total drifts by even 1p from source, the deposit will too.
+    // We've already verified Purchases (above). Now verify SalesReceipts.
     let depositLines: unknown[] = [];
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      // SalesReceipt lines (positive — gross sales). Round each amount to 2dp to avoid
-      // floating-point drift (e.g. 13.20 + 9.04 + ... summing to .07 instead of .06).
-      depositLines = Array.from(orderQboMap.values()).map((entry) => ({
-        Amount: round2(entry.gross),
-        DepositLineDetail: {
-          PaymentMethodRef: { value: "1" },
-        },
-        LinkedTxn: [
-          {
-            TxnId: entry.qboId,
-            TxnLineId: "0",
-            TxnType: "SalesReceipt",
-          },
-        ],
-      }));
+      // Fetch each linked SalesReceipt's actual TotalAmt and verify it matches
+      // the source SALE gross_amount exactly. If not, abort — a stale or
+      // mis-rounded SalesReceipt would corrupt the deposit total.
+      for (const entry of orderQboMap.values()) {
+        let qboReceiptTotal = 0;
+        try {
+          qboReceiptTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
+        } catch (e) {
+          const msg = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
+          await persistSyncFailure(admin, payoutId, msg);
+          return new Response(
+            JSON.stringify({ success: false, error: msg, payoutId }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        if (toPence(qboReceiptTotal) !== toPence(round2(entry.gross))) {
+          const msg = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Deposit aborted to prevent rounding drift. Delete the SalesReceipt and re-sync the order.`;
+          await persistSyncFailure(admin, payoutId, msg);
+          return new Response(
+            JSON.stringify({ success: false, error: msg, payoutId }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        depositLines.push({
+          Amount: qboReceiptTotal,
+          DepositLineDetail: { PaymentMethodRef: { value: "1" } },
+          LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+        });
+      }
     } else {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
       await persistSyncFailure(admin, payoutId, msg);
@@ -807,17 +932,18 @@ Deno.serve(async (req) => {
     //    out-of-band (matching TRANSFER) and booked directly to the bank, so they
     //    never debited Undeposited Funds and must not reduce this deposit.
     for (const exp of expenseResults) {
-      if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.qboPurchaseId === "N/A" || exp.qboTotalAmt <= 0) continue;
       if (exp.settledViaTransfer) continue;
 
       depositLines.push({
-        Amount: -round2(exp.amount),
+        Amount: -exp.qboTotalAmt,
         DepositLineDetail: {
           PaymentMethodRef: { value: "1" },
         },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
       });
     }
+
 
     // Guard: ensure we have at least one deposit line
     if (depositLines.length === 0) {
@@ -828,14 +954,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Reconciliation guard: verify constructed deposit matches expected net ─
-    const constructedTotal = round2(
-      (depositLines as Array<{ Amount: number }>).reduce((s, l) => s + l.Amount, 0)
-    );
+    // ─── Reconciliation guard: integer-pence exact match ───
+    // All deposit-line amounts at this point are verified QBO TotalAmts.
+    // Sum them in integer pence and compare to the source payout net.
+    const constructedPence = (depositLines as Array<{ Amount: number }>)
+      .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
-    const delta = round2(Math.abs(constructedTotal - expectedNet));
-    if (delta > 0.001) {
-      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+    const expectedPence = toPence(expectedNet);
+    const constructedTotal = fromPence(constructedPence);
+    if (constructedPence !== expectedPence) {
+      const deltaPence = constructedPence - expectedPence;
+      const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
       console.error(msg);
       await persistSyncFailure(admin, payoutId, msg);
       return new Response(
@@ -843,10 +972,11 @@ Deno.serve(async (req) => {
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    console.log(`Deposit reconciliation OK: constructed=${constructedTotal}, expected=${expectedNet}, delta=${delta}`);
+    console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
+    let qboDepositTotal: number | null = null;
 
     if (externalPayoutId) {
       const queryStr = `SELECT * FROM Deposit WHERE DocNumber = '${externalPayoutId}'`;
@@ -860,7 +990,8 @@ Deno.serve(async (req) => {
         const deposits = (existingPayload?.QueryResponse?.Deposit ?? []) as Record<string, unknown>[];
         if (deposits.length > 0) {
           qboDepositId = String(deposits[0].Id);
-          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} — skipping creation`);
+          qboDepositTotal = Number(deposits[0].TotalAmt ?? 0);
+          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} (TotalAmt £${qboDepositTotal.toFixed(2)}) — skipping creation`);
         }
       } else {
         await existingRes.text(); // consume body
@@ -892,12 +1023,42 @@ Deno.serve(async (req) => {
       if (depositRes.ok) {
         const depositResult = await depositRes.json();
         qboDepositId = String(depositResult.Deposit.Id);
+        qboDepositTotal = Number(depositResult.Deposit.TotalAmt ?? 0);
       } else {
         const errBody = await depositRes.text();
         syncError = `Deposit creation failed [${depositRes.status}]: ${errBody.substring(0, 500)}`;
         console.error(`QBO Deposit creation failed:`, syncError);
       }
     }
+
+    // ─── Post-create exact-balance safeguard for the Deposit ─
+    // QBO's returned TotalAmt must match the expected payout net to the penny.
+    // If it doesn't, the deposit is wrong even though every linked doc was right
+    // (e.g. if QBO reapplied tax to the deposit header). Mark sync as error.
+    if (qboDepositId && qboDepositTotal !== null) {
+      try {
+        assertQBOTotalMatches({
+          expectedGross: expectedNet,
+          qboTotalAmt: qboDepositTotal,
+          docKind: "Deposit",
+          qboDocId: qboDepositId,
+        });
+      } catch (e) {
+        if (e instanceof QBOTotalMismatchError) {
+          syncError = e.message;
+          console.error(syncError);
+          // Do NOT clear qboDepositId — record exists in QBO and operator
+          // needs to delete it manually before retry. Persist as error.
+          await persistSyncFailure(admin, payoutId, e.message);
+          return new Response(
+            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        throw e;
+      }
+    }
+
 
     // ─── 7. Update payout record ────────────────────────────
     const updateData: Record<string, unknown> = {
