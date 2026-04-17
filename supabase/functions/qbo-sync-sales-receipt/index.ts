@@ -245,8 +245,39 @@ Deno.serve(async (req) => {
       if (!qboRes.ok) {
         const errorText = await qboRes.text();
         console.error(`QBO SalesReceipt POST failed [${qboRes.status}]:`, errorText);
+
+        // Idempotency: if QBO says DocNumber already exists, adopt the existing receipt
+        // instead of failing. This happens when our DB was reset but QBO still has the doc.
+        if (qboRes.status === 400 && /Duplicate Document Number/i.test(errorText)) {
+          try {
+            const q = `select Id, TotalAmt, SyncToken from SalesReceipt where DocNumber = '${orderNumber.replace(/'/g, "\\'")}'`;
+            const lookupUrl = `${baseUrl}/query?query=${encodeURIComponent(q)}&minorversion=65`;
+            const lookupRes = await fetchWithTimeout(lookupUrl, {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+            });
+            if (lookupRes.ok) {
+              const lookupJson = await lookupRes.json();
+              const existing = lookupJson?.QueryResponse?.SalesReceipt?.[0];
+              if (existing?.Id) {
+                console.log(`Adopting existing QBO SalesReceipt ${existing.Id} for DocNumber ${orderNumber} (TotalAmt £${existing.TotalAmt})`);
+                receiptId = String(existing.Id);
+                qboTotalAmt = Number(existing.TotalAmt ?? 0);
+                qboResult = { SalesReceipt: existing };
+                const driftPence = toPence(expectedGross) - toPence(qboTotalAmt);
+                if (driftPence === 0) {
+                  break;
+                }
+                console.warn(`Existing QBO SalesReceipt ${receiptId} has drift ${driftPence}p — adopting anyway (cannot safely modify pre-existing doc)`);
+                break;
+              }
+            }
+          } catch (lookupErr) {
+            console.warn("Failed to look up existing SalesReceipt by DocNumber:", lookupErr);
+          }
+        }
+
         await admin.from("sales_order").update({ qbo_sync_status: "error" } as never).eq("id", orderId);
-        return jsonResponse({ success: false, qbo_error: `QBO API error [${qboRes.status}]`, orderId });
+        return jsonResponse({ success: false, qbo_error: `QBO API error [${qboRes.status}]`, qbo_detail: errorText, orderId });
       }
 
       qboResult = await qboRes.json();
