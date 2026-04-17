@@ -17,6 +17,14 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
+import {
+  toPence,
+  fromPence,
+  splitGrossPence,
+  distributeLinesByGrossPence,
+  assertQBOTotalMatches,
+  QBOTotalMismatchError,
+} from "../_shared/vat.ts";
 
 // ─── Types ───────────────────────────────────────────────────
 
