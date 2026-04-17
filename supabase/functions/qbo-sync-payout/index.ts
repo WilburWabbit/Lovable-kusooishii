@@ -20,6 +20,7 @@ import {
 import {
   toPence,
   fromPence,
+  distributeLinesByGrossPence,
   assertQBOTotalMatches,
   QBOTotalMismatchError,
 } from "../_shared/vat.ts";
