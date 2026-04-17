@@ -254,60 +254,24 @@ interface ExpenseLineInput {
   itemRef?: { value: string; name?: string };
 }
 
-async function createQBOPurchase(
-  baseUrl: string,
-  accessToken: string,
-  opts: {
-    txnDate: string;
-    bankAccountRef: { value: string; name?: string };
-    vendorRef: { value: string; name?: string };
-    lines: ExpenseLineInput[];
-    privateNote: string;
-    docNumber?: string;
-  },
-): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
-  // ─── QBO-stable line distribution ────────────────────────────
-  // QBO recomputes VAT *per-line* on Purchase documents using
-  // `round(Amount × rate)` and ignores the document-level
-  // `TxnTaxDetail.TotalTax`. Naive per-line net = round(gross / 1.20)
-  // therefore drifts by ±1p on multi-line documents (e.g. 7.63 + 0.24 + 0.41
-  // → QBO recomputed total £9.94 vs our expected £9.93).
-  //
-  // The QBO-stable distributor in _shared/qbo-tax.ts pre-solves for QBO's
-  // own arithmetic: it picks per-line nets so that `sum(round(net × 0.20))`
-  // equals the target tax exactly, and if no per-line solution exists it
-  // appends a ±1p zero-tax "rounding adjustment" line. This guarantees QBO
-  // returns TotalAmt = source gross to the penny under its own recompute,
-  // making the post-create assertQBOTotalMatches a true safety net.
-  //
-  // Note: TxnTaxDetail.TotalTax is omitted entirely — QBO ignores it for
-  // Purchases, sending it is misleading.
-  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
-  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
-  const expectedGross = fromPence(totalGrossPence);
+const MAX_PURCHASE_ATTEMPTS = 3;
 
-  const stableLines = buildBalancedQBOLines(grossPenceLines);
-
-  // Pre-flight: confirm the simulated total balances under QBO's recompute.
-  // Throws QBOPayloadImbalanceError if the distributor itself failed to converge.
-  try {
-    assertQBOPayloadBalances(stableLines, totalGrossPence);
-  } catch (e) {
-    if (e instanceof QBOPayloadImbalanceError) {
-      return { error: e.message };
-    }
-    throw e;
-  }
-
-  const qboLines = stableLines.map((s) => {
+/**
+ * Build the QBO `Line[]` payload from a set of stable lines + the original
+ * source ExpenseLineInput[]. Pure function — used by both the initial POST
+ * and retry attempts (which call it with a `growRoundingLine`-adjusted
+ * stableLines array).
+ */
+function buildQBOPurchaseLineArray(
+  stableLines: QBOStableLine[],
+  sourceLines: ExpenseLineInput[],
+  bankAccountRef: { value: string; name?: string },
+): Record<string, unknown>[] {
+  return stableLines.map((s) => {
     const lineNet = fromPence(s.netPence);
 
-    // Rounding balancer line — book against the same selling_fees account
-    // as the first standard line, with TaxCodeRef = "No VAT" so QBO does
-    // not compute tax on it. This is the bookkeeping audit trail of the
-    // ±1p discrepancy between the source gross and any per-line VAT split.
     if (s.kind === "rounding") {
-      const fallbackAccount = opts.lines[0]?.accountRef ?? opts.bankAccountRef;
+      const fallbackAccount = sourceLines[0]?.accountRef ?? bankAccountRef;
       return {
         Amount: lineNet,
         DetailType: "AccountBasedExpenseLineDetail",
@@ -319,7 +283,7 @@ async function createQBOPurchase(
       };
     }
 
-    const sourceLine = opts.lines[s.sourceIndex!];
+    const sourceLine = sourceLines[s.sourceIndex!];
     const taxCode = sourceLine.taxCodeRef ?? s.taxCodeRef ?? QBO_TAX_CODE_REF;
 
     if (sourceLine.itemRef) {
@@ -353,64 +317,185 @@ async function createQBOPurchase(
       Description: sourceLine.description,
     };
   });
+}
 
-  const payload: Record<string, unknown> = {
-    TxnDate: opts.txnDate,
-    PaymentType: "Cash",
-    AccountRef: opts.bankAccountRef,
-    EntityRef: { ...opts.vendorRef, type: "Vendor" },
-    GlobalTaxCalculation: "TaxExcluded",
-    Line: qboLines,
-    PrivateNote: opts.privateNote,
-  };
-  if (opts.docNumber) {
-    payload.DocNumber = opts.docNumber;
+/**
+ * Best-effort delete a QBO Purchase. Used between retry attempts to avoid
+ * leaving orphan over/under-totalled Purchases in QBO. Logs but does not
+ * throw on failure — the retry loop continues regardless.
+ */
+async function deleteQBOPurchase(
+  baseUrl: string,
+  accessToken: string,
+  purchaseId: string,
+): Promise<void> {
+  try {
+    // QBO requires fetching the SyncToken before delete.
+    const getRes = await fetchWithTimeout(
+      `${baseUrl}/purchase/${encodeURIComponent(purchaseId)}?minorversion=65`,
+      { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+    );
+    if (!getRes.ok) {
+      console.warn(`Could not fetch QBO Purchase ${purchaseId} for delete: HTTP ${getRes.status}`);
+      return;
+    }
+    const getJson = await getRes.json();
+    const syncToken = getJson?.Purchase?.SyncToken;
+    if (syncToken === undefined) {
+      console.warn(`QBO Purchase ${purchaseId} missing SyncToken; skipping delete`);
+      return;
+    }
+    const delRes = await fetchWithTimeout(
+      `${baseUrl}/purchase?operation=delete&minorversion=65`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ Id: purchaseId, SyncToken: String(syncToken) }),
+      },
+    );
+    if (!delRes.ok) {
+      const body = await delRes.text();
+      console.warn(`QBO Purchase ${purchaseId} delete failed [${delRes.status}]: ${body.substring(0, 300)}`);
+    } else {
+      console.log(`Deleted bad QBO Purchase ${purchaseId}`);
+    }
+  } catch (e) {
+    console.warn(`Exception deleting QBO Purchase ${purchaseId}:`, e);
+  }
+}
+
+type CreateQBOPurchaseResult =
+  | { id: string; totalAmt: number; expectedGross: number; attempts: number }
+  | { error: string }
+  | { skipped: true; reason: string; lastQboTotal: number; expected: number; attempts: number };
+
+async function createQBOPurchase(
+  baseUrl: string,
+  accessToken: string,
+  opts: {
+    txnDate: string;
+    bankAccountRef: { value: string; name?: string };
+    vendorRef: { value: string; name?: string };
+    lines: ExpenseLineInput[];
+    privateNote: string;
+    docNumber?: string;
+  },
+): Promise<CreateQBOPurchaseResult> {
+  // ─── QBO-stable line distribution + reactive retry loop ────
+  // QBO recomputes VAT *per-line* on Purchase documents using
+  // `round(Amount × rate)` and ignores `TxnTaxDetail.TotalTax`. Our
+  // pre-flight distributor predicts that recompute and, when it can't land
+  // exactly, appends a zero-tax "rounding adjustment" line.
+  //
+  // Empirically QBO occasionally returns a TotalAmt that disagrees with
+  // even our pre-flight simulation by ±1p. Rather than abort, we react to
+  // QBO's actual result: read TotalAmt, compute the drift, delete the bad
+  // Purchase, and re-POST with the rounding line grown by exactly that
+  // drift. Because the rounding line uses TaxCodeRef "10" (No VAT) it is
+  // excluded from QBO's tax recompute and shifts TotalAmt 1:1, so
+  // convergence is mathematically guaranteed on attempt 2 (attempt 3 covers
+  // any non-determinism).
+  //
+  // After 3 failed attempts we return { skipped: true } so the caller can
+  // record the failure for the single transaction and continue with the
+  // rest of the payout instead of aborting everything.
+  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
+  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+  const expectedGross = fromPence(totalGrossPence);
+
+  let stableLines = buildBalancedQBOLines(grossPenceLines);
+
+  // Pre-flight: confirm the simulated total balances under QBO's recompute.
+  try {
+    assertQBOPayloadBalances(stableLines, totalGrossPence);
+  } catch (e) {
+    if (e instanceof QBOPayloadImbalanceError) {
+      return { error: e.message };
+    }
+    throw e;
   }
 
-  console.log("QBO Purchase payload:", JSON.stringify(payload));
+  let lastQboTotal = 0;
+  let lastQboId: string | null = null;
 
-  const res = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  for (let attempt = 1; attempt <= MAX_PURCHASE_ATTEMPTS; attempt++) {
+    const qboLines = buildQBOPurchaseLineArray(stableLines, opts.lines, opts.bankAccountRef);
 
-  if (res.ok) {
+    const payload: Record<string, unknown> = {
+      TxnDate: opts.txnDate,
+      PaymentType: "Cash",
+      AccountRef: opts.bankAccountRef,
+      EntityRef: { ...opts.vendorRef, type: "Vendor" },
+      GlobalTaxCalculation: "TaxExcluded",
+      Line: qboLines,
+      PrivateNote: opts.privateNote,
+    };
+    if (opts.docNumber) {
+      payload.DocNumber = opts.docNumber;
+    }
+
+    console.log(`QBO Purchase attempt ${attempt}/${MAX_PURCHASE_ATTEMPTS} (expected £${expectedGross.toFixed(2)}):`, JSON.stringify(payload));
+
+    const res = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      // POST itself failed (validation, auth, etc.) — not a math drift.
+      // Don't retry; surface the error to the caller.
+      return { error: `Purchase creation failed [${res.status}] on attempt ${attempt}: ${errBody.substring(0, 500)}` };
+    }
+
     const result = await res.json();
     const purchase = result.Purchase ?? {};
     const qboId = String(purchase.Id);
     const qboTotalAmt = Number(purchase.TotalAmt ?? 0);
+    lastQboTotal = qboTotalAmt;
+    lastQboId = qboId;
 
-    // ─── Post-create defence-in-depth ────────────────────────
-    // The pre-flight assertQBOPayloadBalances already verified the math
-    // would balance under QBO's own recompute. This second check guards
-    // against QBO returning anything different (e.g. unexpected behaviour
-    // in a future API revision) and surfaces a clear diagnostic.
-    try {
-      assertQBOTotalMatches({
-        expectedGross,
-        qboTotalAmt,
-        docKind: "Purchase",
-        qboDocId: qboId,
-      });
-    } catch (e) {
-      if (e instanceof QBOTotalMismatchError) {
-        return {
-          error: `${e.message} | payload total £${expectedGross.toFixed(2)} ≠ QBO TotalAmt £${qboTotalAmt.toFixed(2)}`,
-        };
+    const driftPence = toPence(expectedGross) - toPence(qboTotalAmt);
+    if (driftPence === 0) {
+      if (attempt > 1) {
+        console.log(`QBO Purchase ${qboId} converged on attempt ${attempt} (expected £${expectedGross.toFixed(2)})`);
       }
-      throw e;
+      return { id: qboId, totalAmt: qboTotalAmt, expectedGross, attempts: attempt };
     }
 
-    return { id: qboId, totalAmt: qboTotalAmt, expectedGross };
+    console.warn(
+      `QBO Purchase ${qboId} attempt ${attempt}: expected £${expectedGross.toFixed(2)}, ` +
+        `QBO returned £${qboTotalAmt.toFixed(2)}, drift=${driftPence}p. ` +
+        (attempt < MAX_PURCHASE_ATTEMPTS ? "Deleting and retrying with grown rounding line." : "Max attempts reached."),
+    );
+
+    // Delete the bad Purchase so QBO doesn't keep an orphan.
+    await deleteQBOPurchase(baseUrl, accessToken, qboId);
+
+    if (attempt < MAX_PURCHASE_ATTEMPTS) {
+      // Grow (or add) the rounding line by exactly `driftPence`. QBO's
+      // recompute will not touch this line (TaxCodeRef "10" = No VAT),
+      // so the next TotalAmt will be old TotalAmt + driftPence = expected.
+      stableLines = growRoundingLine(stableLines, driftPence);
+    }
   }
 
-  const errBody = await res.text();
-  return { error: `Purchase creation failed [${res.status}]: ${errBody.substring(0, 500)}` };
+  return {
+    skipped: true,
+    reason: `QBO total drift unresolvable after ${MAX_PURCHASE_ATTEMPTS} attempts (last QBO TotalAmt £${lastQboTotal.toFixed(2)}, expected £${expectedGross.toFixed(2)})`,
+    lastQboTotal,
+    expected: expectedGross,
+    attempts: MAX_PURCHASE_ATTEMPTS,
+  };
 }
 
 // ─── Main handler ────────────────────────────────────────────
