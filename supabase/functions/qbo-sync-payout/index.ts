@@ -225,7 +225,7 @@ async function persistSyncFailure(
 async function fetchQBODocTotal(
   baseUrl: string,
   accessToken: string,
-  docKind: "Purchase" | "SalesReceipt",
+  docKind: "Purchase" | "SalesReceipt" | "Deposit",
   qboId: string,
 ): Promise<number> {
   const url = `${baseUrl}/${docKind.toLowerCase()}/${encodeURIComponent(qboId)}?minorversion=65`;
@@ -239,6 +239,195 @@ async function fetchQBODocTotal(
   const json = await res.json();
   const doc = json[docKind] ?? {};
   return Number(doc.TotalAmt ?? 0);
+}
+
+/**
+ * Best-effort delete a QBO SalesReceipt. Used during canonical-drift
+ * auto-rebuild: when the cached SalesReceipt's TotalAmt doesn't equal the
+ * channel-recorded sale gross, we delete it and let qbo-sync-sales-receipt
+ * recreate it from the canonical sales_order.
+ */
+async function deleteQBOSalesReceipt(
+  baseUrl: string,
+  accessToken: string,
+  receiptId: string,
+): Promise<void> {
+  try {
+    const getRes = await fetchWithTimeout(
+      `${baseUrl}/salesreceipt/${encodeURIComponent(receiptId)}?minorversion=65`,
+      { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+    );
+    if (!getRes.ok) {
+      console.warn(`Could not fetch QBO SalesReceipt ${receiptId} for delete: HTTP ${getRes.status}`);
+      return;
+    }
+    const getJson = await getRes.json();
+    const syncToken = getJson?.SalesReceipt?.SyncToken;
+    if (syncToken === undefined) {
+      console.warn(`QBO SalesReceipt ${receiptId} missing SyncToken; skipping delete`);
+      return;
+    }
+    const delRes = await fetchWithTimeout(
+      `${baseUrl}/salesreceipt?operation=delete&minorversion=65`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ Id: receiptId, SyncToken: String(syncToken) }),
+      },
+    );
+    if (!delRes.ok) {
+      const body = await delRes.text();
+      console.warn(`QBO SalesReceipt ${receiptId} delete failed [${delRes.status}]: ${body.substring(0, 300)}`);
+    } else {
+      console.log(`Deleted stale QBO SalesReceipt ${receiptId}`);
+    }
+  } catch (e) {
+    console.warn(`Exception deleting QBO SalesReceipt ${receiptId}:`, e);
+  }
+}
+
+/**
+ * Repair a sales_order whose gross_total has drifted from the channel-recorded
+ * gross. Recomputes unit_price/line_total so the order's gross equals
+ * `channelGross` exactly under VAT-inclusive math (gross = round2(net * 1.2)).
+ *
+ * For multi-line orders we proportionally rescale each line's unit_price by
+ * `channelGross / currentGross` and absorb the residual penny on the largest
+ * line so the per-line gross sums round-trip to channelGross exactly.
+ *
+ * Writes a price_audit_log entry per affected SKU.
+ */
+async function repairSalesOrderToCanonicalGross(
+  admin: ReturnType<typeof createAdminClient>,
+  salesOrderId: string,
+  orderNumber: string | null,
+  channelGross: number,
+): Promise<{ repaired: boolean; reason: string }> {
+  const channelGrossPence = toPence(channelGross);
+
+  const { data: lines, error: linesErr } = await admin
+    .from("sales_order_line" as never)
+    .select("id, sku_id, quantity, unit_price, line_total")
+    .eq("sales_order_id" as never, salesOrderId);
+
+  if (linesErr) {
+    return { repaired: false, reason: `Failed to load order lines: ${linesErr.message}` };
+  }
+  type Line = { id: string; sku_id: string | null; quantity: number; unit_price: number; line_total: number };
+  const orderLines = ((lines ?? []) as Line[]);
+  if (orderLines.length === 0) {
+    return { repaired: false, reason: "Order has no lines" };
+  }
+
+  // Compute per-line gross under VAT-inclusive rule: gross = round2(net * 1.2)
+  // where net = unit_price * qty.
+  const lineGrossPence = (unitPrice: number, qty: number) =>
+    toPence(round2(unitPrice * qty * VAT_DIVISOR));
+
+  const currentGrossPence = orderLines.reduce(
+    (s, l) => s + lineGrossPence(l.unit_price, l.quantity),
+    0,
+  );
+
+  if (currentGrossPence === channelGrossPence) {
+    return { repaired: false, reason: "Order gross already matches channel gross" };
+  }
+
+  // Rescale each line's unit_price proportionally, then absorb residual on
+  // the largest line so per-line grosses sum to exactly channelGrossPence.
+  const scale = channelGrossPence / currentGrossPence;
+  type Adjusted = { id: string; sku_id: string | null; quantity: number; oldUnitPrice: number; newUnitPrice: number; newLineGrossPence: number };
+  const adjusted: Adjusted[] = orderLines.map((l) => {
+    const newUnit = round2(l.unit_price * scale);
+    return {
+      id: l.id,
+      sku_id: l.sku_id,
+      quantity: l.quantity,
+      oldUnitPrice: l.unit_price,
+      newUnitPrice: newUnit,
+      newLineGrossPence: lineGrossPence(newUnit, l.quantity),
+    };
+  });
+
+  let summed = adjusted.reduce((s, a) => s + a.newLineGrossPence, 0);
+  let residualPence = channelGrossPence - summed;
+
+  if (residualPence !== 0) {
+    // Adjust the largest line's unit_price by 1p increments until the residual
+    // is absorbed. With VAT_DIVISOR=1.2, a 1p shift on net moves gross by 1p
+    // for qty=1; for higher qty we'd move by qty*1.2 rounded — so we iterate.
+    // Sort by quantity desc then by line_gross desc so the biggest line
+    // absorbs the rounding.
+    const sorted = [...adjusted].sort((a, b) =>
+      (b.quantity - a.quantity) || (b.newLineGrossPence - a.newLineGrossPence)
+    );
+    const target = sorted[0];
+    let safety = 200; // 200 iterations max — covers any reasonable order
+    while (residualPence !== 0 && safety > 0) {
+      const stepPence = residualPence > 0 ? 1 : -1;
+      target.newUnitPrice = round2(target.newUnitPrice + stepPence / 100);
+      const newGross = lineGrossPence(target.newUnitPrice, target.quantity);
+      const delta = newGross - target.newLineGrossPence;
+      target.newLineGrossPence = newGross;
+      residualPence -= delta;
+      safety--;
+    }
+    if (residualPence !== 0) {
+      return {
+        repaired: false,
+        reason: `Could not converge order gross to channel gross (residual ${residualPence}p after 200 iterations)`,
+      };
+    }
+  }
+
+  // Persist line updates and audit log entries
+  for (const a of adjusted) {
+    if (toPence(a.oldUnitPrice) === toPence(a.newUnitPrice)) continue;
+    const { error: updErr } = await admin
+      .from("sales_order_line" as never)
+      .update({
+        unit_price: a.newUnitPrice,
+        line_total: round2(a.newUnitPrice * a.quantity),
+      } as never)
+      .eq("id" as never, a.id);
+    if (updErr) {
+      return { repaired: false, reason: `Failed to update line ${a.id}: ${updErr.message}` };
+    }
+
+    if (a.sku_id) {
+      const { data: skuRow } = await admin
+        .from("sku" as never)
+        .select("sku_code")
+        .eq("id" as never, a.sku_id)
+        .maybeSingle();
+      const skuCode = (skuRow as { sku_code?: string } | null)?.sku_code ?? "unknown";
+      await admin.from("price_audit_log" as never).insert({
+        sku_id: a.sku_id,
+        sku_code: skuCode,
+        old_price: a.oldUnitPrice,
+        new_price: a.newUnitPrice,
+        reason: `payout_canonical_repair (order ${orderNumber ?? salesOrderId})`,
+      } as never);
+    }
+  }
+
+  // Update sales_order.gross_total to channelGross
+  const { error: orderUpdErr } = await admin
+    .from("sales_order" as never)
+    .update({ gross_total: channelGross } as never)
+    .eq("id" as never, salesOrderId);
+  if (orderUpdErr) {
+    return { repaired: false, reason: `Failed to update order gross_total: ${orderUpdErr.message}` };
+  }
+
+  console.log(
+    `Repaired sales_order ${orderNumber ?? salesOrderId}: gross ${fromPence(currentGrossPence).toFixed(2)} → ${channelGross.toFixed(2)}`,
+  );
+  return { repaired: true, reason: "OK" };
 }
 
 // ─── Create a QBO Purchase (Expense) ────────────────────────
@@ -586,7 +775,7 @@ Deno.serve(async (req) => {
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null; txId: string; transactionId: string }>();
+    var orderQboMap = new Map<string, { qboId: string; channelGross: number; orderNumber: string | null; txId: string; transactionId: string; salesOrderId: string }>();
     var orderNumberByTxId = new Map<string, string>();
     var customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
@@ -647,14 +836,17 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Good — add to deposit map
+        // Good — add to deposit map. Carry the channel-recorded sale gross
+        // (canonical for this historical sale) and the salesOrderId so the
+        // deposit builder can detect drift and trigger an auto-rebuild.
         const orderNum = (so.order_number as string) ?? null;
         orderQboMap.set(so.id as string, {
           qboId: so.qbo_sales_receipt_id as string,
-          gross: tx.gross_amount,
+          channelGross: tx.gross_amount,
           orderNumber: orderNum,
           txId: tx.id,
           transactionId: tx.transaction_id,
+          salesOrderId: so.id as string,
         });
         // Map transaction ID → order number for expense DocNumber
         if (orderNum) {
@@ -1021,25 +1213,26 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
-    // Business rule (canonical):
-    //   - The app's sales_order + sales_order_line is the LEGAL record of the
-    //     sale at that moment. Its gross is canonical for what the customer
-    //     contracted to pay. Current product/listing prices are irrelevant to
-    //     a historical order.
-    //   - The QBO SalesReceipt mirrors that historical sale, so its TotalAmt
-    //     IS the canonical sale gross.
-    //   - The eBay payout-transaction gross represents the cash settlement,
-    //     which can legitimately differ (price changes between sale and
-    //     payout, marketplace adjustments, currency rounding, etc.).
+    // Canonical rule (your stated business rule):
+    //   The channel-recorded sale amount (ebay_payout_transactions.gross_amount)
+    //   IS canonical for a historical sale. The app's sales_order is the legal
+    //   record of that sale and its gross MUST equal the channel-recorded gross.
+    //   The QBO SalesReceipt mirrors the sales_order so its TotalAmt MUST also
+    //   equal the channel-recorded gross.
     //
     // QBO behaviour: when a Deposit line carries a LinkedTxn for a SalesReceipt
-    // or Purchase, QBO forces that line's Amount to the linked document's
-    // TotalAmt regardless of what we POST. So we MUST build deposit lines from
-    // the actual QBO document totals, not from the eBay payout transaction
-    // amount. Any residual delta vs the payout net is a real settlement
-    // adjustment and is booked as a separate unlinked "Payout settlement
-    // adjustment" line.
-    let depositLines: unknown[] = [];
+    // or Purchase, QBO ignores the line Amount we POST and substitutes the
+    // linked document's TotalAmt. There is no "settlement adjustment" line we
+    // can append that QBO will accept against a linked-doc deposit — empirically
+    // QBO drops unlinked AccountRef lines from such deposits silently. Therefore
+    // the deposit can only ever equal sum(linked-doc TotalAmts).
+    //
+    // Strategy: for every SALE, ensure QBO SalesReceipt TotalAmt == channel
+    // gross. If it doesn't, repair the canonical sales_order, delete the stale
+    // SalesReceipt, recreate it from the canonical order. Then construct
+    // deposit lines from the verified canonical totals. The sum is then equal
+    // to payout.net_amount by construction — no fudge line, no surprises.
+    let depositLines: { Amount: number; DepositLineDetail: Record<string, unknown>; LinkedTxn: Array<Record<string, string>> }[] = [];
 
     if (typeof orderQboMap === "undefined" || orderQboMap.size === 0) {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
@@ -1050,41 +1243,164 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch the actual QBO SalesReceipt TotalAmt for each linked sale so the
-    // deposit math reflects the canonical sale (not the eBay payout gross).
+    // Canonical-drift detection + auto-rebuild for every SALE in the payout.
+    // Per-order mismatches collected for the operator if auto-rebuild ultimately
+    // fails — surfaced verbatim in qbo_sync_error so they know exactly which
+    // order to investigate.
+    const canonicalMismatches: Array<{
+      orderNumber: string | null;
+      transactionId: string;
+      channelGross: number;
+      qboTotal: number;
+      reason: string;
+    }> = [];
+
     for (const entry of orderQboMap.values()) {
-      let canonicalTotal = 0;
+      let qboTotal = 0;
       try {
-        canonicalTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
+        qboTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
       } catch (e) {
-        const msg = `Cannot verify QBO SalesReceipt ${entry.qboId} for order ${entry.orderNumber ?? entry.transactionId}: ${e instanceof Error ? e.message : String(e)}`;
-        syncError = syncError ? `${syncError}; ${msg}` : msg;
+        const reason = `Cannot read QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
+        canonicalMismatches.push({
+          orderNumber: entry.orderNumber,
+          transactionId: entry.transactionId,
+          channelGross: entry.channelGross,
+          qboTotal: 0,
+          reason,
+        });
         continue;
       }
+
+      if (toPence(qboTotal) === toPence(entry.channelGross)) {
+        depositLines.push({
+          Amount: round2(qboTotal),
+          DepositLineDetail: { PaymentMethodRef: { value: "1" } },
+          LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+        });
+        continue;
+      }
+
+      // Drift detected. Auto-rebuild this sale.
+      console.warn(
+        `Canonical drift on ${entry.orderNumber ?? entry.transactionId}: ` +
+          `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboTotal.toFixed(2)} ≠ ` +
+          `channel gross £${entry.channelGross.toFixed(2)}. Auto-rebuilding…`,
+      );
+
+      // Step 1: repair the local sales_order so its gross == channel gross.
+      const repair = await repairSalesOrderToCanonicalGross(
+        admin,
+        entry.salesOrderId,
+        entry.orderNumber,
+        entry.channelGross,
+      );
+      if (!repair.repaired && repair.reason !== "Order gross already matches channel gross") {
+        canonicalMismatches.push({
+          orderNumber: entry.orderNumber,
+          transactionId: entry.transactionId,
+          channelGross: entry.channelGross,
+          qboTotal,
+          reason: `sales_order repair failed: ${repair.reason}`,
+        });
+        continue;
+      }
+
+      // Step 2: delete the stale QBO SalesReceipt.
+      await deleteQBOSalesReceipt(baseUrl, accessToken, entry.qboId);
+
+      // Step 3: clear the local QBO link so qbo-sync-sales-receipt builds fresh.
+      await admin
+        .from("sales_order" as never)
+        .update({ qbo_sales_receipt_id: null, qbo_sync_status: null } as never)
+        .eq("id" as never, entry.salesOrderId);
+
+      // Step 4: invoke qbo-sync-sales-receipt for this order.
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const recreateRes = await fetchWithTimeout(
+        `${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ orderId: entry.salesOrderId }),
+        },
+      );
+      const recreateBody = await recreateRes.json().catch(() => ({}));
+      if (!recreateRes.ok || (recreateBody && recreateBody.success === false)) {
+        canonicalMismatches.push({
+          orderNumber: entry.orderNumber,
+          transactionId: entry.transactionId,
+          channelGross: entry.channelGross,
+          qboTotal,
+          reason: `Recreate SalesReceipt failed: ${JSON.stringify(recreateBody).substring(0, 300)}`,
+        });
+        continue;
+      }
+
+      // Step 5: re-fetch the new SalesReceipt id + verify TotalAmt to the penny.
+      const { data: refreshedSo } = await admin
+        .from("sales_order" as never)
+        .select("qbo_sales_receipt_id")
+        .eq("id" as never, entry.salesOrderId)
+        .single();
+      const newReceiptId = (refreshedSo as { qbo_sales_receipt_id?: string } | null)?.qbo_sales_receipt_id;
+      if (!newReceiptId) {
+        canonicalMismatches.push({
+          orderNumber: entry.orderNumber,
+          transactionId: entry.transactionId,
+          channelGross: entry.channelGross,
+          qboTotal,
+          reason: "SalesReceipt was not relinked after recreate",
+        });
+        continue;
+      }
+      const newQboTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", newReceiptId);
+      if (toPence(newQboTotal) !== toPence(entry.channelGross)) {
+        canonicalMismatches.push({
+          orderNumber: entry.orderNumber,
+          transactionId: entry.transactionId,
+          channelGross: entry.channelGross,
+          qboTotal: newQboTotal,
+          reason: `Recreated SalesReceipt ${newReceiptId} TotalAmt £${newQboTotal.toFixed(2)} still ≠ channel gross £${entry.channelGross.toFixed(2)}`,
+        });
+        continue;
+      }
+
+      console.log(
+        `Recreated SalesReceipt ${newReceiptId} for ${entry.orderNumber}: TotalAmt £${newQboTotal.toFixed(2)} matches channel gross.`,
+      );
       depositLines.push({
-        Amount: round2(canonicalTotal),
+        Amount: round2(newQboTotal),
         DepositLineDetail: { PaymentMethodRef: { value: "1" } },
-        LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+        LinkedTxn: [{ TxnId: newReceiptId, TxnLineId: "0", TxnType: "SalesReceipt" }],
       });
     }
 
-    if (syncError) {
-      await persistSyncFailure(admin, payoutId, syncError);
+    if (canonicalMismatches.length > 0) {
+      const msg =
+        `Canonical sale mismatch on ${canonicalMismatches.length} order(s): ` +
+        canonicalMismatches
+          .map((m) => `${m.orderNumber ?? m.transactionId} (channel £${m.channelGross.toFixed(2)}, QBO £${m.qboTotal.toFixed(2)} — ${m.reason})`)
+          .join("; ");
+      await persistSyncFailure(admin, payoutId, msg);
       return new Response(
-        JSON.stringify({ success: false, error: syncError, payoutId }),
+        JSON.stringify({
+          success: false,
+          error: msg,
+          payoutId,
+          canonicalMismatches,
+        }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit.
-    // SALE fees, SHIPPING_LABEL, and unsettled NON_SALE_CHARGE Purchases are booked
-    // against Undeposited Funds and must appear here to clear that account.
-    //
-    // Skipped:
-    //  - TRANSFER transactions (filtered out earlier) — informational only.
-    //  - NON_SALE_CHARGEs flagged settledViaTransfer — these were paid by eBay
-    //    out-of-band (matching TRANSFER) and booked directly to the bank, so they
-    //    never debited Undeposited Funds and must not reduce this deposit.
+    // qboTotalAmt was already verified to equal the source amount to the penny
+    // (cached path: lines 821–827; fresh path: post-POST drift loop in
+    // createQBOPurchase). So sum(deposit lines) is canonical by construction.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.qboTotalAmt <= 0) continue;
       if (exp.settledViaTransfer) continue;
@@ -1098,8 +1414,6 @@ Deno.serve(async (req) => {
       });
     }
 
-
-    // Guard: ensure we have at least one deposit line
     if (depositLines.length === 0) {
       const msg = "Cannot create deposit: no deposit lines built — payout has no matched sales and no deductible expenses";
       await persistSyncFailure(admin, payoutId, msg);
@@ -1108,53 +1422,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Reconciliation: absorb settlement drift as adjustment ───
-    // All deposit-line amounts at this point are verified QBO TotalAmts (for
-    // linked SalesReceipts/Purchases QBO would force these anyway). Any
-    // residual delta vs the payout net is a real settlement adjustment —
-    // marketplace adjustments, currency rounding, post-sale price tweaks,
-    // partial refunds settled at payout time, etc. — and is booked explicitly
-    // as a separate unlinked "Payout settlement adjustment" line so the
-    // accounting is visible rather than silently misposted.
-    const constructedPence = (depositLines as Array<{ Amount: number }>)
-      .reduce((s, l) => s + toPence(l.Amount), 0);
+    // ─── Pre-POST balance assertion ──────────────────────────
+    // After canonical-rebuild and verified expense totals, the deposit must
+    // equal payout.net_amount to the penny. If not, something upstream is
+    // broken — abort hard rather than mask with a fudge line.
+    const constructedPence = depositLines.reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
-    // Skipped expense (Purchase) txns: omitted negative deposit line → +K pence missing.
-    // Skipped sales_receipt txns:      omitted positive deposit line → -G pence missing.
-    const skippedExpensePence = skippedTransactions
-      .filter((t) => t.kind !== "sales_receipt")
-      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
-    const skippedSalesPence = skippedTransactions
-      .filter((t) => t.kind === "sales_receipt")
-      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
-    // The deposit only needs to clear what it actually contains — i.e. the
-    // payout net adjusted for skipped lines that aren't in the deposit.
-    const targetDepositPence = expectedPence + skippedExpensePence - skippedSalesPence;
-    const adjustmentPence = targetDepositPence - constructedPence;
-    let payoutAdjustmentAmount = 0;
 
-    if (adjustmentPence !== 0) {
-      payoutAdjustmentAmount = fromPence(adjustmentPence);
-      const adjustmentMapping =
-        (await getAccountMapping(admin, "payout_adjustment")) ?? sellingFeesAccount;
-      const adjAccountRef = buildAccountRef(adjustmentMapping);
-      console.warn(
-        `Payout settlement adjustment: ${adjustmentPence}p (£${payoutAdjustmentAmount.toFixed(2)}) ` +
-        `posted to "${adjustmentMapping.name ?? adjustmentMapping.id}" — constructed £${fromPence(constructedPence).toFixed(2)}, ` +
-        `target £${fromPence(targetDepositPence).toFixed(2)} (payout net £${expectedNet.toFixed(2)}).`
+    if (constructedPence !== expectedPence) {
+      const breakdown = depositLines
+        .map((l) => `£${l.Amount.toFixed(2)} (${l.LinkedTxn?.[0]?.TxnType ?? "?"} ${l.LinkedTxn?.[0]?.TxnId ?? "?"})`)
+        .join(", ");
+      const msg =
+        `Deposit construction does not balance: built £${fromPence(constructedPence).toFixed(2)} ` +
+        `(${constructedPence}p), payout net £${expectedNet.toFixed(2)} (${expectedPence}p), ` +
+        `delta ${expectedPence - constructedPence}p. Lines: ${breakdown}. ` +
+        `This means a linked QBO doc total no longer matches its source — investigate ` +
+        `the SalesReceipt/Purchase totals listed above.`;
+      await persistSyncFailure(admin, payoutId, msg);
+      return new Response(
+        JSON.stringify({ success: false, error: msg, payoutId }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-      depositLines.push({
-        Amount: payoutAdjustmentAmount,
-        DepositLineDetail: {
-          AccountRef: adjAccountRef,
-          PaymentMethodRef: { value: "1" },
-        },
-        Description: `Payout settlement adjustment (${channel} ${externalPayoutId})`,
-      });
-    } else {
-      console.log(`Deposit reconciliation OK: constructed=£${fromPence(constructedPence).toFixed(2)}, no adjustment needed`);
     }
+
+    console.log(`Deposit balances exactly: £${expectedNet.toFixed(2)} across ${depositLines.length} lines.`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
@@ -1173,10 +1466,10 @@ Deno.serve(async (req) => {
         if (deposits.length > 0) {
           qboDepositId = String(deposits[0].Id);
           qboDepositTotal = Number(deposits[0].TotalAmt ?? 0);
-          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} (TotalAmt £${qboDepositTotal.toFixed(2)}) — skipping creation`);
+          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} (TotalAmt £${qboDepositTotal.toFixed(2)})`);
         }
       } else {
-        await existingRes.text(); // consume body
+        await existingRes.text();
       }
     }
 
@@ -1213,14 +1506,54 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Note: no post-create deposit total assertion needed — the deposit is
-    // balanced by construction (linked-doc totals + explicit adjustment line),
-    // so QBO's TotalAmt is guaranteed to equal the payout net.
+    // ─── Post-POST verification: QBO Deposit TotalAmt MUST equal payout net ─
+    // Read back from QBO (don't trust the POST response). If QBO dropped/forced
+    // any line during creation, the TotalAmt will diverge — surface that as a
+    // hard error so it never silently mis-posts.
+    if (qboDepositId) {
+      try {
+        const verifiedTotal = await fetchQBODocTotal(baseUrl, accessToken, "Deposit", qboDepositId);
+        if (toPence(verifiedTotal) !== expectedPence) {
+          const driftPence = expectedPence - toPence(verifiedTotal);
+          const msg =
+            `QBO Deposit ${qboDepositId} TotalAmt £${verifiedTotal.toFixed(2)} ` +
+            `does not equal payout net £${expectedNet.toFixed(2)} (drift ${driftPence}p). ` +
+            `QBO dropped or forced a deposit line. Inspect the deposit in QBO and ` +
+            `investigate which linked document changed.`;
+          await persistSyncFailure(admin, payoutId, msg);
+          // Persist the qbo_deposit_id so the operator can navigate to it,
+          // but keep status = error.
+          await admin
+            .from("payouts" as never)
+            .update({ qbo_deposit_id: qboDepositId } as never)
+            .eq("id", payoutId);
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: msg,
+              payoutId,
+              qbo_deposit_id: qboDepositId,
+              expected_total: expectedNet,
+              actual_total: verifiedTotal,
+            }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        qboDepositTotal = verifiedTotal;
+      } catch (e) {
+        const msg = `Could not verify created QBO Deposit ${qboDepositId}: ${e instanceof Error ? e.message : String(e)}`;
+        await persistSyncFailure(admin, payoutId, msg);
+        return new Response(
+          JSON.stringify({ success: false, error: msg, payoutId, qbo_deposit_id: qboDepositId }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
 
     // ─── 7. Update payout record ────────────────────────────
     // Status:
-    //  - synced  → deposit landed and no skipped transactions
-    //  - partial → deposit landed but ≥1 transactions skipped (drift unresolvable)
+    //  - synced  → deposit landed, balanced exactly, no skipped txns
+    //  - partial → deposit landed but ≥1 expense skipped (drift unresolvable)
     //  - error   → deposit creation itself failed
     const finalStatus = qboDepositId
       ? (skippedTransactions.length > 0 ? "partial" : "synced")
@@ -1229,11 +1562,6 @@ Deno.serve(async (req) => {
     if (skippedTransactions.length > 0) {
       noteParts.push(
         `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
-      );
-    }
-    if (payoutAdjustmentAmount !== 0) {
-      noteParts.push(
-        `Settlement adjustment £${payoutAdjustmentAmount.toFixed(2)} posted to balance deposit against payout net.`
       );
     }
     const partialMessage = noteParts.length > 0 ? noteParts.join(" ") : null;
@@ -1260,6 +1588,7 @@ Deno.serve(async (req) => {
       success: true,
       status: finalStatus,
       qbo_deposit_id: qboDepositId,
+      qbo_deposit_total: qboDepositTotal,
       expenses_created: expenseResults.length,
       skipped: skippedTransactions,
       partial_message: partialMessage,
@@ -1273,3 +1602,4 @@ Deno.serve(async (req) => {
     return errorResponse(err);
   }
 });
+

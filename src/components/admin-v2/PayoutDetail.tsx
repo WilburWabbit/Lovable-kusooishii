@@ -172,6 +172,25 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         </div>
       )}
 
+      {payout.qboSyncStatus === "error" && payout.qboSyncError && (
+        <div className="mb-5 rounded-md border border-red-300 bg-red-50 p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-red-700">
+            QBO Sync Blocked
+          </div>
+          <div className="mt-1 text-sm text-red-900">
+            {payout.qboSyncError.includes("Canonical sale mismatch")
+              ? "One or more sales orders no longer match the channel-recorded sale amount. Auto-rebuild of the affected QuickBooks SalesReceipt(s) did not converge. The channel amount is canonical for a historical sale — investigate and repair the orders listed below."
+              : payout.qboSyncError.includes("Deposit construction does not balance") ||
+                payout.qboSyncError.includes("does not equal payout net")
+              ? "The deposit does not equal the payout net to the penny. No fudge adjustment is applied — reconcile the linked QuickBooks document totals listed below."
+              : "Deposit creation failed. See details below."}
+          </div>
+          <Mono color="dim" className="mt-2 block whitespace-pre-wrap text-xs text-red-800">
+            {payout.qboSyncError}
+          </Mono>
+        </div>
+      )}
+
       {/* 1. Totals */}
       <div className="grid grid-cols-3 gap-3 mb-3">
         <SurfaceCard>
