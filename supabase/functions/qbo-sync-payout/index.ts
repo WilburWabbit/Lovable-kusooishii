@@ -834,7 +834,7 @@ Deno.serve(async (req) => {
     );
     const expectedNet = p.net_amount as number;
     const delta = round2(Math.abs(constructedTotal - expectedNet));
-    if (delta > 0.02) {
+    if (delta > 0.001) {
       const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
       console.error(msg);
       await persistSyncFailure(admin, payoutId, msg);
