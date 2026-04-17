@@ -1138,18 +1138,21 @@ Deno.serve(async (req) => {
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
     const constructedTotal = fromPence(constructedPence);
-    const skippedExpensePence = skippedTransactions.reduce(
-      (s, t) => s + toPence(Math.abs(t.expected)),
-      0,
-    );
+    // Skipped expense (Purchase) txns: omitted negative deposit line → delta is +K.
+    // Skipped sales_receipt txns:      omitted positive deposit line → delta is -G.
+    // Net expected delta = sum(expense.expected) - sum(salesReceipt.expected).
+    const skippedExpensePence = skippedTransactions
+      .filter((t) => t.kind !== "sales_receipt")
+      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
+    const skippedSalesPence = skippedTransactions
+      .filter((t) => t.kind === "sales_receipt")
+      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
+    const expectedDeltaPence = skippedExpensePence - skippedSalesPence;
     if (constructedPence !== expectedPence) {
       const deltaPence = constructedPence - expectedPence;
-      // Skipped expenses would have been negative deposit lines. So a payout
-      // net of N with K pence of skipped expenses produces a constructed
-      // total of N + K (we didn't subtract them). delta should equal +K.
-      const tolerated = skippedTransactions.length > 0 && deltaPence === skippedExpensePence;
+      const tolerated = skippedTransactions.length > 0 && deltaPence === expectedDeltaPence;
       if (!tolerated) {
-        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (sum ${skippedExpensePence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (expense ${skippedExpensePence}p, sales ${skippedSalesPence}p, expected delta ${expectedDeltaPence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
         console.error(msg);
         await persistSyncFailure(admin, payoutId, msg);
         return new Response(
