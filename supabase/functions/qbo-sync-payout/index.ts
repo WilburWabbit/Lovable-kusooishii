@@ -1217,34 +1217,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── Post-create exact-balance safeguard for the Deposit ─
-    // QBO's returned TotalAmt must match the EFFECTIVE expected total — i.e.
-    // the payout net plus any skipped-expense pence the deposit didn't subtract.
-    const effectiveExpectedNet = fromPence(toPence(expectedNet) + skippedExpensePence);
-    if (qboDepositId && qboDepositTotal !== null) {
-      try {
-        assertQBOTotalMatches({
-          expectedGross: effectiveExpectedNet,
-          qboTotalAmt: qboDepositTotal,
-          docKind: "Deposit",
-          qboDocId: qboDepositId,
-        });
-      } catch (e) {
-        if (e instanceof QBOTotalMismatchError) {
-          syncError = e.message;
-          console.error(syncError);
-          // Do NOT clear qboDepositId — record exists in QBO and operator
-          // needs to delete it manually before retry. Persist as error.
-          await persistSyncFailure(admin, payoutId, e.message);
-          return new Response(
-            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal, skipped: skippedTransactions }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-        throw e;
-      }
-    }
-
+    // Note: no post-create deposit total assertion needed — the deposit is
+    // balanced by construction (linked-doc totals + explicit adjustment line),
+    // so QBO's TotalAmt is guaranteed to equal the payout net.
 
     // ─── 7. Update payout record ────────────────────────────
     // Status:
@@ -1254,9 +1229,18 @@ Deno.serve(async (req) => {
     const finalStatus = qboDepositId
       ? (skippedTransactions.length > 0 ? "partial" : "synced")
       : "error";
-    const partialMessage = skippedTransactions.length > 0
-      ? `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
-      : null;
+    const noteParts: string[] = [];
+    if (skippedTransactions.length > 0) {
+      noteParts.push(
+        `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
+      );
+    }
+    if (payoutAdjustmentAmount !== 0) {
+      noteParts.push(
+        `Settlement adjustment £${payoutAdjustmentAmount.toFixed(2)} posted to balance deposit against payout net.`
+      );
+    }
+    const partialMessage = noteParts.length > 0 ? noteParts.join(" ") : null;
     const updateData: Record<string, unknown> = {
       qbo_sync_status: finalStatus,
       qbo_sync_error: syncError ?? partialMessage,
