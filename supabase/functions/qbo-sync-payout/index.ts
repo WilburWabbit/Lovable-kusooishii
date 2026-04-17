@@ -225,7 +225,7 @@ async function persistSyncFailure(
 async function fetchQBODocTotal(
   baseUrl: string,
   accessToken: string,
-  docKind: "Purchase" | "SalesReceipt",
+  docKind: "Purchase" | "SalesReceipt" | "Deposit",
   qboId: string,
 ): Promise<number> {
   const url = `${baseUrl}/${docKind.toLowerCase()}/${encodeURIComponent(qboId)}?minorversion=65`;
@@ -239,6 +239,195 @@ async function fetchQBODocTotal(
   const json = await res.json();
   const doc = json[docKind] ?? {};
   return Number(doc.TotalAmt ?? 0);
+}
+
+/**
+ * Best-effort delete a QBO SalesReceipt. Used during canonical-drift
+ * auto-rebuild: when the cached SalesReceipt's TotalAmt doesn't equal the
+ * channel-recorded sale gross, we delete it and let qbo-sync-sales-receipt
+ * recreate it from the canonical sales_order.
+ */
+async function deleteQBOSalesReceipt(
+  baseUrl: string,
+  accessToken: string,
+  receiptId: string,
+): Promise<void> {
+  try {
+    const getRes = await fetchWithTimeout(
+      `${baseUrl}/salesreceipt/${encodeURIComponent(receiptId)}?minorversion=65`,
+      { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+    );
+    if (!getRes.ok) {
+      console.warn(`Could not fetch QBO SalesReceipt ${receiptId} for delete: HTTP ${getRes.status}`);
+      return;
+    }
+    const getJson = await getRes.json();
+    const syncToken = getJson?.SalesReceipt?.SyncToken;
+    if (syncToken === undefined) {
+      console.warn(`QBO SalesReceipt ${receiptId} missing SyncToken; skipping delete`);
+      return;
+    }
+    const delRes = await fetchWithTimeout(
+      `${baseUrl}/salesreceipt?operation=delete&minorversion=65`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ Id: receiptId, SyncToken: String(syncToken) }),
+      },
+    );
+    if (!delRes.ok) {
+      const body = await delRes.text();
+      console.warn(`QBO SalesReceipt ${receiptId} delete failed [${delRes.status}]: ${body.substring(0, 300)}`);
+    } else {
+      console.log(`Deleted stale QBO SalesReceipt ${receiptId}`);
+    }
+  } catch (e) {
+    console.warn(`Exception deleting QBO SalesReceipt ${receiptId}:`, e);
+  }
+}
+
+/**
+ * Repair a sales_order whose gross_total has drifted from the channel-recorded
+ * gross. Recomputes unit_price/line_total so the order's gross equals
+ * `channelGross` exactly under VAT-inclusive math (gross = round2(net * 1.2)).
+ *
+ * For multi-line orders we proportionally rescale each line's unit_price by
+ * `channelGross / currentGross` and absorb the residual penny on the largest
+ * line so the per-line gross sums round-trip to channelGross exactly.
+ *
+ * Writes a price_audit_log entry per affected SKU.
+ */
+async function repairSalesOrderToCanonicalGross(
+  admin: ReturnType<typeof createAdminClient>,
+  salesOrderId: string,
+  orderNumber: string | null,
+  channelGross: number,
+): Promise<{ repaired: boolean; reason: string }> {
+  const channelGrossPence = toPence(channelGross);
+
+  const { data: lines, error: linesErr } = await admin
+    .from("sales_order_line" as never)
+    .select("id, sku_id, quantity, unit_price, line_total")
+    .eq("sales_order_id" as never, salesOrderId);
+
+  if (linesErr) {
+    return { repaired: false, reason: `Failed to load order lines: ${linesErr.message}` };
+  }
+  type Line = { id: string; sku_id: string | null; quantity: number; unit_price: number; line_total: number };
+  const orderLines = ((lines ?? []) as Line[]);
+  if (orderLines.length === 0) {
+    return { repaired: false, reason: "Order has no lines" };
+  }
+
+  // Compute per-line gross under VAT-inclusive rule: gross = round2(net * 1.2)
+  // where net = unit_price * qty.
+  const lineGrossPence = (unitPrice: number, qty: number) =>
+    toPence(round2(unitPrice * qty * VAT_DIVISOR));
+
+  const currentGrossPence = orderLines.reduce(
+    (s, l) => s + lineGrossPence(l.unit_price, l.quantity),
+    0,
+  );
+
+  if (currentGrossPence === channelGrossPence) {
+    return { repaired: false, reason: "Order gross already matches channel gross" };
+  }
+
+  // Rescale each line's unit_price proportionally, then absorb residual on
+  // the largest line so per-line grosses sum to exactly channelGrossPence.
+  const scale = channelGrossPence / currentGrossPence;
+  type Adjusted = { id: string; sku_id: string | null; quantity: number; oldUnitPrice: number; newUnitPrice: number; newLineGrossPence: number };
+  const adjusted: Adjusted[] = orderLines.map((l) => {
+    const newUnit = round2(l.unit_price * scale);
+    return {
+      id: l.id,
+      sku_id: l.sku_id,
+      quantity: l.quantity,
+      oldUnitPrice: l.unit_price,
+      newUnitPrice: newUnit,
+      newLineGrossPence: lineGrossPence(newUnit, l.quantity),
+    };
+  });
+
+  let summed = adjusted.reduce((s, a) => s + a.newLineGrossPence, 0);
+  let residualPence = channelGrossPence - summed;
+
+  if (residualPence !== 0) {
+    // Adjust the largest line's unit_price by 1p increments until the residual
+    // is absorbed. With VAT_DIVISOR=1.2, a 1p shift on net moves gross by 1p
+    // for qty=1; for higher qty we'd move by qty*1.2 rounded — so we iterate.
+    // Sort by quantity desc then by line_gross desc so the biggest line
+    // absorbs the rounding.
+    const sorted = [...adjusted].sort((a, b) =>
+      (b.quantity - a.quantity) || (b.newLineGrossPence - a.newLineGrossPence)
+    );
+    const target = sorted[0];
+    let safety = 200; // 200 iterations max — covers any reasonable order
+    while (residualPence !== 0 && safety > 0) {
+      const stepPence = residualPence > 0 ? 1 : -1;
+      target.newUnitPrice = round2(target.newUnitPrice + stepPence / 100);
+      const newGross = lineGrossPence(target.newUnitPrice, target.quantity);
+      const delta = newGross - target.newLineGrossPence;
+      target.newLineGrossPence = newGross;
+      residualPence -= delta;
+      safety--;
+    }
+    if (residualPence !== 0) {
+      return {
+        repaired: false,
+        reason: `Could not converge order gross to channel gross (residual ${residualPence}p after 200 iterations)`,
+      };
+    }
+  }
+
+  // Persist line updates and audit log entries
+  for (const a of adjusted) {
+    if (toPence(a.oldUnitPrice) === toPence(a.newUnitPrice)) continue;
+    const { error: updErr } = await admin
+      .from("sales_order_line" as never)
+      .update({
+        unit_price: a.newUnitPrice,
+        line_total: round2(a.newUnitPrice * a.quantity),
+      } as never)
+      .eq("id" as never, a.id);
+    if (updErr) {
+      return { repaired: false, reason: `Failed to update line ${a.id}: ${updErr.message}` };
+    }
+
+    if (a.sku_id) {
+      const { data: skuRow } = await admin
+        .from("sku" as never)
+        .select("sku_code")
+        .eq("id" as never, a.sku_id)
+        .maybeSingle();
+      const skuCode = (skuRow as { sku_code?: string } | null)?.sku_code ?? "unknown";
+      await admin.from("price_audit_log" as never).insert({
+        sku_id: a.sku_id,
+        sku_code: skuCode,
+        old_price: a.oldUnitPrice,
+        new_price: a.newUnitPrice,
+        reason: `payout_canonical_repair (order ${orderNumber ?? salesOrderId})`,
+      } as never);
+    }
+  }
+
+  // Update sales_order.gross_total to channelGross
+  const { error: orderUpdErr } = await admin
+    .from("sales_order" as never)
+    .update({ gross_total: channelGross } as never)
+    .eq("id" as never, salesOrderId);
+  if (orderUpdErr) {
+    return { repaired: false, reason: `Failed to update order gross_total: ${orderUpdErr.message}` };
+  }
+
+  console.log(
+    `Repaired sales_order ${orderNumber ?? salesOrderId}: gross ${fromPence(currentGrossPence).toFixed(2)} → ${channelGross.toFixed(2)}`,
+  );
+  return { repaired: true, reason: "OK" };
 }
 
 // ─── Create a QBO Purchase (Expense) ────────────────────────
