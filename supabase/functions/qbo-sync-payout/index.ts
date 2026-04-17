@@ -20,7 +20,6 @@ import {
 import {
   toPence,
   fromPence,
-  distributeLinesByGrossPence,
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
@@ -299,11 +298,15 @@ async function deleteQBOSalesReceipt(
  *   sum(net line totals)  = round(channelGrossPence / 1.2)   (banker's)
  *   sales_order.gross_total = channelGross (exact, to the penny)
  *
- * We compute canonical net pence directly from the channel gross pence and
- * distribute it across lines proportionally to current line value, with the
- * residual penny absorbed on the largest line. No iteration, no convergence
- * loop — pure integer-pence arithmetic in the same model the rest of the app
- * (ingestion, sales-receipt builder, vat.ts helpers) operates in.
+ * Previous attempts used integer NET pence as the repair target. That loses
+ * the sub-penny precision present in canonical ex-VAT order lines like
+ * £13.325 (which legitimately maps to a £15.99 customer-facing gross). Once
+ * such a line is rewritten to £13.33, qbo-sync-sales-receipt derives £16.00
+ * on rebuild and we permanently regress historical sales.
+ *
+ * So the repair target here is the per-line GROSS pence distribution, and we
+ * write back 4dp NET line totals chosen to reproduce those exact gross pence
+ * when qbo-sync-sales-receipt later runs `Math.round(netLineTotal * 1.2 * 100)`.
  *
  * Writes a price_audit_log entry per affected SKU.
  */
@@ -329,86 +332,78 @@ async function repairSalesOrderToCanonicalGross(
     return { repaired: false, reason: "Order has no lines" };
   }
 
-  // Current per-line NET pence (treat unit_price/line_total as ex-VAT, which
-  // matches every ingestion writer).
-  const currentNetPenceByLine = orderLines.map((l) => {
-    const netLineTotal =
-      typeof l.line_total === "number" && l.line_total !== 0
-        ? l.line_total
-        : (l.unit_price ?? 0) * (l.quantity ?? 1);
-    return toPence(netLineTotal);
-  });
-  const currentTotalNetPence = currentNetPenceByLine.reduce((s, p) => s + p, 0);
-  // Reconstruct each line's *current* gross-pence proxy for the distributor.
-  // We want to distribute the canonical channel gross across lines in the
-  // same shape as their current net values. distributeLinesByGrossPence will
-  // then split each into (net, vat) at 20% with the residual penny on the
-  // last entry — we just need to make sure the largest-value line is last so
-  // the residual lands there.
-  const indexed = currentNetPenceByLine.map((p, i) => ({ p, i }));
-  // Sort ascending by current net pence; the last (largest) line absorbs
-  // both the proportional rounding and any residual penny. Lines with zero
-  // current value get a proportional share of zero (which still leaves the
-  // canonical total intact via the last-line residual handling).
+  const currentNetTotals = orderLines.map((l) =>
+    typeof l.line_total === "number" && l.line_total !== 0
+      ? l.line_total
+      : (l.unit_price ?? 0) * (l.quantity ?? 1)
+  );
+  const currentNetWeightPenceByLine = currentNetTotals.map((net) => toPence(net));
+  const currentGrossProxyPenceByLine = currentNetTotals.map((net) => Math.round(net * VAT_DIVISOR * 100));
+  const currentTotalNetWeightPence = currentNetWeightPenceByLine.reduce((s, p) => s + p, 0);
+
+  const { data: orderRow, error: orderErr } = await admin
+    .from("sales_order" as never)
+    .select("gross_total")
+    .eq("id" as never, salesOrderId)
+    .single();
+  if (orderErr) {
+    return { repaired: false, reason: `Failed to load order header: ${orderErr.message}` };
+  }
+  const currentOrderGross = Number((orderRow as { gross_total?: number } | null)?.gross_total ?? 0);
+
+  const indexed = currentNetWeightPenceByLine.map((p, i) => ({ p, i }));
   indexed.sort((a, b) => a.p - b.p);
 
-  // Build proportional GROSS pence shares for the distributor that sum
-  // exactly to channelGrossPence.
+  // Build proportional GROSS pence shares that sum exactly to channelGrossPence.
   const sortedShares: number[] = new Array(indexed.length);
-  if (currentTotalNetPence === 0) {
-    // Degenerate: all lines zero. Put the entire channel gross on the last
-    // (any) line so VAT split works.
+  if (currentTotalNetWeightPence === 0) {
     for (let k = 0; k < sortedShares.length; k++) sortedShares[k] = 0;
     sortedShares[sortedShares.length - 1] = channelGrossPence;
   } else {
     let allocated = 0;
     for (let k = 0; k < indexed.length - 1; k++) {
-      const share = Math.round((indexed[k].p / currentTotalNetPence) * channelGrossPence);
+      const share = Math.round((indexed[k].p / currentTotalNetWeightPence) * channelGrossPence);
       sortedShares[k] = share;
       allocated += share;
     }
     sortedShares[sortedShares.length - 1] = channelGrossPence - allocated;
   }
 
-  // Use the shared distributor: gives us {netPence, vatPence, grossPence}
-  // per share with sum(net) = round(channelGross/1.2) and sum(gross) = channelGross.
-  const distributed = distributeLinesByGrossPence(sortedShares);
-
-  // Map distributed shares back to original line order.
   type Adjusted = {
     id: string;
     sku_id: string | null;
     quantity: number;
     oldUnitPrice: number;
-    oldNetPence: number;
-    newNetPence: number;
+    oldLineTotal: number;
+    currentGrossProxyPence: number;
+    targetGrossPence: number;
   };
   const adjusted: Adjusted[] = orderLines.map((l, i) => ({
     id: l.id,
     sku_id: l.sku_id,
     quantity: l.quantity ?? 1,
     oldUnitPrice: l.unit_price ?? 0,
-    oldNetPence: currentNetPenceByLine[i],
-    newNetPence: 0,
+    oldLineTotal: currentNetTotals[i],
+    currentGrossProxyPence: currentGrossProxyPenceByLine[i],
+    targetGrossPence: 0,
   }));
   for (let k = 0; k < indexed.length; k++) {
-    adjusted[indexed[k].i].newNetPence = distributed[k].netPence;
+    adjusted[indexed[k].i].targetGrossPence = sortedShares[k];
   }
 
-  // No-op short-circuit: already canonical.
-  const newTotalNetPence = adjusted.reduce((s, a) => s + a.newNetPence, 0);
-  const expectedNetPence = Math.round(channelGrossPence / 1.2);
+  // No-op short-circuit: stored lines already reproduce the canonical gross.
   if (
-    newTotalNetPence === currentTotalNetPence &&
-    newTotalNetPence === expectedNetPence
+    toPence(currentOrderGross) === channelGrossPence &&
+    adjusted.every((a) => a.currentGrossProxyPence === a.targetGrossPence)
   ) {
     return { repaired: false, reason: "Order gross already matches channel gross" };
   }
 
-  // Persist line updates + per-SKU price_audit_log entries.
+  // Persist line updates as 4dp ex-VAT amounts that reproduce the exact target
+  // gross pence during qbo-sync-sales-receipt rebuild.
   for (const a of adjusted) {
-    if (a.newNetPence === a.oldNetPence) continue;
-    const newLineTotal = fromPence(a.newNetPence);
+    if (a.currentGrossProxyPence === a.targetGrossPence) continue;
+    const newLineTotal = Math.round(((a.targetGrossPence / (VAT_DIVISOR * 100)) * 10000)) / 10000;
     const newUnitPrice = a.quantity > 0
       ? Math.round((newLineTotal / a.quantity) * 10000) / 10000
       : newLineTotal;
@@ -450,8 +445,11 @@ async function repairSalesOrderToCanonicalGross(
     return { repaired: false, reason: `Failed to update order gross_total: ${orderUpdErr.message}` };
   }
 
+  const repairedLineTotals = adjusted.map((a) =>
+    Math.round(((a.targetGrossPence / (VAT_DIVISOR * 100)) * 10000)) / 10000
+  );
   console.log(
-    `Repaired sales_order ${orderNumber ?? salesOrderId}: net ${fromPence(currentTotalNetPence).toFixed(2)} → ${fromPence(newTotalNetPence).toFixed(2)} (canonical gross £${channelGross.toFixed(2)})`,
+    `Repaired sales_order ${orderNumber ?? salesOrderId}: gross proxies ${currentGrossProxyPenceByLine.join(",")} → ${adjusted.map((a) => a.targetGrossPence).join(",")} and line totals ${currentNetTotals.join(",")} → ${repairedLineTotals.join(",")} (canonical gross £${channelGross.toFixed(2)})`,
   );
   return { repaired: true, reason: "OK" };
 }
