@@ -1,75 +1,57 @@
 
 
-## Root cause (proven, not guessed)
+## What "9/10" actually means
 
-For payout `7388684270`, exactly one sale is wrong:
+The "QBO Readiness: 9/10 orders synced" badge counts how many of the 10 eBay SALE transactions have a linked `sales_order` with a `qbo_sales_receipt_id`. Right now:
 
-- Order `24-14326-19004` / `KO-0009323`
-- eBay recorded the customer paid **£15.99** (`ebay_payout_transactions.gross_amount = 15.99`)
-- App `sales_order.gross_total` = **£14.99** (`unit_price = 12.49 × 1 + 20% VAT`)
-- QBO SalesReceipt `1668` TotalAmt = **£14.99** (built from the wrong app order)
+- 9 orders have a SalesReceipt
+- 1 order does not: `KO-0009323` (eBay reference `24-14326-19004`)
 
-All other 9 sales match eBay's recorded gross to the penny. Sum-of-deposit-lines = £221.06. Payout net = £222.06. The £1.00 "settlement adjustment" is the system masking a **single corrupted historical order record**, not arithmetic drift.
+That's `KO-0009323`'s SalesReceipt `1668` which was deleted as part of the canonical repair. It hasn't been recreated yet, so readiness correctly reports 9/10.
 
-The app's design rule (your stated rule, restated) is that the channel's recorded sale amount IS canonical for a historical sale. Order `KO-0009323`'s `sales_order` row was mutated after the fact (current price replaced the original sale price). That breaks the rule and breaks every downstream record.
+## But there's a real bug behind this
 
-## What I will change
+While verifying, I found a separate, worse bug in the live data:
 
-### 1. `qbo-sync-payout/index.ts` — detect and auto-rebuild on sale drift
+`payout_orders` for this payout has **12 rows** but eBay only paid for **10 sales**. The two extras don't belong:
 
-Before linking a SalesReceipt into the deposit, for every SALE transaction:
+- `KO-0009312` / `05-14355-58903` — not in this payout
+- `KO-0009327` / `24-14326-19005` (£360) — not in this payout
 
-- Read the canonical channel-recorded sale gross: `ebay_payout_transactions.gross_amount` for that transaction.
-- Read the QBO SalesReceipt's `TotalAmt` via `fetchQBODocTotal`.
-- If they differ by even 1p:
-  1. Detect that `sales_order.gross_total` ≠ channel-recorded gross. If so, **repair the app order first**:
-     - Recompute `sales_order_line.unit_price` and `line_total` so the order's gross equals the channel-recorded gross exactly. For single-line orders this is `unit_price = round(channelGross / 1.2 / qty, 2)` with the residual penny absorbed on the line so `line_total × 1.2` round-trips to `channelGross` exactly.
-     - Update `sales_order.gross_total` to the channel-recorded gross.
-     - Write a `price_audit_log` entry (`reason: 'payout_canonical_repair'`) so the change is auditable.
-  2. Delete the stale QBO SalesReceipt (`deleteQBOSalesReceipt`).
-  3. Clear `sales_order.qbo_sales_receipt_id` and `qbo_sync_status`.
-  4. Invoke `qbo-sync-sales-receipt` for that order. The existing 3-attempt rounding-stable loop guarantees QBO's TotalAmt lands at exactly the canonical gross.
-  5. Re-fetch the new SalesReceipt's TotalAmt and assert it equals the channel-recorded gross. If still wrong, mark payout `error` and surface the exact order — **no silent adjustment**.
+These were over-linked by the fallback in `supabase/functions/v2-reconcile-payout/index.ts` (lines ~80–103): when no `payout_orders` exist yet, it sweeps every `sales_order` on the same channel within a 14-day window and links them all. That fallback is what's polluting `payout_orders` (sum = £679.54 vs payout net £222.06).
 
-### 2. Remove the £1 fudge
+The new `qbo-sync-payout` deposit-construction logic correctly ignores `payout_orders` and works from `ebay_payout_transactions` instead, which is why the deposit math is still right — but the UI uses `payout_orders` for the per-order table, so the user sees ghost rows and inflated figures, and any future reconciliation logic that trusts `payout_orders` is unsafe.
 
-Delete the entire "Payout settlement adjustment" / `payoutAdjustmentAmount` block (lines 1111–1157 + 1234–1238). Remove the `payout_adjustment` account fallback path. After step 1, `sum(deposit lines) === payout.net_amount` to the penny by construction.
+## Fix
 
-Add a final pre-POST assertion:
-```
-if (constructedPence !== expectedPence) {
-  // Hard error with a per-order breakdown — never auto-mask.
-  persistSyncFailure + return 422
-}
-```
+Two things, smallest possible changes:
 
-### 3. Same canonical check for expense (`Purchase`) lines
+### 1. Recreate the missing SalesReceipt for `KO-0009323`
 
-For each expense-side payout transaction, the QBO Purchase `TotalAmt` must equal `Math.abs(gross_amount)` to the penny. The cached-purchase path at line 821–827 already enforces this. Extend the same enforcement to freshly-created Purchases by reading back the actual `TotalAmt` and asserting equality before adding the deposit line — no estimation, no rounding tolerance.
+Trigger `qbo-sync-sales-receipt` for sales_order `6a5dadc9-d17f-4546-bfe6-92ecbd763e16`. Its `gross_total` is now the canonical `£15.99`, so the new SalesReceipt will land at exactly £15.99. Readiness will then show `10/10` and the deposit will balance to `£222.06`.
 
-### 4. Post-POST deposit verification
+### 2. Stop the over-linking in `v2-reconcile-payout`
 
-After creating (or finding) the QBO Deposit, fetch its `TotalAmt` via the query endpoint and assert `toPence(qboDepositTotal) === toPence(payout.net_amount)`. If not, mark `error` (not `synced`, not `partial`) with the exact pence delta. Do not trust QBO's response without a read-back.
+Remove the channel + date-range fallback that auto-links every order in a window. Replace with a strict match: only link a `sales_order` to a payout when its `origin_reference` matches an `ebay_payout_transactions.order_id` for that `payout_id` (or, for Stripe, when the payment_intent matches). This is the exact same canonical-source rule we just enforced for sale amounts, applied to which orders belong to a payout in the first place.
 
-### 5. Repair the existing broken state
+Also clean up the two ghost rows already in `payout_orders` for the current payout so the UI stops showing them.
 
-For payout `060ee447-…`:
-- Delete QBO Deposit `2229` and QBO SalesReceipt `1668`.
-- Restore `sales_order` `KO-0009323` to its canonical sale gross of **£15.99** (`unit_price = 13.33`, `line_total = 13.33`, `gross_total = 15.99`), with an audit log entry.
-- Clear `qbo_sales_receipt_id` on that order and `qbo_deposit_id` + `qbo_sync_status` on the payout.
-- Re-run the payout sync with the fixed code.
+### 3. Fix the React ref warning (cosmetic)
 
-Expected result: deposit lands at **exactly £222.06**, no adjustment line, status `synced`.
-
-### 6. Investigate the upstream corruption (separate follow-up, not in this fix)
-
-`KO-0009323`'s sale was mutated from £15.99 to £14.99 after the fact. The `v2_cascade_sku_price_to_listings` trigger only writes to `channel_listing` and `price_audit_log`, not `sales_order_line`, so the corruption came from somewhere else (manual edit, an order re-import, a cart re-pricing path, etc.). I will note this as a follow-up — the fix above prevents it from quietly re-corrupting QBO, and the new audit-log entry will help track future occurrences. Recommend you raise a separate ticket to find and close that hole.
+`Mono` in `src/components/admin-v2/ui-primitives.tsx` is rendered inside table cells where Radix tooltips try to attach a ref. Wrap the component in `React.forwardRef` so the warning stops. Pure cosmetic, no behaviour change.
 
 ## Files
 
-- `supabase/functions/qbo-sync-payout/index.ts` — canonical-drift detection + auto-rebuild loop, remove £1 adjustment block, deposit read-back assertion.
-- `src/components/admin-v2/PayoutDetail.tsx` — replace "Partial / adjustment" copy with a per-order canonical-mismatch report when `error` status is set; otherwise unchanged.
-- One-off SQL migration (data repair) — restore `KO-0009323` and clear sync IDs for the stuck payout.
+- `supabase/functions/v2-reconcile-payout/index.ts` — remove date-range fallback, require canonical channel-transaction match.
+- `src/components/admin-v2/ui-primitives.tsx` — `forwardRef` on `Mono`.
+- One-off SQL repair — delete the two ghost `payout_orders` rows for payout `060ee447…`, then trigger `qbo-sync-sales-receipt` for `KO-0009323`, then re-run `qbo-sync-payout`.
 
 No schema change.
+
+## Expected outcome
+
+- Readiness becomes `10/10 orders synced`
+- `payout_orders` contains exactly the 10 real eBay sales for this payout
+- QBO deposit is recreated at exactly `£222.06`
+- Future payouts can never silently sweep in unrelated orders
 
