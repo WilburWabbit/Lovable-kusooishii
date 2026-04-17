@@ -26,11 +26,36 @@ import {
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
+  growRoundingLine,
   assertQBOPayloadBalances,
   QBOPayloadImbalanceError,
   QBO_TAX_CODE_STANDARD_20,
   QBO_TAX_CODE_NO_VAT,
+  type QBOStableLine,
 } from "../_shared/qbo-tax.ts";
+
+const MAX_SR_ATTEMPTS = 3;
+
+async function deleteQBOSalesReceipt(baseUrl: string, accessToken: string, srId: string): Promise<void> {
+  try {
+    const getRes = await fetchWithTimeout(
+      `${baseUrl}/salesreceipt/${encodeURIComponent(srId)}?minorversion=65`,
+      { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+    );
+    if (!getRes.ok) return;
+    const j = await getRes.json();
+    const syncToken = j?.SalesReceipt?.SyncToken;
+    if (syncToken === undefined) return;
+    await fetchWithTimeout(`${baseUrl}/salesreceipt?operation=delete&minorversion=65`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ Id: srId, SyncToken: String(syncToken) }),
+    });
+    console.log(`Deleted bad QBO SalesReceipt ${srId}`);
+  } catch (e) {
+    console.warn(`Exception deleting QBO SalesReceipt ${srId}:`, e);
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
