@@ -1,94 +1,89 @@
-<final-text>
+
 ## Root cause
 
-Yes — the active penny drift is coming from the **expense path**, not the deposit header.
+The new safeguard is correctly catching a real bug — QBO is returning totals **20% higher** than what we send. £2.64 → £3.17, £9.93 → £11.92, £32.40 → £38.88. That's 1.20× exactly.
 
-I checked the payout record, the payout sync logic, the raw QBO purchases, and the source eBay transaction data:
+Looking at the payload in the logs:
 
-- The payout sync function reconciled the deposit to **£222.06** before sending it.
-- But one linked QBO **Purchase** was created with the wrong total:
-  - eBay fee source total for sale `02-14338-32191`: **£9.93**
-  - fee components: **£9.16 + £0.29 + £0.48 = £9.93**
-  - landed QBO Purchase `2016`: **£9.92**
+```json
+{
+  "GlobalTaxCalculation": "TaxInclusive",
+  "Line": [{
+    "Amount": 2.09,
+    "AccountBasedExpenseLineDetail": {
+      "TaxCodeRef": { "value": "6" },
+      "TaxAmount": 0.35,
+      "TaxInclusiveAmt": 2.09,
+      ...
+    }
+  }, ...]
+}
+```
 
-Why that happened:
-- `createQBOPurchase()` in `supabase/functions/qbo-sync-payout/index.ts` currently converts each fee line from gross to ex-VAT **line by line** and rounds each line separately.
-- That loses a penny on this exact set of fee amounts.
-- The Deposit then links to the actual QBO Purchase total, so QBO effectively uses **£9.92** instead of **£9.93**, which pushes the final deposit to **£222.07**.
+The bug is in how `Amount` is being set when `GlobalTaxCalculation: "TaxInclusive"` is used.
 
-So the earlier deposit-header-only theory was incomplete. The real fix needs to start at the **expense document creation**.
+**QBO's TaxInclusive contract:**
+- `Amount` must be the **net** (ex-VAT) value
+- `TaxInclusiveAmt` is the gross
+- QBO computes `TotalAmt = sum(Amount) + sum(TaxAmount)` 
 
-## Plan
+What we sent for the £2.64 Purchase: line `Amount: 2.09` + line `TaxAmount: 0.35` = £2.44 net+tax... but QBO returned £3.17. That means QBO is treating `Amount: 2.09` as net, then **adding 20% tax on top** = £2.51, plus the explicit `TaxAmount: 0.35` = ~£2.86... still doesn't reach £3.17.
 
-### 1. Fix payout expenses to post from exact gross values
-Update `supabase/functions/qbo-sync-payout/index.ts` so payout-created **Purchases** are handled as **tax-inclusive/gross-exact** documents, while **SalesReceipts stay tax-exclusive**.
+Actually the math is simpler: **QBO is treating the per-line `Amount` field as the gross value (because TaxInclusive mode says so), and ALSO adding the explicit `TaxAmount` again**. So `2.09 + 0.07 + 0.48 = 2.64` (matches our expected) **plus** the three TaxAmounts `0.35 + 0.01 + 0.08 = 0.44` added a second time → wait that's £3.08, not £3.17.
 
-This matches your rule:
-- Sales receipts: tax-exclusive
-- Expenses: tax-inclusive where supported
+Let me re-check. £2.64 × 1.20 = £3.168 ≈ £3.17. £9.93 × 1.20 = £11.916 ≈ £11.92. £32.40 × 1.20 = £38.88 exact. So QBO is taking our gross `Amount` values and **adding 20% VAT on top**, ignoring `TaxInclusiveAmt`.
 
-### 2. Move all reconciliation math to integer pence
-Add a shared helper for outbound QBO calculations that:
-- converts source amounts to **integer pence**
-- computes per-line net/tax safely
-- applies any rounding remainder to the final line
-- converts back to 2dp only at payload creation
+That happens when `GlobalTaxCalculation: "TaxInclusive"` is set but the line `Amount` is treated by QBO as net (its default interpretation). The combination of `Amount` (gross), `TaxInclusiveAmt` (gross), and explicit `TaxAmount` is contradictory and QBO is resolving it by treating `Amount` as net + applying TaxCodeRef VAT on top.
 
-This removes floating-point drift and makes “exact to the penny” enforceable.
+## The actual fix
 
-### 3. Add exact-balancing safeguards for every QBO document
-After creating any outbound financial document, immediately verify:
-- expected gross total from app/source
-- actual QBO returned total
-- actual QBO returned tax total
+QBO's `TaxInclusive` mode for AccountBasedExpenseLineDetail requires:
+- `Amount` = **gross** (tax-inclusive) value ✓ (we do this)
+- **Do NOT send explicit `TaxAmount`** — QBO derives it from `TaxCodeRef` and the gross `Amount`
+- **Do NOT send `TaxInclusiveAmt`** — that's a SalesItemLineDetail field, not valid here
+- `TaxCodeRef` tells QBO which rate to back-out
 
-If the totals are not exact after 2dp normalization, stop and mark the sync as error.
+When you send all three (Amount + TaxAmount + TaxInclusiveAmt) under TaxInclusive mode, QBO's behaviour is undefined and it defaults to treating Amount as net.
 
-For payout sync specifically:
-- do **not** create the Deposit if any linked Purchase or SalesReceipt total is off by even **£0.01**
+### Change to `createQBOPurchase` in `supabase/functions/qbo-sync-payout/index.ts`
 
-### 4. Build the Deposit from verified linked totals
-Change the payout flow so the Deposit is built only after all linked Purchases/SalesReceipts have passed exact-total validation.
+For each expense line:
+- Keep `Amount` = gross pence/pounds
+- Keep `TaxCodeRef` 
+- **Remove `TaxAmount`**
+- **Remove `TaxInclusiveAmt`**
+- Keep `GlobalTaxCalculation: "TaxInclusive"` at document level
+- Remove the document-level `TxnTaxDetail` if present (let QBO compute)
 
-Add a final guard comparing:
-- payout net from source
-- verified linked sales totals
-- verified linked expense totals
-- final deposit total
+QBO will then:
+1. Read `Amount` as gross
+2. Use `TaxCodeRef` rate (20%) to derive net = Amount / 1.2 and tax = Amount - net
+3. Set `TotalAmt` = sum of gross Amounts (exact match to source)
 
-If those do not reconcile exactly, fail before posting.
+The new safeguard `assertQBOTotalMatches` will then pass because TotalAmt will equal the sum of our line gross values to the penny.
 
-### 5. Apply the same safeguard pattern across all outbound QBO writers
-Refactor the shared exact-total logic into reused helpers and apply it to:
+## Why this matches every error in the log
 
-- `supabase/functions/qbo-sync-payout/index.ts`
-- `supabase/functions/qbo-sync-sales-receipt/index.ts`
-- `supabase/functions/qbo-retry-sync/index.ts`
-- `supabase/functions/ebay-process-order/index.ts`
-- `supabase/functions/qbo-sync-refund-receipt/index.ts`
+Every failing Purchase shows `expected × 1.20 ≈ returned`:
+| Expected | Returned | Ratio |
+|---|---|---|
+| £2.64 | £3.17 | 1.2008 |
+| £9.93 | £11.92 | 1.2004 |
+| £32.40 | £38.88 | 1.2000 |
+| £0.12 | £0.14 | 1.1667 (rounding noise on tiny amount) |
+| £8.58 | £10.30 | 1.2005 |
 
-This gives one consistent rule: **no outbound QBO document is accepted unless line totals, tax totals, and document totals reconcile exactly**.
+Consistent 20% overshoot = QBO double-applying VAT.
 
-## Existing data repair
+## Files
 
-After the code fix is deployed, the bad records need to be recreated from corrected logic:
+- `supabase/functions/qbo-sync-payout/index.ts` — strip `TaxAmount` and `TaxInclusiveAmt` from `AccountBasedExpenseLineDetail` in `createQBOPurchase`. Keep `TaxCodeRef` and document-level `GlobalTaxCalculation: "TaxInclusive"`.
 
-1. Delete the incorrect QBO Deposit for this payout.
-2. Delete the payout-created QBO Purchase(s) created with the old rounding logic — safest is all Purchases for this payout, not just the known £9.92 one.
-3. Clear:
-   - `payouts.qbo_deposit_id`
-   - related `ebay_payout_transactions.qbo_purchase_id`
-4. Re-run payout sync.
+## Data repair
 
-If only the Deposit is deleted and recreated, it will still link to the old mis-rounded Purchase and the penny issue can persist.
+After deploy:
+1. Delete QBO Purchases 2030–2051 manually in QBO (all 22 over-taxed records).
+2. Clear `qbo_purchase_id` on the affected `ebay_payout_transactions` rows for payout `060ee447-02f7-4527-84a4-95aedecd0daa`.
+3. Re-run the payout sync. Each Purchase should land at exact gross, the safeguard should pass, and the Deposit should construct to £222.06 exactly.
 
-## Technical details
-
-- Confirmed mismatch:
-  - source fee total: **£9.93**
-  - landed QBO Purchase total: **£9.92**
-- Current broken path:
-  - `createQBOPurchase()` in `supabase/functions/qbo-sync-payout/index.ts`
-- No database migration is needed.
-- This is an edge-function refactor plus stricter reconciliation/validation.
-</final-text>
+No DB migration needed.
