@@ -1,98 +1,64 @@
 
 
-## Root cause (definitive, from logs)
+## Why this keeps happening
 
-Failure: `expected gross £9.93, QBO returned TotalAmt £9.94`.
+The simulator in `qbo-tax.ts` models QBO as `tax = round(SUM(taxable nets) × 0.20)`. Logs show QBO actually returns `£9.92` for nets summing to `£8.28` (which would be `8.28 + 1.66 = £9.94` per our model and `8.28 + 1.66 = £9.94` per per-line-rounding too). The model is empirically still wrong for some realm/payload combinations. We've now spent 4 rounds trying to predict QBO. The user is right: **stop predicting, start reacting.**
 
-Payload we sent (TaxExcluded recipe):
-- Lines: `Amount: 7.63 + 0.24 + 0.41 = 8.28` (net)
-- `TxnTaxDetail.TotalTax: 1.65`
-- Expected: 8.28 + 1.65 = **£9.93**
+## Fix strategy: react to QBO, don't predict it
 
-What QBO actually did:
-- 7.63 × 0.20 = 1.526 → **1.53**
-- 0.24 × 0.20 = 0.048 → **0.05**
-- 0.41 × 0.20 = 0.082 → **0.08**
-- Recomputed tax: **1.66**, ignoring our `TotalTax: 1.65`
-- Result: 8.28 + 1.66 = **£9.94**
+Treat QBO's returned `TotalAmt` as the source of truth and **iteratively correct the payload until it lands**, with a hard ceiling of 3 attempts per Purchase. If still wrong after 3, skip that single transaction and continue the payout.
 
-**QBO recomputes VAT per-line for Purchases and overrides our document-level `TxnTaxDetail.TotalTax`.** Our integer-pence math is correct; QBO's behaviour is the problem. Sending `TotalTax` is theatre — QBO ignores it.
+### Algorithm in `qbo-sync-payout/index.ts → createQBOPurchase`
 
-The previous "Sainsbury" SalesReceipt path appears to work only because we haven't yet hit a fee combination where per-line rounding diverges from document rounding. It is exposed to the exact same bug.
+For each Purchase, in a loop (max 3 attempts):
 
-## The definitive fix: build payloads QBO can't drift on
+1. Build payload with current `grossPenceLines` using existing `buildBalancedQBOLines`.
+2. POST to QBO. Read `qboTotalAmt`.
+3. If `toPence(qboTotalAmt) === expectedGrossPence` → done, return success.
+4. Otherwise:
+   - `drift = expectedGrossPence − toPence(qboTotalAmt)` (signed pence, almost always ±1p)
+   - **Delete the bad Purchase from QBO** via `DELETE /purchase/{id}?operation=delete` so QBO doesn't keep an orphan.
+   - Adjust the payload: append (or grow) a **zero-tax "Rounding adjustment" line** by `drift` pence. Because that line uses TaxCodeRef "10" (No VAT), QBO will not recompute tax on it — it shifts `TotalAmt` by exactly `drift` regardless of whatever recompute QBO did to the standard lines.
+   - Loop.
+5. After 3 failed attempts:
+   - Delete the last bad Purchase.
+   - Return `{ skipped: true, reason: "QBO total drift unresolvable after 3 attempts", lastQboTotal, expected }` instead of throwing.
 
-There is exactly one reliable way to get penny-exact totals out of QBO when it recomputes tax per line: **construct line `Amount` values such that QBO's own per-line `round(Amount × 0.20)` sums back to the source gross**. Don't fight QBO — pre-solve for its arithmetic.
+### How the caller handles a skipped transaction
 
-### Algorithm: "QBO-stable line distribution"
+In the main payout loop:
 
-Given a target gross `G_pence`:
+- On `skipped`: write `qbo_sync_error` on that single `ebay_payout_transactions` row, leave its `qbo_purchase_id` NULL, increment a `skipped` counter. Do **not** abort the payout.
+- After processing all transactions: if `skipped > 0`, build the deposit only from successfully-linked transactions. Mark the payout `qbo_sync_status = "partial"` with a clear message listing skipped transaction IDs. Surface this in the response and on the payout detail page so the user can investigate the handful of edge cases instead of being blocked by them.
 
-1. Compute target net pence `N = round(G / 1.20)` and target tax pence `T = G − N`.
-2. Take the source line gross amounts (e.g. fee components 9.16 + 0.29 + 0.48).
-3. For each line, compute candidate `lineNet_pence = round(lineGross / 1.20)` and `lineTax_pence = round(lineNet × 0.20)`.
-4. Sum candidate `lineNet` and candidate `lineTax`.
-5. If `sum(lineTax) ≠ T`, adjust the **largest** line's net by ±1p in the direction that fixes the per-line tax sum. Re-check. Repeat (worst case 1–2 lines need a 1p adjustment; mathematically bounded).
-6. If absolutely no per-line net combination yields the target (rare for grade-1 odd cases), **add a balancing micro-line**:
-   - One extra `AccountBasedExpenseLineDetail` line with `Amount = ±0.01`, `TaxCodeRef` = zero-rated/exempt code, and a clear description like `"Rounding adjustment"`. This line carries no tax, so it shifts the document gross by exactly 1p without touching QBO's per-line VAT recompute.
-7. Drop `TxnTaxDetail.TotalTax` from the payload entirely. It's ignored — sending it is misleading and adds confusion when reading payloads in QBO.
+### Why a "rounding adjustment" line guarantees convergence in ≤2 attempts
 
-This is the supermarket-receipt strategy: every line balances under the system's own recompute rules, and any unavoidable rounding lives in an explicit, auditable rounding line.
+The first attempt either lands or drifts by a small integer pence amount `d`. We add a No-VAT line of exactly `d` pence. QBO's per-line VAT recompute touches only standard-rated lines (unchanged), so the new `TotalAmt` is exactly old `TotalAmt + d = expected`. Convergence is mathematically guaranteed on attempt 2 unless QBO behaves non-deterministically (the 3rd attempt covers that).
 
-### Why this works where the current code fails
+### Defence retained
 
-- We stop relying on QBO honouring `TxnTaxDetail.TotalTax` (it doesn't, for Purchases).
-- We pre-validate the document under QBO's own arithmetic *before* sending it. If the simulated `sum(round(net × 0.20))` doesn't equal `expectedTax`, we either re-balance or insert a rounding line.
-- The `assertQBOTotalMatches` guard becomes a true safety net rather than the primary defence — it should never fire after this fix.
+- Pre-flight `assertQBOPayloadBalances` stays — still useful as a fast fail before the first POST.
+- Post-create `assertQBOTotalMatches` is now caught and drives the retry/skip flow instead of throwing all the way out.
+- All payload variants and QBO responses logged with `attempt`, `drift`, `qboTotalAmt` for forensic review.
 
-### Apply consistently across all outbound QBO writers
+### Apply same retry-and-skip to SalesReceipts
 
-Move the line-distribution logic into `supabase/functions/_shared/qbo-tax.ts`:
+Mirror the loop in `qbo-sync-sales-receipt/index.ts`. SalesReceipts are per-order so "skip" means marking that single order `qbo_sync_status = "error"` and returning, which is already the existing failure behaviour — only the retry-with-rounding-line addition is new.
 
-- `buildQBOStableLines(grossPenceLines: number[]): { netPence, taxPence }[]` — the core algorithm above.
-- `simulateQBOTotal(lines): { totalNetPence, totalTaxPence, totalGrossPence }` — mirrors QBO's per-line recompute exactly.
-- `appendRoundingLineIfNeeded(lines, expectedGrossPence)` — adds the ±1p zero-tax balancer when math can't be solved otherwise.
-- `assertQBOPayloadBalances(payload, expectedGrossPence)` — pre-flight check before POST. Throws if simulated total ≠ expected, with full diagnostic.
+## Files
 
-Use it in:
-- `supabase/functions/qbo-sync-payout/index.ts` — `createQBOPurchase`
-- `supabase/functions/qbo-sync-sales-receipt/index.ts` — SalesReceipt builder
-- `supabase/functions/qbo-sync-refund-receipt/index.ts`
-- `supabase/functions/qbo-retry-sync/index.ts`
-- `supabase/functions/ebay-process-order/index.ts`
+- `supabase/functions/qbo-sync-payout/index.ts` — wrap `createQBOPurchase` in retry loop, add QBO Purchase delete, change return type to allow `{ skipped: true, ... }`. Update caller to handle skip and mark payout `partial`.
+- `supabase/functions/qbo-sync-sales-receipt/index.ts` — same retry-with-rounding-line loop, max 3.
+- `supabase/functions/_shared/qbo-tax.ts` — small helper `growRoundingLine(stableLines, deltaPence)` used by the retry path.
+- `src/components/admin-v2/PayoutDetail.tsx` — render `partial` status and the skipped-transaction list (read-only, no behavioural change).
 
-### Safeguards retained
+No DB migration. No schema change.
 
-- Pre-flight: `assertQBOPayloadBalances` — fails before any POST if simulated total drifts.
-- Post-create: `assertQBOTotalMatches` — fails after POST if QBO does something unexpected (defence in depth).
-- Cached-doc check: continue verifying linked Purchases/SalesReceipts via `fetchQBODocTotal` before building the Deposit.
+## Existing data repair for current payout
 
-### Settings for the rounding line
-
-Need a QBO account configured for "Rounding adjustments" (zero-tax). Two options:
-- Reuse `selling_fees` with a zero-rated `TaxCodeRef` on the rounding line only.
-- Add a new mapping purpose `rounding_adjustment` in `qbo_account_mapping`.
-
-Default to the simpler option (selling_fees + zero-rated tax code) and only add a dedicated mapping if the user wants a separate trail.
-
-## Existing data repair
-
-After deploy:
-
-1. Delete in QBO the bad Purchases from this latest run (Refs around 2112 and adjacent failed siblings) and any Deposit linked to payout `060ee447-02f7-4527-84a4-95aedecd0daa`.
-2. Clear `payouts.qbo_deposit_id = NULL` and `ebay_payout_transactions.qbo_purchase_id = NULL` for that payout.
-3. Re-run sync. Each Purchase should land at exact source gross under QBO's own per-line recompute, and the Deposit should construct to **£222.06** to the penny.
-
-## Files touched
-
-- New: `supabase/functions/_shared/qbo-tax.ts` — the QBO-stable distribution algorithm and pre-flight asserter.
-- Modified: `supabase/functions/qbo-sync-payout/index.ts` — `createQBOPurchase` uses the new helper, drops `TxnTaxDetail.TotalTax`.
-- Modified: `supabase/functions/qbo-sync-sales-receipt/index.ts` — same treatment.
-- Modified (defence in depth, no behaviour change today): `supabase/functions/qbo-sync-refund-receipt/index.ts`, `qbo-retry-sync/index.ts`, `ebay-process-order/index.ts` — adopt the helper.
-
-No DB migration. No schema change. No new secrets.
-
-## Open question for confirmation before implementing
-
-The rounding line: prefer (a) reuse `selling_fees` account with a zero-rated `TaxCodeRef` on that one line, or (b) add a new `qbo_account_mapping.purpose = "rounding_adjustment"` so it's auditable as its own line in QBO reports? Default plan is (a) for minimal moving parts.
+After deploy, for `060ee447-02f7-4527-84a4-95aedecd0daa`:
+1. Delete in QBO any over/undertotalled Purchase (Ref 2135 + recent failed siblings) and any Deposit linked to this payout.
+2. `UPDATE payouts SET qbo_deposit_id = NULL, qbo_sync_status = 'pending' WHERE id = '060ee447-02f7-4527-84a4-95aedecd0daa';`
+3. `UPDATE ebay_payout_transactions SET qbo_purchase_id = NULL, qbo_sync_error = NULL WHERE payout_id = (SELECT external_payout_id FROM payouts WHERE id = '060ee447-02f7-4527-84a4-95aedecd0daa');`
+4. Re-run sync. Worst case a couple of transactions get auto-corrected in a 2nd attempt; expected gross of £222.06 is reached. If any transactions still fail after 3 attempts, payout completes as `partial` with those transactions clearly flagged for follow-up.
 
