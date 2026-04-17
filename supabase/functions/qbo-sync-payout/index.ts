@@ -854,7 +854,17 @@ Deno.serve(async (req) => {
 
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
-      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef, transactionType: txType, settledViaTransfer: isSettled });
+      // purchaseResult.totalAmt was already verified to equal expectedGross by
+      // assertQBOTotalMatches inside createQBOPurchase — safe to use directly.
+      expenseResults.push({
+        txId: tx.id,
+        qboPurchaseId: purchaseResult.id,
+        amount: round2(totalExpenseAmount),
+        qboTotalAmt: purchaseResult.totalAmt,
+        accountRef: primaryAccountRef,
+        transactionType: txType,
+        settledViaTransfer: isSettled,
+      });
     }
 
     // If any expense creation failed, persist error and return
@@ -867,24 +877,42 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
+    // CRITICAL: deposit lines must use the *actual* QBO TotalAmt for each
+    // linked Purchase and SalesReceipt, not locally-computed values. If the
+    // landed QBO total drifts by even 1p from source, the deposit will too.
+    // We've already verified Purchases (above). Now verify SalesReceipts.
     let depositLines: unknown[] = [];
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      // SalesReceipt lines (positive — gross sales). Round each amount to 2dp to avoid
-      // floating-point drift (e.g. 13.20 + 9.04 + ... summing to .07 instead of .06).
-      depositLines = Array.from(orderQboMap.values()).map((entry) => ({
-        Amount: round2(entry.gross),
-        DepositLineDetail: {
-          PaymentMethodRef: { value: "1" },
-        },
-        LinkedTxn: [
-          {
-            TxnId: entry.qboId,
-            TxnLineId: "0",
-            TxnType: "SalesReceipt",
-          },
-        ],
-      }));
+      // Fetch each linked SalesReceipt's actual TotalAmt and verify it matches
+      // the source SALE gross_amount exactly. If not, abort — a stale or
+      // mis-rounded SalesReceipt would corrupt the deposit total.
+      for (const entry of orderQboMap.values()) {
+        let qboReceiptTotal = 0;
+        try {
+          qboReceiptTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
+        } catch (e) {
+          const msg = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
+          await persistSyncFailure(admin, payoutId, msg);
+          return new Response(
+            JSON.stringify({ success: false, error: msg, payoutId }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        if (toPence(qboReceiptTotal) !== toPence(round2(entry.gross))) {
+          const msg = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Deposit aborted to prevent rounding drift. Delete the SalesReceipt and re-sync the order.`;
+          await persistSyncFailure(admin, payoutId, msg);
+          return new Response(
+            JSON.stringify({ success: false, error: msg, payoutId }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        depositLines.push({
+          Amount: qboReceiptTotal,
+          DepositLineDetail: { PaymentMethodRef: { value: "1" } },
+          LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+        });
+      }
     } else {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
       await persistSyncFailure(admin, payoutId, msg);
@@ -904,17 +932,18 @@ Deno.serve(async (req) => {
     //    out-of-band (matching TRANSFER) and booked directly to the bank, so they
     //    never debited Undeposited Funds and must not reduce this deposit.
     for (const exp of expenseResults) {
-      if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.qboPurchaseId === "N/A" || exp.qboTotalAmt <= 0) continue;
       if (exp.settledViaTransfer) continue;
 
       depositLines.push({
-        Amount: -round2(exp.amount),
+        Amount: -exp.qboTotalAmt,
         DepositLineDetail: {
           PaymentMethodRef: { value: "1" },
         },
         LinkedTxn: [{ TxnId: exp.qboPurchaseId, TxnLineId: "0", TxnType: "Purchase" }],
       });
     }
+
 
     // Guard: ensure we have at least one deposit line
     if (depositLines.length === 0) {
