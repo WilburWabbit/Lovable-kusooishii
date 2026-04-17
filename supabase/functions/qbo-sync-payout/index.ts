@@ -265,59 +265,91 @@ async function createQBOPurchase(
     docNumber?: string;
   },
 ): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
-  // ─── TaxExcluded posting (mirror working SalesReceipt contract) ─
-  // QBO is unreliable about honouring `GlobalTaxCalculation: "TaxInclusive"`
-  // on Purchase documents in this UK realm — it falls back to treating
-  // `Amount` as net and adding VAT on top, producing TotalAmt = gross × 1.20.
+  // ─── QBO-stable line distribution ────────────────────────────
+  // QBO recomputes VAT *per-line* on Purchase documents using
+  // `round(Amount × rate)` and ignores the document-level
+  // `TxnTaxDetail.TotalTax`. Naive per-line net = round(gross / 1.20)
+  // therefore drifts by ±1p on multi-line documents (e.g. 7.63 + 0.24 + 0.41
+  // → QBO recomputed total £9.94 vs our expected £9.93).
   //
-  // Instead we use the same recipe that works for SalesReceipts:
-  //   - GlobalTaxCalculation: "TaxExcluded"
-  //   - Per line: Amount = NET (ex-VAT) + TaxCodeRef
-  //   - Document: TxnTaxDetail.TotalTax = sum of per-line VAT
-  //   - QBO computes TotalAmt = sum(Amount) + TotalTax = source gross exactly.
+  // The QBO-stable distributor in _shared/qbo-tax.ts pre-solves for QBO's
+  // own arithmetic: it picks per-line nets so that `sum(round(net × 0.20))`
+  // equals the target tax exactly, and if no per-line solution exists it
+  // appends a ±1p zero-tax "rounding adjustment" line. This guarantees QBO
+  // returns TotalAmt = source gross to the penny under its own recompute,
+  // making the post-create assertQBOTotalMatches a true safety net.
   //
-  // Integer-pence distribution guarantees sum(net) + sum(vat) == sum(gross)
-  // to the penny, with any rounding remainder pushed onto the last line.
+  // Note: TxnTaxDetail.TotalTax is omitted entirely — QBO ignores it for
+  // Purchases, sending it is misleading.
   const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
   const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
   const expectedGross = fromPence(totalGrossPence);
-  const distributed = distributeLinesByGrossPence(grossPenceLines);
-  const totalVatPence = distributed.reduce((s, d) => s + d.vatPence, 0);
-  const totalVat = fromPence(totalVatPence);
 
-  const qboLines = opts.lines.map((line, idx) => {
-    const lineNet = fromPence(distributed[idx].netPence);
+  const stableLines = buildBalancedQBOLines(grossPenceLines);
 
-    if (line.itemRef) {
-      // Item-linked line — Amount is NET; QBO adds VAT from TaxCodeRef.
+  // Pre-flight: confirm the simulated total balances under QBO's recompute.
+  // Throws QBOPayloadImbalanceError if the distributor itself failed to converge.
+  try {
+    assertQBOPayloadBalances(stableLines, totalGrossPence);
+  } catch (e) {
+    if (e instanceof QBOPayloadImbalanceError) {
+      return { error: e.message };
+    }
+    throw e;
+  }
+
+  const qboLines = stableLines.map((s) => {
+    const lineNet = fromPence(s.netPence);
+
+    // Rounding balancer line — book against the same selling_fees account
+    // as the first standard line, with TaxCodeRef = "No VAT" so QBO does
+    // not compute tax on it. This is the bookkeeping audit trail of the
+    // ±1p discrepancy between the source gross and any per-line VAT split.
+    if (s.kind === "rounding") {
+      const fallbackAccount = opts.lines[0]?.accountRef ?? opts.bankAccountRef;
+      return {
+        Amount: lineNet,
+        DetailType: "AccountBasedExpenseLineDetail",
+        AccountBasedExpenseLineDetail: {
+          AccountRef: fallbackAccount,
+          TaxCodeRef: { value: QBO_TAX_CODE_NO_VAT },
+        },
+        Description: "Rounding adjustment (per-line VAT recompute)",
+      };
+    }
+
+    const sourceLine = opts.lines[s.sourceIndex!];
+    const taxCode = sourceLine.taxCodeRef ?? s.taxCodeRef ?? QBO_TAX_CODE_REF;
+
+    if (sourceLine.itemRef) {
       const detail: Record<string, unknown> = {
-        ItemRef: line.itemRef,
+        ItemRef: sourceLine.itemRef,
         Qty: 1,
         UnitPrice: lineNet,
-        TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+        TaxCodeRef: { value: taxCode },
       };
-      if (line.customerRef) detail.CustomerRef = line.customerRef;
+      if (sourceLine.customerRef) detail.CustomerRef = sourceLine.customerRef;
       return {
         Amount: lineNet,
         DetailType: "ItemBasedExpenseLineDetail",
         ItemBasedExpenseLineDetail: detail,
-        Description: line.description,
+        Description: sourceLine.description,
       };
     }
 
     const detail: Record<string, unknown> = {
-      AccountRef: line.accountRef,
-      TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
+      AccountRef: sourceLine.accountRef,
+      TaxCodeRef: { value: taxCode },
     };
-    if (line.customerRef) {
-      detail.CustomerRef = line.customerRef;
+    if (sourceLine.customerRef) {
+      detail.CustomerRef = sourceLine.customerRef;
     }
 
     return {
       Amount: lineNet,
       DetailType: "AccountBasedExpenseLineDetail",
       AccountBasedExpenseLineDetail: detail,
-      Description: line.description,
+      Description: sourceLine.description,
     };
   });
 
@@ -328,7 +360,6 @@ async function createQBOPurchase(
     EntityRef: { ...opts.vendorRef, type: "Vendor" },
     GlobalTaxCalculation: "TaxExcluded",
     Line: qboLines,
-    TxnTaxDetail: { TotalTax: totalVat },
     PrivateNote: opts.privateNote,
   };
   if (opts.docNumber) {
@@ -353,10 +384,11 @@ async function createQBOPurchase(
     const qboId = String(purchase.Id);
     const qboTotalAmt = Number(purchase.TotalAmt ?? 0);
 
-    // ─── Exact-balance safeguard ─────────────────────────────
-    // Verify QBO accepted the document at the exact gross we sent.
-    // If QBO recalculated to a different total (e.g. due to a tax-code
-    // mismatch or rounding), abort and surface the mismatch.
+    // ─── Post-create defence-in-depth ────────────────────────
+    // The pre-flight assertQBOPayloadBalances already verified the math
+    // would balance under QBO's own recompute. This second check guards
+    // against QBO returning anything different (e.g. unexpected behaviour
+    // in a future API revision) and surfaces a clear diagnostic.
     try {
       assertQBOTotalMatches({
         expectedGross,
