@@ -214,6 +214,31 @@ async function persistSyncFailure(
     .eq("id", payoutId);
 }
 
+/**
+ * Fetch a QBO document's TotalAmt via the /query endpoint.
+ * Used to verify cached Purchases and SalesReceipts before linking
+ * them as deposit lines — guarantees the deposit math uses the
+ * actual landed totals, not locally-computed values.
+ */
+async function fetchQBODocTotal(
+  baseUrl: string,
+  accessToken: string,
+  docKind: "Purchase" | "SalesReceipt",
+  qboId: string,
+): Promise<number> {
+  const url = `${baseUrl}/${docKind.toLowerCase()}/${encodeURIComponent(qboId)}?minorversion=65`;
+  const res = await fetchWithTimeout(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch QBO ${docKind} ${qboId}: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  const doc = json[docKind] ?? {};
+  return Number(doc.TotalAmt ?? 0);
+}
+
 // ─── Create a QBO Purchase (Expense) ────────────────────────
 
 interface ExpenseLineInput {
