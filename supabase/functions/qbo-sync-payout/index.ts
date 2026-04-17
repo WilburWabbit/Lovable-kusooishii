@@ -971,6 +971,24 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      if ("skipped" in purchaseResult) {
+        // Auto-adjust loop exhausted. Record the skip and move on.
+        // The payout will complete as `partial` (not `error`) so the operator
+        // can investigate just this transaction.
+        console.warn(
+          `Skipping tx ${tx.transaction_id} after ${purchaseResult.attempts} attempts: ${purchaseResult.reason}`,
+        );
+        skippedTransactions.push({
+          txId: tx.id,
+          transactionId: tx.transaction_id,
+          reason: purchaseResult.reason,
+          lastQboTotal: purchaseResult.lastQboTotal,
+          expected: purchaseResult.expected,
+          attempts: purchaseResult.attempts,
+        });
+        continue;
+      }
+
       // Update the transaction with the QBO Purchase ID
       await admin
         .from("ebay_payout_transactions" as never)
@@ -980,7 +998,7 @@ Deno.serve(async (req) => {
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
       // purchaseResult.totalAmt was already verified to equal expectedGross by
-      // assertQBOTotalMatches inside createQBOPurchase — safe to use directly.
+      // the post-POST drift check inside createQBOPurchase — safe to use directly.
       expenseResults.push({
         txId: tx.id,
         qboPurchaseId: purchaseResult.id,
@@ -992,11 +1010,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // If any expense creation failed, persist error and return
+    // Hard errors (non-drift POST failures, validation errors, etc.) still abort.
+    // Drift-skipped transactions are tracked separately and do NOT abort.
     if (syncError) {
       await persistSyncFailure(admin, payoutId, syncError);
       return new Response(
-        JSON.stringify({ success: false, error: syncError, payoutId, expensesCreated: expenseResults.length }),
+        JSON.stringify({ success: false, error: syncError, payoutId, expensesCreated: expenseResults.length, skipped: skippedTransactions }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
