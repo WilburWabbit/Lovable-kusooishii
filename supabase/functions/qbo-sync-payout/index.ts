@@ -1052,7 +1052,6 @@ Deno.serve(async (req) => {
 
     // Fetch the actual QBO SalesReceipt TotalAmt for each linked sale so the
     // deposit math reflects the canonical sale (not the eBay payout gross).
-    const salesReceiptCanonicalTotals = new Map<string, number>(); // entry.qboId → TotalAmt
     for (const entry of orderQboMap.values()) {
       let canonicalTotal = 0;
       try {
@@ -1062,7 +1061,6 @@ Deno.serve(async (req) => {
         syncError = syncError ? `${syncError}; ${msg}` : msg;
         continue;
       }
-      salesReceiptCanonicalTotals.set(entry.qboId, canonicalTotal);
       depositLines.push({
         Amount: round2(canonicalTotal),
         DepositLineDetail: { PaymentMethodRef: { value: "1" } },
