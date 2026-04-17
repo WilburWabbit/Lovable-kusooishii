@@ -773,9 +773,10 @@ Deno.serve(async (req) => {
     let depositLines: unknown[] = [];
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      // SalesReceipt lines (positive — gross sales)
+      // SalesReceipt lines (positive — gross sales). Round each amount to 2dp to avoid
+      // floating-point drift (e.g. 13.20 + 9.04 + ... summing to .07 instead of .06).
       depositLines = Array.from(orderQboMap.values()).map((entry) => ({
-        Amount: entry.gross,
+        Amount: round2(entry.gross),
         DepositLineDetail: {
           PaymentMethodRef: { value: "1" },
         },
@@ -810,7 +811,7 @@ Deno.serve(async (req) => {
       if (exp.settledViaTransfer) continue;
 
       depositLines.push({
-        Amount: -exp.amount,
+        Amount: -round2(exp.amount),
         DepositLineDetail: {
           PaymentMethodRef: { value: "1" },
         },
@@ -833,7 +834,7 @@ Deno.serve(async (req) => {
     );
     const expectedNet = p.net_amount as number;
     const delta = round2(Math.abs(constructedTotal - expectedNet));
-    if (delta > 0.02) {
+    if (delta > 0.001) {
       const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
       console.error(msg);
       await persistSyncFailure(admin, payoutId, msg);
