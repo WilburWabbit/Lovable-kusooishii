@@ -353,10 +353,35 @@ Deno.serve(async (req) => {
 
     const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
     // Exclude TRANSFER transactions from expense processing.
-    // TRANSFER = eBay collecting a fee (e.g. subscription) directly from undeposited funds.
-    // The corresponding NON_SALE_CHARGE Purchase already represents this payment from UF;
-    // adding a separate TRANSFER deposit line would double-count it.
+    // TRANSFER is informational only: it tells us the matching NON_SALE_CHARGE invoice
+    // (same absolute gross_amount) was settled out-of-band by eBay and never debited
+    // Undeposited Funds. We use these to flag "settled" NON_SALE_CHARGEs below — those
+    // expenses are still booked as Purchases (P&L is real) but paid directly from the
+    // bank account rather than UF, and excluded from the deposit lines.
     const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
+
+    // Build a multiset of TRANSFER absolute amounts so we can match each settled
+    // NON_SALE_CHARGE one-for-one (avoid double-matching when amounts repeat).
+    const transferAmountCounts = new Map<string, number>();
+    for (const t of allTransactions) {
+      if (t.transaction_type === "TRANSFER") {
+        const key = Math.abs(t.gross_amount).toFixed(2);
+        transferAmountCounts.set(key, (transferAmountCounts.get(key) ?? 0) + 1);
+      }
+    }
+    const settledTxIds = new Set<string>();
+    for (const t of allTransactions) {
+      if (t.transaction_type !== "NON_SALE_CHARGE") continue;
+      const key = Math.abs(t.gross_amount).toFixed(2);
+      const remaining = transferAmountCounts.get(key) ?? 0;
+      if (remaining > 0) {
+        settledTxIds.add(t.id);
+        transferAmountCounts.set(key, remaining - 1);
+      }
+    }
+    if (settledTxIds.size > 0) {
+      console.log(`Detected ${settledTxIds.size} settled NON_SALE_CHARGE(s) with matching TRANSFER — booking direct to bank, excluding from deposit.`);
+    }
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
     const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
