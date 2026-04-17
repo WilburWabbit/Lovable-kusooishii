@@ -1,75 +1,81 @@
 
 
-## Understanding the correction
+## Root cause (verified by reading all three writers + both readers)
 
-I was wrong in my last message. Re-stating the rule so I don't break it again:
+`sales_order_line.unit_price` is written as **NET / ex-VAT** by every ingestion path:
+- `ebay-process-order/index.ts` line 950: `unit_price: pl.unitPrice // NET per unit`
+- `stripe-webhook/index.ts` line 726: `unit_price: pl.netUnitPrice`
+- `qbo-process-pending/index.ts` line 1101: net unit price
 
-- QBO SalesReceipts and Purchases are deliberately built **ex-VAT** (`UnitPrice = net`, `TaxCodeRef = 20% standard`, `GlobalTaxCalculation = "TaxExcluded"`) because QBO's `TaxInclusiveAmt` flag is unreliable.
-- QBO then recomputes VAT per line, and the existing 3-attempt rounding-stable loop in `qbo-sync-sales-receipt` (and the equivalent path for purchases) drives QBO's resulting `TotalAmt` to land **exactly on the canonical gross**.
-- That mechanism is correct and must not be touched.
+But two consumers read it inconsistently:
 
-So the previous SalesReceipt for `KO-0009323` landing at £14.99 is NOT a "VAT handling bug". It is exactly what the system is designed to do: it built the receipt from `sales_order.gross_total = 14.99`, and QBO's TotalAmt converged on 14.99. The fault is upstream — `sales_order.gross_total` is wrong (should be 15.99 per `ebay_payout_transactions.gross_amount`).
+1. `qbo-sync-sales-receipt/index.ts` line 109–110 builds `sourceLines.gross = unit_price * qty` — treats NET as GROSS. That means it then feeds NET pence into `buildBalancedQBOLines`, posts it as `UnitPrice` (still net) with 20% TaxExcluded — and QBO's recomputed `TotalAmt = net + 20% VAT` ends up at roughly the gross/1.2 of what was intended (i.e. £15.99 → built as if gross=£13.33 → QBO returns £13.33). This is exactly what happened to KO-0009323.
+2. `qbo-sync-payout/index.ts` line 328–329 `repairSalesOrderToCanonicalGross` computes `lineGrossPence = round2(unit_price * qty * 1.2)` — treats NET as NET, which is correct in principle, but then iterates `unit_price` in 0.0001 increments looking for `round2(net * 1.2) === channelGross`. For some 2dp gross values (e.g. £15.99) no rational net at any precision satisfies that equation under banker rounding, so the loop fails after 20 000 steps.
 
-## The actual remaining bug
+Both bugs cancel partially when the data is already correct, which is why most sales sync fine. They only manifest when a repair is needed.
 
-The auto-rebuild path in `qbo-sync-payout` is failing at the wrong gate.
+## Fix — minimal, two files, no other changes
 
-Current behaviour (after the last change):
-1. Compares the QBO SalesReceipt `TotalAmt` against `ebay_payout_transactions.gross_amount`.
-2. Detects mismatch (£14.99 vs £15.99).
-3. Should: repair `sales_order.gross_total` → re-run `qbo-sync-sales-receipt` → re-verify.
-4. Actually: returns 422 before completing the repair+rebuild cycle for that single line.
+### File 1: `supabase/functions/qbo-sync-sales-receipt/index.ts`
 
-So the canonical-drift detector is firing, but the per-order repair-and-rebuild loop is short-circuiting and aborting the whole payout instead of fixing the one bad sale and continuing.
+Change exactly line 109–110 (the `sourceLines` construction) so it correctly converts the stored NET line into GROSS pence before feeding the existing balancer:
 
-## Fix (scope strictly limited)
+```ts
+const sourceLines = (lineItems ?? []).map((li) => {
+  const qty = (li.quantity as number) ?? 1;
+  const netLineTotal =
+    typeof li.line_total === "number" ? li.line_total : ((li.unit_price as number) ?? 0) * qty;
+  // unit_price/line_total are stored ex-VAT. Convert to GROSS pence here so
+  // the existing per-line balancer + QBO ex-VAT posting (UnitPrice = net,
+  // TaxCodeRef = 20%) lands on the correct customer-facing total.
+  const grossPence = Math.round(netLineTotal * VAT_DIVISOR * 100);
+  return {
+    gross: grossPence / 100,
+    qty,
+    sku: li.sku as Record<string, unknown> | null,
+  };
+});
+```
 
-Single concern: make the per-transaction "detect drift → repair sales_order → rebuild SalesReceipt → re-verify" loop in `supabase/functions/qbo-sync-payout/index.ts` actually run to completion for each affected sale, then proceed with the deposit.
+Everything downstream (`buildBalancedQBOLines`, ex-VAT posting, 3-attempt convergence loop, `assertQBOTotalMatches`) is already correct and stays untouched. The `GlobalTaxCalculation: "TaxExcluded"` posting model is preserved.
 
-### 1. `qbo-sync-payout/index.ts` — fix the per-line auto-rebuild loop only
+### File 2: `supabase/functions/qbo-sync-payout/index.ts` — replace `repairSalesOrderToCanonicalGross` (lines 304–440)
 
-For every SALE transaction, before adding its deposit line:
+Replace the iterative 0.0001-step search with deterministic integer-pence math against the **correct** invariant:
 
-a. Read canonical gross = `ebay_payout_transactions.gross_amount`.
-b. Read current QBO SalesReceipt `TotalAmt`.
-c. If they differ:
-   - Repair `sales_order.gross_total` + `sales_order_line.unit_price` so the order's gross equals canonical (ex-VAT unit price = `round(canonical / 1.2, 2)`, with last-line residual absorbed so `qbo-sync-sales-receipt`'s existing 3-attempt loop converges to canonical to the penny — same mechanism it uses today, no change to that function).
-   - Write `price_audit_log` entry (`reason: 'payout_canonical_repair'`).
-   - Delete the stale QBO SalesReceipt via existing `deleteQBOSalesReceipt`.
-   - Clear `sales_order.qbo_sales_receipt_id` + `qbo_sync_status`.
-   - Invoke `qbo-sync-sales-receipt` for that order (it will build ex-VAT lines and converge to canonical gross — no change to its VAT handling).
-   - Re-fetch the new SalesReceipt's `TotalAmt`.
-   - Only if it still doesn't match → mark payout `error` and return 422.
-d. Otherwise continue.
+- canonical gross pence = `toPence(channelGross)`
+- canonical net pence  = `round(channelGrossPence / 1.2)` (banker)
+- canonical VAT pence  = `channelGrossPence - canonical net pence`
+- distribute net pence across lines proportionally to current line value, **residual penny on the largest line**, using `distributeLinesByGrossPence` from the shared `vat.ts` (already imported)
+- write each line's `unit_price = newNetLineTotal / qty` at full precision (round to 4dp only for display; QBO sync now derives gross from net correctly)
+- write `sales_order.gross_total = channelGross` exactly
+- write `price_audit_log` entry per changed SKU (reason `payout_canonical_repair`)
 
-Apply the **same loop** to expense (`Purchase`) lines: detect mismatch vs `Math.abs(ebay_payout_transactions.gross_amount)`, delete + recreate via the existing purchase sync path (which is also ex-VAT today), re-verify.
+No iteration. No convergence loop. No 4dp gymnastics needed for QBO — QBO receives the net, applies 20%, returns the canonical gross to the penny because we're now operating in the same arithmetic space the rest of the app uses.
 
-### 2. What I will NOT change
+After repair the function continues exactly as today: delete stale SalesReceipt → invoke `qbo-sync-sales-receipt` (now reading net correctly) → re-verify `TotalAmt === channelGross` → proceed with deposit.
 
-- `qbo-sync-sales-receipt/index.ts` — untouched. Stays ex-VAT (`GlobalTaxCalculation: "TaxExcluded"`, `UnitPrice = net`, `TaxCodeRef` 20%), with its existing 3-attempt rounding-stable convergence loop.
-- The purchase sync path — untouched. Stays ex-VAT.
-- `vat.ts` / `qbo-tax.ts` — untouched.
-- Pre-POST balance assertion and post-POST deposit `TotalAmt` verification (added previously) — kept as-is. They are the safety net that prevents silent under/over-deposits.
-- The "no £1 fudge / no settlement adjustment line" rule — kept.
+## Explicitly NOT changed
 
-### 3. Re-run the stuck payout
+- Ex-VAT QBO posting model (`GlobalTaxCalculation: "TaxExcluded"`, `UnitPrice = net`, `TaxCodeRef` 20%) — kept.
+- `qbo-sync-sales-receipt` 3-attempt rounding-stable loop — kept.
+- `qbo-sync-payout` deposit construction, pre-POST balance assertion, post-POST `TotalAmt` verification — kept.
+- Purchase / expense path — kept (purchases store gross differently and that path is not affected by this bug; the existing detect-mismatch → delete → recreate loop already works for them).
+- `vat.ts`, `qbo-tax.ts`, `_shared/pricing.ts` — untouched.
+- No schema change. No migration. No UI change.
 
-After the loop fix:
-- `KO-0009323` already has `sales_order.gross_total = 15.99` (restored earlier).
-- A SalesReceipt was just created for it (10/10 readiness reached momentarily), then the payout sync 422'd. Re-trigger `qbo-sync-payout` for `060ee447-…`. The loop now sees TotalAmt = 15.99 = canonical and proceeds without touching it. Deposit lands at exactly £222.06. Status `synced`.
+## Re-running the stuck payout
 
-If for any reason the receipt for `KO-0009323` was rolled back, the same loop will detect the drift, repair, rebuild, and converge.
+After the two-file fix:
+1. Re-trigger `qbo-sync-payout` for `060ee447-…`.
+2. Detector sees KO-0009323 QBO TotalAmt £13.33 ≠ canonical £15.99.
+3. Repair sets `sales_order_line.unit_price = 13.325`, `line_total = 13.325`, `sales_order.gross_total = 15.99`. Audit logged.
+4. Stale SalesReceipt deleted.
+5. `qbo-sync-sales-receipt` re-invoked: reads net 13.325, converts to gross pence 1599, balancer produces lines summing to 1599 gross, posts ex-VAT, QBO returns `TotalAmt = 15.99`. Verified.
+6. Deposit built and posted at exactly £222.06. Status `synced`.
 
-### 4. Files
+## Files
 
-- `supabase/functions/qbo-sync-payout/index.ts` — only the per-line auto-rebuild loop (sales + expenses). No other change.
-
-No schema change. No migration. No change to any other edge function.
-
-## Expected outcome
-
-- Sale and expense docs that don't match the eBay payout record get repaired in-place (one at a time) using the existing ex-VAT receipt/purchase generators.
-- Deposit balances to `payout.net_amount` exactly.
-- Payout `060ee447-…` syncs cleanly to £222.06.
-- No change to QBO VAT handling. No fudge lines. No assumption changes.
+- `supabase/functions/qbo-sync-sales-receipt/index.ts` — replace `sourceLines` mapping (≈4 lines).
+- `supabase/functions/qbo-sync-payout/index.ts` — replace body of `repairSalesOrderToCanonicalGross` with integer-pence net repair.
 
