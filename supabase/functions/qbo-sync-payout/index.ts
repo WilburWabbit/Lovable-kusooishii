@@ -261,39 +261,40 @@ async function createQBOPurchase(
     docNumber?: string;
   },
 ): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
-  // ─── TaxInclusive posting (let QBO derive tax) ─────────────
-  // Under `GlobalTaxCalculation: "TaxInclusive"`, QBO interprets each line's
-  // `Amount` as the GROSS (VAT-inclusive) value and back-derives net + tax
-  // from the linked `TaxCodeRef`. We must NOT also send `TaxAmount` or
-  // `TaxInclusiveAmt` on AccountBasedExpenseLineDetail — sending all three
-  // is contradictory and triggers QBO to treat `Amount` as net and apply
-  // VAT a second time, producing TotalAmt = gross × 1.20.
+  // ─── TaxExcluded posting (mirror working SalesReceipt contract) ─
+  // QBO is unreliable about honouring `GlobalTaxCalculation: "TaxInclusive"`
+  // on Purchase documents in this UK realm — it falls back to treating
+  // `Amount` as net and adding VAT on top, producing TotalAmt = gross × 1.20.
   //
-  // Strategy:
-  //   - Convert source amounts to integer pence (no float drift).
-  //   - Send only `Amount` (gross) + `TaxCodeRef` per line.
-  //   - QBO computes per-line net/tax and document TotalAmt = sum(gross).
-  //   - The post-create `assertQBOTotalMatches` guard verifies penny exactness.
+  // Instead we use the same recipe that works for SalesReceipts:
+  //   - GlobalTaxCalculation: "TaxExcluded"
+  //   - Per line: Amount = NET (ex-VAT) + TaxCodeRef
+  //   - Document: TxnTaxDetail.TotalTax = sum of per-line VAT
+  //   - QBO computes TotalAmt = sum(Amount) + TotalTax = source gross exactly.
+  //
+  // Integer-pence distribution guarantees sum(net) + sum(vat) == sum(gross)
+  // to the penny, with any rounding remainder pushed onto the last line.
   const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
   const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
   const expectedGross = fromPence(totalGrossPence);
+  const distributed = distributeLinesByGrossPence(grossPenceLines);
+  const totalVatPence = distributed.reduce((s, d) => s + d.vatPence, 0);
+  const totalVat = fromPence(totalVatPence);
 
   const qboLines = opts.lines.map((line, idx) => {
-    const grossLine = fromPence(grossPenceLines[idx]);
+    const lineNet = fromPence(distributed[idx].netPence);
 
     if (line.itemRef) {
-      // Item-linked line — links the expense to a specific QBO Item.
-      // For TaxInclusive posting, UnitPrice is the gross unit price and
-      // QBO derives tax from the item's tax code. Do not send TaxAmount.
+      // Item-linked line — Amount is NET; QBO adds VAT from TaxCodeRef.
       const detail: Record<string, unknown> = {
         ItemRef: line.itemRef,
         Qty: 1,
-        UnitPrice: grossLine,
+        UnitPrice: lineNet,
         TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
       };
       if (line.customerRef) detail.CustomerRef = line.customerRef;
       return {
-        Amount: grossLine,
+        Amount: lineNet,
         DetailType: "ItemBasedExpenseLineDetail",
         ItemBasedExpenseLineDetail: detail,
         Description: line.description,
@@ -309,7 +310,7 @@ async function createQBOPurchase(
     }
 
     return {
-      Amount: grossLine,
+      Amount: lineNet,
       DetailType: "AccountBasedExpenseLineDetail",
       AccountBasedExpenseLineDetail: detail,
       Description: line.description,
@@ -321,8 +322,9 @@ async function createQBOPurchase(
     PaymentType: "Cash",
     AccountRef: opts.bankAccountRef,
     EntityRef: { ...opts.vendorRef, type: "Vendor" },
-    GlobalTaxCalculation: "TaxInclusive",
+    GlobalTaxCalculation: "TaxExcluded",
     Line: qboLines,
+    TxnTaxDetail: { TotalTax: totalVat },
     PrivateNote: opts.privateNote,
   };
   if (opts.docNumber) {
