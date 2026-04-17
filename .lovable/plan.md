@@ -1,89 +1,55 @@
 
+
 ## Root cause
 
-The new safeguard is correctly catching a real bug — QBO is returning totals **20% higher** than what we send. £2.64 → £3.17, £9.93 → £11.92, £32.40 → £38.88. That's 1.20× exactly.
+Both previous attempts got the QBO tax-mode contract wrong. The latest logs prove it:
 
-Looking at the payload in the logs:
+- Payload: `Amount: 2.94` + `TaxCodeRef: 6` + `GlobalTaxCalculation: "TaxInclusive"`
+- QBO returned: `TotalAmt: 3.53` = **2.94 × 1.20 exactly**
 
-```json
-{
-  "GlobalTaxCalculation": "TaxInclusive",
-  "Line": [{
-    "Amount": 2.09,
-    "AccountBasedExpenseLineDetail": {
-      "TaxCodeRef": { "value": "6" },
-      "TaxAmount": 0.35,
-      "TaxInclusiveAmt": 2.09,
-      ...
-    }
-  }, ...]
-}
-```
+So QBO is **ignoring `GlobalTaxCalculation: "TaxInclusive"` on the Purchase document** in this UK realm and falling back to the default (treat `Amount` as net, add VAT from `TaxCodeRef` on top). This is consistent across every failing line in the log (2.94→3.53, 3.55→4.26, 4.52→5.42, all ×1.20).
 
-The bug is in how `Amount` is being set when `GlobalTaxCalculation: "TaxInclusive"` is used.
+Meanwhile the SalesReceipt path **works** because it uses the opposite contract: `TaxExcluded` + net `Amount` + explicit `TxnTaxDetail.TotalTax`. QBO honours that, and the post-create assert passes.
 
-**QBO's TaxInclusive contract:**
-- `Amount` must be the **net** (ex-VAT) value
-- `TaxInclusiveAmt` is the gross
-- QBO computes `TotalAmt = sum(Amount) + sum(TaxAmount)` 
+## Fix
 
-What we sent for the £2.64 Purchase: line `Amount: 2.09` + line `TaxAmount: 0.35` = £2.44 net+tax... but QBO returned £3.17. That means QBO is treating `Amount: 2.09` as net, then **adding 20% tax on top** = £2.51, plus the explicit `TaxAmount: 0.35` = ~£2.86... still doesn't reach £3.17.
+Mirror the working SalesReceipt contract for Purchases. Stop relying on `TaxInclusive`.
 
-Actually the math is simpler: **QBO is treating the per-line `Amount` field as the gross value (because TaxInclusive mode says so), and ALSO adding the explicit `TaxAmount` again**. So `2.09 + 0.07 + 0.48 = 2.64` (matches our expected) **plus** the three TaxAmounts `0.35 + 0.01 + 0.08 = 0.44` added a second time → wait that's £3.08, not £3.17.
+In `supabase/functions/qbo-sync-payout/index.ts`, change `createQBOPurchase`:
 
-Let me re-check. £2.64 × 1.20 = £3.168 ≈ £3.17. £9.93 × 1.20 = £11.916 ≈ £11.92. £32.40 × 1.20 = £38.88 exact. So QBO is taking our gross `Amount` values and **adding 20% VAT on top**, ignoring `TaxInclusiveAmt`.
+1. Convert source gross per line to integer pence.
+2. Use `distributeLinesByGrossPence` (already in `_shared/vat.ts`) to split into per-line `{ netPence, vatPence }` with the rounding remainder pushed to the last line, guaranteeing `sum(net) + sum(vat) = sum(gross)` exactly.
+3. Build payload with:
+   - `GlobalTaxCalculation: "TaxExcluded"`
+   - Each line `Amount = lineNet` (ex-VAT, 2dp from pence)
+   - `AccountBasedExpenseLineDetail.TaxCodeRef: { value: "6" }`
+   - For item-linked lines: `UnitPrice = unitNet`, same `TaxCodeRef`
+   - `TxnTaxDetail: { TotalTax: totalVatPounds }`
+4. Keep the existing `assertQBOTotalMatches` guard — `expectedGross` stays as the original source gross. After the fix, QBO `TotalAmt` will equal exactly that.
 
-That happens when `GlobalTaxCalculation: "TaxInclusive"` is set but the line `Amount` is treated by QBO as net (its default interpretation). The combination of `Amount` (gross), `TaxInclusiveAmt` (gross), and explicit `TaxAmount` is contradictory and QBO is resolving it by treating `Amount` as net + applying TaxCodeRef VAT on top.
+No other changes. The deposit construction and reconciliation logic downstream are already correct (they use the verified linked totals).
 
-## The actual fix
+## Why this works
 
-QBO's `TaxInclusive` mode for AccountBasedExpenseLineDetail requires:
-- `Amount` = **gross** (tax-inclusive) value ✓ (we do this)
-- **Do NOT send explicit `TaxAmount`** — QBO derives it from `TaxCodeRef` and the gross `Amount`
-- **Do NOT send `TaxInclusiveAmt`** — that's a SalesItemLineDetail field, not valid here
-- `TaxCodeRef` tells QBO which rate to back-out
+- This is the exact same recipe QBO is currently accepting for SalesReceipts in the same realm — proven to land at the correct gross to the penny.
+- Integer-pence distribution removes any per-line rounding drift.
+- The `TotalTax` we send equals the sum of the exact per-line VAT pence, so QBO has no opportunity to recompute and produce a different total.
 
-When you send all three (Amount + TaxAmount + TaxInclusiveAmt) under TaxInclusive mode, QBO's behaviour is undefined and it defaults to treating Amount as net.
+## Existing data repair
 
-### Change to `createQBOPurchase` in `supabase/functions/qbo-sync-payout/index.ts`
+After the new code is deployed, recreate the bad records:
 
-For each expense line:
-- Keep `Amount` = gross pence/pounds
-- Keep `TaxCodeRef` 
-- **Remove `TaxAmount`**
-- **Remove `TaxInclusiveAmt`**
-- Keep `GlobalTaxCalculation: "TaxInclusive"` at document level
-- Remove the document-level `TxnTaxDetail` if present (let QBO compute)
+1. Delete in QBO: any Purchases created during the failing payout sync attempts (Refs 2089–2095 from the latest logs, plus any earlier failed batch) and the existing Deposit if one exists for this payout.
+2. Clear DB pointers for payout `060ee447-02f7-4527-84a4-95aedecd0daa`:
+   - `payouts.qbo_deposit_id = NULL`
+   - `ebay_payout_transactions.qbo_purchase_id = NULL` for rows in that payout
+3. Re-run the payout sync.
 
-QBO will then:
-1. Read `Amount` as gross
-2. Use `TaxCodeRef` rate (20%) to derive net = Amount / 1.2 and tax = Amount - net
-3. Set `TotalAmt` = sum of gross Amounts (exact match to source)
-
-The new safeguard `assertQBOTotalMatches` will then pass because TotalAmt will equal the sum of our line gross values to the penny.
-
-## Why this matches every error in the log
-
-Every failing Purchase shows `expected × 1.20 ≈ returned`:
-| Expected | Returned | Ratio |
-|---|---|---|
-| £2.64 | £3.17 | 1.2008 |
-| £9.93 | £11.92 | 1.2004 |
-| £32.40 | £38.88 | 1.2000 |
-| £0.12 | £0.14 | 1.1667 (rounding noise on tiny amount) |
-| £8.58 | £10.30 | 1.2005 |
-
-Consistent 20% overshoot = QBO double-applying VAT.
+Each Purchase should now land at the exact source gross, the assert guard should pass, and the Deposit should construct to **£222.06** to the penny.
 
 ## Files
 
-- `supabase/functions/qbo-sync-payout/index.ts` — strip `TaxAmount` and `TaxInclusiveAmt` from `AccountBasedExpenseLineDetail` in `createQBOPurchase`. Keep `TaxCodeRef` and document-level `GlobalTaxCalculation: "TaxInclusive"`.
+- `supabase/functions/qbo-sync-payout/index.ts` — rewrite tax handling in `createQBOPurchase` (TaxExcluded + net amounts + TxnTaxDetail.TotalTax). Use `distributeLinesByGrossPence` from the shared helper for exact pence math.
 
-## Data repair
+No DB migration. No schema change. No other edge functions touched.
 
-After deploy:
-1. Delete QBO Purchases 2030–2051 manually in QBO (all 22 over-taxed records).
-2. Clear `qbo_purchase_id` on the affected `ebay_payout_transactions` rows for payout `060ee447-02f7-4527-84a4-95aedecd0daa`.
-3. Re-run the payout sync. Each Purchase should land at exact gross, the safeguard should pass, and the Deposit should construct to £222.06 exactly.
-
-No DB migration needed.
