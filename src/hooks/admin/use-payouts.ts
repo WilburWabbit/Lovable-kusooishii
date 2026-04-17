@@ -102,6 +102,7 @@ function mapPayout(row: Record<string, unknown>): Payout {
     qboDepositId: (row.qbo_deposit_id as string) ?? null,
     qboExpenseId: (row.qbo_expense_id as string) ?? null,
     qboSyncStatus: (row.qbo_sync_status as QBOSyncStatus) ?? 'pending',
+    qboSyncError: (row.qbo_sync_error as string) ?? null,
     externalPayoutId: (row.external_payout_id as string) ?? null,
     reconciliationStatus: (row.reconciliation_status as 'pending' | 'reconciled') ?? 'pending',
     transactionCount: (row.transaction_count as number) ?? 0,

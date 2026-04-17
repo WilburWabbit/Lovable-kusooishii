@@ -296,6 +296,7 @@ export interface Payout {
   qboDepositId: string | null;
   qboExpenseId: string | null;
   qboSyncStatus: QBOSyncStatus;
+  qboSyncError: string | null;
   externalPayoutId: string | null;
   reconciliationStatus: 'pending' | 'reconciled';
   transactionCount: number;

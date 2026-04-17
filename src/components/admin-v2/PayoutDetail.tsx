@@ -130,13 +130,47 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
           />
           {payout.qboSyncStatus && (
             <Badge
-              label={payout.qboSyncStatus === "synced" ? "QBO Synced" : payout.qboSyncStatus === "error" ? "QBO Error" : "QBO Pending"}
-              color={payout.qboSyncStatus === "synced" ? "#22C55E" : payout.qboSyncStatus === "error" ? "#EF4444" : "#F59E0B"}
+              label={
+                payout.qboSyncStatus === "synced"
+                  ? "QBO Synced"
+                  : payout.qboSyncStatus === "error"
+                    ? "QBO Error"
+                    : payout.qboSyncStatus === "partial"
+                      ? "QBO Partial"
+                      : "QBO Pending"
+              }
+              color={
+                payout.qboSyncStatus === "synced"
+                  ? "#22C55E"
+                  : payout.qboSyncStatus === "error"
+                    ? "#EF4444"
+                    : payout.qboSyncStatus === "partial"
+                      ? "#F97316"
+                      : "#F59E0B"
+              }
               small
             />
           )}
         </div>
       </div>
+
+      {payout.qboSyncStatus === "partial" && (
+        <div className="mb-5 rounded-md border border-orange-300 bg-orange-50 p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-orange-700">
+            QBO Partial Sync
+          </div>
+          <div className="mt-1 text-sm text-orange-900">
+            Some transactions could not be synced to QBO after 3 auto-adjust attempts and were skipped.
+            The deposit was created from the successfully-synced transactions only. Skipped transactions
+            appear below with no QBO Purchase ID — investigate and re-sync individually.
+          </div>
+          {payout.qboSyncError && (
+            <Mono color="dim" className="mt-2 block whitespace-pre-wrap text-xs text-orange-800">
+              {payout.qboSyncError}
+            </Mono>
+          )}
+        </div>
+      )}
 
       {/* 1. Totals */}
       <div className="grid grid-cols-3 gap-3 mb-3">
@@ -247,7 +281,15 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                     <Mono color="dim" className="text-xs">#{payout.qboDepositId}</Mono>
                     <Badge
                       label={payout.qboSyncStatus === "synced" ? "Synced" : payout.qboSyncStatus ?? "—"}
-                      color={payout.qboSyncStatus === "synced" ? "#22C55E" : "#F59E0B"}
+                      color={
+                        payout.qboSyncStatus === "synced"
+                          ? "#22C55E"
+                          : payout.qboSyncStatus === "partial"
+                            ? "#F97316"
+                            : payout.qboSyncStatus === "error"
+                              ? "#EF4444"
+                              : "#F59E0B"
+                      }
                       small
                     />
                   </div>
