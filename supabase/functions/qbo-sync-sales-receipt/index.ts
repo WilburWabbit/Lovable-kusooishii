@@ -16,7 +16,7 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
-import { exVAT, adjustLineVATRounding } from "../_shared/vat.ts";
+import { exVAT, adjustLineVATRounding, assertQBOTotalMatches, QBOTotalMismatchError, toPence } from "../_shared/vat.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
