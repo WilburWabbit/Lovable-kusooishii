@@ -174,117 +174,101 @@ Deno.serve(async (req) => {
       classId = await lookupQboRef("Class", "In Person Sale");
     }
 
-    const qboLines = stableLines.map((s) => {
-      const lineNet = fromPence(s.netPence);
-
-      // Rounding balancer line — non-itemised, zero VAT.
-      if (s.kind === "rounding") {
-        return {
-          DetailType: "SalesItemLineDetail",
-          Amount: lineNet,
-          SalesItemLineDetail: {
-            Qty: 1,
-            UnitPrice: lineNet,
-            TaxCodeRef: { value: QBO_TAX_CODE_NO_VAT },
-            ...(classId ? { ClassRef: { value: classId } } : {}),
-          },
-          Description: "Rounding adjustment (per-line VAT recompute)",
-        } as Record<string, unknown>;
-      }
-
-      const src = sourceLines[s.sourceIndex!];
-      const qty = src.qty;
-      const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
-
-      const detail: Record<string, unknown> = {
-        Qty: qty,
-        UnitPrice: unitNet,
-        TaxCodeRef: { value: s.taxCodeRef ?? QBO_TAX_CODE_STANDARD_20 },
-      };
-
-      if (src.sku?.qbo_item_id) {
-        detail.ItemRef = { value: String(src.sku.qbo_item_id) };
-      }
-      if (classId) {
-        detail.ClassRef = { value: classId };
-      }
-
-      return {
-        DetailType: "SalesItemLineDetail",
-        Amount: lineNet,
-        SalesItemLineDetail: detail,
-      } as Record<string, unknown>;
-    });
-
-    const salesReceiptPayload: Record<string, unknown> = {
-      DocNumber: orderNumber,
-      TxnDate: order.created_at ? new Date(order.created_at as string).toISOString().slice(0, 10) : undefined,
-      Line: qboLines,
-      GlobalTaxCalculation: "TaxExcluded",
-      // NB: TxnTaxDetail.TotalTax intentionally omitted — QBO ignores it on
-      // SalesReceipts and recomputes per-line. The QBO-stable distributor
-      // above ensures sum(round(net × 0.20)) = expected tax exactly.
-      CustomerRef: { value: qboCustomerRef },
-    };
-
-    if (paymentMethodId) {
-      salesReceiptPayload.PaymentMethodRef = { value: paymentMethodId };
-    }
-    if (classId) {
-      salesReceiptPayload.ClassRef = { value: classId };
-    }
-
-
-    // ─── 5. POST to QBO ─────────────────────────────────────
-
-    const qboRes = await fetchWithTimeout(`${baseUrl}/salesreceipt?minorversion=65`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(salesReceiptPayload),
-    });
-
-    if (!qboRes.ok) {
-      const errorText = await qboRes.text();
-      console.error(`QBO SalesReceipt creation failed [${qboRes.status}]:`, errorText);
-
-      // Mark order as sync error
-      await admin
-        .from("sales_order")
-        .update({ qbo_sync_status: "error" } as never)
-        .eq("id", orderId);
-
-      return jsonResponse({
-        success: false,
-        qbo_error: `QBO API error [${qboRes.status}]`,
-        orderId,
+    function buildSRLines(lines: QBOStableLine[]): Record<string, unknown>[] {
+      return lines.map((s) => {
+        const lineNet = fromPence(s.netPence);
+        if (s.kind === "rounding") {
+          return {
+            DetailType: "SalesItemLineDetail",
+            Amount: lineNet,
+            SalesItemLineDetail: {
+              Qty: 1,
+              UnitPrice: lineNet,
+              TaxCodeRef: { value: QBO_TAX_CODE_NO_VAT },
+              ...(classId ? { ClassRef: { value: classId } } : {}),
+            },
+            Description: "Rounding adjustment (per-line VAT recompute)",
+          } as Record<string, unknown>;
+        }
+        const src = sourceLines[s.sourceIndex!];
+        const qty = src.qty;
+        const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
+        const detail: Record<string, unknown> = {
+          Qty: qty,
+          UnitPrice: unitNet,
+          TaxCodeRef: { value: s.taxCodeRef ?? QBO_TAX_CODE_STANDARD_20 },
+        };
+        if (src.sku?.qbo_item_id) detail.ItemRef = { value: String(src.sku.qbo_item_id) };
+        if (classId) detail.ClassRef = { value: classId };
+        return { DetailType: "SalesItemLineDetail", Amount: lineNet, SalesItemLineDetail: detail } as Record<string, unknown>;
       });
     }
 
-    const qboResult = await qboRes.json();
-    const receiptId = String(qboResult.SalesReceipt.Id);
-    const qboTotalAmt = Number(qboResult.SalesReceipt.TotalAmt ?? 0);
+    // ─── Retry loop: react to QBO's actual TotalAmt ─────────
+    let receiptId = "";
+    let qboTotalAmt = 0;
+    let qboResult: Record<string, unknown> = {};
+    let lastError: string | null = null;
+
+    for (let attempt = 1; attempt <= MAX_SR_ATTEMPTS; attempt++) {
+      const qboLines = buildSRLines(stableLines);
+      const salesReceiptPayload: Record<string, unknown> = {
+        DocNumber: orderNumber,
+        TxnDate: order.created_at ? new Date(order.created_at as string).toISOString().slice(0, 10) : undefined,
+        Line: qboLines,
+        GlobalTaxCalculation: "TaxExcluded",
+        CustomerRef: { value: qboCustomerRef },
+      };
+      if (paymentMethodId) salesReceiptPayload.PaymentMethodRef = { value: paymentMethodId };
+      if (classId) salesReceiptPayload.ClassRef = { value: classId };
+
+      console.log(`QBO SalesReceipt attempt ${attempt}/${MAX_SR_ATTEMPTS} (expected £${expectedGross.toFixed(2)})`);
+      const qboRes = await fetchWithTimeout(`${baseUrl}/salesreceipt?minorversion=65`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(salesReceiptPayload),
+      });
+
+      if (!qboRes.ok) {
+        const errorText = await qboRes.text();
+        console.error(`QBO SalesReceipt POST failed [${qboRes.status}]:`, errorText);
+        await admin.from("sales_order").update({ qbo_sync_status: "error" } as never).eq("id", orderId);
+        return jsonResponse({ success: false, qbo_error: `QBO API error [${qboRes.status}]`, orderId });
+      }
+
+      qboResult = await qboRes.json();
+      receiptId = String((qboResult.SalesReceipt as Record<string, unknown>).Id);
+      qboTotalAmt = Number((qboResult.SalesReceipt as Record<string, unknown>).TotalAmt ?? 0);
+      const driftPence = toPence(expectedGross) - toPence(qboTotalAmt);
+
+      if (driftPence === 0) {
+        if (attempt > 1) console.log(`QBO SalesReceipt ${receiptId} converged on attempt ${attempt}`);
+        break;
+      }
+
+      console.warn(`QBO SalesReceipt ${receiptId} attempt ${attempt}: drift=${driftPence}p (expected £${expectedGross.toFixed(2)}, got £${qboTotalAmt.toFixed(2)})`);
+      await deleteQBOSalesReceipt(baseUrl, accessToken, receiptId);
+      lastError = `drift ${driftPence}p after attempt ${attempt}`;
+      receiptId = "";
+
+      if (attempt < MAX_SR_ATTEMPTS) {
+        stableLines = growRoundingLine(stableLines, driftPence);
+      }
+    }
+
+    if (!receiptId) {
+      const msg = `QBO SalesReceipt total drift unresolvable after ${MAX_SR_ATTEMPTS} attempts (${lastError})`;
+      console.error(msg);
+      await admin.from("sales_order").update({ qbo_sync_status: "error" } as never).eq("id", orderId);
+      return jsonResponse({ success: false, qbo_error: msg, orderId, expected_gross: expectedGross });
+    }
 
     // ─── Post-create defence-in-depth ────────────────────────
-    // Pre-flight already verified the math under QBO's recompute. This
-    // catches any unexpected QBO behaviour (e.g. future API changes).
     try {
-      assertQBOTotalMatches({
-        expectedGross,
-        qboTotalAmt,
-        docKind: "SalesReceipt",
-        qboDocId: receiptId,
-      });
+      assertQBOTotalMatches({ expectedGross, qboTotalAmt, docKind: "SalesReceipt", qboDocId: receiptId });
     } catch (e) {
       if (e instanceof QBOTotalMismatchError) {
-        console.error(e.message);
-        await admin
-          .from("sales_order")
-          .update({ qbo_sync_status: "error" } as never)
-          .eq("id", orderId);
+        await admin.from("sales_order").update({ qbo_sync_status: "error" } as never).eq("id", orderId);
         return jsonResponse({
           success: false,
           qbo_error: e.message,
