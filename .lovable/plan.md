@@ -1,56 +1,94 @@
-
-
+<final-text>
 ## Root cause
 
-Our deposit payload sums **exactly to £222.06**. The reconciliation guard logs `constructed=222.06, expected=222.06, delta=0` and the payload sent to QBO contains lines totalling £222.06 to the penny.
+Yes — the active penny drift is coming from the **expense path**, not the deposit header.
 
-QBO is the one adding the extra £0.01 — it produces a Deposit of £222.07 from a payload of £222.06. The culprit is this field on the Deposit payload:
+I checked the payout record, the payout sync logic, the raw QBO purchases, and the source eBay transaction data:
 
-```json
-"GlobalTaxCalculation": "TaxExcluded"
-```
+- The payout sync function reconciled the deposit to **£222.06** before sending it.
+- But one linked QBO **Purchase** was created with the wrong total:
+  - eBay fee source total for sale `02-14338-32191`: **£9.93**
+  - fee components: **£9.16 + £0.29 + £0.48 = £9.93**
+  - landed QBO Purchase `2016`: **£9.92**
 
-This was added recently to the SalesReceipt sync (correctly — sales receipts need it). But it was also propagated to the **Deposit** payload at line 874. Deposits are not tax documents:
+Why that happened:
+- `createQBOPurchase()` in `supabase/functions/qbo-sync-payout/index.ts` currently converts each fee line from gross to ex-VAT **line by line** and rounds each line separately.
+- That loses a penny on this exact set of fee amounts.
+- The Deposit then links to the actual QBO Purchase total, so QBO effectively uses **£9.92** instead of **£9.93**, which pushes the final deposit to **£222.07**.
 
-- Their lines link to existing `SalesReceipt` and `Purchase` records that already carry their own gross/net.
-- When `GlobalTaxCalculation: "TaxExcluded"` is set on a Deposit, QBO interprets each line `Amount` as net-of-tax and applies a tax adjustment to the linked transactions, producing rounding artefacts at the penny level.
+So the earlier deposit-header-only theory was incomplete. The real fix needs to start at the **expense document creation**.
 
-The correct value for a Deposit linking to gross SalesReceipts and Purchases is `"NotApplicable"` (or simply omit the field — QBO defaults appropriately for Deposits).
+## Plan
 
-## Fix
+### 1. Fix payout expenses to post from exact gross values
+Update `supabase/functions/qbo-sync-payout/index.ts` so payout-created **Purchases** are handled as **tax-inclusive/gross-exact** documents, while **SalesReceipts stay tax-exclusive**.
 
-### Single change in `supabase/functions/qbo-sync-payout/index.ts` (line 874)
+This matches your rule:
+- Sales receipts: tax-exclusive
+- Expenses: tax-inclusive where supported
 
-Remove the `GlobalTaxCalculation: "TaxExcluded"` line from the Deposit payload object. Deposits should not carry this field.
+### 2. Move all reconciliation math to integer pence
+Add a shared helper for outbound QBO calculations that:
+- converts source amounts to **integer pence**
+- computes per-line net/tax safely
+- applies any rounding remainder to the final line
+- converts back to 2dp only at payload creation
 
-```diff
- const depositPayload: Record<string, unknown> = {
-   TxnDate: payoutDate,
-   DepositToAccountRef: buildAccountRef(payoutBankRef),
--  GlobalTaxCalculation: "TaxExcluded",
-   Line: depositLines,
-   PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
- };
-```
+This removes floating-point drift and makes “exact to the penny” enforceable.
 
-That's the entire change.
+### 3. Add exact-balancing safeguards for every QBO document
+After creating any outbound financial document, immediately verify:
+- expected gross total from app/source
+- actual QBO returned total
+- actual QBO returned tax total
 
-### Why this matches the symptom exactly
+If the totals are not exact after 2dp normalization, stop and mark the sync as error.
 
-- Our payload sum: **£222.06** ✓ (verified in logs and recomputed from raw transaction data)
-- QBO created: **£222.07**
-- Delta: **+£0.01** — within the rounding noise produced by an unintended tax recalculation across 31 lines
+For payout sync specifically:
+- do **not** create the Deposit if any linked Purchase or SalesReceipt total is off by even **£0.01**
 
-No other code path touches the deposit total. The `Line[]` Amount values are already correct.
+### 4. Build the Deposit from verified linked totals
+Change the payout flow so the Deposit is built only after all linked Purchases/SalesReceipts have passed exact-total validation.
 
-### Action required after deploy
+Add a final guard comparing:
+- payout net from source
+- verified linked sales totals
+- verified linked expense totals
+- final deposit total
 
-1. Delete QBO Deposit **2028** (Ref £222.07) manually in QuickBooks Online.
-2. Clear the `qbo_deposit_id` field for payout `060ee447-02f7-4527-84a4-95aedecd0daa`.
-3. Re-run the sync — the new Deposit should be exactly £222.06.
+If those do not reconcile exactly, fail before posting.
 
-### Files
-- `supabase/functions/qbo-sync-payout/index.ts` — remove one line (874).
+### 5. Apply the same safeguard pattern across all outbound QBO writers
+Refactor the shared exact-total logic into reused helpers and apply it to:
 
-No DB migrations needed.
+- `supabase/functions/qbo-sync-payout/index.ts`
+- `supabase/functions/qbo-sync-sales-receipt/index.ts`
+- `supabase/functions/qbo-retry-sync/index.ts`
+- `supabase/functions/ebay-process-order/index.ts`
+- `supabase/functions/qbo-sync-refund-receipt/index.ts`
 
+This gives one consistent rule: **no outbound QBO document is accepted unless line totals, tax totals, and document totals reconcile exactly**.
+
+## Existing data repair
+
+After the code fix is deployed, the bad records need to be recreated from corrected logic:
+
+1. Delete the incorrect QBO Deposit for this payout.
+2. Delete the payout-created QBO Purchase(s) created with the old rounding logic — safest is all Purchases for this payout, not just the known £9.92 one.
+3. Clear:
+   - `payouts.qbo_deposit_id`
+   - related `ebay_payout_transactions.qbo_purchase_id`
+4. Re-run payout sync.
+
+If only the Deposit is deleted and recreated, it will still link to the old mis-rounded Purchase and the penny issue can persist.
+
+## Technical details
+
+- Confirmed mismatch:
+  - source fee total: **£9.93**
+  - landed QBO Purchase total: **£9.92**
+- Current broken path:
+  - `createQBOPurchase()` in `supabase/functions/qbo-sync-payout/index.ts`
+- No database migration is needed.
+- This is an edge-function refactor plus stricter reconciliation/validation.
+</final-text>
