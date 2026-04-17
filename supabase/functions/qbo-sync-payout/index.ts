@@ -721,14 +721,22 @@ Deno.serve(async (req) => {
         expenseDocNumber = tx.ebay_item_id;
       }
 
+      // Settled NON_SALE_CHARGEs (matched by a TRANSFER) were paid out-of-band by eBay
+      // from separate funds — UF was never debited. Book the Purchase directly against
+      // the bank account so the P&L hits but UF stays untouched.
+      const isSettled = settledTxIds.has(tx.id);
+      const purchaseBankRef = isSettled
+        ? buildAccountRef(payoutBankRef)
+        : buildAccountRef(undepositedFundsAccount);
+
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
-        bankAccountRef: buildAccountRef(undepositedFundsAccount),
+        bankAccountRef: purchaseBankRef,
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
         privateNote: txType === "NON_SALE_CHARGE" && tx.ebay_item_id
           ? `${channel} payout ${externalPayoutId} — ${txType} item ${tx.ebay_item_id} — ${tx.transaction_id}`
-          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}${isSettled ? " (settled via TRANSFER)" : ""}`,
         docNumber: expenseDocNumber,
       });
 
