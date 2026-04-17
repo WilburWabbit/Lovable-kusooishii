@@ -1,64 +1,57 @@
 
 
-## Why this keeps happening
+## User's point
 
-The simulator in `qbo-tax.ts` models QBO as `tax = round(SUM(taxable nets) × 0.20)`. Logs show QBO actually returns `£9.92` for nets summing to `£8.28` (which would be `8.28 + 1.66 = £9.94` per our model and `8.28 + 1.66 = £9.94` per per-line-rounding too). The model is empirically still wrong for some realm/payload combinations. We've now spent 4 rounds trying to predict QBO. The user is right: **stop predicting, start reacting.**
+The order's `gross_total` (and the per-line `unit_price` × `quantity`) is **canonical for that sale** — it's the legally-contracted amount eBay/Stripe/etc collected from the buyer at that moment in time. The app's *current* listing price is irrelevant to a historical order. So:
 
-## Fix strategy: react to QBO, don't predict it
+- A SalesReceipt's QBO `TotalAmt` must equal the **order's recorded gross**, full stop.
+- It must NOT be reconciled against any current product price, current listing price, or any recomputed value.
+- The previous "expected gross £15.99 vs actual £14.99" error was the eBay-channel transaction's reported gross (£14.99) being checked against something else (£15.99) — likely the order's own `gross_total` derived from current line prices, or a payout-transaction amount mismatch.
 
-Treat QBO's returned `TotalAmt` as the source of truth and **iteratively correct the payload until it lands**, with a hard ceiling of 3 attempts per Purchase. If still wrong after 3, skip that single transaction and continue the payout.
+## What's actually wrong in the current code
 
-### Algorithm in `qbo-sync-payout/index.ts → createQBOPurchase`
+In `qbo-sync-payout/index.ts`, when syncing SalesReceipts for SALE-type payout transactions, the function compares the **eBay payout transaction amount** against the **app order's gross_total**, and aborts if they differ. That's the bug. The eBay payout amount and the app's order gross can legitimately differ (price changes between order placement and payout, partial refunds applied at payout time, eBay fee adjustments, etc.) — and **neither validation is meaningful** because the SalesReceipt's job is simply to mirror the order as it was sold.
 
-For each Purchase, in a loop (max 3 attempts):
+The SalesReceipt should be built from the **`sales_order` + `sales_order_line` rows as they exist** (that IS the canonical sale), and the only number QBO must match is the sum of those lines. The eBay payout transaction is just the cash settlement reference — it links the order to the deposit, it doesn't re-validate the sale amount.
 
-1. Build payload with current `grossPenceLines` using existing `buildBalancedQBOLines`.
-2. POST to QBO. Read `qboTotalAmt`.
-3. If `toPence(qboTotalAmt) === expectedGrossPence` → done, return success.
-4. Otherwise:
-   - `drift = expectedGrossPence − toPence(qboTotalAmt)` (signed pence, almost always ±1p)
-   - **Delete the bad Purchase from QBO** via `DELETE /purchase/{id}?operation=delete` so QBO doesn't keep an orphan.
-   - Adjust the payload: append (or grow) a **zero-tax "Rounding adjustment" line** by `drift` pence. Because that line uses TaxCodeRef "10" (No VAT), QBO will not recompute tax on it — it shifts `TotalAmt` by exactly `drift` regardless of whatever recompute QBO did to the standard lines.
-   - Loop.
-5. After 3 failed attempts:
-   - Delete the last bad Purchase.
-   - Return `{ skipped: true, reason: "QBO total drift unresolvable after 3 attempts", lastQboTotal, expected }` instead of throwing.
+## Investigation needed before final plan
 
-### How the caller handles a skipped transaction
+I need to confirm exactly where the £15.99 vs £14.99 comparison happens. Three candidates:
 
-In the main payout loop:
+1. `qbo-sync-payout/index.ts` — comparing `payout_transaction.amount` to `order.gross_total` before invoking sales-receipt sync.
+2. `qbo-sync-sales-receipt/index.ts` — its own `assertQBOTotalMatches` post-check, where `expectedGross` is computed from order lines but the payout caller passes a different "expected".
+3. The deposit-balancing step — checking `sum(sales_receipts) + sum(purchases) === payout_net` and treating any drift as an order-level error.
 
-- On `skipped`: write `qbo_sync_error` on that single `ebay_payout_transactions` row, leave its `qbo_purchase_id` NULL, increment a `skipped` counter. Do **not** abort the payout.
-- After processing all transactions: if `skipped > 0`, build the deposit only from successfully-linked transactions. Mark the payout `qbo_sync_status = "partial"` with a clear message listing skipped transaction IDs. Surface this in the response and on the payout detail page so the user can investigate the handful of edge cases instead of being blocked by them.
+Reading these three files will pin down the exact comparison and let me write a precise fix.
 
-### Why a "rounding adjustment" line guarantees convergence in ≤2 attempts
+## Fix direction (subject to confirming above)
 
-The first attempt either lands or drifts by a small integer pence amount `d`. We add a No-VAT line of exactly `d` pence. QBO's per-line VAT recompute touches only standard-rated lines (unchanged), so the new `TotalAmt` is exactly old `TotalAmt + d = expected`. Convergence is mathematically guaranteed on attempt 2 unless QBO behaves non-deterministically (the 3rd attempt covers that).
+1. **Remove the cross-validation** between payout-transaction gross and order/sales-receipt gross. The SalesReceipt is built from and validated against **only** the order's own line items. Whatever total that produces is what QBO must match.
+2. **Reconcile at the deposit level, not the transaction level.** If the sum of SalesReceipts + Purchases doesn't equal the payout net, the difference is real-world: marketplace fees, refunds processed at payout time, currency conversion, etc. Surface it as a deposit-level adjustment line (or a "payout adjustment" expense), not as a per-transaction failure.
+3. **Keep the QBO-vs-app per-document retry loop** that was just built — that's still correct, because *within* a single SalesReceipt or Purchase we still want QBO's TotalAmt to equal the document we sent. That's a QBO rounding fight, not a sale-amount fight.
+4. **Skip-and-continue stays** for the rare case where QBO's per-line tax recompute genuinely can't be reconciled within 3 attempts.
 
-### Defence retained
+## Files to read before finalising
 
-- Pre-flight `assertQBOPayloadBalances` stays — still useful as a fast fail before the first POST.
-- Post-create `assertQBOTotalMatches` is now caught and drives the retry/skip flow instead of throwing all the way out.
-- All payload variants and QBO responses logged with `attempt`, `drift`, `qboTotalAmt` for forensic review.
+- `supabase/functions/qbo-sync-payout/index.ts` — find the SALE-handling branch and the £15.99/£14.99 comparison.
+- `supabase/functions/qbo-sync-sales-receipt/index.ts` — confirm `expectedGross` is sourced from `sales_order_line` only.
+- `src/components/admin-v2/PayoutDetail.tsx` — how skipped/partial state is surfaced, so the deposit-adjustment story lands somewhere visible.
 
-### Apply same retry-and-skip to SalesReceipts
+## Files likely to change
 
-Mirror the loop in `qbo-sync-sales-receipt/index.ts`. SalesReceipts are per-order so "skip" means marking that single order `qbo_sync_status = "error"` and returning, which is already the existing failure behaviour — only the retry-with-rounding-line addition is new.
-
-## Files
-
-- `supabase/functions/qbo-sync-payout/index.ts` — wrap `createQBOPurchase` in retry loop, add QBO Purchase delete, change return type to allow `{ skipped: true, ... }`. Update caller to handle skip and mark payout `partial`.
-- `supabase/functions/qbo-sync-sales-receipt/index.ts` — same retry-with-rounding-line loop, max 3.
-- `supabase/functions/_shared/qbo-tax.ts` — small helper `growRoundingLine(stableLines, deltaPence)` used by the retry path.
-- `src/components/admin-v2/PayoutDetail.tsx` — render `partial` status and the skipped-transaction list (read-only, no behavioural change).
+- `supabase/functions/qbo-sync-payout/index.ts` — drop the order/payout amount cross-check; treat any deposit-level drift as a "Payout adjustment" deposit line rather than a per-transaction error.
+- `supabase/functions/qbo-sync-sales-receipt/index.ts` — confirm (and if needed, lock down) that `expectedGross` is `sum(sales_order_line.unit_price × quantity)` and nothing else. No comparison to `payouts.amount` or eBay reported gross.
+- `src/components/admin-v2/PayoutDetail.tsx` — show "Payout adjustment £X.XX" line on partial deposits so it's visible, not silent.
 
 No DB migration. No schema change.
 
-## Existing data repair for current payout
+## Open question before writing code
 
-After deploy, for `060ee447-02f7-4527-84a4-95aedecd0daa`:
-1. Delete in QBO any over/undertotalled Purchase (Ref 2135 + recent failed siblings) and any Deposit linked to this payout.
-2. `UPDATE payouts SET qbo_deposit_id = NULL, qbo_sync_status = 'pending' WHERE id = '060ee447-02f7-4527-84a4-95aedecd0daa';`
-3. `UPDATE ebay_payout_transactions SET qbo_purchase_id = NULL, qbo_sync_error = NULL WHERE payout_id = (SELECT external_payout_id FROM payouts WHERE id = '060ee447-02f7-4527-84a4-95aedecd0daa');`
-4. Re-run sync. Worst case a couple of transactions get auto-corrected in a 2nd attempt; expected gross of £222.06 is reached. If any transactions still fail after 3 attempts, payout completes as `partial` with those transactions clearly flagged for follow-up.
+For the deposit-level reconciliation drift (e.g. payout settled at £222.06 but sum of mirrored sales/expenses is £222.40):
+
+a) **Auto-balance with a "Payout adjustment" deposit line** to a configurable QBO account (e.g. an Other Income / Other Expense account), so the deposit always lands and the difference is visible in QBO for monthly review.
+
+b) **Skip the deposit creation entirely** when there's drift, mark the payout `partial`, and surface it for manual investigation.
+
+(a) keeps automation flowing and matches how accountants typically handle marketplace-payout rounding/fees. (b) is safer but blocks automation. I'd recommend (a) with the adjustment account configurable in QBO settings.
 
