@@ -588,7 +588,7 @@ Deno.serve(async (req) => {
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null }>();
+    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null; txId: string; transactionId: string }>();
     var orderNumberByTxId = new Map<string, string>();
     var customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
