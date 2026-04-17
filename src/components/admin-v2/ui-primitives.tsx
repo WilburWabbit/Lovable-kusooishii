@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import { cn } from "@/lib/utils";
 import type { StockUnitStatus, OrderStatus, ConditionGrade } from "@/lib/types/admin";
 import { UNIT_STATUSES, ORDER_STATUSES, GRADE_COLORS } from "@/lib/constants/unit-statuses";
@@ -19,13 +20,19 @@ const colorMap: Record<string, string> = {
   red: "text-red-500",
 };
 
-export function Mono({ children, className, color = "default" }: MonoProps) {
-  return (
-    <span className={cn("font-mono text-xs tracking-wide", colorMap[color], className)}>
-      {children}
-    </span>
-  );
-}
+export const Mono = forwardRef<HTMLSpanElement, MonoProps>(
+  ({ children, className, color = "default" }, ref) => {
+    return (
+      <span
+        ref={ref}
+        className={cn("font-mono text-xs tracking-wide", colorMap[color], className)}
+      >
+        {children}
+      </span>
+    );
+  }
+);
+Mono.displayName = "Mono";
 
 // ─── Badge ──────────────────────────────────────────────────
 
