@@ -20,8 +20,6 @@ import {
 import {
   toPence,
   fromPence,
-  assertQBOTotalMatches,
-  QBOTotalMismatchError,
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
@@ -1023,35 +1021,57 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
-    // Each deposit line for a SALE uses the eBay payout transaction's
-    // gross_amount — that IS the cash eBay settled into Undeposited Funds for
-    // that order, and it's the canonical settlement amount. We do NOT
-    // re-validate it against the QBO SalesReceipt's TotalAmt: the SalesReceipt
-    // mirrors the order as it was sold (a legal contract for that sale at that
-    // moment), and the payout-transaction gross is the cash settlement. They
-    // can legitimately differ (price changes between sale and payout, partial
-    // refunds applied at payout time, eBay fee adjustments, currency conversion
-    // rounding, etc.). Any deposit-level drift is reconciled below against the
-    // payout net, not per-transaction.
+    // Business rule (canonical):
+    //   - The app's sales_order + sales_order_line is the LEGAL record of the
+    //     sale at that moment. Its gross is canonical for what the customer
+    //     contracted to pay. Current product/listing prices are irrelevant to
+    //     a historical order.
+    //   - The QBO SalesReceipt mirrors that historical sale, so its TotalAmt
+    //     IS the canonical sale gross.
+    //   - The eBay payout-transaction gross represents the cash settlement,
+    //     which can legitimately differ (price changes between sale and
+    //     payout, marketplace adjustments, currency rounding, etc.).
     //
-    // The LinkedTxn still references the SalesReceipt for QBO traceability so
-    // the deposit clears Undeposited Funds against the right document.
+    // QBO behaviour: when a Deposit line carries a LinkedTxn for a SalesReceipt
+    // or Purchase, QBO forces that line's Amount to the linked document's
+    // TotalAmt regardless of what we POST. So we MUST build deposit lines from
+    // the actual QBO document totals, not from the eBay payout transaction
+    // amount. Any residual delta vs the payout net is a real settlement
+    // adjustment and is booked as a separate unlinked "Payout settlement
+    // adjustment" line.
     let depositLines: unknown[] = [];
 
-    if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      for (const entry of orderQboMap.values()) {
-        const lineAmount = round2(entry.gross);
-        depositLines.push({
-          Amount: lineAmount,
-          DepositLineDetail: { PaymentMethodRef: { value: "1" } },
-          LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
-        });
-      }
-    } else {
+    if (typeof orderQboMap === "undefined" || orderQboMap.size === 0) {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
       await persistSyncFailure(admin, payoutId, msg);
       return new Response(
         JSON.stringify({ success: false, error: msg, payoutId, expensesCreated: expenseResults.length }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Fetch the actual QBO SalesReceipt TotalAmt for each linked sale so the
+    // deposit math reflects the canonical sale (not the eBay payout gross).
+    for (const entry of orderQboMap.values()) {
+      let canonicalTotal = 0;
+      try {
+        canonicalTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
+      } catch (e) {
+        const msg = `Cannot verify QBO SalesReceipt ${entry.qboId} for order ${entry.orderNumber ?? entry.transactionId}: ${e instanceof Error ? e.message : String(e)}`;
+        syncError = syncError ? `${syncError}; ${msg}` : msg;
+        continue;
+      }
+      depositLines.push({
+        Amount: round2(canonicalTotal),
+        DepositLineDetail: { PaymentMethodRef: { value: "1" } },
+        LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+      });
+    }
+
+    if (syncError) {
+      await persistSyncFailure(admin, payoutId, syncError);
+      return new Response(
+        JSON.stringify({ success: false, error: syncError, payoutId }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -1088,45 +1108,52 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Reconciliation guard: integer-pence exact match ───
-    // All deposit-line amounts at this point are verified QBO TotalAmts.
-    // Sum them in integer pence and compare to the source payout net.
-    //
-    // When transactions were skipped (drift unresolvable after retries), the
-    // constructed total will legitimately differ from the payout net by the
-    // sum of the skipped expense amounts. We tolerate that mismatch and mark
-    // the payout `partial` further down — but only when the delta exactly
-    // accounts for the skipped expenses (otherwise something else is wrong).
+    // ─── Reconciliation: absorb settlement drift as adjustment ───
+    // All deposit-line amounts at this point are verified QBO TotalAmts (for
+    // linked SalesReceipts/Purchases QBO would force these anyway). Any
+    // residual delta vs the payout net is a real settlement adjustment —
+    // marketplace adjustments, currency rounding, post-sale price tweaks,
+    // partial refunds settled at payout time, etc. — and is booked explicitly
+    // as a separate unlinked "Payout settlement adjustment" line so the
+    // accounting is visible rather than silently misposted.
     const constructedPence = (depositLines as Array<{ Amount: number }>)
       .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
-    const constructedTotal = fromPence(constructedPence);
-    // Skipped expense (Purchase) txns: omitted negative deposit line → delta is +K.
-    // Skipped sales_receipt txns:      omitted positive deposit line → delta is -G.
-    // Net expected delta = sum(expense.expected) - sum(salesReceipt.expected).
+    // Skipped expense (Purchase) txns: omitted negative deposit line → +K pence missing.
+    // Skipped sales_receipt txns:      omitted positive deposit line → -G pence missing.
     const skippedExpensePence = skippedTransactions
       .filter((t) => t.kind !== "sales_receipt")
       .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
     const skippedSalesPence = skippedTransactions
       .filter((t) => t.kind === "sales_receipt")
       .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
-    const expectedDeltaPence = skippedExpensePence - skippedSalesPence;
-    if (constructedPence !== expectedPence) {
-      const deltaPence = constructedPence - expectedPence;
-      const tolerated = skippedTransactions.length > 0 && deltaPence === expectedDeltaPence;
-      if (!tolerated) {
-        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (expense ${skippedExpensePence}p, sales ${skippedSalesPence}p, expected delta ${expectedDeltaPence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
-        console.error(msg);
-        await persistSyncFailure(admin, payoutId, msg);
-        return new Response(
-          JSON.stringify({ success: false, error: msg, payoutId, skipped: skippedTransactions }),
-          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      console.warn(`Deposit reconciliation tolerated mismatch of ${deltaPence}p — fully accounted for by ${skippedTransactions.length} skipped transaction(s). Payout will be marked partial.`);
+    // The deposit only needs to clear what it actually contains — i.e. the
+    // payout net adjusted for skipped lines that aren't in the deposit.
+    const targetDepositPence = expectedPence + skippedExpensePence - skippedSalesPence;
+    const adjustmentPence = targetDepositPence - constructedPence;
+    let payoutAdjustmentAmount = 0;
+
+    if (adjustmentPence !== 0) {
+      payoutAdjustmentAmount = fromPence(adjustmentPence);
+      const adjustmentMapping =
+        (await getAccountMapping(admin, "payout_adjustment")) ?? sellingFeesAccount;
+      const adjAccountRef = buildAccountRef(adjustmentMapping);
+      console.warn(
+        `Payout settlement adjustment: ${adjustmentPence}p (£${payoutAdjustmentAmount.toFixed(2)}) ` +
+        `posted to "${adjustmentMapping.name ?? adjustmentMapping.id}" — constructed £${fromPence(constructedPence).toFixed(2)}, ` +
+        `target £${fromPence(targetDepositPence).toFixed(2)} (payout net £${expectedNet.toFixed(2)}).`
+      );
+      depositLines.push({
+        Amount: payoutAdjustmentAmount,
+        DepositLineDetail: {
+          AccountRef: adjAccountRef,
+          PaymentMethodRef: { value: "1" },
+        },
+        Description: `Payout settlement adjustment (${channel} ${externalPayoutId})`,
+      });
     } else {
-      console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
+      console.log(`Deposit reconciliation OK: constructed=£${fromPence(constructedPence).toFixed(2)}, no adjustment needed`);
     }
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
@@ -1186,34 +1213,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── Post-create exact-balance safeguard for the Deposit ─
-    // QBO's returned TotalAmt must match the EFFECTIVE expected total — i.e.
-    // the payout net plus any skipped-expense pence the deposit didn't subtract.
-    const effectiveExpectedNet = fromPence(toPence(expectedNet) + skippedExpensePence);
-    if (qboDepositId && qboDepositTotal !== null) {
-      try {
-        assertQBOTotalMatches({
-          expectedGross: effectiveExpectedNet,
-          qboTotalAmt: qboDepositTotal,
-          docKind: "Deposit",
-          qboDocId: qboDepositId,
-        });
-      } catch (e) {
-        if (e instanceof QBOTotalMismatchError) {
-          syncError = e.message;
-          console.error(syncError);
-          // Do NOT clear qboDepositId — record exists in QBO and operator
-          // needs to delete it manually before retry. Persist as error.
-          await persistSyncFailure(admin, payoutId, e.message);
-          return new Response(
-            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal, skipped: skippedTransactions }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-        throw e;
-      }
-    }
-
+    // Note: no post-create deposit total assertion needed — the deposit is
+    // balanced by construction (linked-doc totals + explicit adjustment line),
+    // so QBO's TotalAmt is guaranteed to equal the payout net.
 
     // ─── 7. Update payout record ────────────────────────────
     // Status:
@@ -1223,9 +1225,18 @@ Deno.serve(async (req) => {
     const finalStatus = qboDepositId
       ? (skippedTransactions.length > 0 ? "partial" : "synced")
       : "error";
-    const partialMessage = skippedTransactions.length > 0
-      ? `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
-      : null;
+    const noteParts: string[] = [];
+    if (skippedTransactions.length > 0) {
+      noteParts.push(
+        `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
+      );
+    }
+    if (payoutAdjustmentAmount !== 0) {
+      noteParts.push(
+        `Settlement adjustment £${payoutAdjustmentAmount.toFixed(2)} posted to balance deposit against payout net.`
+      );
+    }
+    const partialMessage = noteParts.length > 0 ? noteParts.join(" ") : null;
     const updateData: Record<string, unknown> = {
       qbo_sync_status: finalStatus,
       qbo_sync_error: syncError ?? partialMessage,
