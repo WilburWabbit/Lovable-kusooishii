@@ -797,7 +797,7 @@ Deno.serve(async (req) => {
     // These do NOT abort the payout — the deposit is constructed from successfully
     // synced expenses and the payout is marked `partial` so the operator can follow up
     // on just the handful of edge cases.
-    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number }[] = [];
+    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number; kind?: "expense" | "sales_receipt" }[] = [];
 
 
     for (const tx of expenseTxs) {
