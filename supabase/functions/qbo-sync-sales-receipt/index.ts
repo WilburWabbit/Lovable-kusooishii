@@ -106,11 +106,24 @@ Deno.serve(async (req) => {
     // to integer pence and let the distributor pre-solve for QBO's per-line
     // VAT recompute. Any unavoidable ±1p residual is absorbed by an injected
     // "Rounding adjustment" zero-tax line.
-    const sourceLines = (lineItems ?? []).map((li: Record<string, unknown>) => ({
-      gross: ((li.unit_price as number) ?? 0) * ((li.quantity as number) ?? 1),
-      qty: (li.quantity as number) ?? 1,
-      sku: li.sku as Record<string, unknown> | null,
-    }));
+    // sales_order_line.unit_price and line_total are stored EX-VAT (NET) by all
+    // ingestion paths (ebay-process-order, stripe-webhook, qbo-process-pending).
+    // Convert NET → GROSS pence here so the per-line balancer + QBO ex-VAT
+    // posting (UnitPrice = net, TaxCodeRef = 20%) lands on the correct
+    // customer-facing gross total.
+    const sourceLines = (lineItems ?? []).map((li: Record<string, unknown>) => {
+      const qty = (li.quantity as number) ?? 1;
+      const netLineTotal =
+        typeof li.line_total === "number"
+          ? (li.line_total as number)
+          : ((li.unit_price as number) ?? 0) * qty;
+      const grossPence = Math.round(netLineTotal * 1.2 * 100);
+      return {
+        gross: grossPence / 100,
+        qty,
+        sku: li.sku as Record<string, unknown> | null,
+      };
+    });
     const grossPenceLines = sourceLines.map((l) => toPence(l.gross));
     const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
     const expectedGross = fromPence(totalGrossPence);
