@@ -393,12 +393,14 @@ async function repairSalesOrderToCanonicalGross(
 
   // Persist line updates and audit log entries
   for (const a of adjusted) {
-    if (toPence(a.oldUnitPrice) === toPence(a.newUnitPrice)) continue;
+    // Compare at 4dp resolution since unit_price is now stored at 4dp
+    if (Math.round(a.oldUnitPrice * 10000) === Math.round(a.newUnitPrice * 10000)) continue;
     const { error: updErr } = await admin
       .from("sales_order_line" as never)
       .update({
         unit_price: a.newUnitPrice,
-        line_total: round2(a.newUnitPrice * a.quantity),
+        // line_total kept at 4dp; QBO sync rounds to 2dp per line at payload build.
+        line_total: Math.round(a.newUnitPrice * a.quantity * 10000) / 10000,
       } as never)
       .eq("id" as never, a.id);
     if (updErr) {
