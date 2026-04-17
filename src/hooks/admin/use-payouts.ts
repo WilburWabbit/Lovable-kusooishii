@@ -370,8 +370,11 @@ export function useTriggerPayoutQBOSync() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, payoutId) => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout', payoutId] as const });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout-qbo-readiness'] });
     },
   });
 }
@@ -925,6 +928,7 @@ export function useResetPayoutSync() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout-qbo-readiness'] });
     },
   });
 }

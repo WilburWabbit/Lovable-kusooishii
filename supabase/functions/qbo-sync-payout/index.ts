@@ -896,12 +896,87 @@ Deno.serve(async (req) => {
       }
 
       if (unsyncedRefs.length > 0) {
-        const message = `Cannot create deposit: ${unsyncedRefs.length} linked order(s) not yet synced to QBO: ${unsyncedRefs.join(", ")}`;
-        await persistSyncFailure(admin, payoutId, message);
-        return new Response(
-          JSON.stringify({ success: false, error: message, payoutId, unsyncedOrders: unsyncedRefs }),
-          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+        for (const tx of saleTxs) {
+          let so: Record<string, unknown> | undefined;
+          if (tx.matched_order_id) {
+            so = soById.get(tx.matched_order_id);
+          } else if (tx.order_id) {
+            so = soByRef.get(tx.order_id);
+          }
+
+          if (!so || so.qbo_sales_receipt_id) continue;
+
+          const recreateRes = await fetchWithTimeout(
+            `${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${serviceKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ orderId: so.id }),
+            },
+          );
+          const recreateBody = await recreateRes.json().catch(() => ({}));
+          if (!recreateRes.ok || (recreateBody && recreateBody.success === false)) {
+            const message = `Cannot create deposit: failed to sync linked order ${(so.origin_reference as string) ?? (so.id as string)}: ${JSON.stringify(recreateBody).substring(0, 300)}`;
+            await persistSyncFailure(admin, payoutId, message);
+            return new Response(
+              JSON.stringify({ success: false, error: message, payoutId }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+
+          const { data: refreshedSo, error: refreshedErr } = await admin
+            .from("sales_order" as never)
+            .select("id, origin_reference, order_number, customer_id, qbo_sales_receipt_id, qbo_sync_status")
+            .eq("id" as never, so.id as string)
+            .single();
+
+          if (refreshedErr || !refreshedSo || !(refreshedSo as Record<string, unknown>).qbo_sales_receipt_id) {
+            const message = `Cannot create deposit: linked order ${(so.origin_reference as string) ?? (so.id as string)} did not relink a SalesReceipt after sync`;
+            await persistSyncFailure(admin, payoutId, message);
+            return new Response(
+              JSON.stringify({ success: false, error: message, payoutId }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+
+          const refreshed = refreshedSo as Record<string, unknown>;
+          so.qbo_sales_receipt_id = refreshed.qbo_sales_receipt_id;
+          so.qbo_sync_status = refreshed.qbo_sync_status;
+        }
+      }
+
+      for (const tx of saleTxs) {
+        let so: Record<string, unknown> | undefined;
+        if (tx.matched_order_id) {
+          so = soById.get(tx.matched_order_id);
+        } else if (tx.order_id) {
+          so = soByRef.get(tx.order_id);
+        }
+
+        if (!so || !so.qbo_sales_receipt_id || so.qbo_sales_receipt_id === "") continue;
+
+        const orderNum = (so.order_number as string) ?? null;
+        orderQboMap.set(so.id as string, {
+          qboId: so.qbo_sales_receipt_id as string,
+          channelGross: tx.gross_amount,
+          orderNumber: orderNum,
+          txId: tx.id,
+          transactionId: tx.transaction_id,
+          salesOrderId: so.id as string,
+        });
+        if (orderNum) {
+          orderNumberByTxId.set(tx.id, orderNum);
+        }
+        const customerId = so.customer_id as string | null;
+        if (customerId) {
+          customerRefByTxId.set(tx.id, { value: customerId });
+        }
       }
     }
 
