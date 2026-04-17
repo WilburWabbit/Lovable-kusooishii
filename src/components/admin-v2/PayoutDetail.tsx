@@ -130,8 +130,24 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
           />
           {payout.qboSyncStatus && (
             <Badge
-              label={payout.qboSyncStatus === "synced" ? "QBO Synced" : payout.qboSyncStatus === "error" ? "QBO Error" : "QBO Pending"}
-              color={payout.qboSyncStatus === "synced" ? "#22C55E" : payout.qboSyncStatus === "error" ? "#EF4444" : "#F59E0B"}
+              label={
+                payout.qboSyncStatus === "synced"
+                  ? "QBO Synced"
+                  : payout.qboSyncStatus === "error"
+                    ? "QBO Error"
+                    : payout.qboSyncStatus === "partial"
+                      ? "QBO Partial"
+                      : "QBO Pending"
+              }
+              color={
+                payout.qboSyncStatus === "synced"
+                  ? "#22C55E"
+                  : payout.qboSyncStatus === "error"
+                    ? "#EF4444"
+                    : payout.qboSyncStatus === "partial"
+                      ? "#F97316"
+                      : "#F59E0B"
+              }
               small
             />
           )}
@@ -247,7 +263,15 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                     <Mono color="dim" className="text-xs">#{payout.qboDepositId}</Mono>
                     <Badge
                       label={payout.qboSyncStatus === "synced" ? "Synced" : payout.qboSyncStatus ?? "—"}
-                      color={payout.qboSyncStatus === "synced" ? "#22C55E" : "#F59E0B"}
+                      color={
+                        payout.qboSyncStatus === "synced"
+                          ? "#22C55E"
+                          : payout.qboSyncStatus === "partial"
+                            ? "#F97316"
+                            : payout.qboSyncStatus === "error"
+                              ? "#EF4444"
+                              : "#F59E0B"
+                      }
                       small
                     />
                   </div>
