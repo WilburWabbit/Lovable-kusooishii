@@ -997,28 +997,42 @@ Deno.serve(async (req) => {
 
       // Skip if already has a QBO Purchase — but verify its actual QBO TotalAmt
       // so the deposit links to the real landed value, not a locally-computed one.
+      // If the cached total doesn't match the canonical source amount, auto-rebuild:
+      // delete the stale Purchase, clear the link, and fall through to recreate it
+      // via the existing createQBOPurchase path (which handles VAT-recompute drift).
       if (tx.qbo_purchase_id) {
         if (tx.qbo_purchase_id === "N/A") continue;
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
           : buildAccountRef(sellingFeesAccount);
         let cachedTotal = 0;
+        let cacheReadOk = true;
         try {
           cachedTotal = await fetchQBODocTotal(baseUrl, accessToken, "Purchase", tx.qbo_purchase_id);
         } catch (e) {
-          const msg = `Cannot verify cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id}: ${e instanceof Error ? e.message : String(e)}`;
-          syncError = syncError ? `${syncError}; ${msg}` : msg;
-          continue;
+          console.warn(`Cannot read cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id}: ${e instanceof Error ? e.message : String(e)}. Will attempt rebuild.`);
+          cacheReadOk = false;
         }
         const expectedAmount = txType === "SALE" ? round2(tx.total_fees) : round2(Math.abs(tx.gross_amount));
-        // Exact-balance safeguard for cached Purchase: must match source to the penny.
-        if (toPence(cachedTotal) !== toPence(expectedAmount)) {
-          const msg = `Cached QBO Purchase ${tx.qbo_purchase_id} for tx ${tx.transaction_id} has TotalAmt £${cachedTotal.toFixed(2)} but source expects £${expectedAmount.toFixed(2)}. Delete the QBO Purchase and re-run sync.`;
-          syncError = syncError ? `${syncError}; ${msg}` : msg;
+
+        if (cacheReadOk && toPence(cachedTotal) === toPence(expectedAmount)) {
+          // Cached Purchase matches canonical — reuse it.
+          expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: expectedAmount, qboTotalAmt: cachedTotal, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
           continue;
         }
-        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: expectedAmount, qboTotalAmt: cachedTotal, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
-        continue;
+
+        // Drift (or unreadable) — delete the stale Purchase, clear the link, and
+        // fall through to the recreate path below. The existing createQBOPurchase
+        // helper has its own 3-attempt VAT-recompute convergence loop.
+        console.warn(
+          `Canonical drift on Purchase for tx ${tx.transaction_id}: cached TotalAmt £${cachedTotal.toFixed(2)} ≠ expected £${expectedAmount.toFixed(2)}. Auto-rebuilding…`,
+        );
+        await deleteQBOPurchase(baseUrl, accessToken, tx.qbo_purchase_id);
+        await admin
+          .from("ebay_payout_transactions" as never)
+          .update({ qbo_purchase_id: null } as never)
+          .eq("id" as never, tx.id);
+        // Fall through to expense-line build + createQBOPurchase below.
       }
 
       // Determine expense lines based on transaction type
