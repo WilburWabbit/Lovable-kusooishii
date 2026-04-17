@@ -48,6 +48,14 @@ export async function authenticateRequest(
     throw new Error("Unauthorized — missing Bearer token");
   }
   const token = authHeader.replace("Bearer ", "");
+
+  // Allow internal service-to-service calls (e.g. qbo-sync-payout invoking
+  // qbo-sync-sales-receipt) to authenticate using the service role key.
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (serviceRoleKey && token === serviceRoleKey) {
+    return { userId: "service-role", email: undefined };
+  }
+
   const { data: { user }, error } = await admin.auth.getUser(token);
   if (error || !user) throw new Error("Unauthorized — invalid token");
   return { userId: user.id, email: user.email };
