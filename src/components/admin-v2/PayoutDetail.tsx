@@ -691,7 +691,10 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
         >
           {reconcilePayout.isPending ? "Reconciling…" : "Reconcile Orders"}
         </button>
-        {payout.qboSyncStatus !== "synced" && (
+        {(payout.qboSyncStatus !== "synced" ||
+          !payout.qboDepositId ||
+          (qboReadiness != null &&
+            (qboReadiness.unsyncedOrders.length > 0 || qboReadiness.pendingExpenses.length > 0))) && (
           <button
             onClick={() => {
               triggerQBOSync.mutate(payoutId, {
@@ -741,7 +744,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <button
               onClick={() => {
                 resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "deposit" }, {
-                  onSuccess: () => toast.success("Deposit reset — ready to re-sync"),
+                  onSuccess: (d: any) => toast.success(`Deposit reset (${d.depositReset ?? 0}) + ${d.salesReceiptsReset ?? 0} sales receipts cleared`),
                   onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
                 });
               }}
@@ -753,7 +756,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <button
               onClick={() => {
                 resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "all" }, {
-                  onSuccess: (d: any) => toast.success(`Full reset: ${d.expensesReset ?? 0} expenses, deposit cleared`),
+                  onSuccess: (d: any) => toast.success(`Reset ${d.expensesReset ?? 0} expenses, deposit (${d.depositReset ?? 0}), ${d.salesReceiptsReset ?? 0} sales receipts`),
                   onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
                 });
               }}
