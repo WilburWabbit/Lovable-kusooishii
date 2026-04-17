@@ -20,10 +20,17 @@ import {
 import {
   toPence,
   fromPence,
-  distributeLinesByGrossPence,
   assertQBOTotalMatches,
   QBOTotalMismatchError,
 } from "../_shared/vat.ts";
+import {
+  buildBalancedQBOLines,
+  assertQBOPayloadBalances,
+  QBOPayloadImbalanceError,
+  QBO_TAX_CODE_STANDARD_20,
+  QBO_TAX_CODE_NO_VAT,
+  type QBOStableLine,
+} from "../_shared/qbo-tax.ts";
 
 // ─── Types ───────────────────────────────────────────────────
 
