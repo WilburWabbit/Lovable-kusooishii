@@ -262,37 +262,35 @@ async function createQBOPurchase(
     docNumber?: string;
   },
 ): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
-  // ─── TaxInclusive integer-pence math ──────────────────────
-  // Posting Purchases as TaxInclusive lets us send the *gross* fee amounts
-  // exactly as eBay reported them, with QBO deriving net+tax internally —
-  // no round-each-line floating-point drift. Every line's `Amount` is the
-  // gross (VAT-inclusive) value; `TaxInclusiveAmt` mirrors `Amount`; QBO
-  // computes `TaxAmount` from the linked tax code.
+  // ─── TaxInclusive posting (let QBO derive tax) ─────────────
+  // Under `GlobalTaxCalculation: "TaxInclusive"`, QBO interprets each line's
+  // `Amount` as the GROSS (VAT-inclusive) value and back-derives net + tax
+  // from the linked `TaxCodeRef`. We must NOT also send `TaxAmount` or
+  // `TaxInclusiveAmt` on AccountBasedExpenseLineDetail — sending all three
+  // is contradictory and triggers QBO to treat `Amount` as net and apply
+  // VAT a second time, producing TotalAmt = gross × 1.20.
   //
-  // We still pass an explicit `TaxAmount` per line (using the integer-pence
-  // distributor) so the line-level breakdown sums exactly to the expected
-  // total VAT and total gross — last line absorbs any 1p remainder.
+  // Strategy:
+  //   - Convert source amounts to integer pence (no float drift).
+  //   - Send only `Amount` (gross) + `TaxCodeRef` per line.
+  //   - QBO computes per-line net/tax and document TotalAmt = sum(gross).
+  //   - The post-create `assertQBOTotalMatches` guard verifies penny exactness.
   const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
-  const distributed = distributeLinesByGrossPence(grossPenceLines);
   const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
   const expectedGross = fromPence(totalGrossPence);
 
   const qboLines = opts.lines.map((line, idx) => {
-    const d = distributed[idx];
-    const grossLine = fromPence(d.grossPence);
-    const vatLine = fromPence(d.vatPence);
+    const grossLine = fromPence(grossPenceLines[idx]);
 
     if (line.itemRef) {
-      // Item-linked line — links the expense to a specific QBO Item (e.g. insertion fee
-      // against the SKU that was listed). The expense account is determined by the Item's
-      // own expense account in QBO.
-      // For TaxInclusive posting, UnitPrice is the gross unit price.
+      // Item-linked line — links the expense to a specific QBO Item.
+      // For TaxInclusive posting, UnitPrice is the gross unit price and
+      // QBO derives tax from the item's tax code. Do not send TaxAmount.
       const detail: Record<string, unknown> = {
         ItemRef: line.itemRef,
         Qty: 1,
         UnitPrice: grossLine,
         TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
-        TaxInclusiveAmt: grossLine,
       };
       if (line.customerRef) detail.CustomerRef = line.customerRef;
       return {
@@ -306,8 +304,6 @@ async function createQBOPurchase(
     const detail: Record<string, unknown> = {
       AccountRef: line.accountRef,
       TaxCodeRef: { value: line.taxCodeRef ?? QBO_TAX_CODE_REF },
-      TaxAmount: vatLine,
-      TaxInclusiveAmt: grossLine,
     };
     if (line.customerRef) {
       detail.CustomerRef = line.customerRef;
