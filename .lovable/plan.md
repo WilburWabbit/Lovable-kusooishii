@@ -1,57 +1,128 @@
 
+## Diagnosis
 
-## User's point
+Do I know what the issue is? Yes.
 
-The order's `gross_total` (and the per-line `unit_price` × `quantity`) is **canonical for that sale** — it's the legally-contracted amount eBay/Stripe/etc collected from the buyer at that moment in time. The app's *current* listing price is irrelevant to a historical order. So:
+There are two separate problems, and only one is a code bug:
 
-- A SalesReceipt's QBO `TotalAmt` must equal the **order's recorded gross**, full stop.
-- It must NOT be reconciled against any current product price, current listing price, or any recomputed value.
-- The previous "expected gross £15.99 vs actual £14.99" error was the eBay-channel transaction's reported gross (£14.99) being checked against something else (£15.99) — likely the order's own `gross_total` derived from current line prices, or a payout-transaction amount mismatch.
+1. **The “dist upload failed / R2 temp credentials timeout” is a transient publish/infrastructure timeout**, not a code error. Retrying publish usually clears that.
+2. **The real app bug is in `qbo-sync-payout`**: the code now assumes a Deposit line can link to a QBO `SalesReceipt` or `Purchase` and still force a different `Amount`. In practice, QBO totals the Deposit from the **linked document totals**, not the overridden line amount.
 
-## What's actually wrong in the current code
+That means:
+- your stale `SalesReceipt 1668` is still sitting in QBO at **£14.99**
+- the app expects the canonical sale to be **£15.99**
+- the Deposit therefore lands **£1 short**
+- current code then aborts on the Deposit total mismatch
 
-In `qbo-sync-payout/index.ts`, when syncing SalesReceipts for SALE-type payout transactions, the function compares the **eBay payout transaction amount** against the **app order's gross_total**, and aborts if they differ. That's the bug. The eBay payout amount and the app's order gross can legitimately differ (price changes between order placement and payout, partial refunds applied at payout time, eBay fee adjustments, etc.) — and **neither validation is meaningful** because the SalesReceipt's job is simply to mirror the order as it was sold.
+So the failure is not “simple arithmetic gone wrong” anymore. It is:
+- a **stale bad SalesReceipt**
+- plus a **wrong assumption about how linked Deposit lines behave in QBO**
 
-The SalesReceipt should be built from the **`sales_order` + `sales_order_line` rows as they exist** (that IS the canonical sale), and the only number QBO must match is the sum of those lines. The eBay payout transaction is just the cash settlement reference — it links the order to the deposit, it doesn't re-validate the sale amount.
+## What I will change
 
-## Investigation needed before final plan
+### 1. Fix SALE handling to use the canonical sale record only
+In `supabase/functions/qbo-sync-payout/index.ts`:
 
-I need to confirm exactly where the £15.99 vs £14.99 comparison happens. Three candidates:
+- For every SALE transaction with an existing `qbo_sales_receipt_id`, fetch:
+  - the linked QBO SalesReceipt `TotalAmt`
+  - the canonical sale gross from `sales_order_line.unit_price × quantity`
+- Compare **only those two values**
+- Do **not** compare against:
+  - payout transaction gross
+  - current product price
+  - current listing price
 
-1. `qbo-sync-payout/index.ts` — comparing `payout_transaction.amount` to `order.gross_total` before invoking sales-receipt sync.
-2. `qbo-sync-sales-receipt/index.ts` — its own `assertQBOTotalMatches` post-check, where `expectedGross` is computed from order lines but the payout caller passes a different "expected".
-3. The deposit-balancing step — checking `sum(sales_receipts) + sum(purchases) === payout_net` and treating any drift as an order-level error.
+If the existing QBO SalesReceipt is stale/wrong:
+- auto-delete the bad SalesReceipt in QBO
+- clear the stale local link
+- recreate it from the canonical order lines using `qbo-sync-sales-receipt`
+- reuse the existing 3-attempt rounding-repair loop
 
-Reading these three files will pin down the exact comparison and let me write a precise fix.
+If it still cannot land after retries:
+- skip that SALE transaction
+- mark payout `partial`
+- continue the payout instead of hard-failing everything
 
-## Fix direction (subject to confirming above)
+### 2. Stop assuming linked Deposit lines can “override” document totals
+Still in `qbo-sync-payout/index.ts`:
 
-1. **Remove the cross-validation** between payout-transaction gross and order/sales-receipt gross. The SalesReceipt is built from and validated against **only** the order's own line items. Whatever total that produces is what QBO must match.
-2. **Reconcile at the deposit level, not the transaction level.** If the sum of SalesReceipts + Purchases doesn't equal the payout net, the difference is real-world: marketplace fees, refunds processed at payout time, currency conversion, etc. Surface it as a deposit-level adjustment line (or a "payout adjustment" expense), not as a per-transaction failure.
-3. **Keep the QBO-vs-app per-document retry loop** that was just built — that's still correct, because *within* a single SalesReceipt or Purchase we still want QBO's TotalAmt to equal the document we sent. That's a QBO rounding fight, not a sale-amount fight.
-4. **Skip-and-continue stays** for the rare case where QBO's per-line tax recompute genuinely can't be reconciled within 3 attempts.
+- Build linked Deposit lines using the **actual fetched QBO totals** for linked SalesReceipts and Purchases
+- Treat those lines as **clearing lines only**
+- After summing them, compute the remaining delta to the payout net
+- Add a separate unlinked line:
+  - `Description: "Payout settlement adjustment"`
+  - amount = exact residual delta
+  - account = configurable payout-adjustment mapping if available, otherwise fail safely with a clear message rather than silently misposting
 
-## Files to read before finalising
+This keeps the accounting explicit:
+- linked docs clear the exact QBO documents
+- settlement drift is shown as a separate adjustment
+- the deposit can still land cleanly
 
-- `supabase/functions/qbo-sync-payout/index.ts` — find the SALE-handling branch and the £15.99/£14.99 comparison.
-- `supabase/functions/qbo-sync-sales-receipt/index.ts` — confirm `expectedGross` is sourced from `sales_order_line` only.
-- `src/components/admin-v2/PayoutDetail.tsx` — how skipped/partial state is surfaced, so the deposit-adjustment story lands somewhere visible.
+### 3. Keep the retry-and-skip behavior
+I will retain the existing 3-attempt loop for:
+- Purchases
+- SalesReceipts
 
-## Files likely to change
+If a single doc still refuses to match after 3 attempts:
+- skip only that transaction
+- persist `qbo_sync_error`
+- let the payout finish as `partial`
 
-- `supabase/functions/qbo-sync-payout/index.ts` — drop the order/payout amount cross-check; treat any deposit-level drift as a "Payout adjustment" deposit line rather than a per-transaction error.
-- `supabase/functions/qbo-sync-sales-receipt/index.ts` — confirm (and if needed, lock down) that `expectedGross` is `sum(sales_order_line.unit_price × quantity)` and nothing else. No comparison to `payouts.amount` or eBay reported gross.
-- `src/components/admin-v2/PayoutDetail.tsx` — show "Payout adjustment £X.XX" line on partial deposits so it's visible, not silent.
+### 4. Surface the real reason in the UI
+In `src/components/admin-v2/PayoutDetail.tsx`:
 
-No DB migration. No schema change.
+- show when a payout contains:
+  - skipped transactions
+  - a payout settlement adjustment
+  - stale SalesReceipt/Purchase self-healing attempts
+- make it obvious whether the payout is:
+  - fully synced
+  - partial
+  - blocked by missing adjustment-account mapping
 
-## Open question before writing code
+## Why this matches your business rule
 
-For the deposit-level reconciliation drift (e.g. payout settled at £222.06 but sum of mirrored sales/expenses is £222.40):
+This restores the rule you stated:
 
-a) **Auto-balance with a "Payout adjustment" deposit line** to a configurable QBO account (e.g. an Other Income / Other Expense account), so the deposit always lands and the difference is visible in QBO for monthly review.
+- the **sale record for that moment in time** is canonical
+- the app must mirror **that sale**, not today’s fluctuating price
+- payout settlement is a separate cash event and should be reconciled at the **deposit level**, not used to rewrite or veto the sale
 
-b) **Skip the deposit creation entirely** when there's drift, mark the payout `partial`, and surface it for manual investigation.
+So:
+- SalesReceipt correctness comes from `sales_order` + `sales_order_line`
+- payout cash differences are handled as deposit reconciliation
+- current catalog prices stay irrelevant
 
-(a) keeps automation flowing and matches how accountants typically handle marketplace-payout rounding/fees. (b) is safer but blocks automation. I'd recommend (a) with the adjustment account configurable in QBO settings.
+## Files to update
 
+- `supabase/functions/qbo-sync-payout/index.ts`
+  - detect stale linked SalesReceipts
+  - self-heal bad receipts before deposit
+  - compute deposit from actual linked doc totals
+  - add explicit payout-adjustment line
+- `supabase/functions/qbo-sync-sales-receipt/index.ts`
+  - keep canonical-order-only total logic
+  - expose clearer retry failure info for payout caller
+- `src/components/admin-v2/PayoutDetail.tsx`
+  - show adjustment/skipped/self-healed status clearly
+
+No DB migration required.
+
+## Repair plan for the stuck payout after code changes
+
+For payout `060ee447-02f7-4527-84a4-95aedecd0daa`, after implementation I will clean up the bad accounting state before retrying:
+
+1. delete bad QBO Deposit `2206`
+2. delete bad QBO SalesReceipt `1668`
+3. clear the stale local QBO IDs/status for that payout and affected order
+4. re-run payout sync
+
+Expected result:
+- SalesReceipt is recreated from the canonical sale amount
+- Deposit lands at the payout total
+- if anything still refuses to match after retries, payout completes as `partial` instead of blocking everything
+
+## Note on the publish error
+
+The Cloudflare/R2 timeout is not the bug here. After the code fix, frontend publish may simply need to be retried if that timeout happens again.
