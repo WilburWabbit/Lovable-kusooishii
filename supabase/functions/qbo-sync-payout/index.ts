@@ -797,14 +797,17 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit.
-    // SALE fees, SHIPPING_LABEL, and NON_SALE_CHARGE Purchases are all booked
+    // SALE fees, SHIPPING_LABEL, and unsettled NON_SALE_CHARGE Purchases are booked
     // against Undeposited Funds and must appear here to clear that account.
-    // TRANSFER transactions are excluded — each TRANSFER is eBay collecting a fee
-    // (e.g. subscription) from undeposited funds, which is already represented by
-    // the corresponding NON_SALE_CHARGE Purchase negative line. Including it again
-    // would double-count the amount and fail reconciliation.
+    //
+    // Skipped:
+    //  - TRANSFER transactions (filtered out earlier) — informational only.
+    //  - NON_SALE_CHARGEs flagged settledViaTransfer — these were paid by eBay
+    //    out-of-band (matching TRANSFER) and booked directly to the bank, so they
+    //    never debited Undeposited Funds and must not reduce this deposit.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.settledViaTransfer) continue;
 
       depositLines.push({
         Amount: -exp.amount,
