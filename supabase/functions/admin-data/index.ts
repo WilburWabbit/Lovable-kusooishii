@@ -2535,7 +2535,7 @@ Deno.serve(async (req) => {
           if (orderIds.size > 0) {
             const { data: clearedOrders } = await admin
               .from("sales_order")
-              .update({ qbo_sales_receipt_id: null, qbo_sync_status: "pending", qbo_sync_error: null } as never)
+              .update({ qbo_sales_receipt_id: null, qbo_sync_status: "pending", qbo_last_error: null } as never)
               .in("id", Array.from(orderIds))
               .select("id");
             salesReceiptsReset = (clearedOrders ?? []).length;
