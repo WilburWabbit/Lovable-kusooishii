@@ -655,6 +655,8 @@ Deno.serve(async (req) => {
           qboId: so.qbo_sales_receipt_id as string,
           gross: tx.gross_amount,
           orderNumber: orderNum,
+          txId: tx.id,
+          transactionId: tx.transaction_id,
         });
         // Map transaction ID → order number for expense DocNumber
         if (orderNum) {
