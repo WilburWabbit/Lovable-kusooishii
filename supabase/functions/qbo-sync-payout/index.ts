@@ -954,14 +954,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Reconciliation guard: verify constructed deposit matches expected net ─
-    const constructedTotal = round2(
-      (depositLines as Array<{ Amount: number }>).reduce((s, l) => s + l.Amount, 0)
-    );
+    // ─── Reconciliation guard: integer-pence exact match ───
+    // All deposit-line amounts at this point are verified QBO TotalAmts.
+    // Sum them in integer pence and compare to the source payout net.
+    const constructedPence = (depositLines as Array<{ Amount: number }>)
+      .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
-    const delta = round2(Math.abs(constructedTotal - expectedNet));
-    if (delta > 0.001) {
-      const msg = `Deposit total mismatch: constructed=${constructedTotal}, expected payout net=${expectedNet}, delta=${delta}. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+    const expectedPence = toPence(expectedNet);
+    const constructedTotal = fromPence(constructedPence);
+    if (constructedPence !== expectedPence) {
+      const deltaPence = constructedPence - expectedPence;
+      const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
       console.error(msg);
       await persistSyncFailure(admin, payoutId, msg);
       return new Response(
@@ -969,10 +972,11 @@ Deno.serve(async (req) => {
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    console.log(`Deposit reconciliation OK: constructed=${constructedTotal}, expected=${expectedNet}, delta=${delta}`);
+    console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
+    let qboDepositTotal: number | null = null;
 
     if (externalPayoutId) {
       const queryStr = `SELECT * FROM Deposit WHERE DocNumber = '${externalPayoutId}'`;
@@ -986,7 +990,8 @@ Deno.serve(async (req) => {
         const deposits = (existingPayload?.QueryResponse?.Deposit ?? []) as Record<string, unknown>[];
         if (deposits.length > 0) {
           qboDepositId = String(deposits[0].Id);
-          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} — skipping creation`);
+          qboDepositTotal = Number(deposits[0].TotalAmt ?? 0);
+          console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} (TotalAmt £${qboDepositTotal.toFixed(2)}) — skipping creation`);
         }
       } else {
         await existingRes.text(); // consume body
@@ -1018,12 +1023,42 @@ Deno.serve(async (req) => {
       if (depositRes.ok) {
         const depositResult = await depositRes.json();
         qboDepositId = String(depositResult.Deposit.Id);
+        qboDepositTotal = Number(depositResult.Deposit.TotalAmt ?? 0);
       } else {
         const errBody = await depositRes.text();
         syncError = `Deposit creation failed [${depositRes.status}]: ${errBody.substring(0, 500)}`;
         console.error(`QBO Deposit creation failed:`, syncError);
       }
     }
+
+    // ─── Post-create exact-balance safeguard for the Deposit ─
+    // QBO's returned TotalAmt must match the expected payout net to the penny.
+    // If it doesn't, the deposit is wrong even though every linked doc was right
+    // (e.g. if QBO reapplied tax to the deposit header). Mark sync as error.
+    if (qboDepositId && qboDepositTotal !== null) {
+      try {
+        assertQBOTotalMatches({
+          expectedGross: expectedNet,
+          qboTotalAmt: qboDepositTotal,
+          docKind: "Deposit",
+          qboDocId: qboDepositId,
+        });
+      } catch (e) {
+        if (e instanceof QBOTotalMismatchError) {
+          syncError = e.message;
+          console.error(syncError);
+          // Do NOT clear qboDepositId — record exists in QBO and operator
+          // needs to delete it manually before retry. Persist as error.
+          await persistSyncFailure(admin, payoutId, e.message);
+          return new Response(
+            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        throw e;
+      }
+    }
+
 
     // ─── 7. Update payout record ────────────────────────────
     const updateData: Record<string, unknown> = {
