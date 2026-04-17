@@ -78,22 +78,39 @@ Deno.serve(async (req) => {
 
     let orderIds = linkedOrderIds;
 
-    // If no orders linked yet, try to match by channel + date range
+    // ─── Strict canonical matching ──────────────────────────
+    // Only link a sales_order to a payout when its origin_reference
+    // exactly matches a channel transaction's order_id for THIS payout.
+    // No date-range fallbacks — they over-link unrelated orders.
     if (orderIds.length === 0) {
-      const payoutDate = p.payout_date as string;
-      const lookbackDate = new Date(new Date(payoutDate).getTime() - 14 * 24 * 60 * 60 * 1000)
-        .toISOString().slice(0, 10);
+      const externalPayoutId = p.external_payout_id as string | null;
+      const externalOrderIds: string[] = [];
 
-      const channelFilter = channel === "stripe" ? "web" : channel;
-      const { data: matchedOrders } = await admin
-        .from("sales_order")
-        .select("id, gross_total")
-        .eq("origin_channel", channelFilter)
-        .gte("created_at", lookbackDate)
-        .lte("created_at", payoutDate + "T23:59:59Z");
+      if (channel === "ebay" && externalPayoutId) {
+        const { data: ebayTxns } = await admin
+          .from("ebay_payout_transactions")
+          .select("order_id")
+          .eq("payout_id", externalPayoutId)
+          .eq("transaction_type", "SALE")
+          .not("order_id", "is", null);
 
-      if (matchedOrders) {
-        const links = ((matchedOrders) as Record<string, unknown>[]).map((o) => ({
+        for (const t of ((ebayTxns ?? []) as { order_id: string | null }[])) {
+          if (t.order_id) externalOrderIds.push(t.order_id);
+        }
+      }
+      // Stripe: payout_orders are already linked by the Stripe webhook flow,
+      // so the empty-orderIds case here means "nothing to do" rather than
+      // "go searching by date" — same canonical rule applies.
+
+      if (externalOrderIds.length > 0) {
+        const channelFilter = channel === "stripe" ? "web" : channel;
+        const { data: matchedOrders } = await admin
+          .from("sales_order")
+          .select("id, gross_total, origin_reference")
+          .eq("origin_channel", channelFilter)
+          .in("origin_reference", externalOrderIds);
+
+        const links = ((matchedOrders ?? []) as Record<string, unknown>[]).map((o) => ({
           payout_id: payoutId,
           sales_order_id: o.id as string,
           order_gross: (o.gross_total as number) ?? 0,
