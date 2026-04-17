@@ -871,7 +871,6 @@ Deno.serve(async (req) => {
       const depositPayload: Record<string, unknown> = {
         TxnDate: payoutDate,
         DepositToAccountRef: buildAccountRef(payoutBankRef),
-        GlobalTaxCalculation: "TaxExcluded",
         Line: depositLines,
         PrivateNote: `${channel} payout ${externalPayoutId} — ${saleTxs.length} orders, ${expenseResults.length} expenses`,
       };
