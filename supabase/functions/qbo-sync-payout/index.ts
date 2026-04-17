@@ -353,10 +353,35 @@ Deno.serve(async (req) => {
 
     const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
     // Exclude TRANSFER transactions from expense processing.
-    // TRANSFER = eBay collecting a fee (e.g. subscription) directly from undeposited funds.
-    // The corresponding NON_SALE_CHARGE Purchase already represents this payment from UF;
-    // adding a separate TRANSFER deposit line would double-count it.
+    // TRANSFER is informational only: it tells us the matching NON_SALE_CHARGE invoice
+    // (same absolute gross_amount) was settled out-of-band by eBay and never debited
+    // Undeposited Funds. We use these to flag "settled" NON_SALE_CHARGEs below — those
+    // expenses are still booked as Purchases (P&L is real) but paid directly from the
+    // bank account rather than UF, and excluded from the deposit lines.
     const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
+
+    // Build a multiset of TRANSFER absolute amounts so we can match each settled
+    // NON_SALE_CHARGE one-for-one (avoid double-matching when amounts repeat).
+    const transferAmountCounts = new Map<string, number>();
+    for (const t of allTransactions) {
+      if (t.transaction_type === "TRANSFER") {
+        const key = Math.abs(t.gross_amount).toFixed(2);
+        transferAmountCounts.set(key, (transferAmountCounts.get(key) ?? 0) + 1);
+      }
+    }
+    const settledTxIds = new Set<string>();
+    for (const t of allTransactions) {
+      if (t.transaction_type !== "NON_SALE_CHARGE") continue;
+      const key = Math.abs(t.gross_amount).toFixed(2);
+      const remaining = transferAmountCounts.get(key) ?? 0;
+      if (remaining > 0) {
+        settledTxIds.add(t.id);
+        transferAmountCounts.set(key, remaining - 1);
+      }
+    }
+    if (settledTxIds.size > 0) {
+      console.log(`Detected ${settledTxIds.size} settled NON_SALE_CHARGE(s) with matching TRANSFER — booking direct to bank, excluding from deposit.`);
+    }
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
     const saleTxs = transactions.filter((t) => t.transaction_type === "SALE");
@@ -567,7 +592,7 @@ Deno.serve(async (req) => {
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
-    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string }[] = [];
+    const expenseResults: { txId: string; qboPurchaseId: string; amount: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
@@ -578,7 +603,7 @@ Deno.serve(async (req) => {
         const acctRef = txType === "NON_SALE_CHARGE"
           ? buildAccountRef(subscriptionAccount!)
           : buildAccountRef(sellingFeesAccount);
-        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef, transactionType: txType });
+        expenseResults.push({ txId: tx.id, qboPurchaseId: tx.qbo_purchase_id, amount: totalAmount, accountRef: acctRef, transactionType: txType, settledViaTransfer: settledTxIds.has(tx.id) });
         continue;
       }
 
@@ -696,14 +721,22 @@ Deno.serve(async (req) => {
         expenseDocNumber = tx.ebay_item_id;
       }
 
+      // Settled NON_SALE_CHARGEs (matched by a TRANSFER) were paid out-of-band by eBay
+      // from separate funds — UF was never debited. Book the Purchase directly against
+      // the bank account so the P&L hits but UF stays untouched.
+      const isSettled = settledTxIds.has(tx.id);
+      const purchaseBankRef = isSettled
+        ? buildAccountRef(payoutBankRef)
+        : buildAccountRef(undepositedFundsAccount);
+
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
-        bankAccountRef: buildAccountRef(undepositedFundsAccount),
+        bankAccountRef: purchaseBankRef,
         vendorRef: EBAY_VENDOR_REF,
         lines: expenseLines,
         privateNote: txType === "NON_SALE_CHARGE" && tx.ebay_item_id
           ? `${channel} payout ${externalPayoutId} — ${txType} item ${tx.ebay_item_id} — ${tx.transaction_id}`
-          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}`,
+          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}${isSettled ? " (settled via TRANSFER)" : ""}`,
         docNumber: expenseDocNumber,
       });
 
@@ -724,7 +757,7 @@ Deno.serve(async (req) => {
 
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
-      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef, transactionType: txType });
+      expenseResults.push({ txId: tx.id, qboPurchaseId: purchaseResult.id, amount: totalExpenseAmount, accountRef: primaryAccountRef, transactionType: txType, settledViaTransfer: isSettled });
     }
 
     // If any expense creation failed, persist error and return
@@ -764,14 +797,17 @@ Deno.serve(async (req) => {
     }
 
     // Expense (Purchase) lines — negative amounts net off the deposit.
-    // SALE fees, SHIPPING_LABEL, and NON_SALE_CHARGE Purchases are all booked
+    // SALE fees, SHIPPING_LABEL, and unsettled NON_SALE_CHARGE Purchases are booked
     // against Undeposited Funds and must appear here to clear that account.
-    // TRANSFER transactions are excluded — each TRANSFER is eBay collecting a fee
-    // (e.g. subscription) from undeposited funds, which is already represented by
-    // the corresponding NON_SALE_CHARGE Purchase negative line. Including it again
-    // would double-count the amount and fail reconciliation.
+    //
+    // Skipped:
+    //  - TRANSFER transactions (filtered out earlier) — informational only.
+    //  - NON_SALE_CHARGEs flagged settledViaTransfer — these were paid by eBay
+    //    out-of-band (matching TRANSFER) and booked directly to the bank, so they
+    //    never debited Undeposited Funds and must not reduce this deposit.
     for (const exp of expenseResults) {
       if (exp.qboPurchaseId === "N/A" || exp.amount <= 0) continue;
+      if (exp.settledViaTransfer) continue;
 
       depositLines.push({
         Amount: -exp.amount,
