@@ -588,7 +588,7 @@ Deno.serve(async (req) => {
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null }>();
+    var orderQboMap = new Map<string, { qboId: string; gross: number; orderNumber: string | null; txId: string; transactionId: string }>();
     var orderNumberByTxId = new Map<string, string>();
     var customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
@@ -655,6 +655,8 @@ Deno.serve(async (req) => {
           qboId: so.qbo_sales_receipt_id as string,
           gross: tx.gross_amount,
           orderNumber: orderNum,
+          txId: tx.id,
+          transactionId: tx.transaction_id,
         });
         // Map transaction ID → order number for expense DocNumber
         if (orderNum) {
@@ -797,7 +799,7 @@ Deno.serve(async (req) => {
     // These do NOT abort the payout — the deposit is constructed from successfully
     // synced expenses and the payout is marked `partial` so the operator can follow up
     // on just the handful of edge cases.
-    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number }[] = [];
+    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number; kind?: "expense" | "sales_receipt" }[] = [];
 
 
     for (const tx of expenseTxs) {
@@ -1029,27 +1031,51 @@ Deno.serve(async (req) => {
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
       // Fetch each linked SalesReceipt's actual TotalAmt and verify it matches
-      // the source SALE gross_amount exactly. If not, abort — a stale or
-      // mis-rounded SalesReceipt would corrupt the deposit total.
+      // the source SALE gross_amount exactly. If a SalesReceipt has drifted
+      // (typically by ±1p due to QBO's tax recompute on a previous sync), we
+      // SKIP that single transaction rather than aborting the whole payout.
+      // The skip is recorded so the operator can re-sync the order; the payout
+      // completes as `partial`.
       for (const entry of orderQboMap.values()) {
         let qboReceiptTotal = 0;
         try {
           qboReceiptTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
         } catch (e) {
-          const msg = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
-          await persistSyncFailure(admin, payoutId, msg);
-          return new Response(
-            JSON.stringify({ success: false, error: msg, payoutId }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
+          // Network/API failure fetching the receipt — skip this txn rather than abort.
+          const reason = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
+          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
+          skippedTransactions.push({
+            txId: entry.txId,
+            transactionId: entry.transactionId,
+            reason,
+            lastQboTotal: 0,
+            expected: round2(entry.gross),
+            attempts: 1,
+            kind: "sales_receipt",
+          });
+          await admin
+            .from("ebay_payout_transactions" as never)
+            .update({ qbo_sync_error: reason } as never)
+            .eq("id" as never, entry.txId);
+          continue;
         }
         if (toPence(qboReceiptTotal) !== toPence(round2(entry.gross))) {
-          const msg = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Deposit aborted to prevent rounding drift. Delete the SalesReceipt and re-sync the order.`;
-          await persistSyncFailure(admin, payoutId, msg);
-          return new Response(
-            JSON.stringify({ success: false, error: msg, payoutId }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
+          const reason = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Delete the SalesReceipt and re-sync the order.`;
+          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
+          skippedTransactions.push({
+            txId: entry.txId,
+            transactionId: entry.transactionId,
+            reason,
+            lastQboTotal: qboReceiptTotal,
+            expected: round2(entry.gross),
+            attempts: 1,
+            kind: "sales_receipt",
+          });
+          await admin
+            .from("ebay_payout_transactions" as never)
+            .update({ qbo_sync_error: reason } as never)
+            .eq("id" as never, entry.txId);
+          continue;
         }
         depositLines.push({
           Amount: qboReceiptTotal,
@@ -1112,18 +1138,21 @@ Deno.serve(async (req) => {
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
     const constructedTotal = fromPence(constructedPence);
-    const skippedExpensePence = skippedTransactions.reduce(
-      (s, t) => s + toPence(Math.abs(t.expected)),
-      0,
-    );
+    // Skipped expense (Purchase) txns: omitted negative deposit line → delta is +K.
+    // Skipped sales_receipt txns:      omitted positive deposit line → delta is -G.
+    // Net expected delta = sum(expense.expected) - sum(salesReceipt.expected).
+    const skippedExpensePence = skippedTransactions
+      .filter((t) => t.kind !== "sales_receipt")
+      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
+    const skippedSalesPence = skippedTransactions
+      .filter((t) => t.kind === "sales_receipt")
+      .reduce((s, t) => s + toPence(Math.abs(t.expected)), 0);
+    const expectedDeltaPence = skippedExpensePence - skippedSalesPence;
     if (constructedPence !== expectedPence) {
       const deltaPence = constructedPence - expectedPence;
-      // Skipped expenses would have been negative deposit lines. So a payout
-      // net of N with K pence of skipped expenses produces a constructed
-      // total of N + K (we didn't subtract them). delta should equal +K.
-      const tolerated = skippedTransactions.length > 0 && deltaPence === skippedExpensePence;
+      const tolerated = skippedTransactions.length > 0 && deltaPence === expectedDeltaPence;
       if (!tolerated) {
-        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (sum ${skippedExpensePence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (expense ${skippedExpensePence}p, sales ${skippedSalesPence}p, expected delta ${expectedDeltaPence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
         console.error(msg);
         await persistSyncFailure(admin, payoutId, msg);
         return new Response(
