@@ -370,8 +370,11 @@ export function useTriggerPayoutQBOSync() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout', variables.payoutId] as const });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout-transactions', variables.payoutId] as const });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'payout-qbo-readiness', variables.payoutId] as const });
     },
   });
 }

@@ -709,9 +709,9 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                 onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
               });
             }}
-            disabled={triggerQBOSync.isPending || (qboReadiness != null && !qboReadiness.ready)}
+            disabled={triggerQBOSync.isPending}
             className="flex-1 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-700 transition-colors"
-            title={qboReadiness && !qboReadiness.ready ? `${qboReadiness.unsyncedOrders.length} order(s) must be synced to QBO first` : undefined}
+            title={qboReadiness && !qboReadiness.ready ? `This payout will recreate ${qboReadiness.unsyncedOrders.length} missing sales receipt(s) and ${qboReadiness.pendingExpenses.length} expense(s) during sync` : undefined}
           >
             {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
           </button>
