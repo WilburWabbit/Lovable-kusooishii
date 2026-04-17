@@ -71,16 +71,13 @@ type EbayTransaction = {
 const EBAY_VENDOR_REF = { value: "4", name: "eBay" };
 const VAT_RATE = 0.2;
 const VAT_DIVISOR = 1 + VAT_RATE;
-const QBO_TAX_CODE_REF = "6"; // 20% S
+// Default TaxCodeRef for non-rounding lines. The QBO-stable distributor in
+// _shared/qbo-tax.ts attaches QBO_TAX_CODE_NO_VAT ("10") to balancer lines.
+const QBO_TAX_CODE_REF = QBO_TAX_CODE_STANDARD_20;
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
-
-// Match tolerance for QBO returned TotalAmt vs expected gross.
-// Must be 0 — we want exact penny equality.
-const PENNY_EXACT = 0;
-
 
 // ─── Account mapping helper ──────────────────────────────────
 
