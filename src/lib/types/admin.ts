@@ -42,7 +42,7 @@ export type OrderStatus =
 
 export type PayoutChannel = 'ebay' | 'stripe';
 
-export type QBOSyncStatus = 'pending' | 'synced' | 'error' | 'needs_manual_review';
+export type QBOSyncStatus = 'pending' | 'synced' | 'partial' | 'error' | 'needs_manual_review';
 
 /** Saleable condition grades only. Grade 5 (Red Card) is internal/parts-only. */
 export type ConditionGrade = 1 | 2 | 3 | 4;

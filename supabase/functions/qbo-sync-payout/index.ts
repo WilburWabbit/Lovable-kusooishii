@@ -25,6 +25,7 @@ import {
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
+  growRoundingLine,
   assertQBOPayloadBalances,
   QBOPayloadImbalanceError,
   QBO_TAX_CODE_STANDARD_20,
@@ -253,60 +254,24 @@ interface ExpenseLineInput {
   itemRef?: { value: string; name?: string };
 }
 
-async function createQBOPurchase(
-  baseUrl: string,
-  accessToken: string,
-  opts: {
-    txnDate: string;
-    bankAccountRef: { value: string; name?: string };
-    vendorRef: { value: string; name?: string };
-    lines: ExpenseLineInput[];
-    privateNote: string;
-    docNumber?: string;
-  },
-): Promise<{ id: string; totalAmt: number; expectedGross: number } | { error: string }> {
-  // ─── QBO-stable line distribution ────────────────────────────
-  // QBO recomputes VAT *per-line* on Purchase documents using
-  // `round(Amount × rate)` and ignores the document-level
-  // `TxnTaxDetail.TotalTax`. Naive per-line net = round(gross / 1.20)
-  // therefore drifts by ±1p on multi-line documents (e.g. 7.63 + 0.24 + 0.41
-  // → QBO recomputed total £9.94 vs our expected £9.93).
-  //
-  // The QBO-stable distributor in _shared/qbo-tax.ts pre-solves for QBO's
-  // own arithmetic: it picks per-line nets so that `sum(round(net × 0.20))`
-  // equals the target tax exactly, and if no per-line solution exists it
-  // appends a ±1p zero-tax "rounding adjustment" line. This guarantees QBO
-  // returns TotalAmt = source gross to the penny under its own recompute,
-  // making the post-create assertQBOTotalMatches a true safety net.
-  //
-  // Note: TxnTaxDetail.TotalTax is omitted entirely — QBO ignores it for
-  // Purchases, sending it is misleading.
-  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
-  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
-  const expectedGross = fromPence(totalGrossPence);
+const MAX_PURCHASE_ATTEMPTS = 3;
 
-  const stableLines = buildBalancedQBOLines(grossPenceLines);
-
-  // Pre-flight: confirm the simulated total balances under QBO's recompute.
-  // Throws QBOPayloadImbalanceError if the distributor itself failed to converge.
-  try {
-    assertQBOPayloadBalances(stableLines, totalGrossPence);
-  } catch (e) {
-    if (e instanceof QBOPayloadImbalanceError) {
-      return { error: e.message };
-    }
-    throw e;
-  }
-
-  const qboLines = stableLines.map((s) => {
+/**
+ * Build the QBO `Line[]` payload from a set of stable lines + the original
+ * source ExpenseLineInput[]. Pure function — used by both the initial POST
+ * and retry attempts (which call it with a `growRoundingLine`-adjusted
+ * stableLines array).
+ */
+function buildQBOPurchaseLineArray(
+  stableLines: QBOStableLine[],
+  sourceLines: ExpenseLineInput[],
+  bankAccountRef: { value: string; name?: string },
+): Record<string, unknown>[] {
+  return stableLines.map((s) => {
     const lineNet = fromPence(s.netPence);
 
-    // Rounding balancer line — book against the same selling_fees account
-    // as the first standard line, with TaxCodeRef = "No VAT" so QBO does
-    // not compute tax on it. This is the bookkeeping audit trail of the
-    // ±1p discrepancy between the source gross and any per-line VAT split.
     if (s.kind === "rounding") {
-      const fallbackAccount = opts.lines[0]?.accountRef ?? opts.bankAccountRef;
+      const fallbackAccount = sourceLines[0]?.accountRef ?? bankAccountRef;
       return {
         Amount: lineNet,
         DetailType: "AccountBasedExpenseLineDetail",
@@ -318,7 +283,7 @@ async function createQBOPurchase(
       };
     }
 
-    const sourceLine = opts.lines[s.sourceIndex!];
+    const sourceLine = sourceLines[s.sourceIndex!];
     const taxCode = sourceLine.taxCodeRef ?? s.taxCodeRef ?? QBO_TAX_CODE_REF;
 
     if (sourceLine.itemRef) {
@@ -352,64 +317,185 @@ async function createQBOPurchase(
       Description: sourceLine.description,
     };
   });
+}
 
-  const payload: Record<string, unknown> = {
-    TxnDate: opts.txnDate,
-    PaymentType: "Cash",
-    AccountRef: opts.bankAccountRef,
-    EntityRef: { ...opts.vendorRef, type: "Vendor" },
-    GlobalTaxCalculation: "TaxExcluded",
-    Line: qboLines,
-    PrivateNote: opts.privateNote,
-  };
-  if (opts.docNumber) {
-    payload.DocNumber = opts.docNumber;
+/**
+ * Best-effort delete a QBO Purchase. Used between retry attempts to avoid
+ * leaving orphan over/under-totalled Purchases in QBO. Logs but does not
+ * throw on failure — the retry loop continues regardless.
+ */
+async function deleteQBOPurchase(
+  baseUrl: string,
+  accessToken: string,
+  purchaseId: string,
+): Promise<void> {
+  try {
+    // QBO requires fetching the SyncToken before delete.
+    const getRes = await fetchWithTimeout(
+      `${baseUrl}/purchase/${encodeURIComponent(purchaseId)}?minorversion=65`,
+      { method: "GET", headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } },
+    );
+    if (!getRes.ok) {
+      console.warn(`Could not fetch QBO Purchase ${purchaseId} for delete: HTTP ${getRes.status}`);
+      return;
+    }
+    const getJson = await getRes.json();
+    const syncToken = getJson?.Purchase?.SyncToken;
+    if (syncToken === undefined) {
+      console.warn(`QBO Purchase ${purchaseId} missing SyncToken; skipping delete`);
+      return;
+    }
+    const delRes = await fetchWithTimeout(
+      `${baseUrl}/purchase?operation=delete&minorversion=65`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ Id: purchaseId, SyncToken: String(syncToken) }),
+      },
+    );
+    if (!delRes.ok) {
+      const body = await delRes.text();
+      console.warn(`QBO Purchase ${purchaseId} delete failed [${delRes.status}]: ${body.substring(0, 300)}`);
+    } else {
+      console.log(`Deleted bad QBO Purchase ${purchaseId}`);
+    }
+  } catch (e) {
+    console.warn(`Exception deleting QBO Purchase ${purchaseId}:`, e);
+  }
+}
+
+type CreateQBOPurchaseResult =
+  | { id: string; totalAmt: number; expectedGross: number; attempts: number }
+  | { error: string }
+  | { skipped: true; reason: string; lastQboTotal: number; expected: number; attempts: number };
+
+async function createQBOPurchase(
+  baseUrl: string,
+  accessToken: string,
+  opts: {
+    txnDate: string;
+    bankAccountRef: { value: string; name?: string };
+    vendorRef: { value: string; name?: string };
+    lines: ExpenseLineInput[];
+    privateNote: string;
+    docNumber?: string;
+  },
+): Promise<CreateQBOPurchaseResult> {
+  // ─── QBO-stable line distribution + reactive retry loop ────
+  // QBO recomputes VAT *per-line* on Purchase documents using
+  // `round(Amount × rate)` and ignores `TxnTaxDetail.TotalTax`. Our
+  // pre-flight distributor predicts that recompute and, when it can't land
+  // exactly, appends a zero-tax "rounding adjustment" line.
+  //
+  // Empirically QBO occasionally returns a TotalAmt that disagrees with
+  // even our pre-flight simulation by ±1p. Rather than abort, we react to
+  // QBO's actual result: read TotalAmt, compute the drift, delete the bad
+  // Purchase, and re-POST with the rounding line grown by exactly that
+  // drift. Because the rounding line uses TaxCodeRef "10" (No VAT) it is
+  // excluded from QBO's tax recompute and shifts TotalAmt 1:1, so
+  // convergence is mathematically guaranteed on attempt 2 (attempt 3 covers
+  // any non-determinism).
+  //
+  // After 3 failed attempts we return { skipped: true } so the caller can
+  // record the failure for the single transaction and continue with the
+  // rest of the payout instead of aborting everything.
+  const grossPenceLines = opts.lines.map((l) => toPence(l.amount));
+  const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+  const expectedGross = fromPence(totalGrossPence);
+
+  let stableLines = buildBalancedQBOLines(grossPenceLines);
+
+  // Pre-flight: confirm the simulated total balances under QBO's recompute.
+  try {
+    assertQBOPayloadBalances(stableLines, totalGrossPence);
+  } catch (e) {
+    if (e instanceof QBOPayloadImbalanceError) {
+      return { error: e.message };
+    }
+    throw e;
   }
 
-  console.log("QBO Purchase payload:", JSON.stringify(payload));
+  let lastQboTotal = 0;
+  let lastQboId: string | null = null;
 
-  const res = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  for (let attempt = 1; attempt <= MAX_PURCHASE_ATTEMPTS; attempt++) {
+    const qboLines = buildQBOPurchaseLineArray(stableLines, opts.lines, opts.bankAccountRef);
 
-  if (res.ok) {
+    const payload: Record<string, unknown> = {
+      TxnDate: opts.txnDate,
+      PaymentType: "Cash",
+      AccountRef: opts.bankAccountRef,
+      EntityRef: { ...opts.vendorRef, type: "Vendor" },
+      GlobalTaxCalculation: "TaxExcluded",
+      Line: qboLines,
+      PrivateNote: opts.privateNote,
+    };
+    if (opts.docNumber) {
+      payload.DocNumber = opts.docNumber;
+    }
+
+    console.log(`QBO Purchase attempt ${attempt}/${MAX_PURCHASE_ATTEMPTS} (expected £${expectedGross.toFixed(2)}):`, JSON.stringify(payload));
+
+    const res = await fetchWithTimeout(`${baseUrl}/purchase?minorversion=65`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      // POST itself failed (validation, auth, etc.) — not a math drift.
+      // Don't retry; surface the error to the caller.
+      return { error: `Purchase creation failed [${res.status}] on attempt ${attempt}: ${errBody.substring(0, 500)}` };
+    }
+
     const result = await res.json();
     const purchase = result.Purchase ?? {};
     const qboId = String(purchase.Id);
     const qboTotalAmt = Number(purchase.TotalAmt ?? 0);
+    lastQboTotal = qboTotalAmt;
+    lastQboId = qboId;
 
-    // ─── Post-create defence-in-depth ────────────────────────
-    // The pre-flight assertQBOPayloadBalances already verified the math
-    // would balance under QBO's own recompute. This second check guards
-    // against QBO returning anything different (e.g. unexpected behaviour
-    // in a future API revision) and surfaces a clear diagnostic.
-    try {
-      assertQBOTotalMatches({
-        expectedGross,
-        qboTotalAmt,
-        docKind: "Purchase",
-        qboDocId: qboId,
-      });
-    } catch (e) {
-      if (e instanceof QBOTotalMismatchError) {
-        return {
-          error: `${e.message} | payload total £${expectedGross.toFixed(2)} ≠ QBO TotalAmt £${qboTotalAmt.toFixed(2)}`,
-        };
+    const driftPence = toPence(expectedGross) - toPence(qboTotalAmt);
+    if (driftPence === 0) {
+      if (attempt > 1) {
+        console.log(`QBO Purchase ${qboId} converged on attempt ${attempt} (expected £${expectedGross.toFixed(2)})`);
       }
-      throw e;
+      return { id: qboId, totalAmt: qboTotalAmt, expectedGross, attempts: attempt };
     }
 
-    return { id: qboId, totalAmt: qboTotalAmt, expectedGross };
+    console.warn(
+      `QBO Purchase ${qboId} attempt ${attempt}: expected £${expectedGross.toFixed(2)}, ` +
+        `QBO returned £${qboTotalAmt.toFixed(2)}, drift=${driftPence}p. ` +
+        (attempt < MAX_PURCHASE_ATTEMPTS ? "Deleting and retrying with grown rounding line." : "Max attempts reached."),
+    );
+
+    // Delete the bad Purchase so QBO doesn't keep an orphan.
+    await deleteQBOPurchase(baseUrl, accessToken, qboId);
+
+    if (attempt < MAX_PURCHASE_ATTEMPTS) {
+      // Grow (or add) the rounding line by exactly `driftPence`. QBO's
+      // recompute will not touch this line (TaxCodeRef "10" = No VAT),
+      // so the next TotalAmt will be old TotalAmt + driftPence = expected.
+      stableLines = growRoundingLine(stableLines, driftPence);
+    }
   }
 
-  const errBody = await res.text();
-  return { error: `Purchase creation failed [${res.status}]: ${errBody.substring(0, 500)}` };
+  return {
+    skipped: true,
+    reason: `QBO total drift unresolvable after ${MAX_PURCHASE_ATTEMPTS} attempts (last QBO TotalAmt £${lastQboTotal.toFixed(2)}, expected £${expectedGross.toFixed(2)})`,
+    lastQboTotal,
+    expected: expectedGross,
+    attempts: MAX_PURCHASE_ATTEMPTS,
+  };
 }
 
 // ─── Main handler ────────────────────────────────────────────
@@ -707,6 +793,12 @@ Deno.serve(async (req) => {
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
     let syncError: string | null = null;
     const expenseResults: { txId: string; qboPurchaseId: string; amount: number; qboTotalAmt: number; accountRef: { value: string; name?: string }; transactionType: string; settledViaTransfer: boolean }[] = [];
+    // Per-transaction skips (QBO total drift unresolvable after MAX_PURCHASE_ATTEMPTS).
+    // These do NOT abort the payout — the deposit is constructed from successfully
+    // synced expenses and the payout is marked `partial` so the operator can follow up
+    // on just the handful of edge cases.
+    const skippedTransactions: { txId: string; transactionId: string; reason: string; lastQboTotal: number; expected: number; attempts: number }[] = [];
+
 
     for (const tx of expenseTxs) {
       const txType = tx.transaction_type;
@@ -879,6 +971,24 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      if ("skipped" in purchaseResult) {
+        // Auto-adjust loop exhausted. Record the skip and move on.
+        // The payout will complete as `partial` (not `error`) so the operator
+        // can investigate just this transaction.
+        console.warn(
+          `Skipping tx ${tx.transaction_id} after ${purchaseResult.attempts} attempts: ${purchaseResult.reason}`,
+        );
+        skippedTransactions.push({
+          txId: tx.id,
+          transactionId: tx.transaction_id,
+          reason: purchaseResult.reason,
+          lastQboTotal: purchaseResult.lastQboTotal,
+          expected: purchaseResult.expected,
+          attempts: purchaseResult.attempts,
+        });
+        continue;
+      }
+
       // Update the transaction with the QBO Purchase ID
       await admin
         .from("ebay_payout_transactions" as never)
@@ -888,7 +998,7 @@ Deno.serve(async (req) => {
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
       // purchaseResult.totalAmt was already verified to equal expectedGross by
-      // assertQBOTotalMatches inside createQBOPurchase — safe to use directly.
+      // the post-POST drift check inside createQBOPurchase — safe to use directly.
       expenseResults.push({
         txId: tx.id,
         qboPurchaseId: purchaseResult.id,
@@ -900,11 +1010,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // If any expense creation failed, persist error and return
+    // Hard errors (non-drift POST failures, validation errors, etc.) still abort.
+    // Drift-skipped transactions are tracked separately and do NOT abort.
     if (syncError) {
       await persistSyncFailure(admin, payoutId, syncError);
       return new Response(
-        JSON.stringify({ success: false, error: syncError, payoutId, expensesCreated: expenseResults.length }),
+        JSON.stringify({ success: false, error: syncError, payoutId, expensesCreated: expenseResults.length, skipped: skippedTransactions }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -990,22 +1101,40 @@ Deno.serve(async (req) => {
     // ─── Reconciliation guard: integer-pence exact match ───
     // All deposit-line amounts at this point are verified QBO TotalAmts.
     // Sum them in integer pence and compare to the source payout net.
+    //
+    // When transactions were skipped (drift unresolvable after retries), the
+    // constructed total will legitimately differ from the payout net by the
+    // sum of the skipped expense amounts. We tolerate that mismatch and mark
+    // the payout `partial` further down — but only when the delta exactly
+    // accounts for the skipped expenses (otherwise something else is wrong).
     const constructedPence = (depositLines as Array<{ Amount: number }>)
       .reduce((s, l) => s + toPence(l.Amount), 0);
     const expectedNet = p.net_amount as number;
     const expectedPence = toPence(expectedNet);
     const constructedTotal = fromPence(constructedPence);
+    const skippedExpensePence = skippedTransactions.reduce(
+      (s, t) => s + toPence(Math.abs(t.expected)),
+      0,
+    );
     if (constructedPence !== expectedPence) {
       const deltaPence = constructedPence - expectedPence;
-      const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p. Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
-      console.error(msg);
-      await persistSyncFailure(admin, payoutId, msg);
-      return new Response(
-        JSON.stringify({ success: false, error: msg, payoutId }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      // Skipped expenses would have been negative deposit lines. So a payout
+      // net of N with K pence of skipped expenses produces a constructed
+      // total of N + K (we didn't subtract them). delta should equal +K.
+      const tolerated = skippedTransactions.length > 0 && deltaPence === skippedExpensePence;
+      if (!tolerated) {
+        const msg = `Deposit total mismatch: constructed=£${constructedTotal.toFixed(2)} (${constructedPence}p), expected payout net=£${expectedNet.toFixed(2)} (${expectedPence}p), delta=${deltaPence}p, skipped=${skippedTransactions.length} (sum ${skippedExpensePence}p). Check NON_SALE_CHARGE/SHIPPING_LABEL amounts and gross_amount signs.`;
+        console.error(msg);
+        await persistSyncFailure(admin, payoutId, msg);
+        return new Response(
+          JSON.stringify({ success: false, error: msg, payoutId, skipped: skippedTransactions }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      console.warn(`Deposit reconciliation tolerated mismatch of ${deltaPence}p — fully accounted for by ${skippedTransactions.length} skipped transaction(s). Payout will be marked partial.`);
+    } else {
+      console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
     }
-    console.log(`Deposit reconciliation OK: constructed=£${constructedTotal.toFixed(2)}, expected=£${expectedNet.toFixed(2)}, delta=0p`);
 
     // ─── 6a. Check for existing QBO deposit with same DocNumber ─
     let qboDepositId: string | null = null;
@@ -1065,13 +1194,13 @@ Deno.serve(async (req) => {
     }
 
     // ─── Post-create exact-balance safeguard for the Deposit ─
-    // QBO's returned TotalAmt must match the expected payout net to the penny.
-    // If it doesn't, the deposit is wrong even though every linked doc was right
-    // (e.g. if QBO reapplied tax to the deposit header). Mark sync as error.
+    // QBO's returned TotalAmt must match the EFFECTIVE expected total — i.e.
+    // the payout net plus any skipped-expense pence the deposit didn't subtract.
+    const effectiveExpectedNet = fromPence(toPence(expectedNet) + skippedExpensePence);
     if (qboDepositId && qboDepositTotal !== null) {
       try {
         assertQBOTotalMatches({
-          expectedGross: expectedNet,
+          expectedGross: effectiveExpectedNet,
           qboTotalAmt: qboDepositTotal,
           docKind: "Deposit",
           qboDocId: qboDepositId,
@@ -1084,7 +1213,7 @@ Deno.serve(async (req) => {
           // needs to delete it manually before retry. Persist as error.
           await persistSyncFailure(admin, payoutId, e.message);
           return new Response(
-            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal }),
+            JSON.stringify({ success: false, error: e.message, payoutId, qbo_deposit_id: qboDepositId, qbo_deposit_total: qboDepositTotal, skipped: skippedTransactions }),
             { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
@@ -1094,9 +1223,19 @@ Deno.serve(async (req) => {
 
 
     // ─── 7. Update payout record ────────────────────────────
+    // Status:
+    //  - synced  → deposit landed and no skipped transactions
+    //  - partial → deposit landed but ≥1 transactions skipped (drift unresolvable)
+    //  - error   → deposit creation itself failed
+    const finalStatus = qboDepositId
+      ? (skippedTransactions.length > 0 ? "partial" : "synced")
+      : "error";
+    const partialMessage = skippedTransactions.length > 0
+      ? `Partial sync: ${skippedTransactions.length} transaction(s) skipped after auto-adjust failed: ${skippedTransactions.map((s) => `${s.transactionId} (expected £${s.expected.toFixed(2)}, QBO returned £${s.lastQboTotal.toFixed(2)})`).join("; ")}`
+      : null;
     const updateData: Record<string, unknown> = {
-      qbo_sync_status: qboDepositId ? "synced" : "error",
-      qbo_sync_error: syncError,
+      qbo_sync_status: finalStatus,
+      qbo_sync_error: syncError ?? partialMessage,
       sync_attempted_at: new Date().toISOString(),
     };
     if (qboDepositId) updateData.qbo_deposit_id = qboDepositId;
@@ -1108,15 +1247,18 @@ Deno.serve(async (req) => {
 
     if (!qboDepositId) {
       return new Response(
-        JSON.stringify({ success: false, error: syncError, payoutId }),
+        JSON.stringify({ success: false, error: syncError, payoutId, skipped: skippedTransactions }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     return jsonResponse({
       success: true,
+      status: finalStatus,
       qbo_deposit_id: qboDepositId,
       expenses_created: expenseResults.length,
+      skipped: skippedTransactions,
+      partial_message: partialMessage,
       payoutId,
     });
   } catch (err) {

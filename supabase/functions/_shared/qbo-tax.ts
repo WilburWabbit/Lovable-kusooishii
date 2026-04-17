@@ -212,5 +212,42 @@ export function buildBalancedQBOLines(
   return lines;
 }
 
+/**
+ * Reactive correction: shift the document total by exactly `deltaPence` by
+ * appending or growing a zero-tax "Rounding adjustment" line.
+ *
+ * Used by the post-POST retry loop in qbo-sync-payout / qbo-sync-sales-receipt:
+ * if QBO returned a TotalAmt that differs from expected by `d` pence, calling
+ * `growRoundingLine(stableLines, expected - actual)` produces a new payload
+ * whose QBO recompute will land at exactly `expected` (TaxCodeRef "10" lines
+ * are excluded from QBO's per-line VAT recompute, so they shift TotalAmt
+ * 1:1 regardless of how QBO rounded the standard lines).
+ *
+ * Mutates and returns a new array; original is not modified.
+ */
+export function growRoundingLine(
+  lines: QBOStableLine[],
+  deltaPence: number,
+): QBOStableLine[] {
+  if (deltaPence === 0) return [...lines];
+  const next = [...lines];
+  const existingIdx = next.findIndex((l) => l.kind === "rounding");
+  if (existingIdx >= 0) {
+    next[existingIdx] = {
+      ...next[existingIdx],
+      netPence: next[existingIdx].netPence + deltaPence,
+    };
+  } else {
+    next.push({
+      netPence: deltaPence,
+      vatPence: 0,
+      kind: "rounding",
+      sourceIndex: null,
+      taxCodeRef: QBO_TAX_CODE_NO_VAT,
+    });
+  }
+  return next;
+}
+
 /** Re-export pence helpers for convenience at call sites. */
 export { toPence, fromPence };
