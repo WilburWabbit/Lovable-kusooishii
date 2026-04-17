@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
     const grossPenceLines = sourceLines.map((l) => toPence(l.gross));
     const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
     const expectedGross = fromPence(totalGrossPence);
-    const stableLines = buildBalancedQBOLines(grossPenceLines);
+    let stableLines = buildBalancedQBOLines(grossPenceLines);
 
     try {
       assertQBOPayloadBalances(stableLines, totalGrossPence);
