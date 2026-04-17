@@ -1023,35 +1023,59 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
-    // Each deposit line for a SALE uses the eBay payout transaction's
-    // gross_amount — that IS the cash eBay settled into Undeposited Funds for
-    // that order, and it's the canonical settlement amount. We do NOT
-    // re-validate it against the QBO SalesReceipt's TotalAmt: the SalesReceipt
-    // mirrors the order as it was sold (a legal contract for that sale at that
-    // moment), and the payout-transaction gross is the cash settlement. They
-    // can legitimately differ (price changes between sale and payout, partial
-    // refunds applied at payout time, eBay fee adjustments, currency conversion
-    // rounding, etc.). Any deposit-level drift is reconciled below against the
-    // payout net, not per-transaction.
+    // Business rule (canonical):
+    //   - The app's sales_order + sales_order_line is the LEGAL record of the
+    //     sale at that moment. Its gross is canonical for what the customer
+    //     contracted to pay. Current product/listing prices are irrelevant to
+    //     a historical order.
+    //   - The QBO SalesReceipt mirrors that historical sale, so its TotalAmt
+    //     IS the canonical sale gross.
+    //   - The eBay payout-transaction gross represents the cash settlement,
+    //     which can legitimately differ (price changes between sale and
+    //     payout, marketplace adjustments, currency rounding, etc.).
     //
-    // The LinkedTxn still references the SalesReceipt for QBO traceability so
-    // the deposit clears Undeposited Funds against the right document.
+    // QBO behaviour: when a Deposit line carries a LinkedTxn for a SalesReceipt
+    // or Purchase, QBO forces that line's Amount to the linked document's
+    // TotalAmt regardless of what we POST. So we MUST build deposit lines from
+    // the actual QBO document totals, not from the eBay payout transaction
+    // amount. Any residual delta vs the payout net is a real settlement
+    // adjustment and is booked as a separate unlinked "Payout settlement
+    // adjustment" line.
     let depositLines: unknown[] = [];
 
-    if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      for (const entry of orderQboMap.values()) {
-        const lineAmount = round2(entry.gross);
-        depositLines.push({
-          Amount: lineAmount,
-          DepositLineDetail: { PaymentMethodRef: { value: "1" } },
-          LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
-        });
-      }
-    } else {
+    if (typeof orderQboMap === "undefined" || orderQboMap.size === 0) {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
       await persistSyncFailure(admin, payoutId, msg);
       return new Response(
         JSON.stringify({ success: false, error: msg, payoutId, expensesCreated: expenseResults.length }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Fetch the actual QBO SalesReceipt TotalAmt for each linked sale so the
+    // deposit math reflects the canonical sale (not the eBay payout gross).
+    const salesReceiptCanonicalTotals = new Map<string, number>(); // entry.qboId → TotalAmt
+    for (const entry of orderQboMap.values()) {
+      let canonicalTotal = 0;
+      try {
+        canonicalTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
+      } catch (e) {
+        const msg = `Cannot verify QBO SalesReceipt ${entry.qboId} for order ${entry.orderNumber ?? entry.transactionId}: ${e instanceof Error ? e.message : String(e)}`;
+        syncError = syncError ? `${syncError}; ${msg}` : msg;
+        continue;
+      }
+      salesReceiptCanonicalTotals.set(entry.qboId, canonicalTotal);
+      depositLines.push({
+        Amount: round2(canonicalTotal),
+        DepositLineDetail: { PaymentMethodRef: { value: "1" } },
+        LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
+      });
+    }
+
+    if (syncError) {
+      await persistSyncFailure(admin, payoutId, syncError);
+      return new Response(
+        JSON.stringify({ success: false, error: syncError, payoutId }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
