@@ -1023,62 +1023,26 @@ Deno.serve(async (req) => {
     }
 
     // ─── 6. Create QBO Deposit ──────────────────────────────
-    // CRITICAL: deposit lines must use the *actual* QBO TotalAmt for each
-    // linked Purchase and SalesReceipt, not locally-computed values. If the
-    // landed QBO total drifts by even 1p from source, the deposit will too.
-    // We've already verified Purchases (above). Now verify SalesReceipts.
+    // Each deposit line for a SALE uses the eBay payout transaction's
+    // gross_amount — that IS the cash eBay settled into Undeposited Funds for
+    // that order, and it's the canonical settlement amount. We do NOT
+    // re-validate it against the QBO SalesReceipt's TotalAmt: the SalesReceipt
+    // mirrors the order as it was sold (a legal contract for that sale at that
+    // moment), and the payout-transaction gross is the cash settlement. They
+    // can legitimately differ (price changes between sale and payout, partial
+    // refunds applied at payout time, eBay fee adjustments, currency conversion
+    // rounding, etc.). Any deposit-level drift is reconciled below against the
+    // payout net, not per-transaction.
+    //
+    // The LinkedTxn still references the SalesReceipt for QBO traceability so
+    // the deposit clears Undeposited Funds against the right document.
     let depositLines: unknown[] = [];
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
-      // Fetch each linked SalesReceipt's actual TotalAmt and verify it matches
-      // the source SALE gross_amount exactly. If a SalesReceipt has drifted
-      // (typically by ±1p due to QBO's tax recompute on a previous sync), we
-      // SKIP that single transaction rather than aborting the whole payout.
-      // The skip is recorded so the operator can re-sync the order; the payout
-      // completes as `partial`.
       for (const entry of orderQboMap.values()) {
-        let qboReceiptTotal = 0;
-        try {
-          qboReceiptTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
-        } catch (e) {
-          // Network/API failure fetching the receipt — skip this txn rather than abort.
-          const reason = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
-          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
-          skippedTransactions.push({
-            txId: entry.txId,
-            transactionId: entry.transactionId,
-            reason,
-            lastQboTotal: 0,
-            expected: round2(entry.gross),
-            attempts: 1,
-            kind: "sales_receipt",
-          });
-          await admin
-            .from("ebay_payout_transactions" as never)
-            .update({ qbo_sync_error: reason } as never)
-            .eq("id" as never, entry.txId);
-          continue;
-        }
-        if (toPence(qboReceiptTotal) !== toPence(round2(entry.gross))) {
-          const reason = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Delete the SalesReceipt and re-sync the order.`;
-          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
-          skippedTransactions.push({
-            txId: entry.txId,
-            transactionId: entry.transactionId,
-            reason,
-            lastQboTotal: qboReceiptTotal,
-            expected: round2(entry.gross),
-            attempts: 1,
-            kind: "sales_receipt",
-          });
-          await admin
-            .from("ebay_payout_transactions" as never)
-            .update({ qbo_sync_error: reason } as never)
-            .eq("id" as never, entry.txId);
-          continue;
-        }
+        const lineAmount = round2(entry.gross);
         depositLines.push({
-          Amount: qboReceiptTotal,
+          Amount: lineAmount,
           DepositLineDetail: { PaymentMethodRef: { value: "1" } },
           LinkedTxn: [{ TxnId: entry.qboId, TxnLineId: "0", TxnType: "SalesReceipt" }],
         });
