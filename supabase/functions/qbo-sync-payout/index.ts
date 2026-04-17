@@ -1031,27 +1031,51 @@ Deno.serve(async (req) => {
 
     if (typeof orderQboMap !== "undefined" && orderQboMap.size > 0) {
       // Fetch each linked SalesReceipt's actual TotalAmt and verify it matches
-      // the source SALE gross_amount exactly. If not, abort — a stale or
-      // mis-rounded SalesReceipt would corrupt the deposit total.
+      // the source SALE gross_amount exactly. If a SalesReceipt has drifted
+      // (typically by ±1p due to QBO's tax recompute on a previous sync), we
+      // SKIP that single transaction rather than aborting the whole payout.
+      // The skip is recorded so the operator can re-sync the order; the payout
+      // completes as `partial`.
       for (const entry of orderQboMap.values()) {
         let qboReceiptTotal = 0;
         try {
           qboReceiptTotal = await fetchQBODocTotal(baseUrl, accessToken, "SalesReceipt", entry.qboId);
         } catch (e) {
-          const msg = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
-          await persistSyncFailure(admin, payoutId, msg);
-          return new Response(
-            JSON.stringify({ success: false, error: msg, payoutId }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
+          // Network/API failure fetching the receipt — skip this txn rather than abort.
+          const reason = `Cannot verify QBO SalesReceipt ${entry.qboId}: ${e instanceof Error ? e.message : String(e)}`;
+          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
+          skippedTransactions.push({
+            txId: entry.txId,
+            transactionId: entry.transactionId,
+            reason,
+            lastQboTotal: 0,
+            expected: round2(entry.gross),
+            attempts: 1,
+            kind: "sales_receipt",
+          });
+          await admin
+            .from("ebay_payout_transactions" as never)
+            .update({ qbo_sync_error: reason } as never)
+            .eq("id" as never, entry.txId);
+          continue;
         }
         if (toPence(qboReceiptTotal) !== toPence(round2(entry.gross))) {
-          const msg = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Deposit aborted to prevent rounding drift. Delete the SalesReceipt and re-sync the order.`;
-          await persistSyncFailure(admin, payoutId, msg);
-          return new Response(
-            JSON.stringify({ success: false, error: msg, payoutId }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
+          const reason = `QBO SalesReceipt ${entry.qboId} TotalAmt £${qboReceiptTotal.toFixed(2)} does not match source SALE gross £${round2(entry.gross).toFixed(2)}. Delete the SalesReceipt and re-sync the order.`;
+          console.warn(`Skipping SALE tx ${entry.transactionId}: ${reason}`);
+          skippedTransactions.push({
+            txId: entry.txId,
+            transactionId: entry.transactionId,
+            reason,
+            lastQboTotal: qboReceiptTotal,
+            expected: round2(entry.gross),
+            attempts: 1,
+            kind: "sales_receipt",
+          });
+          await admin
+            .from("ebay_payout_transactions" as never)
+            .update({ qbo_sync_error: reason } as never)
+            .eq("id" as never, entry.txId);
+          continue;
         }
         depositLines.push({
           Amount: qboReceiptTotal,
