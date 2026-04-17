@@ -1,21 +1,29 @@
 // ============================================================
-// QBO-Stable Line Distribution
+// QBO-Stable Line Distribution (corrected model)
 // ------------------------------------------------------------
-// QBO recomputes VAT per-line on Purchase/SalesReceipt documents
-// using `round(Amount × rate)` and *ignores* the document-level
-// `TxnTaxDetail.TotalTax`. That means the only reliable way to land
-// a payload at an exact target gross is to pre-solve for QBO's own
-// arithmetic and, if necessary, append a zero-tax balancing line.
+// Empirically verified QBO behaviour for Purchase + SalesReceipt
+// documents with `GlobalTaxCalculation: "TaxExcluded"` in this UK realm:
 //
-// This helper provides:
-//   - simulateQBOTotal      — mirrors QBO's per-line tax recompute
-//   - buildQBOStableLines   — distributes target gross into per-line
-//                             nets such that QBO's recompute totals
-//                             match. Inserts a ±1p zero-tax balancing
-//                             line when no per-line solution exists.
-//   - assertQBOPayloadBalances — pre-flight check before POST.
+//   doc_tax   = round( SUM(line.Amount where TaxCodeRef != "No VAT") × rate )
+//   doc_total = SUM(all line.Amount) + doc_tax
 //
-// All math uses integer pence to avoid floating-point drift.
+// i.e. QBO sums nets first, then computes a single document-level VAT.
+// Lines with TaxCodeRef = "10" (No VAT) are EXCLUDED from the tax base
+// and contribute their net only to the document total. QBO ignores any
+// `TxnTaxDetail.TotalTax` we send.
+//
+// Strategy to land an exact target gross G (in pence):
+//   1. Distribute G into per-line nets such that
+//        sum(taxable line nets) === round(G / 1.2)  (= N)
+//      Naively each line gets round(lineGross / 1.2); fix the largest line
+//      with the integer residual so the sum is exactly N.
+//   2. Compute QBO's recomputed gross = N + round(N × 0.2). If that equals
+//      G, we're done. Otherwise the residual (always ±1p; 1-in-6 of all
+//      gross values) is appended as a zero-tax "Rounding adjustment" line
+//      with TaxCodeRef = "10" (No VAT). That line shifts the total by
+//      exactly ±1p without disturbing QBO's tax recompute.
+//
+// All math is integer pence.
 // ============================================================
 
 import { toPence, fromPence } from "./vat.ts";
@@ -23,48 +31,44 @@ import { toPence, fromPence } from "./vat.ts";
 const VAT_RATE_DEFAULT = 0.2;
 
 // QBO tax code IDs in this UK realm (verified against `tax_code` table).
-// Used as defaults; callers may override per line.
 export const QBO_TAX_CODE_STANDARD_20 = "6"; // "20.0% S"
-export const QBO_TAX_CODE_NO_VAT = "10"; // "No VAT" — zero tax, no VAT line item
+export const QBO_TAX_CODE_NO_VAT = "10"; // "No VAT" — excluded from tax base
 
 export type QBOStableLineKind = "standard" | "rounding";
 
 export interface QBOStableLine {
   /** Net amount in pence (Amount field in QBO payload, ex-VAT). */
   netPence: number;
-  /** Expected per-line VAT in pence under QBO's own recompute. */
+  /** Per-line VAT contribution in pence under QBO's recompute (always 0 here — QBO computes at doc level). */
   vatPence: number;
   /** "standard" = derived from a source gross line. "rounding" = injected balancer. */
   kind: QBOStableLineKind;
   /** Index into the original input array (for lines of kind "standard"). */
   sourceIndex: number | null;
-  /** TaxCodeRef value for this line (defaults to 20% S for standard, No VAT for rounding). */
+  /** TaxCodeRef value for this line. */
   taxCodeRef: string;
 }
 
 /**
- * Simulate exactly what QBO will compute for a set of (netPence, taxCodeRef) lines.
- * QBO performs `round(Amount × rate)` per line and sums them.
+ * Simulate exactly what QBO will compute for a set of (netPence, taxCodeRef) lines
+ * under the doc-level recompute rule:
  *
- * For TaxCodeRef = "10" (No VAT) the per-line tax contribution is 0.
- * For TaxCodeRef = "6"  (20% S) the per-line tax is round(net × 0.20).
+ *   tax  = round( sum(net for lines where code != NO_VAT) × rate )
+ *   gross = sum(all nets) + tax
  */
 export function simulateQBOTotal(
   lines: { netPence: number; taxCodeRef: string }[],
   rate: number = VAT_RATE_DEFAULT,
 ): { totalNetPence: number; totalTaxPence: number; totalGrossPence: number } {
   let totalNetPence = 0;
-  let totalTaxPence = 0;
+  let taxableNetPence = 0;
   for (const l of lines) {
     totalNetPence += l.netPence;
-    if (l.taxCodeRef === QBO_TAX_CODE_NO_VAT) {
-      // Zero-rated / no VAT — no tax computed by QBO.
-      continue;
+    if (l.taxCodeRef !== QBO_TAX_CODE_NO_VAT) {
+      taxableNetPence += l.netPence;
     }
-    // QBO converts pence → pounds, multiplies, rounds to 2dp, converts back.
-    const lineTaxPence = Math.round(l.netPence * rate);
-    totalTaxPence += lineTaxPence;
   }
+  const totalTaxPence = Math.round(taxableNetPence * rate);
   return {
     totalNetPence,
     totalTaxPence,
@@ -73,19 +77,18 @@ export function simulateQBOTotal(
 }
 
 /**
- * Build per-line net amounts such that QBO's own per-line tax recompute
- * sums exactly to the source gross.
+ * Build per-line net amounts such that QBO's doc-level tax recompute lands
+ * the document at the exact target gross.
  *
  * Algorithm:
- *  1. For each input line, start with naive `lineNet = round(lineGross / 1.20)`.
- *  2. Simulate QBO's total. If it matches expected gross → done.
- *  3. Otherwise, nudge the largest-magnitude line's net by ±1p in the direction
- *     that pushes the simulated total toward the target. Re-simulate. Repeat
- *     for up to a small bounded number of iterations.
- *  4. If no per-line nudge converges, append a zero-tax (TaxCodeRef = "No VAT")
- *     balancing line of ±1p to absorb the residual.
+ *  1. N = round(targetGross / 1.20)  — required taxable-net sum.
+ *  2. For each input line, naive net = round(lineGross / 1.20). Fix the
+ *     largest line by ±delta so sum(nets) === N exactly.
+ *  3. Recompute under QBO's rule: doc_tax = round(N × 0.20),
+ *     doc_gross = N + doc_tax. If doc_gross !== targetGross, append a
+ *     zero-tax "Rounding adjustment" line of (targetGross − doc_gross) pence.
  *
- * Guarantees: the returned `simulateQBOTotal(result).totalGrossPence === sum(grossPenceLines)`.
+ * Guarantees: simulateQBOTotal(result).totalGrossPence === sum(grossPenceLines).
  */
 export function buildQBOStableLines(
   grossPenceLines: number[],
@@ -95,87 +98,53 @@ export function buildQBOStableLines(
 
   const targetGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
   const taxDivisor = 1 + rate;
+  const requiredNetSum = Math.round(targetGrossPence / taxDivisor);
 
-  // Step 1: naive per-line net from gross.
-  const lines: QBOStableLine[] = grossPenceLines.map((g, i) => {
-    const netPence = Math.round(g / taxDivisor);
-    return {
-      netPence,
-      vatPence: Math.round(netPence * rate),
-      kind: "standard",
-      sourceIndex: i,
-      taxCodeRef: QBO_TAX_CODE_STANDARD_20,
-    };
-  });
+  // Step 1: naive per-line net.
+  const lines: QBOStableLine[] = grossPenceLines.map((g, i) => ({
+    netPence: Math.round(g / taxDivisor),
+    vatPence: 0,
+    kind: "standard",
+    sourceIndex: i,
+    taxCodeRef: QBO_TAX_CODE_STANDARD_20,
+  }));
 
-  // Step 2: iteratively nudge lines until simulated total matches.
-  // Worst case is 1–2 nudges; cap iterations to avoid pathological loops.
-  const MAX_ITERATIONS = 8;
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const sim = simulateQBOTotal(lines, rate);
-    const drift = sim.totalGrossPence - targetGrossPence;
-    if (drift === 0) {
-      // Refresh per-line vat snapshot for caller diagnostics.
-      for (const l of lines) {
-        l.vatPence = l.taxCodeRef === QBO_TAX_CODE_NO_VAT ? 0 : Math.round(l.netPence * rate);
-      }
-      return lines;
-    }
-
-    // Find the candidate line whose ±1p net adjustment shifts the simulated
-    // gross by exactly `Math.sign(-drift)` pence (i.e. whose tax bucket flips
-    // the right way). For 20% VAT, decrementing net by 1p reduces gross by
-    // either 1p (if tax doesn't flip) or 2p (if tax flips down by 1p), and
-    // similarly +1p increases gross by 1 or 2. We prefer the simplest 1p shift.
-    const direction = drift > 0 ? -1 : 1; // we need to move sim down or up
-    let chosenIdx = -1;
-    let chosenShift = 0;
-
-    // Pass 1: prefer a 1p net shift that yields exactly 1p gross shift.
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
-      if (l.kind !== "standard" || l.taxCodeRef === QBO_TAX_CODE_NO_VAT) continue;
-      const currentTax = Math.round(l.netPence * rate);
-      const candidateNet = l.netPence + direction;
-      if (candidateNet < 0) continue;
-      const candidateTax = Math.round(candidateNet * rate);
-      const grossShift = direction + (candidateTax - currentTax);
-      if (grossShift === direction) {
-        // Exactly the 1p shift we want.
-        chosenIdx = i;
-        chosenShift = direction;
-        break;
+  // Step 2: nudge to make sum(nets) === requiredNetSum.
+  const sumNets = lines.reduce((s, l) => s + l.netPence, 0);
+  const netDelta = requiredNetSum - sumNets;
+  if (netDelta !== 0) {
+    // Apply the entire delta to the largest-magnitude line. Delta is small
+    // (typically ±1p, bounded by line count × 0.5p of rounding noise).
+    let largestIdx = 0;
+    for (let i = 1; i < lines.length; i++) {
+      if (Math.abs(lines[i].netPence) > Math.abs(lines[largestIdx].netPence)) {
+        largestIdx = i;
       }
     }
-
-    // Pass 2: accept any shift in the right direction (largest line first).
-    if (chosenIdx === -1) {
+    const adjusted = lines[largestIdx].netPence + netDelta;
+    if (adjusted < 0) {
+      // Pathological: distribute across multiple lines instead.
+      let remaining = netDelta;
       const order = lines
         .map((l, i) => ({ i, mag: Math.abs(l.netPence) }))
-        .filter((x) => lines[x.i].kind === "standard" && lines[x.i].taxCodeRef !== QBO_TAX_CODE_NO_VAT)
         .sort((a, b) => b.mag - a.mag);
       for (const { i } of order) {
-        const l = lines[i];
-        const currentTax = Math.round(l.netPence * rate);
-        const candidateNet = l.netPence + direction;
-        if (candidateNet < 0) continue;
-        const candidateTax = Math.round(candidateNet * rate);
-        const grossShift = direction + (candidateTax - currentTax);
-        if (Math.sign(grossShift) === direction) {
-          chosenIdx = i;
-          chosenShift = direction;
-          break;
+        if (remaining === 0) break;
+        const step = remaining > 0 ? 1 : -1;
+        while (remaining !== 0 && lines[i].netPence + step >= 0) {
+          lines[i].netPence += step;
+          remaining -= step;
+          if (Math.abs(remaining) > 100) break; // safety
         }
       }
+    } else {
+      lines[largestIdx].netPence = adjusted;
     }
-
-    if (chosenIdx === -1) break; // no per-line solution — fall through to balancer.
-    lines[chosenIdx].netPence += chosenShift;
   }
 
-  // Step 3: residual still nonzero → append a zero-tax balancing line.
-  const finalSim = simulateQBOTotal(lines, rate);
-  const residual = targetGrossPence - finalSim.totalGrossPence;
+  // Step 3: check QBO's doc-level recompute and append balancer if needed.
+  const sim = simulateQBOTotal(lines, rate);
+  const residual = targetGrossPence - sim.totalGrossPence;
   if (residual !== 0) {
     lines.push({
       netPence: residual,
@@ -186,10 +155,6 @@ export function buildQBOStableLines(
     });
   }
 
-  // Refresh vatPence snapshot for diagnostics.
-  for (const l of lines) {
-    l.vatPence = l.taxCodeRef === QBO_TAX_CODE_NO_VAT ? 0 : Math.round(l.netPence * rate);
-  }
   return lines;
 }
 
@@ -206,7 +171,7 @@ export class QBOPayloadImbalanceError extends Error {
     public diagnostic: string,
   ) {
     super(
-      `QBO payload would not balance under per-line VAT recompute: ` +
+      `QBO payload would not balance under doc-level VAT recompute: ` +
         `expected gross ${(expectedGrossPence / 100).toFixed(2)}, ` +
         `simulated ${(simulatedGrossPence / 100).toFixed(2)}. ${diagnostic}`,
     );
@@ -226,7 +191,7 @@ export function assertQBOPayloadBalances(
   if (sim.totalGrossPence !== expectedGrossPence) {
     const dump = lines
       .map((l, i) =>
-        `[${i}] kind=${l.kind} net=${(l.netPence / 100).toFixed(2)} tax=${(l.vatPence / 100).toFixed(2)} code=${l.taxCodeRef}`,
+        `[${i}] kind=${l.kind} net=${(l.netPence / 100).toFixed(2)} code=${l.taxCodeRef}`,
       )
       .join(" | ");
     throw new QBOPayloadImbalanceError(expectedGrossPence, sim.totalGrossPence, dump);
