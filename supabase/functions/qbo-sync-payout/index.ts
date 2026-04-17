@@ -25,6 +25,7 @@ import {
 } from "../_shared/vat.ts";
 import {
   buildBalancedQBOLines,
+  growRoundingLine,
   assertQBOPayloadBalances,
   QBOPayloadImbalanceError,
   QBO_TAX_CODE_STANDARD_20,
