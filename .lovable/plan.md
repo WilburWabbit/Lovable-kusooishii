@@ -1,80 +1,70 @@
 
 
-## What's actually happening
+## Issue
 
-DB state for payout `060ee447`:
-- `payouts.qbo_sync_status = 'synced'`, `qbo_deposit_id = 2276` ← still set
-- All `ebay_payout_transactions.qbo_purchase_id` = NULL ← expenses reset OK
-- All linked `sales_order.qbo_sales_receipt_id` still set (e.g. KO-0009323 → 2275), `qbo_sync_status = 'synced'`
+A large number of payouts already have a `qbo_deposit_id` (e.g., 1835, 1859, 1677, 1608…) — these deposits exist in QBO and were back-ingested via `qbo-process-pending` rather than created by the app. But their `qbo_sync_status` is stuck at `'pending'`, so:
 
-So:
-1. The "Reset Expenses" press worked.
-2. The "Reset Deposit" / "Reset All" press did **not** persist — `qbo_deposit_id` and `qbo_sync_status` on the payout row are unchanged.
-3. The reset action **never** clears `sales_order.qbo_sales_receipt_id`, so even after a successful "Reset All" the app still believes the SalesReceipts exist in QBO. After you delete them in QBO, the app diverges silently.
+- The Payouts list/Detail UI shows "QBO Pending" badges for payouts that are in fact already in QBO
+- The "Sync to QBO" button is offered for payouts that already have a deposit
+- Operators can't tell at a glance which payouts genuinely need work
 
-The "Sync to QBO" button is hidden because `payout.qboSyncStatus !== "synced"` is false (line 694 of `PayoutDetail.tsx`). That's why it's greyed/missing.
+The UI logic in `PayoutDetail.tsx` already prefers the "deposit exists" signal in some places (`payout.qboDepositId &&`) but the `qboSyncStatus` field — used for badges and gating — was never reconciled.
 
-## Fix — two small, surgical changes
+## Fix — three small changes, no schema change
 
-### 1. `supabase/functions/admin-data/index.ts` — `reset_payout_sync` action
+### 1. Backfill: mark all payouts with an existing `qbo_deposit_id` as synced
 
-Make scope `deposit` and `all` also clear the linked sales receipts so the app's view of QBO matches reality after the user has deleted records in QBO:
+One-off SQL repair against `payouts`:
 
-- For `scope in ('deposit','all')`:
-  - Continue to clear `payouts.qbo_deposit_id`, `qbo_expense_id`, `qbo_sync_status='pending'`, `qbo_sync_error=null` (existing behaviour).
-  - Additionally: find every `sales_order` linked to this payout (via `payout_orders.sales_order_id` AND via `ebay_payout_transactions.matched_order_id`/`order_id → origin_reference`) and clear `qbo_sales_receipt_id = null`, `qbo_sync_status = 'pending'`, `qbo_sync_error = null`.
-  - Return counts: `depositReset`, `salesReceiptsReset`.
-
-- For `scope = 'expenses'`: keep current behaviour (clears only `ebay_payout_transactions.qbo_purchase_id`).
-
-This makes the three reset buttons match what the UI implies: "expenses-only", "deposit + sales receipts", "everything".
-
-### 2. `src/components/admin-v2/PayoutDetail.tsx` — make Sync button visible whenever there's work to do
-
-Replace the gating condition on the Sync button (currently `payout.qboSyncStatus !== "synced"`) with:
-
-```ts
-const needsSync =
-  payout.qboSyncStatus !== "synced" ||
-  !payout.qboDepositId ||
-  (qboReadiness && (qboReadiness.unsyncedOrders.length > 0 || qboReadiness.pendingExpenses.length > 0));
+```sql
+UPDATE payouts
+SET qbo_sync_status = 'synced',
+    qbo_sync_error = NULL
+WHERE qbo_deposit_id IS NOT NULL
+  AND qbo_sync_status = 'pending';
 ```
 
-So the button is shown whenever:
-- the payout itself isn't synced, OR
-- there is no QBO deposit linked, OR
-- any sales receipt or expense is missing.
+This brings the ~30 stuck rows in line with reality. No effect on rows already `synced`, `error`, or `partial`, and no effect on rows where `qbo_deposit_id IS NULL` (those genuinely need syncing).
 
-The existing `disabled={triggerQBOSync.isPending || (qboReadiness != null && !qboReadiness.ready)}` stays, so we still block clicking until readiness passes.
+Excludes the one in-flight payout `2a3b0be6-…` (Stripe payout `po_1TLY2QHDItV5mfAy1M1NtzCC`) which has no deposit yet — it correctly stays `pending`.
 
-### 3. Toast hardening on the reset buttons
+### 2. `qbo-process-pending/index.ts` — set status when ingesting a pre-existing QBO deposit
 
-Surface the actual server response counts so a user can immediately tell whether the reset took effect:
+In the existing block (~line 1453) where the function inserts/updates a `payouts` row from a QBO deposit it found in QBO:
 
-- "Reset Deposit" → toast `Deposit reset (1) + N sales receipts cleared`.
-- "Reset All" → toast `Reset N expenses, deposit, M sales receipts`.
+- On both the `INSERT` path (new payout discovered from QBO) and the `UPDATE` path (existing payout matched by `qbo_deposit_id`), set:
+  - `qbo_sync_status = 'synced'`
+  - `qbo_sync_error = null`
 
-### 4. One-off data repair for this stuck payout
+This prevents the same drift from recurring on the next QBO ingestion.
 
-Run once after the function change deploys, against payout `060ee447-02f7-4527-84a4-95aedecd0daa` (external `7388684270`):
+### 3. `qbo-sync-payout/index.ts` — when the existing-deposit lookup finds a match, persist `qbo_sync_status='synced'` immediately
 
-- `UPDATE payouts SET qbo_deposit_id = NULL, qbo_expense_id = NULL, qbo_sync_status = 'pending', qbo_sync_error = NULL WHERE id = '060ee447-…'`
-- `UPDATE sales_order SET qbo_sales_receipt_id = NULL, qbo_sync_status = 'pending', qbo_sync_error = NULL WHERE origin_reference IN (the 10 SALE transaction IDs)`
-- `ebay_payout_transactions.qbo_purchase_id` is already NULL — no change needed.
+In the block at line 1576–1587 (existing deposit found by `DocNumber`), after capturing `qboDepositId` and `qboDepositTotal` from the QBO query response, also persist `qbo_sync_status='synced'` so future page loads reflect reality even if the user closes the tab before the function reaches the line 1681 status-write.
 
-After this:
-- "QBO Readiness" badge will read `0/10 orders synced, 0/N expenses created`.
-- "Sync to QBO" button becomes visible AND enabled once each sales receipt is recreated by the existing per-order sync flow (or directly by `qbo-sync-payout`, which already invokes `qbo-sync-sales-receipt` for any order missing a receipt).
+This is defensive: the function already writes the final status at line 1681, but if anything between detection and final write throws, the payout would be left as `pending` despite being correctly linked to QBO. Persisting on detection makes the UI state monotonic and accurate.
+
+No change needed to the verification logic at lines 1622–1664 — that already correctly downgrades to `error` if `TotalAmt` mismatches.
 
 ## Explicitly NOT changed
 
-- `qbo-sync-payout`, `qbo-sync-sales-receipt`, VAT logic, ex-VAT posting model, repair loop — all untouched. The previous fix stands.
-- `payout_orders` rows — left as-is.
-- No schema change. No migration.
+- Status enum (`pending | synced | partial | error | needs_manual_review`) — unchanged
+- `qbo-sync-payout` core deposit-creation flow, repair loop, VAT logic — untouched
+- `payouts` schema — no migration
+- The "Sync to QBO" button visibility logic in `PayoutDetail.tsx` — already correct (line 694 also checks `qboReadiness.unsyncedOrders/pendingExpenses`, so it'll still surface when sales receipts or expenses are missing even after the payout is "synced")
 
 ## Files
 
-- `supabase/functions/admin-data/index.ts` — extend `reset_payout_sync` for `deposit`/`all` scope to also clear linked `sales_order.qbo_sales_receipt_id`.
-- `src/components/admin-v2/PayoutDetail.tsx` — broaden Sync button visibility condition; richer reset toasts.
-- One-off SQL repair for `060ee447-…`.
+- One-off `UPDATE payouts SET qbo_sync_status='synced'` for rows with existing `qbo_deposit_id`
+- `supabase/functions/qbo-process-pending/index.ts` — set `qbo_sync_status='synced'` on insert/update of payouts created from existing QBO deposits
+- `supabase/functions/qbo-sync-payout/index.ts` — write `qbo_sync_status='synced'` immediately when an existing QBO deposit is detected by `DocNumber`
+
+## Verification after deploy
+
+```sql
+SELECT qbo_sync_status, COUNT(*), COUNT(qbo_deposit_id) FILTER (WHERE qbo_deposit_id IS NOT NULL)
+FROM payouts GROUP BY 1;
+```
+
+Expected: every row with a `qbo_deposit_id` is `synced`, `partial`, or `error` — never `pending`.
 
