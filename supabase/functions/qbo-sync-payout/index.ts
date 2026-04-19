@@ -1580,6 +1580,17 @@ Deno.serve(async (req) => {
           qboDepositId = String(deposits[0].Id);
           qboDepositTotal = Number(deposits[0].TotalAmt ?? 0);
           console.log(`Found existing QBO deposit ${qboDepositId} for DocNumber ${externalPayoutId} (TotalAmt £${qboDepositTotal.toFixed(2)})`);
+          // Persist the link + synced status immediately so the UI reflects
+          // reality even if a later step throws before the final status write.
+          // Verification below may still downgrade to 'error' on TotalAmt mismatch.
+          await admin
+            .from("payouts" as never)
+            .update({
+              qbo_deposit_id: qboDepositId,
+              qbo_sync_status: "synced",
+              qbo_sync_error: null,
+            } as never)
+            .eq("id", payoutId);
         }
       } else {
         await existingRes.text();

@@ -1462,6 +1462,8 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
 
         const updatePayload: Record<string, unknown> = {
           qbo_deposit_id: qboDepositId,
+          qbo_sync_status: "synced",
+          qbo_sync_error: null,
           reconciliation_status: "reconciled",
           notes: memo,
           updated_at: new Date().toISOString(),
@@ -1485,6 +1487,8 @@ async function processDeposits(admin: any, batchSize: number): Promise<{ process
           total_fees: Math.round(feesTotal * 100) / 100,
           net_amount: netAmount, channel, notes: memo,
           reconciliation_status: "reconciled",
+          qbo_sync_status: "synced",
+          qbo_sync_error: null,
           ...(externalPayoutId ? { external_payout_id: externalPayoutId } : {}),
         }).select("id").single();
         if (payoutErr) throw payoutErr;
