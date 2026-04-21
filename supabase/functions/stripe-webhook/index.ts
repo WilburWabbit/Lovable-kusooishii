@@ -1069,12 +1069,23 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
     throw new Error(`Failed to record payout: ${insertErr.message}`);
   }
 
-  // Link matched orders to payout via join table
+  // Link matched orders to payout via join table.
+  // Include order_gross sourced from sales_order.gross_total so
+  // reconcile can compute order_net = gross - fees correctly.
   const localPayoutId = (payoutRecord as Record<string, unknown>)?.id as string;
   if (localPayoutId && matchedOrderIds.length > 0) {
+    const { data: grossRows } = await supabase
+      .from("sales_order")
+      .select("id, gross_total")
+      .in("id", matchedOrderIds);
+    const grossById = new Map<string, number>();
+    for (const g of (grossRows ?? []) as Array<{ id: string; gross_total: number | null }>) {
+      grossById.set(g.id, Number(g.gross_total ?? 0));
+    }
     const orderLinks = matchedOrderIds.map((orderId) => ({
       payout_id: localPayoutId,
       sales_order_id: orderId,
+      order_gross: grossById.get(orderId) ?? 0,
     }));
 
     await supabase
