@@ -13,6 +13,7 @@
 import type {
   PayoutAdapter,
   NeutralPayoutTx,
+  NeutralFeeDetail,
   AdapterDeps,
 } from "../../_shared/payout-adapter.ts";
 
