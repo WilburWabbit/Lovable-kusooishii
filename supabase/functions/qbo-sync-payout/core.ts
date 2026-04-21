@@ -1280,10 +1280,7 @@ export async function syncPayoutCore(
       }
 
       // Update the transaction with the QBO Purchase ID
-      await admin
-        .from("ebay_payout_transactions" as never)
-        .update({ qbo_purchase_id: purchaseResult.id } as never)
-        .eq("id" as never, tx.id);
+      await adapter.persistPurchaseId(adapterDeps, tx.__neutral, purchaseResult.id);
 
       const totalExpenseAmount = expenseLines.reduce((s, l) => s + l.amount, 0);
       const primaryAccountRef = expenseLines[0].accountRef;
