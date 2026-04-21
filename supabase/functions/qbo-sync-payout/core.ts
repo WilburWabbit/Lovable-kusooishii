@@ -1236,14 +1236,19 @@ export async function syncPayoutCore(
         ? buildAccountRef(payoutBankRef)
         : buildAccountRef(undepositedFundsAccount);
 
+      const defaultPrivateNote = txType === "NON_SALE_CHARGE" && tx.ebay_item_id
+        ? `${channel} payout ${externalPayoutId} — ${txType} item ${tx.ebay_item_id} — ${tx.transaction_id}`
+        : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}${isSettled ? " (settled via TRANSFER)" : ""}`;
+      const privateNote = adapter.buildPrivateNote
+        ? adapter.buildPrivateNote(tx.__neutral, channel, externalPayoutId, isSettled)
+        : defaultPrivateNote;
+
       const purchaseResult = await createQBOPurchase(baseUrl, accessToken, {
         txnDate: payoutDate,
         bankAccountRef: purchaseBankRef,
-        vendorRef: EBAY_VENDOR_REF,
+        vendorRef: adapter.qboVendorRef,
         lines: expenseLines,
-        privateNote: txType === "NON_SALE_CHARGE" && tx.ebay_item_id
-          ? `${channel} payout ${externalPayoutId} — ${txType} item ${tx.ebay_item_id} — ${tx.transaction_id}`
-          : `${channel} payout ${externalPayoutId} — ${txType} ${tx.order_id ?? tx.memo ?? tx.transaction_id}${isSettled ? " (settled via TRANSFER)" : ""}`,
+        privateNote,
         docNumber: expenseDocNumber,
       });
 
