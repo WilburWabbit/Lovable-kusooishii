@@ -973,6 +973,17 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
   let grossAmount = netAmount;
   let orderCount = 0;
   const matchedOrderIds: string[] = [];
+  const piToOrderId = new Map<string, string>();
+  // Per-charge fee records to write into payout_fee after we have the local payout id.
+  // Each entry maps a Stripe payment_intent (pi_…) to its processing fee in pounds.
+  const perChargeFees: Array<{
+    paymentIntentId: string;
+    chargeId: string;
+    feeAmount: number; // in pounds
+    description: string;
+  }> = [];
+  // Residual non-charge fees (e.g. account-level Stripe charges) lumped together.
+  let residualFee = 0;
 
   try {
     // Use the correct Stripe instance (live vs sandbox determined by caller context)
@@ -991,10 +1002,24 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
         // This is a charge — look up the payment_intent
         try {
           const charge = await stripeClient.charges.retrieve(bt.source as string);
-          if (charge.payment_intent) {
-            paymentIntentIds.push(charge.payment_intent as string);
+          const pi = charge.payment_intent as string | null;
+          if (pi) {
+            paymentIntentIds.push(pi);
+            perChargeFees.push({
+              paymentIntentId: pi,
+              chargeId: bt.source as string,
+              feeAmount: bt.fee / 100,
+              description: `Stripe processing fee — charge ${bt.source}`,
+            });
+          } else {
+            residualFee += bt.fee / 100;
           }
-        } catch { /* best effort */ }
+        } catch {
+          residualFee += bt.fee / 100;
+        }
+      } else if (bt.fee > 0) {
+        // Non-charge balance tx with a fee (rare): treat as residual.
+        residualFee += bt.fee / 100;
       }
     }
 
@@ -1005,12 +1030,13 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
     if (paymentIntentIds.length > 0) {
       const { data: orders } = await supabase
         .from("sales_order")
-        .select("id")
+        .select("id, payment_reference")
         .in("payment_reference", paymentIntentIds);
 
       if (orders) {
-        for (const o of orders as { id: string }[]) {
+        for (const o of orders as { id: string; payment_reference: string | null }[]) {
           matchedOrderIds.push(o.id);
+          if (o.payment_reference) piToOrderId.set(o.payment_reference, o.id);
         }
         orderCount = matchedOrderIds.length;
       }
@@ -1043,12 +1069,23 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
     throw new Error(`Failed to record payout: ${insertErr.message}`);
   }
 
-  // Link matched orders to payout via join table
+  // Link matched orders to payout via join table.
+  // Include order_gross sourced from sales_order.gross_total so
+  // reconcile can compute order_net = gross - fees correctly.
   const localPayoutId = (payoutRecord as Record<string, unknown>)?.id as string;
   if (localPayoutId && matchedOrderIds.length > 0) {
+    const { data: grossRows } = await supabase
+      .from("sales_order")
+      .select("id, gross_total")
+      .in("id", matchedOrderIds);
+    const grossById = new Map<string, number>();
+    for (const g of (grossRows ?? []) as Array<{ id: string; gross_total: number | null }>) {
+      grossById.set(g.id, Number(g.gross_total ?? 0));
+    }
     const orderLinks = matchedOrderIds.map((orderId) => ({
       payout_id: localPayoutId,
       sales_order_id: orderId,
+      order_gross: grossById.get(orderId) ?? 0,
     }));
 
     await supabase
@@ -1056,6 +1093,45 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
       .upsert(orderLinks as never, { onConflict: "payout_id,sales_order_id" as never })
       .then(() => console.log(`Linked ${matchedOrderIds.length} orders to payout ${payoutId}`))
       .catch((err: unknown) => console.warn("Failed to link orders to payout:", err));
+  }
+
+  // Insert per-charge payout_fee rows so reconciliation can populate
+  // order_fees / order_net per order, and so qbo-sync-payout's Stripe
+  // adapter has fee rows to drive Purchase creation.
+  if (localPayoutId && perChargeFees.length > 0) {
+    const feeRows = perChargeFees.map((c) => ({
+      payout_id: localPayoutId,
+      sales_order_id: piToOrderId.get(c.paymentIntentId) ?? null,
+      external_order_id: c.paymentIntentId,
+      channel: "stripe",
+      fee_category: "payment_processing",
+      amount: Math.round(c.feeAmount * 100) / 100,
+      description: c.description,
+    }));
+    const { error: feeErr } = await supabase
+      .from("payout_fee")
+      .insert(feeRows as never);
+    if (feeErr) {
+      console.warn(`Failed to insert ${feeRows.length} payout_fee rows for ${payoutId}:`, feeErr);
+    } else {
+      console.log(`Inserted ${feeRows.length} payout_fee rows for Stripe payout ${payoutId}`);
+    }
+  }
+
+  // Lump any residual non-charge fees into a single ACCOUNT_CHARGE-style row.
+  if (localPayoutId && residualFee > 0.005) {
+    const { error: resErr } = await supabase
+      .from("payout_fee")
+      .insert({
+        payout_id: localPayoutId,
+        sales_order_id: null,
+        external_order_id: null,
+        channel: "stripe",
+        fee_category: "payment_processing",
+        amount: Math.round(residualFee * 100) / 100,
+        description: `Stripe residual processing fees (non-charge balance txs)`,
+      } as never);
+    if (resErr) console.warn(`Failed to insert residual payout_fee for ${payoutId}:`, resErr);
   }
 
   // Trigger reconciliation (payout_received transition + QBO sync)
