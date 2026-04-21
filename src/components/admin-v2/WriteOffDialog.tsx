@@ -81,6 +81,15 @@ export function WriteOffDialog({ open, onClose, stockUnitIds }: WriteOffDialogPr
           count: stockUnitIds.length,
         },
       });
+
+      // Push updated stock counts to eBay (non-blocking). Writing off
+      // units reduces availability — listings must drop quantity (or be
+      // withdrawn if zero) so they can't be sold on eBay.
+      if (skuIds.size > 0) {
+        supabase.functions
+          .invoke("sync-ebay-quantity", { body: { skuIds: Array.from(skuIds) } })
+          .catch((err) => console.warn("eBay quantity sync failed (non-blocking):", err));
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
