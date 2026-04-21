@@ -13,6 +13,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { pushEbayQuantityForSkus } from "../_shared/ebay-inventory-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,6 +76,7 @@ Deno.serve(async (req) => {
 
     // ─── 2. Process each unallocated line item ──────────────
     const affectedSkus = new Set<string>();
+    const affectedSkuIds = new Set<string>();
     let processedLines = 0;
     let cogsTotal = 0;
 
@@ -144,8 +146,22 @@ Deno.serve(async (req) => {
       }
 
       affectedSkus.add(skuCode);
+      affectedSkuIds.add(skuId);
       processedLines += 1;
       cogsTotal += landedCost;
+    }
+
+    // ─── 2b. Push updated stock counts to eBay (non-blocking) ──
+    // We just consumed units; eBay's available quantity needs to drop
+    // (and the listing should be withdrawn if we hit zero) so the same
+    // unit can't be sold twice across channels.
+    if (affectedSkuIds.size > 0) {
+      pushEbayQuantityForSkus(admin, affectedSkuIds, {
+        source: "v2-process-order",
+        orderId,
+      }).catch((err) =>
+        console.warn(`eBay quantity push failed (non-blocking): ${err}`),
+      );
     }
 
     // ─── 3. Recalculate variant stats for affected SKUs ─────

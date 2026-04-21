@@ -89,6 +89,15 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
       // QBO refund sync will be handled by retry queue in a future release
       console.log("Refund recorded — QBO sync pending for order", orderId);
 
+      // Push updated stock counts to eBay (non-blocking). Restocked
+      // units re-enter availability; pushing for every affected SKU is
+      // safe and idempotent.
+      if (affectedSkus.size > 0) {
+        supabase.functions
+          .invoke("sync-ebay-quantity", { body: { skuCodes: Array.from(affectedSkus) } })
+          .catch((err) => console.warn("eBay quantity sync failed (non-blocking):", err));
+      }
+
       // Audit event
       await supabase.from("audit_event").insert({
         entity_type: "sales_order",

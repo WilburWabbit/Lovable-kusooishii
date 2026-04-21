@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { pushEbayQuantityForSkus } from "../_shared/ebay-inventory-sync.ts";
 
 const stripeLive = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
@@ -768,6 +769,20 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
 
     if (preparedLines.length > 0) {
       console.log(`Created ${preparedLines.length} order line(s) for ${new Set(preparedLines.map(l => l.skuId)).size} SKU(s)`);
+
+      // ── Push updated stock counts to eBay (non-blocking) ──
+      // Stock just decreased on the website; eBay needs to know so the
+      // same units can't also be sold there. Fire-and-forget so a slow
+      // or failing eBay API never holds up the Stripe webhook response.
+      const affectedSkuIds = new Set(preparedLines.map(l => l.skuId).filter(Boolean));
+      if (affectedSkuIds.size > 0) {
+        pushEbayQuantityForSkus(supabase, affectedSkuIds, {
+          source: "stripe-webhook",
+          orderId: order.id,
+        }).catch((err) =>
+          console.warn(`eBay quantity push failed (non-blocking): ${err}`),
+        );
+      }
     } else if (skuItemsStr) {
       console.warn(`sku_items parsed but no lines created for session ${session.id}`);
     } else {

@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { pushEbayQuantityForSkus } from "../_shared/ebay-inventory-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -674,40 +675,32 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       PUSH STOCK — count available stock_units → eBay
+       PUSH STOCK — uses the shared helper so logic
+       matches all per-order paths. v2_status is the
+       source of truth — legacy `status` column drifts.
        ═══════════════════════════════════════════════ */
     if (action === "push_stock") {
       console.log("Pushing stock levels to eBay...");
 
       const { data: listings } = await admin
         .from("channel_listing")
-        .select("id, external_sku, sku_id")
+        .select("sku_id")
         .eq("channel", "ebay")
+        .eq("v2_status", "live")
+        .not("external_listing_id", "is", null)
         .not("sku_id", "is", null);
 
-      if (listings?.length) {
-        // Count available stock per sku_id
-        const skuIds = [...new Set(listings.map((l: any) => l.sku_id))];
-        const stockCounts = new Map<string, number>();
+      const uniqueSkuIds = new Set<string>(
+        ((listings ?? []) as { sku_id: string }[]).map((l) => l.sku_id),
+      );
 
-        for (const skuId of skuIds) {
-          const { count } = await admin
-            .from("stock_unit")
-            .select("id", { count: "exact", head: true })
-            .eq("sku_id", skuId)
-            .eq("status", "available");
-          stockCounts.set(skuId, count || 0);
-        }
-
-        for (const listing of listings) {
-          const qty = stockCounts.get(listing.sku_id) || 0;
-          try {
-            await updateInventoryQuantity(accessToken, listing.external_sku, qty);
-            results.stock_pushed++;
-          } catch (e: any) {
-            console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
-          }
-        }
+      if (uniqueSkuIds.size > 0) {
+        const r = await pushEbayQuantityForSkus(admin, uniqueSkuIds, {
+          source: "ebay-sync:push_stock",
+        });
+        results.stock_pushed = r.pushed + r.withdrawn;
+        (results as Record<string, unknown>).stock_withdrawn = r.withdrawn;
+        (results as Record<string, unknown>).stock_failed = r.failed;
       }
     }
 
