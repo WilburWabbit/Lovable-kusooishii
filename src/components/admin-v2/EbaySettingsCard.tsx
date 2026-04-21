@@ -79,7 +79,25 @@ export function EbaySettingsCard() {
   const pushStock = () => run('push', async () => {
     const d = await invokeWithAuth<Record<string, unknown>>('ebay-sync', { action: 'push_stock' });
     if ((d as Record<string, unknown>)?.error) throw new Error(String((d as Record<string, unknown>).error));
-    toast.success(`${(d as Record<string, unknown>).stock_pushed ?? 0} SKUs pushed to eBay`);
+    const data = d as Record<string, unknown>;
+    const pushed = Number(data.stock_pushed ?? 0);
+    const withdrawn = Number(data.stock_withdrawn ?? 0);
+    const failed = Number(data.stock_failed ?? 0);
+    const remaining = Number(data.mismatches_remaining ?? 0);
+    const mismatches = (data.mismatches as Array<{ external_sku: string; listed_quantity: number; local_available: number }>) ?? [];
+    const summary = `${pushed} updated · ${withdrawn} withdrawn`;
+    if (failed > 0 || remaining > 0) {
+      const sample = mismatches
+        .slice(0, 3)
+        .map((m) => `${m.external_sku} (eBay ${m.listed_quantity} vs local ${m.local_available})`)
+        .join(', ');
+      toast.error(
+        `${summary}. ${failed} eBay API failures, ${remaining} listings still out of sync.${sample ? ` e.g. ${sample}` : ''}`,
+        { duration: 12000 },
+      );
+    } else {
+      toast.success(`${summary}. All eBay listings in sync.`);
+    }
   });
 
   const syncListings = () => run('listings', async () => {

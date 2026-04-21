@@ -117,21 +117,49 @@ export async function pushEbayQuantityForSku(
       // withdrawing the offer, which is what actually ends the listing.
       let withdrew = false;
       if (qty === 0) {
+        let withdrawErr: string | null = null;
         try {
           await ebayFetch(token, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, {
             method: "POST",
           });
           withdrew = true;
         } catch (wErr) {
-          const msg = wErr instanceof Error ? wErr.message : String(wErr);
-          // Stale offerId / already withdrawn / unpublished — treat as
-          // success and end the listing locally so we stop retrying.
-          if (/404|not.*published|already|valid offerId|25002|25710/i.test(msg)) {
-            withdrew = true;
-            console.log(`[ebay-inventory-sync] ${sku} offer ${offerId} already gone — marking ended locally`);
-          } else {
-            throw wErr;
+          withdrawErr = wErr instanceof Error ? wErr.message : String(wErr);
+        }
+
+        // Verify the actual offer state on eBay before declaring success.
+        // We never silently mark a listing "ended" without confirmation —
+        // that is how 31058-1.1 / 60438-1.1 stayed live with qty=1.
+        let confirmedEnded = false;
+        try {
+          const offer = await ebayFetch(
+            token,
+            `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
+          );
+          const offerStatus = String(offer?.status || "").toUpperCase();
+          const listingStatus = String(offer?.listing?.listingStatus || "").toUpperCase();
+          // PUBLISHED + ACTIVE = still live and buyable. Anything else
+          // (UNPUBLISHED, ENDED, OUT_OF_STOCK without PUBLISHED) is fine.
+          if (offerStatus !== "PUBLISHED" || (listingStatus && listingStatus !== "ACTIVE")) {
+            confirmedEnded = true;
           }
+        } catch (gErr) {
+          const gMsg = gErr instanceof Error ? gErr.message : String(gErr);
+          // GET 404 = the offer no longer exists; treat as ended.
+          if (/\[404\]|25710/i.test(gMsg)) confirmedEnded = true;
+        }
+
+        if (confirmedEnded) {
+          withdrew = true;
+        } else {
+          // Listing is still live on eBay despite our withdraw attempt.
+          // Surface as a failure so it shows in the UI as a mismatch and
+          // we don't lie about local v2_status.
+          throw new Error(
+            `Withdraw did not end offer ${offerId} (sku ${sku}). ` +
+              (withdrawErr ? `Withdraw response: ${withdrawErr}. ` : "") +
+              `Offer is still PUBLISHED on eBay.`,
+          );
         }
       } else {
         const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
