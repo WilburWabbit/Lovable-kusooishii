@@ -229,65 +229,10 @@ Deno.serve(async (req) => {
       listingItemId,
     });
   } catch (err) {
+    console.error("ebay-push-listing failed:", err);
     return errorResponse(err);
   }
 });
-
-// ─── eBay OAuth Token Management ─────────────────────────────
-
-async function getEbayAccessToken(admin: ReturnType<typeof createAdminClient>): Promise<string> {
-  const { data: conn, error } = await admin
-    .from("ebay_connection")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !conn) throw new Error("eBay not connected. Connect eBay in Settings first.");
-
-  const c = conn as Record<string, unknown>;
-
-  // Return current token if still valid (with 60s buffer)
-  if (new Date(c.token_expires_at as string).getTime() > Date.now() + 60_000) {
-    return c.access_token as string;
-  }
-
-  // Refresh the token
-  const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
-
-  const res = await fetchWithTimeout(`${EBAY_API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: c.refresh_token as string,
-      scope: [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-      ].join(" "),
-    }),
-  });
-
-  if (!res.ok) throw new Error(`eBay token refresh failed [${res.status}]`);
-  const data = await res.json();
-  const newExpiresAt = new Date(Date.now() + (data.expires_in || 7200) * 1000).toISOString();
-
-  await admin
-    .from("ebay_connection")
-    .update({
-      access_token: data.access_token,
-      ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
-      token_expires_at: newExpiresAt,
-    } as never)
-    .eq("id", c.id as string);
-
-  return data.access_token;
-}
 
 // ─── eBay API Fetch Helper ───────────────────────────────────
 
