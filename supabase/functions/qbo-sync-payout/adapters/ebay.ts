@@ -141,7 +141,7 @@ export const ebayAdapter: PayoutAdapter = {
     return undefined;
   },
 
-  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string) {
+  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string | null) {
     await deps.admin
       .from("ebay_payout_transactions")
       .update({ qbo_purchase_id: qboPurchaseId })
