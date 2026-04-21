@@ -1,62 +1,94 @@
 
 
-# Debug & Fix `ebay-push-listing`
+# Fix eBay inventory desync after non-eBay sales
 
-## What's broken
+## What's actually broken
 
-The most recent eBay publish attempt (channel_listing `80a44cf1-…`, set 43269 Dalmatians, listed 2026-04-03) ended up with `v2_status='live'` and a `listed_at` timestamp but **no `external_listing_id`** — i.e. the front-end recorded "live" while the function silently failed. No edge-function logs exist for `ebay-push-listing` because the front-end calls it as fire-and-forget (`.catch(console.warn)`).
+Right now **36 of 113 live eBay listings have stale `availableQuantity`** on eBay. Examples confirmed in the database:
 
-## Three actual bugs in `supabase/functions/ebay-push-listing/index.ts`
+| MPN / SKU | Available locally | Quantity on eBay listing | eBay listing ID |
+|---|---|---|---|
+| `31058-1.1` | 0 | 1 | 205909093672 |
+| `60438-1.1` | 0 | 1 | 205906621862 |
+| `42164-1.1` | 4 | 6 | 205913766372 |
+| `40776-1.1` | 3 | 5 | 206027612951 |
+| `10349-1.1` | 89 | 90 | 206005702262 |
+| …30 more | | | |
 
-### 1. Crash on initial DB read (line 46) — the real failure cause
+Both `31058-1` and `60438-1` had their last units sold via the website / admin (orders `53d4e0be-…` and `c732ae09-…`), not eBay. Their stock_units are correctly marked `sold`/`complete` in the app, but eBay still shows `1` available, so they remain biddable/buyable on eBay even though we can't fulfil them.
 
-```ts
-.select("*, product:product_id(mpn, name, description, ean, upc, hook)")
+## Root cause
+
+There are three code paths that consume stock and mark units sold:
+
+1. `ebay-process-order` — **does push updated quantity to eBay** (lines 1015-1023, calls `updateInventoryQuantity` and updates `channel_listing.listed_quantity`). This is why eBay-originated sales don't desync.
+2. `stripe-webhook` (website checkout) — closes the stock unit, audits it, and **stops there**. No call to eBay.
+3. `v2-process-order` (admin / generic post-order hook) — runs FIFO, links unit to order, **stops there**. No call to eBay.
+4. Manual admin order completion in `admin-data` — same: updates local stock only.
+
+`channel_listing.listed_quantity` is also never decremented in paths 2-4, which is why the mismatch query above finds 36 rows.
+
+There is no trigger, cron, or hook that reconciles "stock units changed → push quantity to active eBay listings".
+
+## The fix
+
+### 1. New helper: `pushEbayInventoryQuantity(skuId)` — single point of truth
+
+Add a small helper (in `supabase/functions/_shared/`, e.g. `ebay-inventory-sync.ts`) that:
+
+- Looks up live `channel_listing` rows for `sku_id` where `channel='ebay'` and `external_listing_id` is not null.
+- Counts available stock units (`v2_status IN ('graded','listed')`) for that SKU.
+- For each listing, calls `PUT /sell/inventory/v1/inventory_item/{sku}` with the new `availability.shipToLocationAvailability.quantity`.
+- Writes `channel_listing.listed_quantity` and `synced_at` locally on success.
+- If quantity hits 0, also calls `POST /sell/inventory/v1/offer/{offerId}/withdraw` so the listing actually ends instead of just sitting at qty=0 (matches the "End listings when stock reaches zero" rule in the design spec).
+- On failure: insert a row into `audit_event` with `category: 'ebay_stock_desync'` (same shape as `ebay-process-order` already does), so we don't silently fail again.
+
+This consolidates the three near-identical copies of `updateInventoryQuantity` already living in `ebay-sync`, `ebay-process-order`, and `ebay-push-listing`.
+
+### 2. Wire the helper into every non-eBay sales path
+
+- **`stripe-webhook`** — after the `update({ status: "closed" })` of the stock unit (around line 743), collect each affected `sku_id` and at the end of the order processing block fire `pushEbayInventoryQuantity` for each unique SKU. Fire-and-forget with `.catch(audit)`; do NOT block the webhook response (Stripe needs a fast 200).
+- **`v2-process-order`** — same pattern: after the `affectedSkus` set is built (it already exists at line 77/146), iterate it and call the helper.
+- **`admin-data`** order-completion / shipment / write-off branches that flip a unit to `sold`, `shipped`, or `written_off` — call the helper for each affected SKU.
+- **`v2-reconcile-payout`** — already touches units; safe to also nudge eBay quantity for any SKU it consumes (defensive, since reconciliation can also discover missed orders).
+
+In all four cases the helper call is **non-blocking** (the order/payout/webhook must still succeed even if eBay is unreachable), but failures are recorded as `ebay_stock_desync` audit events so they're visible.
+
+### 3. Backfill / repair the 36 currently desynced listings
+
+Add a tiny one-shot admin endpoint or extend `ebay-sync` `action: "push_stock"` (which already exists and does exactly the right loop, lines 678-710) so the user can run it once now. Then call it from the admin UI Channels tab or simply trigger it via `curl_edge_functions`. This will:
+
+- Push correct quantities for all 36 listings.
+- Withdraw offers where the new quantity is 0 (this resolves `31058-1`, `60438-1`, and ~20 other zero-stock listings still live on eBay).
+
+### 4. Safety net: nightly drift check
+
+Add a cron (or extend the existing eBay sync schedule) to run the same comparison query nightly:
+
+```text
+local_available  vs  channel_listing.listed_quantity (per live ebay listing)
 ```
 
-`product.upc` and `product.hook` **don't exist**. PostgREST returns `42703` and the function throws before ever reaching eBay. Real columns: `mpn, name, description, ean, product_hook` (no UPC at all).
+For any mismatch, call the helper. This catches edge cases (manual DB edits, failed pushes, eBay API outages) without manual intervention. Insert one summary `audit_event` per run.
 
-### 2. Wrong column name `external_id` (lines 98, 176)
+## Files touched
 
-`channel_listing` has **no `external_id` column**. The eBay offer ID is meant to live in `external_listing_id` (used by `ebay-sync`, `ebay-import-payouts`, `qbo-sync-payout`, `admin-data` — every other function in the project). Effects:
-- Line 98 (`existingExternalId = l.external_id`) is always null → the function always tries to create a fresh offer instead of updating an existing one.
-- Line 176 (`update({ external_id: offerId })` ) silently writes to a non-existent column → the offer ID is never persisted, which is exactly what we see for the Dalmatians row.
+| File | Change |
+|---|---|
+| `supabase/functions/_shared/ebay-inventory-sync.ts` | **NEW** — `pushEbayInventoryQuantity(admin, skuId)` helper |
+| `supabase/functions/stripe-webhook/index.ts` | Call helper for each SKU after order paid |
+| `supabase/functions/v2-process-order/index.ts` | Call helper for each SKU in `affectedSkus` |
+| `supabase/functions/admin-data/index.ts` | Call helper from manual ship/complete/write-off branches |
+| `supabase/functions/v2-reconcile-payout/index.ts` | Call helper after unit status updates |
+| `supabase/functions/ebay-process-order/index.ts` | Refactor to use the shared helper (drop the local copy) |
+| `supabase/functions/ebay-sync/index.ts` | Refactor `push_stock` action to use the shared helper; add a `withdraw if qty=0` branch |
+| New cron job (SQL) | Nightly drift check that calls the shared push for any mismatch |
 
-### 3. Missing eBay marketplace policy secrets (lines 115-119)
+## Verification steps after deployment
 
-`EBAY_FULFILLMENT_POLICY_ID`, `EBAY_PAYMENT_POLICY_ID`, `EBAY_RETURN_POLICY_ID`, `EBAY_LOCATION_KEY` are not set in project secrets. Once bug #1 is fixed the function will reach eBay and `POST /sell/inventory/v1/offer` will return a 400 because these come through as empty strings.
-
-## Fix plan
-
-### A. Edge function `supabase/functions/ebay-push-listing/index.ts`
-
-1. **Fix the SKU/product select** (line 46): drop `upc`, rename `hook` → `product_hook`. Final list: `mpn, name, description, ean, product_hook`.
-2. **Remove the UPC spread** (line 76) since the column doesn't exist.
-3. **Replace both `external_id` references** with `external_listing_id`:
-   - Line 98: `const existingExternalId = l.external_listing_id as string | null;`
-   - Line 176: `external_listing_id: offerId,` (in the update payload).
-4. **Hard-fail early if the four eBay policy env vars are unset**, so the user sees a clear 400 from the function instead of a 400 from eBay. Throw a single error listing all missing vars before building the offer payload.
-5. **Use the shared `getEbayAccessToken` helper** in `_shared/ebay-auth.ts` (already implements the same flow with proper update conflict handling). Delete the duplicate local copy of the function.
-
-### B. Front-end hook `src/hooks/admin/use-channel-listings.ts`
-
-The current call is fire-and-forget with `console.warn` only. This is exactly why the user didn't see the failure. Change `usePublishListing` so the eBay branch:
-- `await`s `supabase.functions.invoke('ebay-push-listing', …)`,
-- if the response contains an error, surfaces it via `throw new Error(...)` so the calling mutation goes into `onError` and the user sees a toast.
-
-### C. Add the four eBay marketplace secrets
-
-Use `add_secret` to request `EBAY_FULFILLMENT_POLICY_ID`, `EBAY_PAYMENT_POLICY_ID`, `EBAY_RETURN_POLICY_ID`, `EBAY_LOCATION_KEY`. The user must supply these — they come from the eBay seller account's business policies. Without them no offer can be published.
-
-### D. Backfill the broken Dalmatians listing record
-
-`80a44cf1-…` is currently `v2_status='live'` with no eBay ID. After the function is fixed:
-- Reset it to `v2_status='draft'`, clear `listed_at`,
-- Re-trigger the publish from the UI so it goes through the corrected path.
-
-## Verification
-
-1. Use `curl_edge_functions` to POST `/ebay-push-listing` with `{ listingId: "80a44cf1-…" }` while logged in.
-2. Confirm the response contains `offerId` and `listingItemId`, and that the row now has a populated `external_listing_id` plus a real `external_url`.
-3. Confirm a fresh entry appears in `edge-function-logs` for `ebay-push-listing` (currently completely empty — proof the function had been crashing before any `console.log`).
+1. Run the one-shot push and confirm `31058-1.1` and `60438-1.1` listings on eBay flip to ended/withdrawn (quantity 0).
+2. Re-run the mismatch query — expect 0 rows.
+3. Place a test website checkout for an item with stock=2 on eBay. After Stripe webhook fires, confirm eBay shows quantity=1 within ~10 seconds.
+4. Manually mark a unit `written_off` in admin and confirm the corresponding eBay listing decrements.
+5. Confirm `audit_event` rows of category `ebay_stock_desync` only appear when the eBay API genuinely fails.
 
