@@ -112,30 +112,9 @@ export async function pushEbayQuantityForSku(
     const offerId = listing.external_listing_id as string;
     try {
       // 1. Update the inventory item quantity
-      const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
-      if (!existing) {
-        // Inventory item doesn't exist on eBay — nothing to update; skip silently.
-        console.log(`[ebay-inventory-sync] no inventory item on eBay for ${sku}, skipping`);
-        continue;
-      }
-      const updated = {
-        ...existing,
-        availability: {
-          ...(existing.availability || {}),
-          shipToLocationAvailability: {
-            ...(existing.availability?.shipToLocationAvailability || {}),
-            quantity: qty,
-          },
-        },
-      };
-      await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-        method: "PUT",
-        body: JSON.stringify(updated),
-      });
-
-      // 2. If we just hit zero, end the listing by withdrawing the offer.
-      // eBay treats "qty=0 + offer published" as out-of-stock but the
-      // listing card stays visible; withdraw makes it actually go away.
+      // For qty=0: skip the inventory PUT (eBay rejects quantity=0 with
+      // errorId 25004 — "must be greater than 0") and go straight to
+      // withdrawing the offer, which is what actually ends the listing.
       let withdrew = false;
       if (qty === 0) {
         try {
@@ -144,15 +123,39 @@ export async function pushEbayQuantityForSku(
           });
           withdrew = true;
         } catch (wErr) {
-          // 404 / "offer not published" is fine — listing already ended.
           const msg = wErr instanceof Error ? wErr.message : String(wErr);
-          if (!/404|not.*published|already/i.test(msg)) {
+          // Stale offerId / already withdrawn / unpublished — treat as
+          // success and end the listing locally so we stop retrying.
+          if (/404|not.*published|already|valid offerId|25002|25710/i.test(msg)) {
+            withdrew = true;
+            console.log(`[ebay-inventory-sync] ${sku} offer ${offerId} already gone — marking ended locally`);
+          } else {
             throw wErr;
           }
         }
+      } else {
+        const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+        if (!existing) {
+          console.log(`[ebay-inventory-sync] no inventory item on eBay for ${sku}, skipping`);
+          continue;
+        }
+        const updated = {
+          ...existing,
+          availability: {
+            ...(existing.availability || {}),
+            shipToLocationAvailability: {
+              ...(existing.availability?.shipToLocationAvailability || {}),
+              quantity: qty,
+            },
+          },
+        };
+        await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+          method: "PUT",
+          body: JSON.stringify(updated),
+        });
       }
 
-      // 3. Persist the new state locally
+      // Persist the new state locally
       const patch: Record<string, unknown> = {
         listed_quantity: qty,
         synced_at: new Date().toISOString(),
@@ -163,7 +166,6 @@ export async function pushEbayQuantityForSku(
       await admin.from("channel_listing").update(patch as never).eq("id", listing.id);
 
       if (withdrew) result.withdrawn++;
-      else result.pushed++;
 
       console.log(
         `[ebay-inventory-sync] ${sku} → qty ${qty}` + (withdrew ? " (offer withdrawn)" : ""),
