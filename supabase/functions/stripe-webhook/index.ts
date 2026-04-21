@@ -1029,12 +1029,13 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
     if (paymentIntentIds.length > 0) {
       const { data: orders } = await supabase
         .from("sales_order")
-        .select("id")
+        .select("id, payment_reference")
         .in("payment_reference", paymentIntentIds);
 
       if (orders) {
-        for (const o of orders as { id: string }[]) {
+        for (const o of orders as { id: string; payment_reference: string | null }[]) {
           matchedOrderIds.push(o.id);
+          if (o.payment_reference) piToOrderId.set(o.payment_reference, o.id);
         }
         orderCount = matchedOrderIds.length;
       }
