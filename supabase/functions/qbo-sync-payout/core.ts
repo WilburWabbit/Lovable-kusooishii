@@ -699,20 +699,56 @@ async function createQBOPurchase(
   };
 }
 
-// ─── Main handler ────────────────────────────────────────────
+// ─── Main entry point (channel-agnostic) ─────────────────────
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+/**
+ * Internal tx shape used by the legacy eBay-shaped pipeline below. The
+ * adapter loads NeutralPayoutTx rows; we map them onto this shape so the
+ * downstream code (which is already correct for eBay) doesn't need to be
+ * rewritten. Field semantics are channel-neutral.
+ */
+type InternalTx = {
+  id: string;
+  transaction_id: string;
+  transaction_type: string;
+  order_id: string | null;
+  gross_amount: number;
+  total_fees: number;
+  net_amount: number;
+  fee_details: Array<{ feeType?: string; amount?: number | { value?: string }; currency?: string }>;
+  matched_order_id: string | null;
+  qbo_purchase_id: string | null;
+  memo: string | null;
+  ebay_item_id: string | null; // generic "channel-native item id"
+  __neutral: NeutralPayoutTx;  // back-pointer for adapter callbacks
+};
 
-  let admin: ReturnType<typeof createAdminClient> | null = null;
-  let payoutId: string | null = null;
+function neutralToInternal(n: NeutralPayoutTx): InternalTx {
+  return {
+    id: n.id,
+    transaction_id: n.transactionId,
+    transaction_type: n.transactionType,
+    order_id: n.externalOrderId,
+    gross_amount: n.grossAmount,
+    total_fees: n.totalFees,
+    net_amount: n.netAmount,
+    fee_details: n.feeDetails.map((f) => ({ feeType: f.feeType, amount: f.amount, currency: f.currency })),
+    matched_order_id: n.matchedOrderId,
+    qbo_purchase_id: n.qboPurchaseId,
+    memo: n.memo,
+    ebay_item_id: n.externalItemId,
+    __neutral: n,
+  };
+}
 
+export async function syncPayoutCore(
+  payoutId: string,
+  admin: ReturnType<typeof createAdminClient>,
+  adapter: PayoutAdapter,
+): Promise<Response> {
   try {
-    admin = createAdminClient();
-    await authenticateRequest(req, admin);
     const { clientId, clientSecret, realmId } = getQBOConfig();
 
-    ({ payoutId } = await req.json());
     if (!payoutId) throw new Error("payoutId is required");
 
     // ─── 1. Fetch payout ────────────────────────────────────
@@ -740,48 +776,34 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 2. Fetch all non-TRANSFER transactions ─────────────
-    if (!externalPayoutId) {
-      throw new Error("Payout has no external_payout_id — cannot look up transactions");
-    }
+    // ─── 2. Load transactions via adapter ───────────────────
+    const adapterDeps: AdapterDeps = {
+      admin,
+      payoutId,
+      externalPayoutId,
+      payoutDate,
+      payoutNet: Number(p.net_amount ?? 0),
+      payoutGross: Number(p.gross_amount ?? 0),
+      payoutFees: Number(p.fees_amount ?? p.total_fees ?? 0),
+    };
 
-    const { data: txData, error: txErr } = await admin
-      .from("ebay_payout_transactions" as never)
-      .select("id, transaction_id, transaction_type, order_id, gross_amount, total_fees, net_amount, fee_details, matched_order_id, qbo_purchase_id, memo, buyer_username, ebay_item_id")
-      .eq("payout_id" as never, externalPayoutId);
+    const neutralTxs = await adapter.loadTransactions(adapterDeps);
+    const allTransactions = neutralTxs.map(neutralToInternal);
 
-    if (txErr) throw new Error(`Failed to fetch transactions: ${txErr.message}`);
+    // Adapter-driven settlement classification (eBay TRANSFER pairing, etc.).
+    // Settled tx ids are still booked as Purchases but go directly to bank
+    // and are excluded from the deposit lines. Default: empty set.
+    const classification = adapter.classifyTransactions
+      ? adapter.classifyTransactions(neutralTxs)
+      : { settledTxIds: new Set<string>() };
+    const settledTxIds = classification.settledTxIds;
 
-    const allTransactions = ((txData ?? []) as unknown as EbayTransaction[]);
-    // Exclude TRANSFER transactions from expense processing.
-    // TRANSFER is informational only: it tells us the matching NON_SALE_CHARGE invoice
-    // (same absolute gross_amount) was settled out-of-band by eBay and never debited
-    // Undeposited Funds. We use these to flag "settled" NON_SALE_CHARGEs below — those
-    // expenses are still booked as Purchases (P&L is real) but paid directly from the
-    // bank account rather than UF, and excluded from the deposit lines.
+    // Some channels (eBay) include informational TRANSFER rows that must
+    // not produce expense Purchases. Filter them out by string match — Stripe
+    // and others won't have any TRANSFER rows so this is a no-op for them.
     const transactions = allTransactions.filter((t) => t.transaction_type !== "TRANSFER");
-
-    // Build a multiset of TRANSFER absolute amounts so we can match each settled
-    // NON_SALE_CHARGE one-for-one (avoid double-matching when amounts repeat).
-    const transferAmountCounts = new Map<string, number>();
-    for (const t of allTransactions) {
-      if (t.transaction_type === "TRANSFER") {
-        const key = Math.abs(t.gross_amount).toFixed(2);
-        transferAmountCounts.set(key, (transferAmountCounts.get(key) ?? 0) + 1);
-      }
-    }
-    const settledTxIds = new Set<string>();
-    for (const t of allTransactions) {
-      if (t.transaction_type !== "NON_SALE_CHARGE") continue;
-      const key = Math.abs(t.gross_amount).toFixed(2);
-      const remaining = transferAmountCounts.get(key) ?? 0;
-      if (remaining > 0) {
-        settledTxIds.add(t.id);
-        transferAmountCounts.set(key, remaining - 1);
-      }
-    }
     if (settledTxIds.size > 0) {
-      console.log(`Detected ${settledTxIds.size} settled NON_SALE_CHARGE(s) with matching TRANSFER — booking direct to bank, excluding from deposit.`);
+      console.log(`Detected ${settledTxIds.size} settled charge(s) — booking direct to bank, excluding from deposit.`);
     }
 
     // ─── 3. Pre-flight: Verify SALE transactions are synced ─
