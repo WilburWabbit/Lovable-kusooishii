@@ -177,31 +177,65 @@ export function usePublishListing() {
         throw new Error(`Price £${listingPrice.toFixed(2)} is below floor price £${floorPrice.toFixed(2)}`);
       }
 
-      // Upsert listing with all fields
-      const { data, error } = await supabase
-        .from('channel_listing')
-        .upsert(
-          {
-            sku_id: (skuRow as unknown as Record<string, unknown>).id as string,
-            channel: channel,
-            v2_channel: channel,
-            v2_status: 'live',
-            listing_title: listingTitle.trim(),
-            listing_description: listingDescription?.trim() ?? null,
-            listed_price: listingPrice,
-            fee_adjusted_price: listingPrice,
-            estimated_fees: estimatedFees ?? null,
-            estimated_net: estimatedNet ?? null,
-            external_listing_id: externalId ?? null,
-            external_url: externalUrl ?? null,
-            listed_at: new Date().toISOString(),
-          } as never,
-          { onConflict: 'sku_id,channel' as never },
-        )
-        .select()
-        .single();
+      const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
 
-      if (error) throw error;
+      // Normalize channel value: legacy `channel` column uses 'web' for the
+      // website, while v2_channel uses 'website'. The UI/Channel type sends
+      // 'website' — translate so we update the existing row instead of
+      // creating a duplicate (and tripping the (channel, external_sku) unique
+      // constraint downstream).
+      const legacyChannel = channel === 'website' ? 'web' : channel;
+      const v2Channel = channel === 'web' ? 'website' : channel;
+
+      // There is no (sku_id, channel) unique constraint, so a true upsert
+      // can't disambiguate the row. Look it up explicitly, then update or
+      // insert.
+      const { data: existingRows, error: lookupErr } = await supabase
+        .from('channel_listing')
+        .select('id')
+        .eq('sku_id', skuId)
+        .in('channel', [legacyChannel, channel] as never)
+        .limit(1);
+
+      if (lookupErr) throw lookupErr;
+
+      const existingId = (existingRows?.[0] as { id?: string } | undefined)?.id;
+
+      const payload = {
+        sku_id: skuId,
+        channel: legacyChannel,
+        v2_channel: v2Channel,
+        v2_status: 'live',
+        listing_title: listingTitle.trim(),
+        listing_description: listingDescription?.trim() ?? null,
+        listed_price: listingPrice,
+        fee_adjusted_price: listingPrice,
+        estimated_fees: estimatedFees ?? null,
+        estimated_net: estimatedNet ?? null,
+        external_listing_id: externalId ?? null,
+        external_url: externalUrl ?? null,
+        listed_at: new Date().toISOString(),
+      };
+
+      let data: unknown;
+      if (existingId) {
+        const { data: updated, error: updErr } = await supabase
+          .from('channel_listing')
+          .update(payload as never)
+          .eq('id', existingId)
+          .select()
+          .single();
+        if (updErr) throw updErr;
+        data = updated;
+      } else {
+        const { data: inserted, error: insErr } = await supabase
+          .from('channel_listing')
+          .insert(payload as never)
+          .select()
+          .single();
+        if (insErr) throw insErr;
+        data = inserted;
+      }
 
       // Transition stock units from graded → listed
       await supabase
