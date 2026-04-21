@@ -1,21 +1,26 @@
-// Redeployed: 2026-04-13
 // ============================================================
-// QBO Sync Payout
-// Creates per-transaction QBO Purchases (expenses) and a QBO
-// Deposit when a payout is recorded from eBay.
-// Uses qbo_account_mapping for account refs; persists errors.
+// QBO Sync Payout — channel-agnostic core
+// ============================================================
+// This module is driven by a `PayoutAdapter` (eBay, Stripe, …).
+// The adapter loads channel-native transactions and converts them
+// into `NeutralPayoutTx` rows; the core then runs the same QBO
+// purchase + deposit pipeline regardless of channel.
+//
+// To preserve eBay behaviour byte-for-byte, the adapter must report:
+//   - the same set of transactions (excluding settlement-only rows
+//     classified by classifyTransactions),
+//   - the same fee descriptions, DocNumbers, PrivateNotes, and
+//     ItemRefs as the original eBay-only code did.
 // ============================================================
 
 import {
   corsHeaders,
   createAdminClient,
-  authenticateRequest,
   getQBOConfig,
   qboBaseUrl,
   ensureValidToken,
   fetchWithTimeout,
   jsonResponse,
-  errorResponse,
 } from "../_shared/qbo-helpers.ts";
 import {
   toPence,
@@ -30,6 +35,7 @@ import {
   QBO_TAX_CODE_NO_VAT,
   type QBOStableLine,
 } from "../_shared/qbo-tax.ts";
+import type { PayoutAdapter, NeutralPayoutTx, AdapterDeps } from "../_shared/payout-adapter.ts";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -47,22 +53,6 @@ type QBOAccount = {
   accountType: string | null;
   accountSubType: string | null;
   active: boolean | null;
-};
-
-type EbayTransaction = {
-  id: string;
-  transaction_id: string;
-  transaction_type: string;
-  order_id: string | null;
-  gross_amount: number;
-  total_fees: number;
-  net_amount: number;
-  fee_details: Array<{ feeType?: string; amount?: number | { value?: string }; currency?: string }>;
-  matched_order_id: string | null;
-  qbo_purchase_id: string | null;
-  memo: string | null;
-  buyer_username: string | null;
-  ebay_item_id: string | null;
 };
 
 // ─── Constants ───────────────────────────────────────────────
