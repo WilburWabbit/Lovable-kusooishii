@@ -2549,6 +2549,160 @@ Deno.serve(async (req) => {
 
       result = { success: true, ...results };
 
+    } else if (action === "backfill-stripe-payout-fees") {
+      // One-off / repeatable backfill for Stripe payouts whose payout_fee
+      // rows were never written (e.g. payouts received before the webhook
+      // started inserting per-charge fees). Idempotent: skips existing fees
+      // by external_order_id (= Stripe payment_intent id).
+      const { payoutId: targetPayoutId } = params as { payoutId?: string };
+      if (!targetPayoutId) throw new ValidationError("payoutId is required");
+
+      // Resolve to local payout row (accept either the local UUID or the Stripe po_… id)
+      let payoutRow: { id: string; external_payout_id: string | null; channel: string | null; net_amount: number | null } | null = null;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetPayoutId);
+      if (isUuid) {
+        const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("id", targetPayoutId).maybeSingle();
+        payoutRow = data as typeof payoutRow;
+      } else {
+        const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("external_payout_id", targetPayoutId).maybeSingle();
+        payoutRow = data as typeof payoutRow;
+      }
+      if (!payoutRow) throw new ValidationError(`Payout not found: ${targetPayoutId}`);
+      if (payoutRow.channel !== "stripe") throw new ValidationError(`Payout ${payoutRow.id} is not a Stripe payout`);
+      if (!payoutRow.external_payout_id) throw new ValidationError(`Payout ${payoutRow.id} has no external_payout_id`);
+
+      // Pick the right Stripe key based on app_settings.stripe_test_mode
+      const { data: settings } = await admin.from("app_settings").select("stripe_test_mode").maybeSingle();
+      const isTestMode = !!(settings as { stripe_test_mode?: boolean } | null)?.stripe_test_mode;
+      const stripeKey = isTestMode
+        ? (Deno.env.get("STRIPE_SANDBOX_SECRET_KEY") || "")
+        : (Deno.env.get("STRIPE_SECRET_KEY") || "");
+      if (!stripeKey) throw new ValidationError(`Stripe ${isTestMode ? "sandbox " : ""}secret key is not configured`);
+
+      const StripeMod = (await import("https://esm.sh/stripe@14.21.0?target=deno")).default;
+      const stripe = new StripeMod(stripeKey, { apiVersion: "2024-06-20" });
+
+      // Pull all balance transactions for this payout (paginate)
+      type BT = { id: string; fee: number; source: string | null; type: string };
+      const allBts: BT[] = [];
+      let starting_after: string | undefined = undefined;
+      // Defensive cap to avoid runaway loops
+      for (let page = 0; page < 20; page++) {
+        const resp = await stripe.balanceTransactions.list({
+          payout: payoutRow.external_payout_id,
+          limit: 100,
+          starting_after,
+        } as Record<string, unknown>);
+        for (const bt of resp.data as BT[]) allBts.push(bt);
+        if (!resp.has_more) break;
+        starting_after = resp.data[resp.data.length - 1]?.id;
+        if (!starting_after) break;
+      }
+
+      // Resolve payment intents for each charge bt
+      const perCharge: Array<{ pi: string; chargeId: string; feeAmount: number }> = [];
+      let residualFee = 0;
+      for (const bt of allBts) {
+        if (bt.source && bt.source.startsWith("ch_")) {
+          try {
+            const charge = await stripe.charges.retrieve(bt.source);
+            const pi = (charge as { payment_intent: string | null }).payment_intent;
+            if (pi) {
+              perCharge.push({ pi, chargeId: bt.source, feeAmount: bt.fee / 100 });
+            } else {
+              residualFee += bt.fee / 100;
+            }
+          } catch {
+            residualFee += bt.fee / 100;
+          }
+        } else if (bt.fee > 0) {
+          residualFee += bt.fee / 100;
+        }
+      }
+
+      // Idempotency: skip pi's already in payout_fee for this payout
+      const { data: existingFees } = await admin
+        .from("payout_fee")
+        .select("external_order_id")
+        .eq("payout_id", payoutRow.id);
+      const haveSet = new Set(
+        ((existingFees ?? []) as Array<{ external_order_id: string | null }>)
+          .map((r) => r.external_order_id)
+          .filter((v): v is string => !!v)
+      );
+      const toInsertCharges = perCharge.filter((c) => !haveSet.has(c.pi));
+
+      // Map pi → sales_order_id
+      const piList = toInsertCharges.map((c) => c.pi);
+      const piToOrder = new Map<string, string>();
+      if (piList.length > 0) {
+        const { data: orders } = await admin
+          .from("sales_order")
+          .select("id, payment_reference")
+          .in("payment_reference", piList);
+        for (const o of (orders ?? []) as Array<{ id: string; payment_reference: string | null }>) {
+          if (o.payment_reference) piToOrder.set(o.payment_reference, o.id);
+        }
+      }
+
+      let inserted = 0;
+      if (toInsertCharges.length > 0) {
+        const rows = toInsertCharges.map((c) => ({
+          payout_id: payoutRow!.id,
+          sales_order_id: piToOrder.get(c.pi) ?? null,
+          external_order_id: c.pi,
+          channel: "stripe",
+          fee_category: "processing",
+          amount: Math.round(c.feeAmount * 100) / 100,
+          description: `Stripe processing fee — charge ${c.chargeId}`,
+        }));
+        const { error: insErr, data: insData } = await admin
+          .from("payout_fee")
+          .insert(rows as never)
+          .select("id");
+        if (insErr) throw new Error(`Failed to insert payout_fee rows: ${insErr.message}`);
+        inserted = (insData ?? []).length;
+      }
+
+      // Backfill missing payout_orders join rows so reconcile sees them
+      let linkedOrders = 0;
+      if (piToOrder.size > 0) {
+        const orderIds = Array.from(new Set(piToOrder.values()));
+        const links = orderIds.map((oid) => ({ payout_id: payoutRow!.id, sales_order_id: oid }));
+        const { error: linkErr } = await admin
+          .from("payout_orders")
+          .upsert(links as never, { onConflict: "payout_id,sales_order_id" as never });
+        if (linkErr) console.warn("Failed to upsert payout_orders:", linkErr);
+        else linkedOrders = links.length;
+      }
+
+      // Re-trigger reconciliation so per-order fee/net columns are recomputed
+      let reconcileTriggered = false;
+      try {
+        const url = `${supabaseUrl}/functions/v1/v2-reconcile-payout`;
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ payoutId: payoutRow.id }),
+        });
+        reconcileTriggered = resp.ok;
+      } catch (e) {
+        console.warn("v2-reconcile-payout trigger failed:", e);
+      }
+
+      result = {
+        success: true,
+        payoutId: payoutRow.id,
+        externalPayoutId: payoutRow.external_payout_id,
+        balanceTransactions: allBts.length,
+        chargesFound: perCharge.length,
+        feesInserted: inserted,
+        feesSkipped: perCharge.length - toInsertCharges.length,
+        residualFeeUnbooked: Math.round(residualFee * 100) / 100,
+        ordersLinked: linkedOrders,
+        reconcileTriggered,
+      };
+
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
