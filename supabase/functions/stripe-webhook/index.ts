@@ -1084,6 +1084,45 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
       .catch((err: unknown) => console.warn("Failed to link orders to payout:", err));
   }
 
+  // Insert per-charge payout_fee rows so reconciliation can populate
+  // order_fees / order_net per order, and so qbo-sync-payout's Stripe
+  // adapter has fee rows to drive Purchase creation.
+  if (localPayoutId && perChargeFees.length > 0) {
+    const feeRows = perChargeFees.map((c) => ({
+      payout_id: localPayoutId,
+      sales_order_id: piToOrderId.get(c.paymentIntentId) ?? null,
+      external_order_id: c.paymentIntentId,
+      channel: "stripe",
+      fee_category: "processing",
+      amount: Math.round(c.feeAmount * 100) / 100,
+      description: c.description,
+    }));
+    const { error: feeErr } = await supabase
+      .from("payout_fee")
+      .insert(feeRows as never);
+    if (feeErr) {
+      console.warn(`Failed to insert ${feeRows.length} payout_fee rows for ${payoutId}:`, feeErr);
+    } else {
+      console.log(`Inserted ${feeRows.length} payout_fee rows for Stripe payout ${payoutId}`);
+    }
+  }
+
+  // Lump any residual non-charge fees into a single ACCOUNT_CHARGE-style row.
+  if (localPayoutId && residualFee > 0.005) {
+    const { error: resErr } = await supabase
+      .from("payout_fee")
+      .insert({
+        payout_id: localPayoutId,
+        sales_order_id: null,
+        external_order_id: null,
+        channel: "stripe",
+        fee_category: "processing",
+        amount: Math.round(residualFee * 100) / 100,
+        description: `Stripe residual processing fees (non-charge balance txs)`,
+      } as never);
+    if (resErr) console.warn(`Failed to insert residual payout_fee for ${payoutId}:`, resErr);
+  }
+
   // Trigger reconciliation (payout_received transition + QBO sync)
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
