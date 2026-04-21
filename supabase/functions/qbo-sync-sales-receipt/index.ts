@@ -84,21 +84,24 @@ Deno.serve(async (req) => {
 
     if (lineErr) throw new Error(`Failed to fetch line items: ${lineErr.message}`);
 
-    // ─── 2. Fetch customer ──────────────────────────────────
-    // Default to QBO "Cash Sales" customer (id 55) for unmapped/in-person sales.
-    const CASH_SALES_QBO_ID = "55";
+    // ─── 2. Resolve QBO Customer ────────────────────────────
+    // Resolution order:
+    //   1. sales_order.qbo_customer_id (already-resolved cache, used by
+    //      Stripe/website orders without a linked customer record)
+    //   2. customer.qbo_customer_id via order.customer_id
+    //   3. QBO "Cash Sales" customer looked up by NAME — id is realm-
+    //      specific so we must NOT hardcode it. Looked up below after
+    //      the QBO base url + access token are available.
     let qboCustomerRef: string | null = null;
-    if (order.customer_id) {
+    if (order.qbo_customer_id) {
+      qboCustomerRef = String(order.qbo_customer_id);
+    } else if (order.customer_id) {
       const { data: customer } = await admin
         .from("customer")
         .select("qbo_customer_id")
         .eq("id", order.customer_id)
         .single();
-
       qboCustomerRef = customer?.qbo_customer_id ?? null;
-    }
-    if (!qboCustomerRef) {
-      qboCustomerRef = CASH_SALES_QBO_ID;
     }
 
     // ─── 3. Build QBO-stable line distribution ──────────────
