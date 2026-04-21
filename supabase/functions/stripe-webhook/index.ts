@@ -973,6 +973,16 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
   let grossAmount = netAmount;
   let orderCount = 0;
   const matchedOrderIds: string[] = [];
+  // Per-charge fee records to write into payout_fee after we have the local payout id.
+  // Each entry maps a Stripe payment_intent (pi_…) to its processing fee in pounds.
+  const perChargeFees: Array<{
+    paymentIntentId: string;
+    chargeId: string;
+    feeAmount: number; // in pounds
+    description: string;
+  }> = [];
+  // Residual non-charge fees (e.g. account-level Stripe charges) lumped together.
+  let residualFee = 0;
 
   try {
     // Use the correct Stripe instance (live vs sandbox determined by caller context)
@@ -991,10 +1001,24 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
         // This is a charge — look up the payment_intent
         try {
           const charge = await stripeClient.charges.retrieve(bt.source as string);
-          if (charge.payment_intent) {
-            paymentIntentIds.push(charge.payment_intent as string);
+          const pi = charge.payment_intent as string | null;
+          if (pi) {
+            paymentIntentIds.push(pi);
+            perChargeFees.push({
+              paymentIntentId: pi,
+              chargeId: bt.source as string,
+              feeAmount: bt.fee / 100,
+              description: `Stripe processing fee — charge ${bt.source}`,
+            });
+          } else {
+            residualFee += bt.fee / 100;
           }
-        } catch { /* best effort */ }
+        } catch {
+          residualFee += bt.fee / 100;
+        }
+      } else if (bt.fee > 0) {
+        // Non-charge balance tx with a fee (rare): treat as residual.
+        residualFee += bt.fee / 100;
       }
     }
 
