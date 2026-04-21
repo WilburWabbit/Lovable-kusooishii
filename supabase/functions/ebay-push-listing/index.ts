@@ -60,12 +60,15 @@ Deno.serve(async (req) => {
 
     const l = listing as Record<string, unknown>;
 
-    // Fetch SKU for pricing
-    const { data: sku } = await admin
+    // Fetch SKU + product for pricing/aspects.
+    // NOTE: product table has columns mpn / name / description / ean / product_hook only.
+    // There is no `upc` column, and the hook column is `product_hook` (not `hook`).
+    const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name, description, ean, upc, hook)")
+      .select("*, product:product_id(mpn, name, description, ean, product_hook)")
       .eq("id", l.sku_id)
       .single();
+    if (skuErr) throw new Error(`SKU lookup failed: ${skuErr.message}`);
 
     const skuRow = sku as Record<string, unknown> | null;
     const product = skuRow?.product as Record<string, unknown> | null;
@@ -93,7 +96,6 @@ Deno.serve(async (req) => {
           "MPN": [product?.mpn ?? ""],
         },
         ...(product?.ean ? { ean: [product.ean] } : {}),
-        ...(product?.upc ? { upc: [product.upc] } : {}),
       },
       condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
       availability: {
@@ -115,7 +117,10 @@ Deno.serve(async (req) => {
     console.log(`eBay inventory item PUT for ${effectiveSku}: ${inventoryRes ? "updated" : "created"}`);
 
     // ─── Step 2: Create or Update Offer ────────────────────
-    const existingExternalId = l.external_id as string | null;
+    // The offer ID lives in `external_listing_id` on channel_listing.
+    // (There is no `external_id` column — older code referenced a
+    // non-existent column and silently no-op'd both reads and writes.)
+    const existingExternalId = l.external_listing_id as string | null;
     let offerId: string;
 
     const offerPayload = {
@@ -132,11 +137,11 @@ Deno.serve(async (req) => {
         },
       },
       listingPolicies: {
-        fulfillmentPolicyId: Deno.env.get("EBAY_FULFILLMENT_POLICY_ID") ?? "",
-        paymentPolicyId: Deno.env.get("EBAY_PAYMENT_POLICY_ID") ?? "",
-        returnPolicyId: Deno.env.get("EBAY_RETURN_POLICY_ID") ?? "",
+        fulfillmentPolicyId,
+        paymentPolicyId,
+        returnPolicyId,
       },
-      merchantLocationKey: Deno.env.get("EBAY_LOCATION_KEY") ?? "default",
+      merchantLocationKey,
     };
 
     if (existingExternalId) {
@@ -189,11 +194,13 @@ Deno.serve(async (req) => {
     // ─── Step 4: Update local records ──────────────────────
     const now = new Date().toISOString();
 
-    // Update channel_listing with eBay IDs and status
+    // Persist the eBay offer ID + item URL on channel_listing.
+    // Use the actual `external_listing_id` column (matches the rest of the
+    // codebase: ebay-sync, ebay-import-payouts, qbo-sync-payout, etc.)
     await admin
       .from("channel_listing")
       .update({
-        external_id: offerId,
+        external_listing_id: offerId,
         external_url: listingItemId
           ? `https://www.ebay.co.uk/itm/${listingItemId}`
           : (l.external_url as string) ?? null,
