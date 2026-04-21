@@ -1056,6 +1056,43 @@ Deno.serve(async (req) => {
     }
 
 
+    /* ═══════════════════════════════════════════════
+       CHECK OFFER — diagnostic: report eBay's current view of an offer/listing
+       ═══════════════════════════════════════════════ */
+    if (action === "check_offer") {
+      const offerIds: string[] = Array.isArray(body.offerIds) ? body.offerIds : [];
+      const skus: string[] = Array.isArray(body.skus) ? body.skus : [];
+      const results: any[] = [];
+      for (const offerId of offerIds) {
+        try {
+          const offer = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`);
+          results.push({
+            offerId,
+            status: offer?.status,
+            listingId: offer?.listing?.listingId,
+            listingStatus: offer?.listing?.listingStatus,
+            sku: offer?.sku,
+            availableQuantity: offer?.availableQuantity,
+            format: offer?.format,
+          });
+        } catch (e: any) {
+          results.push({ offerId, error: e.message });
+        }
+      }
+      for (const sku of skus) {
+        try {
+          const offersResp = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+          results.push({ sku, offers: offersResp?.offers || [] });
+        } catch (e: any) {
+          results.push({ sku, error: e.message });
+        }
+      }
+      return new Response(
+        JSON.stringify({ success: true, results }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     if (action === "get_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;
       try {
