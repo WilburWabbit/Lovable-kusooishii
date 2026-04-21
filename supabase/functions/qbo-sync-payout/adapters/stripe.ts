@@ -20,7 +20,9 @@ import type {
 // Stripe is vendor "Stripe" in QBO. Resolved at call-time via
 // qbo_account_mapping fallback if not explicitly set; we hardcode a
 // reasonable default and let the operator override.
-const STRIPE_VENDOR_REF = { value: "stripe", name: "Stripe" };
+// QBO Vendor for Stripe (resolved from public.vendor where display_name='Stripe').
+// If you change the Stripe vendor in QBO, update this id.
+const STRIPE_VENDOR_REF = { value: "431", name: "Stripe" };
 
 export const stripeAdapter: PayoutAdapter = {
   channel: "stripe",
