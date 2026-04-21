@@ -213,14 +213,23 @@ export function usePublishListing() {
         .eq('sku_id' as never, (skuRow as unknown as Record<string, unknown>).id as string)
         .eq('v2_status' as never, 'graded');
 
-      // Fire-and-forget: trigger external channel push
+      // Push to external channel.
+      // For eBay we await the result so any failure surfaces as a toast
+      // via the mutation's onError, instead of being swallowed in
+      // a fire-and-forget .catch().
       const listingId = (data as Record<string, unknown>).id as string;
       if (channel === 'ebay') {
-        supabase.functions
-          .invoke('ebay-push-listing', {
-            body: { listingId, skuCode, channel },
-          })
-          .catch((err) => console.warn(`eBay push for ${skuCode} failed (non-blocking):`, err));
+        const { data: pushResult, error: pushErr } = await supabase.functions.invoke(
+          'ebay-push-listing',
+          { body: { listingId, skuCode, channel } },
+        );
+        if (pushErr) {
+          throw new Error(`eBay publish failed: ${pushErr.message}`);
+        }
+        const result = pushResult as { success?: boolean; error?: string } | null;
+        if (result && result.success === false) {
+          throw new Error(`eBay publish failed: ${result.error ?? 'unknown error'}`);
+        }
       }
 
       return data;

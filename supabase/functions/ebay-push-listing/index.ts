@@ -16,6 +16,7 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
+import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
@@ -25,6 +26,25 @@ Deno.serve(async (req) => {
   try {
     const admin = createAdminClient();
     await authenticateRequest(req, admin);
+
+    // Validate required eBay marketplace policy env vars up front so the
+    // user gets a clear message rather than an opaque 400 from eBay later.
+    const fulfillmentPolicyId = Deno.env.get("EBAY_FULFILLMENT_POLICY_ID");
+    const paymentPolicyId = Deno.env.get("EBAY_PAYMENT_POLICY_ID");
+    const returnPolicyId = Deno.env.get("EBAY_RETURN_POLICY_ID");
+    const merchantLocationKey = Deno.env.get("EBAY_LOCATION_KEY");
+    const missingEnv = [
+      ["EBAY_FULFILLMENT_POLICY_ID", fulfillmentPolicyId],
+      ["EBAY_PAYMENT_POLICY_ID", paymentPolicyId],
+      ["EBAY_RETURN_POLICY_ID", returnPolicyId],
+      ["EBAY_LOCATION_KEY", merchantLocationKey],
+    ].filter(([, v]) => !v).map(([k]) => k);
+    if (missingEnv.length > 0) {
+      throw new Error(
+        `eBay listing policies are not configured. Missing secrets: ${missingEnv.join(", ")}. ` +
+          `Add them in Settings before publishing.`,
+      );
+    }
 
     const { listingId, skuCode } = await req.json();
     if (!listingId) throw new Error("listingId is required");
@@ -40,12 +60,15 @@ Deno.serve(async (req) => {
 
     const l = listing as Record<string, unknown>;
 
-    // Fetch SKU for pricing
-    const { data: sku } = await admin
+    // Fetch SKU + product for pricing/aspects.
+    // NOTE: product table has columns mpn / name / description / ean / product_hook only.
+    // There is no `upc` column, and the hook column is `product_hook` (not `hook`).
+    const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name, description, ean, upc, hook)")
+      .select("*, product:product_id(mpn, name, description, ean, product_hook)")
       .eq("id", l.sku_id)
       .single();
+    if (skuErr) throw new Error(`SKU lookup failed: ${skuErr.message}`);
 
     const skuRow = sku as Record<string, unknown> | null;
     const product = skuRow?.product as Record<string, unknown> | null;
@@ -73,7 +96,6 @@ Deno.serve(async (req) => {
           "MPN": [product?.mpn ?? ""],
         },
         ...(product?.ean ? { ean: [product.ean] } : {}),
-        ...(product?.upc ? { upc: [product.upc] } : {}),
       },
       condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
       availability: {
@@ -95,7 +117,10 @@ Deno.serve(async (req) => {
     console.log(`eBay inventory item PUT for ${effectiveSku}: ${inventoryRes ? "updated" : "created"}`);
 
     // ─── Step 2: Create or Update Offer ────────────────────
-    const existingExternalId = l.external_id as string | null;
+    // The offer ID lives in `external_listing_id` on channel_listing.
+    // (There is no `external_id` column — older code referenced a
+    // non-existent column and silently no-op'd both reads and writes.)
+    const existingExternalId = l.external_listing_id as string | null;
     let offerId: string;
 
     const offerPayload = {
@@ -112,11 +137,11 @@ Deno.serve(async (req) => {
         },
       },
       listingPolicies: {
-        fulfillmentPolicyId: Deno.env.get("EBAY_FULFILLMENT_POLICY_ID") ?? "",
-        paymentPolicyId: Deno.env.get("EBAY_PAYMENT_POLICY_ID") ?? "",
-        returnPolicyId: Deno.env.get("EBAY_RETURN_POLICY_ID") ?? "",
+        fulfillmentPolicyId,
+        paymentPolicyId,
+        returnPolicyId,
       },
-      merchantLocationKey: Deno.env.get("EBAY_LOCATION_KEY") ?? "default",
+      merchantLocationKey,
     };
 
     if (existingExternalId) {
@@ -169,11 +194,13 @@ Deno.serve(async (req) => {
     // ─── Step 4: Update local records ──────────────────────
     const now = new Date().toISOString();
 
-    // Update channel_listing with eBay IDs and status
+    // Persist the eBay offer ID + item URL on channel_listing.
+    // Use the actual `external_listing_id` column (matches the rest of the
+    // codebase: ebay-sync, ebay-import-payouts, qbo-sync-payout, etc.)
     await admin
       .from("channel_listing")
       .update({
-        external_id: offerId,
+        external_listing_id: offerId,
         external_url: listingItemId
           ? `https://www.ebay.co.uk/itm/${listingItemId}`
           : (l.external_url as string) ?? null,
@@ -202,65 +229,10 @@ Deno.serve(async (req) => {
       listingItemId,
     });
   } catch (err) {
+    console.error("ebay-push-listing failed:", err);
     return errorResponse(err);
   }
 });
-
-// ─── eBay OAuth Token Management ─────────────────────────────
-
-async function getEbayAccessToken(admin: ReturnType<typeof createAdminClient>): Promise<string> {
-  const { data: conn, error } = await admin
-    .from("ebay_connection")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !conn) throw new Error("eBay not connected. Connect eBay in Settings first.");
-
-  const c = conn as Record<string, unknown>;
-
-  // Return current token if still valid (with 60s buffer)
-  if (new Date(c.token_expires_at as string).getTime() > Date.now() + 60_000) {
-    return c.access_token as string;
-  }
-
-  // Refresh the token
-  const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
-
-  const res = await fetchWithTimeout(`${EBAY_API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: c.refresh_token as string,
-      scope: [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-      ].join(" "),
-    }),
-  });
-
-  if (!res.ok) throw new Error(`eBay token refresh failed [${res.status}]`);
-  const data = await res.json();
-  const newExpiresAt = new Date(Date.now() + (data.expires_in || 7200) * 1000).toISOString();
-
-  await admin
-    .from("ebay_connection")
-    .update({
-      access_token: data.access_token,
-      ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
-      token_expires_at: newExpiresAt,
-    } as never)
-    .eq("id", c.id as string);
-
-  return data.access_token;
-}
 
 // ─── eBay API Fetch Helper ───────────────────────────────────
 
