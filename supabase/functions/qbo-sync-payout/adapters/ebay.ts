@@ -140,4 +140,23 @@ export const ebayAdapter: PayoutAdapter = {
     }
     return undefined;
   },
+
+  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string | null) {
+    await deps.admin
+      .from("ebay_payout_transactions")
+      .update({ qbo_purchase_id: qboPurchaseId })
+      .eq("id", tx.id);
+  },
+
+  describeFeeLine(tx: NeutralPayoutTx, fee: NeutralFeeDetail, channel: string): string {
+    return `${channel} ${(fee.feeType ?? "Fee").replace(/_/g, " ")} — order ${tx.externalOrderId ?? tx.transactionId}`;
+  },
+
+  buildPrivateNote(tx: NeutralPayoutTx, channel: string, externalPayoutId: string | null, settledViaTransfer: boolean): string {
+    const txType = tx.transactionType as string;
+    if (txType === "NON_SALE_CHARGE" && tx.externalItemId) {
+      return `${channel} payout ${externalPayoutId} — ${txType} item ${tx.externalItemId} — ${tx.transactionId}`;
+    }
+    return `${channel} payout ${externalPayoutId} — ${txType} ${tx.externalOrderId ?? tx.memo ?? tx.transactionId}${settledViaTransfer ? " (settled via TRANSFER)" : ""}`;
+  },
 };

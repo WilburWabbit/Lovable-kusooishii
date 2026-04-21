@@ -133,6 +133,27 @@ export interface PayoutAdapter {
   /** Optional. Resolve a QBO ItemRef for fee lines that should book to an
    *  Item rather than an Account (e.g. eBay insertion fees). */
   resolveItemRef?(tx: NeutralPayoutTx, deps: AdapterDeps): Promise<{ value: string; name?: string } | undefined>;
+
+  /**
+   * Persist the QBO Purchase id back to the channel's own storage so it is
+   * idempotent on retry. eBay updates `ebay_payout_transactions`; Stripe
+   * updates `payout_fee`. Called once per successfully synced transaction.
+   * Pass `qboPurchaseId = "N/A"` for tx that need no expense line.
+   * Pass `qboPurchaseId = null` to clear (used during cache-rebuild).
+   */
+  persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string | null): Promise<void>;
+
+  /**
+   * Build the QBO Purchase line description for a given fee inside a
+   * transaction. Defaults to a generic `${channel} ${feeType} — ${transactionId}`.
+   */
+  describeFeeLine?(tx: NeutralPayoutTx, fee: NeutralFeeDetail, channel: string): string;
+
+  /**
+   * Build the per-transaction QBO Purchase PrivateNote. Defaults to a
+   * generic format.
+   */
+  buildPrivateNote?(tx: NeutralPayoutTx, channel: string, externalPayoutId: string | null, settledViaTransfer: boolean): string;
 }
 
 /** Dependencies passed to adapter methods. */
