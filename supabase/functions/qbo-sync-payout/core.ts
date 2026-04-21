@@ -1705,7 +1705,11 @@ export async function syncPayoutCore(
       const message = err instanceof Error ? err.message : "Unknown error";
       await persistSyncFailure(admin, payoutId, message);
     }
-    return errorResponse(err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return new Response(
+      JSON.stringify({ success: false, error: message, payoutId }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
-});
+}
 
