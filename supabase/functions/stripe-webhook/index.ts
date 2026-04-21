@@ -1093,7 +1093,7 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
       sales_order_id: piToOrderId.get(c.paymentIntentId) ?? null,
       external_order_id: c.paymentIntentId,
       channel: "stripe",
-      fee_category: "processing",
+      fee_category: "payment_processing",
       amount: Math.round(c.feeAmount * 100) / 100,
       description: c.description,
     }));
@@ -1116,7 +1116,7 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
         sales_order_id: null,
         external_order_id: null,
         channel: "stripe",
-        fee_category: "processing",
+        fee_category: "payment_processing",
         amount: Math.round(residualFee * 100) / 100,
         description: `Stripe residual processing fees (non-charge balance txs)`,
       } as never);

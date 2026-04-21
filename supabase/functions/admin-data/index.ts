@@ -2652,7 +2652,7 @@ Deno.serve(async (req) => {
           sales_order_id: piToOrder.get(c.pi) ?? null,
           external_order_id: c.pi,
           channel: "stripe",
-          fee_category: "processing",
+          fee_category: "payment_processing",
           amount: Math.round(c.feeAmount * 100) / 100,
           description: `Stripe processing fee — charge ${c.chargeId}`,
         }));
