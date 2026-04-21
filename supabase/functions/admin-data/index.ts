@@ -2664,11 +2664,25 @@ Deno.serve(async (req) => {
         inserted = (insData ?? []).length;
       }
 
-      // Backfill missing payout_orders join rows so reconcile sees them
+      // Backfill missing payout_orders join rows so reconcile sees them.
+      // Include order_gross sourced from sales_order.gross_total so that
+      // reconcile can compute order_net = gross - fees correctly.
       let linkedOrders = 0;
       if (piToOrder.size > 0) {
         const orderIds = Array.from(new Set(piToOrder.values()));
-        const links = orderIds.map((oid) => ({ payout_id: payoutRow!.id, sales_order_id: oid }));
+        const { data: grossRows } = await admin
+          .from("sales_order")
+          .select("id, gross_total")
+          .in("id", orderIds);
+        const grossById = new Map<string, number>();
+        for (const g of (grossRows ?? []) as Array<{ id: string; gross_total: number | null }>) {
+          grossById.set(g.id, Number(g.gross_total ?? 0));
+        }
+        const links = orderIds.map((oid) => ({
+          payout_id: payoutRow!.id,
+          sales_order_id: oid,
+          order_gross: grossById.get(oid) ?? 0,
+        }));
         const { error: linkErr } = await admin
           .from("payout_orders")
           .upsert(links as never, { onConflict: "payout_id,sales_order_id" as never });
