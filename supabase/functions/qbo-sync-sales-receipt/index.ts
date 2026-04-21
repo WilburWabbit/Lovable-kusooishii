@@ -153,8 +153,9 @@ Deno.serve(async (req) => {
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
-    async function lookupQboRef(entity: "PaymentMethod" | "Class", name: string): Promise<string | null> {
-      const query = `select Id, Name from ${entity} where Name = '${name.replace(/'/g, "\\'")}'`;
+    async function lookupQboRef(entity: "PaymentMethod" | "Class" | "Customer", name: string): Promise<string | null> {
+      const nameField = entity === "Customer" ? "DisplayName" : "Name";
+      const query = `select Id, ${nameField} from ${entity} where ${nameField} = '${name.replace(/'/g, "\\'")}'`;
       const url = `${baseUrl}/query?query=${encodeURIComponent(query)}&minorversion=65`;
       const res = await fetchWithTimeout(url, {
         headers: {
@@ -169,6 +170,20 @@ Deno.serve(async (req) => {
       const json = await res.json();
       const row = json?.QueryResponse?.[entity]?.[0];
       return row?.Id ? String(row.Id) : null;
+    }
+
+    // If still no customer ref (no order.qbo_customer_id, no linked customer
+    // record), fall back to QBO "Cash Sales" by NAME — id is realm-specific
+    // and must NEVER be hardcoded.
+    if (!qboCustomerRef) {
+      qboCustomerRef = await lookupQboRef("Customer", "Cash Sales");
+      if (!qboCustomerRef) {
+        return jsonResponse({
+          success: false,
+          qbo_error: 'No QBO customer ref resolved and "Cash Sales" customer not found in this realm. Create a customer named "Cash Sales" in QBO or set sales_order.qbo_customer_id.',
+          orderId,
+        });
+      }
     }
 
     // Map channel to QBO PaymentMethod NAME. Per business rule: in-person
