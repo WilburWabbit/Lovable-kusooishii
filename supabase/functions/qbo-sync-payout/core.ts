@@ -1188,11 +1188,9 @@ export async function syncPayoutCore(
             description = tx.ebay_item_id
               ? `${channel} Insertion Fee — item ${tx.ebay_item_id} — ${tx.transaction_id}`
               : `${channel} Insertion Fee — ${tx.transaction_id}`;
-            // Resolve QBO item ID via channel_listing → sku.qbo_item_id
-            if (tx.ebay_item_id) {
-              const qboId = qboItemIdByEbayItemId.get(tx.ebay_item_id);
-              if (qboId) itemRef = { value: qboId };
-            }
+            // ItemRef pre-resolved by adapter (e.g. eBay insertion fees)
+            const adapterItemRef = itemRefByTxId.get(tx.id);
+            if (adapterItemRef) itemRef = adapterItemRef;
           } else if (isSubscriptionFee) {
             description = `${channel} Store Subscription — ${tx.transaction_id}`;
           } else {
