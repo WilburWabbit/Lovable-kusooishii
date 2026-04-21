@@ -163,7 +163,7 @@ export const stripeAdapter: PayoutAdapter = {
   // Stripe has no out-of-band TRANSFER concept — default classification
   // (no settlements) is correct, so we omit `classifyTransactions`.
 
-  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string) {
+  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string | null) {
     // Stripe stores the QBO Purchase id on every payout_fee row tied to
     // this synthesised SALE/ACCOUNT_CHARGE transaction. For SALE rows the
     // tx.id is `so:<sales_order_id>`; for ACCOUNT_CHARGE it is `fee:<fee_id>`.
