@@ -139,8 +139,9 @@ export interface PayoutAdapter {
    * idempotent on retry. eBay updates `ebay_payout_transactions`; Stripe
    * updates `payout_fee`. Called once per successfully synced transaction.
    * Pass `qboPurchaseId = "N/A"` for tx that need no expense line.
+   * Pass `qboPurchaseId = null` to clear (used during cache-rebuild).
    */
-  persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string): Promise<void>;
+  persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string | null): Promise<void>;
 
   /**
    * Build the QBO Purchase line description for a given fee inside a
