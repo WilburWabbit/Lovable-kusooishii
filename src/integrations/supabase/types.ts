@@ -1826,6 +1826,7 @@ export type Database = {
           fee_category: string
           id: string
           payout_id: string
+          qbo_purchase_id: string | null
           sales_order_id: string | null
           updated_at: string
           vendor_id: string | null
@@ -1839,6 +1840,7 @@ export type Database = {
           fee_category: string
           id?: string
           payout_id: string
+          qbo_purchase_id?: string | null
           sales_order_id?: string | null
           updated_at?: string
           vendor_id?: string | null
@@ -1852,6 +1854,7 @@ export type Database = {
           fee_category?: string
           id?: string
           payout_id?: string
+          qbo_purchase_id?: string | null
           sales_order_id?: string | null
           updated_at?: string
           vendor_id?: string | null
