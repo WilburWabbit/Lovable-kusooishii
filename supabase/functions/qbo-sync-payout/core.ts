@@ -1054,43 +1054,19 @@ export async function syncPayoutCore(
       `QBO payout sync: ${transactions.length} transactions (${saleTxs.length} sales, ${expenseTxs.length} expenses)`,
     );
 
-    // ─── 4b. Resolve QBO item IDs for insertion fee NON_SALE_CHARGE transactions ─
-    // Lookup chain: tx.ebay_item_id → channel_listing.external_listing_id
-    //               → channel_listing.sku_id → sku.qbo_item_id
-    const insertionFeeItemIds = allTransactions
-      .filter((t) => t.transaction_type === "NON_SALE_CHARGE" && t.ebay_item_id &&
-        (t.memo ?? "").toLowerCase().includes("insertion fee"))
-      .map((t) => t.ebay_item_id as string);
-
-    const qboItemIdByEbayItemId = new Map<string, string>();
-
-    if (insertionFeeItemIds.length > 0) {
-      const { data: listings } = await admin
-        .from("channel_listing" as never)
-        .select("external_listing_id, sku_id")
-        .in("external_listing_id" as never, insertionFeeItemIds);
-
-      const listingRows = (listings ?? []) as { external_listing_id: string; sku_id: string | null }[];
-      const skuIds = listingRows.map((l) => l.sku_id).filter(Boolean) as string[];
-
-      if (skuIds.length > 0) {
-        const { data: skus } = await admin
-          .from("sku" as never)
-          .select("id, qbo_item_id")
-          .in("id" as never, skuIds);
-
-        const qboIdBySkuId = new Map<string, string>();
-        for (const s of ((skus ?? []) as { id: string; qbo_item_id: string | null }[])) {
-          if (s.qbo_item_id) qboIdBySkuId.set(s.id, s.qbo_item_id);
-        }
-        for (const l of listingRows) {
-          if (l.sku_id) {
-            const qboId = qboIdBySkuId.get(l.sku_id);
-            if (qboId) qboItemIdByEbayItemId.set(l.external_listing_id, qboId);
-          }
-        }
+    // ─── 4b. Resolve QBO ItemRefs via adapter (e.g. eBay insertion fees) ─
+    // The adapter decides which transactions need an ItemRef on their
+    // expense line and how to resolve it. Channels that don't need this
+    // (Stripe) simply omit `resolveItemRef`.
+    const itemRefByTxId = new Map<string, { value: string; name?: string }>();
+    if (adapter.resolveItemRef) {
+      for (const tx of allTransactions) {
+        const ref = await adapter.resolveItemRef(tx.__neutral, adapterDeps);
+        if (ref) itemRefByTxId.set(tx.id, ref);
       }
-      console.log(`Resolved ${qboItemIdByEbayItemId.size} QBO item IDs for ${insertionFeeItemIds.length} insertion fee transactions`);
+      if (itemRefByTxId.size > 0) {
+        console.log(`Resolved ${itemRefByTxId.size} QBO ItemRef(s) via ${adapter.channel} adapter`);
+      }
     }
 
     // ─── 5. Create per-transaction QBO Purchases (expenses) ─
