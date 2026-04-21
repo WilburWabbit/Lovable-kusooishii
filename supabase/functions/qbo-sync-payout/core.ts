@@ -57,7 +57,7 @@ type QBOAccount = {
 
 // ─── Constants ───────────────────────────────────────────────
 
-const EBAY_VENDOR_REF = { value: "4", name: "eBay" };
+// EBAY_VENDOR_REF moved into ebayAdapter.qboVendorRef.
 const VAT_RATE = 0.2;
 const VAT_DIVISOR = 1 + VAT_RATE;
 // Default TaxCodeRef for non-rounding lines. The QBO-stable distributor in
