@@ -1214,10 +1214,7 @@ export async function syncPayoutCore(
       // Skip if no expense lines (e.g., zero-fee SALE)
       if (expenseLines.length === 0) {
         // Mark as "no expense needed" by setting a placeholder
-        await admin
-          .from("ebay_payout_transactions" as never)
-          .update({ qbo_purchase_id: "N/A" } as never)
-          .eq("id" as never, tx.id);
+        await adapter.persistPurchaseId(adapterDeps, tx.__neutral, "N/A");
         continue;
       }
 
