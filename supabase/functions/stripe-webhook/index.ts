@@ -973,6 +973,7 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
   let grossAmount = netAmount;
   let orderCount = 0;
   const matchedOrderIds: string[] = [];
+  const piToOrderId = new Map<string, string>();
   // Per-charge fee records to write into payout_fee after we have the local payout id.
   // Each entry maps a Stripe payment_intent (pi_…) to its processing fee in pounds.
   const perChargeFees: Array<{
