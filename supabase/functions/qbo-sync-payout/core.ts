@@ -1139,15 +1139,7 @@ export async function syncPayoutCore(
           `Canonical drift on Purchase for tx ${tx.transaction_id}: cached TotalAmt £${cachedTotal.toFixed(2)} ≠ expected £${expectedAmount.toFixed(2)}. Auto-rebuilding…`,
         );
         await deleteQBOPurchase(baseUrl, accessToken, tx.qbo_purchase_id);
-        await adapter.persistPurchaseId(adapterDeps, tx.__neutral, ""); // clear via empty? — instead null:
-        // (clearing handled inline below to keep adapter API simple)
-        if (adapter.channel === "ebay") {
-          await admin.from("ebay_payout_transactions" as never)
-            .update({ qbo_purchase_id: null } as never).eq("id" as never, tx.id);
-        } else if (adapter.channel === "stripe") {
-          // For Stripe, the cached cleared via persistPurchaseId is fine — it
-          // overwrites with empty string which we treat as "needs rebuild".
-        }
+        await adapter.persistPurchaseId(adapterDeps, tx.__neutral, null);
         // Fall through to expense-line build + createQBOPurchase below.
       }
 
