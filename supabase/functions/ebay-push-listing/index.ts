@@ -16,6 +16,7 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
+import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
@@ -25,6 +26,25 @@ Deno.serve(async (req) => {
   try {
     const admin = createAdminClient();
     await authenticateRequest(req, admin);
+
+    // Validate required eBay marketplace policy env vars up front so the
+    // user gets a clear message rather than an opaque 400 from eBay later.
+    const fulfillmentPolicyId = Deno.env.get("EBAY_FULFILLMENT_POLICY_ID");
+    const paymentPolicyId = Deno.env.get("EBAY_PAYMENT_POLICY_ID");
+    const returnPolicyId = Deno.env.get("EBAY_RETURN_POLICY_ID");
+    const merchantLocationKey = Deno.env.get("EBAY_LOCATION_KEY");
+    const missingEnv = [
+      ["EBAY_FULFILLMENT_POLICY_ID", fulfillmentPolicyId],
+      ["EBAY_PAYMENT_POLICY_ID", paymentPolicyId],
+      ["EBAY_RETURN_POLICY_ID", returnPolicyId],
+      ["EBAY_LOCATION_KEY", merchantLocationKey],
+    ].filter(([, v]) => !v).map(([k]) => k);
+    if (missingEnv.length > 0) {
+      throw new Error(
+        `eBay listing policies are not configured. Missing secrets: ${missingEnv.join(", ")}. ` +
+          `Add them in Settings before publishing.`,
+      );
+    }
 
     const { listingId, skuCode } = await req.json();
     if (!listingId) throw new Error("listingId is required");
