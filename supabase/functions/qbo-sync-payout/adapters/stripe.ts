@@ -162,4 +162,41 @@ export const stripeAdapter: PayoutAdapter = {
 
   // Stripe has no out-of-band TRANSFER concept — default classification
   // (no settlements) is correct, so we omit `classifyTransactions`.
+
+  async persistPurchaseId(deps: AdapterDeps, tx: NeutralPayoutTx, qboPurchaseId: string) {
+    // Stripe stores the QBO Purchase id on every payout_fee row tied to
+    // this synthesised SALE/ACCOUNT_CHARGE transaction. For SALE rows the
+    // tx.id is `so:<sales_order_id>`; for ACCOUNT_CHARGE it is `fee:<fee_id>`.
+    const { admin, payoutId } = deps;
+
+    if (tx.id.startsWith("fee:")) {
+      const feeId = tx.id.slice(4);
+      await admin
+        .from("payout_fee")
+        .update({ qbo_purchase_id: qboPurchaseId })
+        .eq("id", feeId);
+      return;
+    }
+
+    if (tx.id.startsWith("so:") && tx.matchedOrderId) {
+      // Update every payout_fee row for this payout linked to this order
+      // (by sales_order_id, or by external_order_id matching the payment_reference).
+      const orFilter = tx.externalOrderId
+        ? `sales_order_id.eq.${tx.matchedOrderId},external_order_id.eq.${tx.externalOrderId}`
+        : `sales_order_id.eq.${tx.matchedOrderId}`;
+      await admin
+        .from("payout_fee")
+        .update({ qbo_purchase_id: qboPurchaseId })
+        .eq("payout_id", payoutId)
+        .or(orFilter);
+    }
+  },
+
+  describeFeeLine(tx: NeutralPayoutTx, fee: NeutralFeeDetail, channel: string): string {
+    return `${channel} ${(fee.feeType ?? "fee").replace(/_/g, " ")} — order ${tx.externalOrderId ?? tx.transactionId}`;
+  },
+
+  buildPrivateNote(tx: NeutralPayoutTx, channel: string, externalPayoutId: string | null): string {
+    return `${channel} payout ${externalPayoutId} — ${tx.transactionType} ${tx.externalOrderId ?? tx.transactionId}`;
+  },
 };
