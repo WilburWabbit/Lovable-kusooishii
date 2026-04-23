@@ -45,6 +45,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
   const [showBulkGrade, setShowBulkGrade] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
 
   const allUnits = useMemo(() => {
     if (!batch) return [];
@@ -285,6 +286,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           line={line}
           selectedUnitIds={selectedUnitIds}
           onToggleSelect={toggleSelect}
+          onEditLine={() => setEditingLineId(line.id)}
           onEditMpn={() => {
             const firstUnit = line.units[0];
             if (!firstUnit) return;
@@ -361,6 +363,14 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
         open={showEditDialog}
         onClose={() => setShowEditDialog(false)}
         batch={batch}
+      />
+
+      {/* Edit line item dialog */}
+      <EditLineItemDialog
+        open={editingLineId !== null}
+        onClose={() => setEditingLineId(null)}
+        batch={batch}
+        line={batch.lineItems.find((l) => l.id === editingLineId) ?? null}
       />
     </div>
   );
