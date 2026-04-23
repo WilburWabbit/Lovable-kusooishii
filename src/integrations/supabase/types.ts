@@ -3821,6 +3821,8 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      v2_create_purchase_batch: { Args: { p_input: Json }; Returns: Json }
+      v2_detect_orphan_purchase_batches: { Args: never; Returns: number }
       v2_link_unmatched_payout_fees: { Args: never; Returns: number }
       v2_reallocate_costs_by_grade: {
         Args: { p_line_item_id: string }
