@@ -282,81 +282,152 @@ export function useCreatePurchaseBatch() {
       if (batchErr) throw batchErr;
       const batchId = (batch as Record<string, unknown>).id as string;
 
-      // 2. Create line items
-      const lineItemInserts = input.lineItems.map((li) => ({
-        batch_id: batchId,
-        mpn: li.mpn,
-        quantity: li.quantity,
-        unit_cost: li.unitCost,
-      }));
+      try {
+        // 2. Create line items
+        const lineItemInserts = input.lineItems.map((li) => ({
+          batch_id: batchId,
+          mpn: li.mpn,
+          quantity: li.quantity,
+          unit_cost: li.unitCost,
+        }));
 
-      const { data: lineItems, error: lineErr } = await supabase
-        .from('purchase_line_items' as never)
-        .insert(lineItemInserts as never)
-        .select();
+        const { data: lineItems, error: lineErr } = await supabase
+          .from('purchase_line_items' as never)
+          .insert(lineItemInserts as never)
+          .select();
 
-      if (lineErr) throw lineErr;
+        if (lineErr) throw lineErr;
 
-      // 2b. Auto-create product records for new MPNs (lazy creation per spec)
-      const uniqueMpns = [...new Set(input.lineItems.map((li) => li.mpn))];
-      for (const mpn of uniqueMpns) {
-        const { data: existingProduct } = await supabase
-          .from('product')
-          .select('id')
-          .eq('mpn', mpn)
-          .maybeSingle();
+        // 2b. For each unique MPN: ensure product + placeholder grade-5 SKU exist.
+        // Grade 5 = ungraded/non-saleable; the unit gets re-pointed to the right
+        // <mpn>.<grade> SKU when the user grades it via GradeSlideOut.
+        const uniqueMpns = [...new Set(input.lineItems.map((li) => li.mpn))];
+        const skuIdByMpn = new Map<string, string>();
 
-        if (!existingProduct) {
-          // Create minimal product record — will be enriched asynchronously
-          const { error: productErr } = await supabase
+        for (const mpn of uniqueMpns) {
+          // Find or create product
+          let { data: product } = await supabase
             .from('product')
-            .insert({
-              mpn,
-              name: mpn, // Placeholder — enrichment will update with real name
-              set_number: mpn.split('-')[0],
-            } as never);
+            .select('id')
+            .eq('mpn', mpn)
+            .maybeSingle();
 
-          if (productErr) {
-            console.warn(`Failed to auto-create product for ${mpn}:`, productErr.message);
-          } else {
-            // Fire-and-forget: trigger product data enrichment from external APIs
+          if (!product) {
+            const { data: newProduct, error: productErr } = await supabase
+              .from('product')
+              .insert({
+                mpn,
+                name: mpn,
+                set_number: mpn.split('-')[0],
+              } as never)
+              .select('id')
+              .single();
+
+            if (productErr) throw new Error(`Failed to create product ${mpn}: ${productErr.message}`);
+            product = newProduct as { id: string };
+
+            // Fire-and-forget: enrich product data from external APIs
             supabase.functions
               .invoke('rebrickable-sync', { body: { mpn } })
               .catch((err) => console.warn(`Product enrichment for ${mpn} failed (non-blocking):`, err));
           }
+
+          // Find or create placeholder grade-5 SKU (non-saleable / ungraded)
+          const skuCode = `${mpn}.5`;
+          let { data: sku } = await supabase
+            .from('sku')
+            .select('id')
+            .eq('sku_code', skuCode)
+            .maybeSingle();
+
+          if (!sku) {
+            const { data: newSku, error: skuErr } = await supabase
+              .from('sku')
+              .insert({
+                sku_code: skuCode,
+                product_id: (product as { id: string }).id,
+                mpn,
+                condition_grade: '5',
+                active_flag: true,
+                saleable_flag: false,
+                name: mpn,
+              } as never)
+              .select('id')
+              .single();
+
+            if (skuErr) throw new Error(`Failed to create SKU ${skuCode}: ${skuErr.message}`);
+            sku = newSku as { id: string };
+          }
+
+          skuIdByMpn.set(mpn, (sku as { id: string }).id);
         }
-      }
 
-      // 3. Create stock units (one per quantity per line item)
-      const stockUnitInserts: Record<string, unknown>[] = [];
-      for (const li of (lineItems ?? []) as Record<string, unknown>[]) {
-        const qty = li.quantity as number;
-        for (let i = 0; i < qty; i++) {
-          stockUnitInserts.push({
-            mpn: li.mpn,
-            batch_id: batchId,
-            line_item_id: li.id,
-            v2_status: 'purchased',
-            status: 'pending_receipt', // v1 compat
-          });
+        // 3. Reserve UIDs atomically, then build stock unit inserts
+        const totalUnits = (lineItems ?? []).reduce(
+          (sum, li) => sum + ((li as Record<string, unknown>).quantity as number),
+          0,
+        );
+
+        let reservedUids: string[] = [];
+        if (totalUnits > 0) {
+          const { data: uids, error: reserveErr } = await supabase.rpc(
+            'v2_reserve_stock_unit_uids' as never,
+            { p_batch_id: batchId, p_count: totalUnits } as never,
+          );
+          if (reserveErr || !uids || (uids as string[]).length !== totalUnits) {
+            throw new Error(
+              `UID reservation failed: ${reserveErr?.message ?? 'unexpected count'}`,
+            );
+          }
+          reservedUids = uids as string[];
         }
+
+        const stockUnitInserts: Record<string, unknown>[] = [];
+        let uidCursor = 0;
+        for (const li of (lineItems ?? []) as Record<string, unknown>[]) {
+          const qty = li.quantity as number;
+          const mpn = li.mpn as string;
+          const skuId = skuIdByMpn.get(mpn);
+          if (!skuId) throw new Error(`Missing SKU mapping for MPN ${mpn}`);
+          const unitCost = li.unit_cost as number;
+
+          for (let i = 0; i < qty; i++) {
+            stockUnitInserts.push({
+              uid: reservedUids[uidCursor++],
+              sku_id: skuId,
+              mpn,
+              condition_grade: '5',
+              batch_id: batchId,
+              line_item_id: li.id,
+              landed_cost: unitCost,
+              v2_status: 'purchased',
+              status: 'pending_receipt',
+            });
+          }
+        }
+
+        if (stockUnitInserts.length > 0) {
+          const { error: unitErr } = await supabase
+            .from('stock_unit')
+            .insert(stockUnitInserts as never);
+
+          if (unitErr) throw unitErr;
+        }
+
+        // 4. Run cost apportionment
+        const { error: apportionErr } = await supabase
+          .rpc('v2_calculate_apportioned_costs' as never, { p_batch_id: batchId } as never);
+
+        if (apportionErr) throw apportionErr;
+
+        return batchId;
+      } catch (innerErr) {
+        // Rollback: best-effort cleanup so we never leave an orphan batch
+        await supabase.from('stock_unit').delete().eq('batch_id' as never, batchId);
+        await supabase.from('purchase_line_items' as never).delete().eq('batch_id', batchId);
+        await supabase.from('purchase_batches' as never).delete().eq('id', batchId);
+        throw innerErr;
       }
-
-      if (stockUnitInserts.length > 0) {
-        const { error: unitErr } = await supabase
-          .from('stock_unit')
-          .insert(stockUnitInserts as never);
-
-        if (unitErr) throw unitErr;
-      }
-
-      // 4. Run cost apportionment
-      const { error: apportionErr } = await supabase
-        .rpc('v2_calculate_apportioned_costs' as never, { p_batch_id: batchId } as never);
-
-      if (apportionErr) throw apportionErr;
-
-      return batchId;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
