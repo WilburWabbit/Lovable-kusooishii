@@ -173,7 +173,9 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[22px] font-bold text-zinc-900">{batch.id}</h1>
+            <h1 className="text-[22px] font-bold text-zinc-900">
+              {batch.reference || batch.id}
+            </h1>
             {ungradedCount > 0 ? (
               <Badge label={`${ungradedCount} ungraded`} color="#F59E0B" />
             ) : (
@@ -193,6 +195,9 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
             )}
           </div>
           <div className="flex gap-4 text-zinc-500 text-[13px]">
+            {batch.reference && (
+              <span className="font-mono text-zinc-400">{batch.id}</span>
+            )}
             <span>{batch.supplierName}</span>
             <span>{formattedDate}</span>
             <span>
