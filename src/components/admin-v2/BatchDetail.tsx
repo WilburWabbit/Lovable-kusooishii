@@ -16,6 +16,7 @@ import {
 import { GradeSlideOut } from "./GradeSlideOut";
 import { BulkGradeDialog } from "./BulkGradeDialog";
 import { EditPurchaseDialog } from "./EditPurchaseDialog";
+import { EditLineItemDialog } from "./EditLineItemDialog";
 import {
   AlertDialog,
   AlertDialogAction,
