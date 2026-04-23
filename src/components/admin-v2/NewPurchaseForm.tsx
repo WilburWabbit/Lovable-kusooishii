@@ -9,6 +9,7 @@ import { toast } from "sonner";
 interface LineItemDraft {
   key: number;
   mpn: string;
+  name: string;
   quantity: number;
   unitCost: number;
 }
@@ -18,6 +19,7 @@ let nextKey = 1;
 export function NewPurchaseForm() {
   const navigate = useNavigate();
   const createBatch = useCreatePurchaseBatch();
+  const { data: products = [] } = useProducts();
 
   // Persistent error banner — toasts auto-hide too quickly to read DB errors
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -38,8 +40,17 @@ export function NewPurchaseForm() {
 
   // Line items
   const [lineItems, setLineItems] = useState<LineItemDraft[]>([
-    { key: nextKey++, mpn: "", quantity: 1, unitCost: 0 },
+    { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
   ]);
+
+  // For each line: lookup the existing product by MPN (case-insensitive)
+  const lineProductMatches = useMemo(() => {
+    return lineItems.map((li) => {
+      const mpn = li.mpn.trim().toLowerCase();
+      if (!mpn) return null;
+      return products.find((p) => p.mpn.toLowerCase() === mpn) ?? null;
+    });
+  }, [lineItems, products]);
 
   const totalSharedCosts = shipping + brokerFee + otherCost;
   const totalMerchandise = lineItems.reduce(
@@ -63,7 +74,7 @@ export function NewPurchaseForm() {
   const addLine = () => {
     setLineItems((prev) => [
       ...prev,
-      { key: nextKey++, mpn: "", quantity: 1, unitCost: 0 },
+      { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
     ]);
   };
 
@@ -83,10 +94,18 @@ export function NewPurchaseForm() {
     );
   };
 
+  // For new MPNs (not in catalog), the operator must enter a Product Name so it
+  // flows correctly into QBO. Existing MPNs reuse the stored name automatically.
   const canSubmit =
     supplierName.trim() !== "" &&
     lineItems.length > 0 &&
-    lineItems.every((li) => li.mpn.trim() !== "" && li.quantity > 0 && li.unitCost > 0);
+    lineItems.every((li, idx) => {
+      const baseValid = li.mpn.trim() !== "" && li.quantity > 0 && li.unitCost > 0;
+      if (!baseValid) return false;
+      const isNew = !lineProductMatches[idx];
+      if (isNew && li.name.trim() === "") return false;
+      return true;
+    });
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -106,8 +125,11 @@ export function NewPurchaseForm() {
         reference: reference.trim() || undefined,
         supplierVatRegistered: vatRegistered,
         sharedCosts,
-        lineItems: lineItems.map((li) => ({
+        lineItems: lineItems.map((li, idx) => ({
           mpn: li.mpn.trim(),
+          name: lineProductMatches[idx]
+            ? lineProductMatches[idx]!.name
+            : li.name.trim() || undefined,
           quantity: li.quantity,
           unitCost: li.unitCost,
         })),
