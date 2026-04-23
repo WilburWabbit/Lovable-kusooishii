@@ -51,11 +51,16 @@ export function QboSettingsCard() {
   const [recalcingCost, setRecalcingCost] = useState(false);
   const [retryingPush, setRetryingPush] = useState(false);
   const [syncingDeposits, setSyncingDeposits] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsSaving, setAccountsSaving] = useState(false);
+  const [accountList, setAccountList] = useState<Array<{ id: string; name: string; type: string; subType: string | null }>>([]);
+  const [accountMappings, setAccountMappings] = useState<Record<string, { account_id: string; account_name: string | null; account_type: string | null }>>({});
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
 
   // ── Fetch status on mount ──
   useState(() => {
