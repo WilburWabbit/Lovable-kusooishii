@@ -309,3 +309,42 @@ export function useCreatePurchaseBatch() {
     },
   });
 }
+
+// ─── useDeletePurchaseBatch ─────────────────────────────────
+
+export interface DeletePurchaseBatchResult {
+  success: boolean;
+  batch_id: string;
+  units_deleted: number;
+  qbo_purchase_id: string | null;
+  qbo_result: { deleted: boolean; reason?: string } | { skipped: true };
+}
+
+export function useDeletePurchaseBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { batchId: string; skipQbo?: boolean }): Promise<DeletePurchaseBatchResult> => {
+      const { data, error } = await supabase.functions.invoke('v2-delete-purchase-batch', {
+        body: { batch_id: input.batchId, skip_qbo: input.skipQbo ?? false },
+      });
+      if (error) {
+        // FunctionsHttpError carries the response body as `error.context`.
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const payload = await ctx.json();
+            if (payload?.error) throw new Error(payload.error);
+          } catch (_) { /* fall through */ }
+        }
+        throw new Error(error.message);
+      }
+      if (data && typeof data === 'object' && 'error' in data) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data as DeletePurchaseBatchResult;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
+    },
+  });
+}
