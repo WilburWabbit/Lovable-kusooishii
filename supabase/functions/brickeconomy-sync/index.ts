@@ -1,5 +1,5 @@
 // Redeployed: 2026-03-23
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
