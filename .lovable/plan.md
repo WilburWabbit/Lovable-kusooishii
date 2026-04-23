@@ -1,104 +1,95 @@
 
 
-# Fix: Purchase batch creation still leaves orphan batches (PO-668)
+# Fix QBO purchase + item sync from new purchase batches
 
-## What broke (again)
+## Three problems to fix
 
-PO-668 was created at 12:19:30 with 9 line items, then the hook silently failed somewhere between line-items and stock_units. The "rollback" `try/catch` we added last round did NOT clean up — header + 9 line items + 9 products are still in the database, 0 SKUs, 0 stock units. The user saw a generic toast and the half-created batch is now sitting in the Purchases list.
+1. **No QBO Purchase was created for PO-669** because the app has no "create purchase in QBO" path — only a one-way pull (`qbo-sync-purchases`).
+2. **QBO Items were created with the MPN as the name** because the form has no name field, so `v2_create_purchase_batch` stores `product.name = mpn`, which `qbo-sync-item` then uses for `Name`, `Description`, and `PurchaseDesc`.
+3. **QBO Items are wrong type / missing fields**: created as `NonInventory`, no `PurchaseCost`, no tax code, no inventory start date.
 
-Confirmed in DB:
-- `purchase_batches` PO-668: status `draft`, unit_counter 0
-- `purchase_line_items`: 9 rows for batch PO-668
-- `product`: 9 rows created at 12:19:30–33 (one per MPN)
-- `sku`: **0 rows for these MPNs**
-- `stock_unit`: **0 rows for batch PO-668**
+## Fix 1 — Capture product name in the new purchase form
 
-The line items include several non-LEGO MPNs (`38881`, `PO702`, `TIP0284GRNONE`, `ricardo`, `B0F5B3VGFN`) — these are valid (consumables / raw materials in a mixed John Pye lot) and not the cause.
+**`src/components/admin-v2/NewPurchaseForm.tsx`**
 
-## Root causes
+For each line item, when the typed MPN does NOT match an existing product in `useProducts()`, expand the row to show a required **"Product Name"** input. When the MPN matches an existing product, show the existing name read-only and skip the input.
 
-1. **Multi-step client-side write with no real transaction.** The hook does 8+ sequential `supabase.from(...)` calls. If any one fails, the previous ones are already committed. The `try/catch` rollback uses 3 more network calls that are themselves subject to RLS, network errors, and the same `as never` typing fragility — and we have no logs proving they ran. PO-668 still being present is proof they didn't.
+Pass `name` per line item up to the mutation. `canSubmit` must also require `name` for new MPNs.
 
-2. **Errors swallowed by destructuring.** Lines 309 and 337 destructure `data` but discard `error`:
-   ```ts
-   let { data: product } = await supabase.from('product').select('id')...
-   let { data: sku } = await supabase.from('sku').select('id')...
-   ```
-   A failed select returns `data: null, error: <something>` — the code then assumes "row doesn't exist" and tries to insert. If the insert later fails for an unrelated reason, the user has no diagnostic and we don't know whether the select or insert was the real culprit.
+**`src/hooks/admin/use-purchase-batches.ts` → `CreateBatchInput`**
 
-3. **Rollback can't be trusted from the client.** Even if we capture errors better, the rollback still runs as 3 separate network calls with no guarantee they all succeed (RLS, network drop, concurrent edits). The only reliable way is one server-side transaction.
+Add optional `name?: string` to each line item and forward it in the RPC payload.
 
-4. **`condition_grade` enum may reject the placeholder grade `'5'` when `saleable_flag=false`.** This isn't the root cause for PO-668 (no constraint enforces this), but the design uses grade 5 as a sentinel which has knock-on effects elsewhere (listings hooks filter on grade ≠ 5; pricing logic skips grade 5). Worth a small assertion test.
+**Migration — `v2_create_purchase_batch`**
 
-5. **No diagnostic surface.** The only way we found PO-667 / PO-668 was by querying the DB directly. There's no audit_event row written, no staging row, nothing. Repeated incidents are invisible until a human notices.
+When upserting `product`, use `COALESCE(NULLIF(elem->>'name',''), v_mpn)` as the insert value, and on conflict update `name` ONLY if the existing row's name equals its mpn (i.e. was a placeholder). This way real names overwrite placeholder names but never overwrite a real one.
 
-## The fix
+## Fix 2 — Push the Purchase to QBO when a batch is created
 
-### 1. Move the entire create into one SECURITY DEFINER RPC (real transaction)
+**New edge function `supabase/functions/v2-push-purchase-to-qbo/index.ts`**
 
-New migration: `v2_create_purchase_batch(p_input jsonb) returns jsonb`.
+Called fire-and-forget from `useCreatePurchaseBatch` after the RPC succeeds (mirrors the pattern in `use-stock-units.ts` for `qbo-sync-item`). Inputs: `{ batch_id }`.
 
-Inside one BEGIN/COMMIT it:
+Steps:
 
-1. Inserts the `purchase_batches` row, returning the new batch id (continues to use the existing `PO-NNN` sequence — read max id + 1, or reuse whatever the current `id` default is).
-2. Inserts all `purchase_line_items` in a single statement.
-3. For each unique MPN: `INSERT … ON CONFLICT (mpn) DO NOTHING` into `product`, then `INSERT … ON CONFLICT (sku_code) DO NOTHING` into `sku` for `<mpn>.5` with `saleable_flag=false, active_flag=true, condition_grade='5'`. `RETURNING id` resolves to the existing or new row in both cases.
-4. Calls `v2_reserve_stock_unit_uids(batch_id, total_units)` (already exists).
-5. Bulk inserts all `stock_unit` rows with `sku_id`, `condition_grade='5'`, `uid`, `landed_cost`, `mpn`, `batch_id`, `line_item_id`, `v2_status='purchased'`, `status='pending_receipt'`.
-6. Calls `v2_calculate_apportioned_costs(batch_id)`.
-7. Writes one `audit_event` row of category `purchase_batch_created` with input + output payloads.
-8. Returns `{ batch_id, line_item_count, unit_count }`.
+1. Load batch + line items + supplier.
+2. `ensure_vendor` already runs in a trigger so `supplier_id` is set; resolve the vendor's QBO `VendorRef.value` (lookup via existing `vendor` table → `qbo_vendor_id`). If missing, call `qbo-upsert-vendor` (already exists pattern via `qbo-sync-vendors`) or fail gracefully and write an audit error.
+3. For each line item: resolve `qbo_item_id` for the placeholder grade-5 SKU (`<mpn>.5`). If absent, call `qbo-sync-item` first to create it (with the correct payload from Fix 3 below).
+4. Build a QBO **Purchase** payload (`PaymentType: "Cash"` with `AccountRef` = the configured cash/bank account, `TxnDate` = `purchase_date`, `EntityRef` = vendor, `DocNumber` = `batch.id`, `Line[]` = one `ItemBasedExpenseLineDetail` per line item with `ItemRef`, `Qty`, `UnitPrice`, `TaxCodeRef`).
+5. POST to `${baseUrl}/purchase?minorversion=65`. On success: store the returned `Id` on the batch (new column `qbo_purchase_id text`) and write an `audit_event`. On error: write the error and the payload to audit, do NOT roll back the local batch — operator can retry.
 
-Any error → automatic transaction rollback → nothing persists. No orphan batches possible.
+**Migration — extend `purchase_batches`**
 
-Permissions: grant execute to `authenticated`. Inside the function, assert `has_role(auth.uid(), 'admin') OR has_role(auth.uid(), 'staff')` and raise if not.
+Add `qbo_purchase_id text` and `qbo_sync_status text default 'pending'` (values: `pending | synced | error | skipped`) and `qbo_sync_error text`.
 
-### 2. Replace the client hook body with a single RPC call
+**Repair PO-669**: call the new function once for PO-669 after deploy (one-shot via the BatchDetail "Retry QBO sync" button below). Migration also resets the existing 9 SKUs' `qbo_item_id` to `NULL` so re-sync recreates them with the corrected item payload (Fix 3) — and we must first delete the 9 broken NonInventory items already in QBO. Plan: a small admin action on the BatchDetail page that lists each linked QBO item and deletes them via `${baseUrl}/item?operation=delete` before re-creating.
 
-`useCreatePurchaseBatch` becomes ~15 lines:
+## Fix 3 — Create QBO Items as Inventory with correct fields
 
-```ts
-const { data, error } = await supabase.rpc('v2_create_purchase_batch', { p_input: input });
-if (error) throw error;
-return (data as { batch_id: string }).batch_id;
-```
+**`supabase/functions/qbo-sync-item/index.ts`**
 
-Drop the find-or-create product / SKU / UID / unit / apportionment / rollback code from the client. The rebrickable enrichment fire-and-forget stays in the client (post-success, iterate unique MPNs).
+Change the CREATE branch:
 
-### 3. Surface real errors in the form
+- `Type: "Inventory"` (not `NonInventory`)
+- `TrackQtyOnHand: true`
+- `QtyOnHand: 0`
+- `InvStartDate: "2023-04-14"` (per the user's spec)
+- `AssetAccountRef: { value: <inventory_asset_account_id> }`
+- `IncomeAccountRef: { value: <sales_income_account_id> }`
+- `ExpenseAccountRef: { value: <cogs_account_id> }`
+- `PurchaseCost: exVAT(landedCost)` from the SKU's most recent stock_unit `landed_cost` (or `unit_cost` from the line item being processed — see batch-push flow).
+- `UnitPrice: exVAT(salePrice)` only when set.
+- `SalesTaxCodeRef: { value: "TAX" }` (and on UK accounts the standard 20% code) — keep current `Taxable: true` and add a `PurchaseTaxCodeRef` if the supplier is VAT-registered.
+- `Name: '<Product Name> (<SKU>)'`, `Description` and `PurchaseDesc` both = `'<Product Name> (<SKU>)'` per the user's spec.
 
-`NewPurchaseForm` `onError` toast must include `error.message` AND, when present, `error.details` / `error.hint` from the PostgrestError. Currently a Postgres error like `null value in column "sku_id"` is being collapsed to "Something went wrong".
+The current account refs are hardcoded `IncomeAccountRef.value = "1"` / `ExpenseAccountRef.value = "2"`. These need to be configurable. Add three new rows to `pricing_settings` (or a new `qbo_settings` keyed table) for `qbo_inventory_asset_account_id`, `qbo_income_account_id`, `qbo_cogs_account_id`. Surface them in `QboSettingsCard.tsx` as a small form with a one-shot "Discover accounts" button that lists active QBO Accounts via `${baseUrl}/query?query=SELECT * FROM Account` and lets the admin pick one for each role. Until configured, `qbo-sync-item` should fail fast with a clear message rather than silently send `"1"`/`"2"`.
 
-Also add a non-toast error banner inside the form panel that persists until the user dismisses it — toasts auto-hide too quickly to read DB error text.
+**Update signature**: `qbo-sync-item` currently takes `{ skuCode, oldSkuCode? }`. Add optional `{ purchaseCost?: number, supplierVatRegistered?: boolean }` so the batch-push flow can pass the per-line cost. When omitted (re-grade path), fall back to current behaviour.
 
-### 4. Always write an audit_event for create attempts
+## Fix 4 — UI surface for QBO sync state on the batch page
 
-Inside the RPC, write `audit_event` for both success and failure (failure path uses an EXCEPTION block that writes the audit row then re-raises). Category: `purchase_batch_create`. This gives us a permanent diagnostic trail for the next incident.
+**`src/components/admin-v2/BatchDetail.tsx`**
 
-### 5. Clean up PO-668
-
-One-shot migration (data, not schema — done via insert tool):
-- `DELETE FROM purchase_line_items WHERE batch_id='PO-668'`
-- `DELETE FROM purchase_batches WHERE id='PO-668'`
-- Leave the 9 `product` rows (they're useful and not orphaned).
-
-### 6. Add a backstop nightly drift check
-
-Tiny `pg_cron` job: any `purchase_batches` row with `status='draft'` AND `created_at < now() - interval '15 minutes'` AND `unit_counter = 0` → write an `audit_event` of category `purchase_batch_orphan_detected` (do NOT auto-delete — humans should review). This catches anything that slips through.
+Header chip showing `qbo_sync_status` (`Synced #1234 / Pending / Error / Not synced`). When `error` or `pending`, show a "Push to QBO" button that calls the new edge function. Show `qbo_sync_error` inline when present.
 
 ## Files touched
 
 | File | Change |
 |---|---|
-| New migration | `v2_create_purchase_batch(jsonb)` SECURITY DEFINER function + GRANT EXECUTE; nightly orphan-detection cron |
-| Data migration (insert tool) | Delete PO-668 line items + header |
-| `src/hooks/admin/use-purchase-batches.ts` | Replace `useCreatePurchaseBatch` mutation body with single `supabase.rpc('v2_create_purchase_batch', …)` call; keep rebrickable enrichment fire-and-forget after success |
-| `src/components/admin-v2/NewPurchaseForm.tsx` | Surface `error.message` + `error.details` in toast AND in a dismissible inline error banner |
+| New migration | `purchase_batches` adds `qbo_purchase_id`, `qbo_sync_status`, `qbo_sync_error`; new `qbo_account_settings` table or pricing_settings rows; updated `v2_create_purchase_batch` to use `name` from input and protect existing real names |
+| New edge fn `v2-push-purchase-to-qbo` | Build + POST QBO Purchase, store id back on batch, audit |
+| `supabase/functions/qbo-sync-item/index.ts` | Inventory type, configurable account refs, PurchaseCost, tax codes, fail-fast on missing config |
+| `src/components/admin-v2/NewPurchaseForm.tsx` | Per-line "Product Name" field for new MPNs; required validation |
+| `src/hooks/admin/use-purchase-batches.ts` | Forward `name` per line item; fire-and-forget call to `v2-push-purchase-to-qbo` after RPC success |
+| `src/components/admin-v2/BatchDetail.tsx` | QBO sync status chip + "Push to QBO" / "Retry" button + error display |
+| `src/components/admin-v2/QboSettingsCard.tsx` | Account-picker form for inventory asset / income / COGS accounts |
+| One-shot repair (BatchDetail action) | Delete the 9 wrong NonInventory items in QBO, clear their `qbo_item_id` on SKUs, then push PO-669 + recreate items as Inventory |
 
 ## Verification
 
-1. Retry the John Pye purchase that produced PO-668 (9 line items, mixed MPNs including non-LEGO). Expect: one new `PO-669` row with status `draft`, 9 line items, 9 stock units at grade 5 each with a `uid` and `sku_id`, 9 SKUs of form `<mpn>.5`. Zero orphan rows on any failure path.
-2. Force a failure (e.g. submit an invalid `unit_cost: 'abc'` via the network). Expect: zero rows persisted (no batch, no lines, no products, no SKUs, no units). Toast shows the actual Postgres error. Audit event row written with `purchase_batch_create_failed`.
-3. Run the nightly orphan check manually via `SELECT cron.schedule(...)` test invocation — confirm it does not flag the new healthy batch and would flag PO-668 if it still existed.
-4. Confirm `audit_event` now has a `purchase_batch_create` row per attempt.
+1. Settings → QBO: configure inventory asset, income, COGS accounts.
+2. Create a new purchase batch with a brand-new MPN — name field appears, required.
+3. After submit: batch row has `qbo_sync_status='synced'` and `qbo_purchase_id` set; QBO shows a Cash Purchase with the supplier as vendor, `DocNumber = PO-NNN`, one line per MPN with the correct unit cost and tax code.
+4. QBO Items for each new MPN exist as **Inventory** with name `<Name> (<SKU>)`, description and purchase description identical, `PurchaseCost` = ex-VAT line unit cost, `QtyOnHand=0`, `InvStartDate=2023-04-14`, asset/income/COGS account refs from settings.
+5. Repair PO-669 from BatchDetail → "Retry QBO sync".
 
