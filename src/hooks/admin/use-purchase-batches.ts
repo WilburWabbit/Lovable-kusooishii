@@ -446,6 +446,135 @@ export function useUpdatePurchaseBatch() {
   });
 }
 
+// ─── useUpdatePurchaseLineItem ──────────────────────────────
+
+export interface UpdatePurchaseLineItemInput {
+  batchId: string;
+  lineItemId: string;
+  mpn: string; // unchanged — used to locate product + grade-5 SKU
+  name: string | null; // null/empty → reset to mpn
+  unitCost: number;
+}
+
+export interface UpdatePurchaseLineItemResult {
+  line_item_id: string;
+  qbo_pushed: boolean;
+  qbo_error?: string;
+}
+
+export function useUpdatePurchaseLineItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdatePurchaseLineItemInput): Promise<UpdatePurchaseLineItemResult> => {
+      // 1. Load batch to know whether it's already in QBO
+      const { data: batchRow, error: batchErr } = await supabase
+        .from('purchase_batches' as never)
+        .select('qbo_purchase_id')
+        .eq('id', input.batchId)
+        .single();
+      if (batchErr) throw new Error(`Load batch failed: ${batchErr.message}`);
+      const qboPurchaseId = (batchRow as Record<string, unknown> | null)?.qbo_purchase_id as string | null;
+
+      // 2. Update the line item itself (unit_cost). Quantity/MPN stay locked.
+      const { error: liErr } = await supabase
+        .from('purchase_line_items' as never)
+        .update({ unit_cost: input.unitCost } as never)
+        .eq('id', input.lineItemId);
+      if (liErr) throw new Error(`Update line item failed: ${liErr.message}`);
+
+      // 3. Update product.name on the canonical product row keyed by MPN.
+      // The QBO Item name is derived from product.name in qbo-sync-item.
+      const newName = input.name?.trim() || input.mpn;
+      const { error: prodErr } = await supabase
+        .from('product')
+        .update({ name: newName } as never)
+        .eq('mpn', input.mpn);
+      if (prodErr) throw new Error(`Update product failed: ${prodErr.message}`);
+
+      // 4. Re-apportion landed costs across the batch's line items / units.
+      const { error: rpcErr } = await supabase.rpc(
+        'v2_calculate_apportioned_costs' as never,
+        { p_batch_id: input.batchId } as never,
+      );
+      if (rpcErr) {
+        console.warn(`Re-apportion failed for ${input.batchId}: ${rpcErr.message}`);
+      }
+
+      // 5. If batch already in QBO, push the QBO Item update (name + cost),
+      //    then push the QBO Purchase update (line totals).
+      if (qboPurchaseId) {
+        const skuCode = `${input.mpn}.5`;
+        try {
+          const { data: itemData, error: itemErr } = await supabase.functions.invoke(
+            'qbo-sync-item',
+            {
+              body: {
+                skuCode,
+                purchaseCost: input.unitCost,
+                supplierVatRegistered: false, // qbo-sync-item ex-VATs as needed; cost is gross
+              },
+            },
+          );
+          if (itemErr) {
+            const ctx = (itemErr as { context?: Response }).context;
+            let detail = itemErr.message;
+            if (ctx && typeof ctx.json === 'function') {
+              try {
+                const payload = await ctx.json();
+                if (payload?.error) detail = String(payload.error);
+              } catch (_) { /* ignore */ }
+            }
+            return { line_item_id: input.lineItemId, qbo_pushed: false, qbo_error: `QBO Item sync: ${detail}` };
+          }
+          if (itemData && typeof itemData === 'object' && 'success' in itemData && !(itemData as { success: boolean }).success) {
+            const errPayload = itemData as { qbo_error?: string; error?: string };
+            return {
+              line_item_id: input.lineItemId,
+              qbo_pushed: false,
+              qbo_error: `QBO Item sync: ${errPayload.qbo_error ?? errPayload.error ?? 'unknown'}`,
+            };
+          }
+        } catch (e) {
+          return {
+            line_item_id: input.lineItemId,
+            qbo_pushed: false,
+            qbo_error: `QBO Item sync threw: ${e instanceof Error ? e.message : String(e)}`,
+          };
+        }
+
+        const { data, error } = await supabase.functions.invoke('v2-update-purchase-in-qbo', {
+          body: { batch_id: input.batchId },
+        });
+        if (error) {
+          const ctx = (error as { context?: Response }).context;
+          let detail = error.message;
+          if (ctx && typeof ctx.json === 'function') {
+            try {
+              const payload = await ctx.json();
+              if (payload?.error) detail = String(payload.error);
+            } catch (_) { /* ignore */ }
+          }
+          return { line_item_id: input.lineItemId, qbo_pushed: false, qbo_error: detail };
+        }
+        if (data && typeof data === 'object' && 'error' in data) {
+          return {
+            line_item_id: input.lineItemId,
+            qbo_pushed: false,
+            qbo_error: String((data as { error: unknown }).error),
+          };
+        }
+        return { line_item_id: input.lineItemId, qbo_pushed: true };
+      }
+
+      return { line_item_id: input.lineItemId, qbo_pushed: false };
+    },
+    onSuccess: (_data, input) => {
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.detail(input.batchId) });
+    },
+  });
+}
+
 // ─── useDeletePurchaseBatch ─────────────────────────────────
 
 export interface DeletePurchaseBatchResult {
