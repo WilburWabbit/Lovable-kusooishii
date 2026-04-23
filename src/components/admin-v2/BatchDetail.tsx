@@ -73,6 +73,60 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
     });
   };
 
+  const handlePushQbo = async () => {
+    try {
+      const result = await pushQbo.mutateAsync(batchId);
+      toast({
+        title: "Pushed to QuickBooks",
+        description: result.qbo_purchase_id
+          ? `Cash Purchase #${result.qbo_purchase_id} created.`
+          : "QBO sync queued.",
+      });
+    } catch (e) {
+      toast({
+        title: "QBO push failed",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+        duration: 12000,
+      });
+    }
+  };
+
+  const handleRepairItems = async () => {
+    if (!confirm(
+      `Repair QBO items for ${batchId}?\n\n` +
+      `This will:\n` +
+      `  • Deactivate the existing QBO items linked to this batch's SKUs\n` +
+      `  • Clear the local QBO item references\n` +
+      `  • Reset the batch sync status so you can re-push it\n\n` +
+      `After this, click "Push to QBO" to recreate the items as proper Inventory items. Continue?`,
+    )) return;
+
+    try {
+      const { data, error } = await import("@/integrations/supabase/client").then((m) =>
+        m.supabase.functions.invoke("v2-repair-purchase-batch-items", { body: { batch_id: batchId } }),
+      );
+      if (error) throw error;
+      if (data && typeof data === "object" && "error" in data) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      const skus = (data as { skus?: { sku_code: string; deactivated: boolean }[] })?.skus ?? [];
+      const ok = skus.filter((s) => s.deactivated).length;
+      toast({
+        title: "QBO items repaired",
+        description: `${ok}/${skus.length} item(s) deactivated. Now click "Push to QBO" to recreate them.`,
+        duration: 8000,
+      });
+    } catch (e) {
+      toast({
+        title: "Repair failed",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+        duration: 12000,
+      });
+    }
+  };
+
   const handleConfirmDelete = async () => {
     try {
       const result = await deleteBatch.mutateAsync({ batchId });
@@ -158,6 +212,15 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
             >
               Bulk Grade {selectedUnitIds.size} Units
+            </button>
+          )}
+          {(batch.qboSyncStatus === "error" || batch.qboPurchaseId) && (
+            <button
+              onClick={handleRepairItems}
+              title="Deactivate the existing QBO items for this batch and clear local refs so they can be recreated as proper Inventory items"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 hover:border-amber-400"
+            >
+              Repair QBO items
             </button>
           )}
           {(batch.qboSyncStatus === "pending" || batch.qboSyncStatus === "error") && (

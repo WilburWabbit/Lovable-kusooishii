@@ -51,11 +51,16 @@ export function QboSettingsCard() {
   const [recalcingCost, setRecalcingCost] = useState(false);
   const [retryingPush, setRetryingPush] = useState(false);
   const [syncingDeposits, setSyncingDeposits] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsSaving, setAccountsSaving] = useState(false);
+  const [accountList, setAccountList] = useState<Array<{ id: string; name: string; type: string; subType: string | null }>>([]);
+  const [accountMappings, setAccountMappings] = useState<Record<string, { account_id: string; account_name: string | null; account_type: string | null }>>({});
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
 
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -487,6 +492,56 @@ export function QboSettingsCard() {
     }
   };
 
+  // ── QBO Account Mapping ──
+
+  const ACCOUNT_KEYS: { key: string; label: string; help: string }[] = [
+    { key: 'qbo_inventory_asset_account_id', label: 'Inventory Asset', help: 'Where stock value is held on the balance sheet (e.g. "Inventory Asset").' },
+    { key: 'qbo_income_account_id', label: 'Sales Income', help: 'Account credited when stock is sold (e.g. "Sales of Product Income").' },
+    { key: 'qbo_cogs_account_id', label: 'Cost of Goods Sold', help: 'Account expensed when stock is sold (e.g. "Cost of Goods Sold").' },
+    { key: 'qbo_cash_account_id', label: 'Cash / Bank', help: 'Bank or cash account used when pushing new purchase batches as Cash Purchases.' },
+  ];
+
+  const loadQboAccounts = async () => {
+    setAccountsLoading(true);
+    try {
+      const data = await invokeWithAuth<Record<string, unknown>>('qbo-list-accounts', { action: 'list' });
+      if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
+      setAccountList(((data as Record<string, unknown>).accounts ?? []) as typeof accountList);
+      setAccountMappings(((data as Record<string, unknown>).mappings ?? {}) as typeof accountMappings);
+      setAccountsLoaded(true);
+      toast.success(`Loaded ${((data as Record<string, unknown>).accounts as unknown[])?.length ?? 0} accounts from QBO`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load QBO accounts');
+    } finally {
+      setAccountsLoading(false);
+    }
+  };
+
+  const saveQboAccounts = async () => {
+    setAccountsSaving(true);
+    try {
+      const mappings: Record<string, { account_id: string; account_name?: string; account_type?: string }> = {};
+      for (const { key } of ACCOUNT_KEYS) {
+        const sel = accountMappings[key];
+        if (sel?.account_id) {
+          const acc = accountList.find((a) => a.id === sel.account_id);
+          mappings[key] = {
+            account_id: sel.account_id,
+            account_name: acc?.name ?? sel.account_name ?? undefined,
+            account_type: acc?.type ?? sel.account_type ?? undefined,
+          };
+        }
+      }
+      const data = await invokeWithAuth<Record<string, unknown>>('qbo-list-accounts', { action: 'save', mappings });
+      if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
+      toast.success(`Saved ${((data as Record<string, unknown>).saved as number) ?? 0} account mapping(s)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save mappings');
+    } finally {
+      setAccountsSaving(false);
+    }
+  };
+
   // ── Render ──
 
   const Btn = ({ onClick, disabled, busy, children }: {
@@ -611,6 +666,61 @@ export function QboSettingsCard() {
               <Btn onClick={cleanupGhostUnits} busy={cleaningGhosts}>Cleanup Ghost Units</Btn>
               <Btn onClick={recalcAvgCost} busy={recalcingCost}>Recalc Avg Cost</Btn>
             </div>
+          </div>
+
+          {/* Account Mapping */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[9px] uppercase tracking-wider text-zinc-400">Account Mapping</p>
+              <div className="flex gap-1.5">
+                <Btn onClick={loadQboAccounts} busy={accountsLoading}>
+                  {accountsLoaded ? 'Reload accounts' : 'Discover accounts'}
+                </Btn>
+                {accountsLoaded && (
+                  <Btn onClick={saveQboAccounts} busy={accountsSaving}>Save mappings</Btn>
+                )}
+              </div>
+            </div>
+            <p className="text-[10px] text-zinc-500 mb-2">
+              Used when creating QBO Inventory items and Cash Purchases for new purchase batches.
+            </p>
+            {accountsLoaded ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {ACCOUNT_KEYS.map(({ key, label, help }) => (
+                  <div key={key} className="space-y-0.5">
+                    <label className="block text-[10px] font-medium text-zinc-700" title={help}>
+                      {label}
+                    </label>
+                    <select
+                      value={accountMappings[key]?.account_id ?? ''}
+                      onChange={(e) =>
+                        setAccountMappings((prev) => ({
+                          ...prev,
+                          [key]: {
+                            account_id: e.target.value,
+                            account_name: accountList.find((a) => a.id === e.target.value)?.name ?? null,
+                            account_type: accountList.find((a) => a.id === e.target.value)?.type ?? null,
+                          },
+                        }))
+                      }
+                      disabled={anyBusy}
+                      className="w-full text-[11px] border border-zinc-300 rounded px-2 py-1 bg-white disabled:opacity-50"
+                    >
+                      <option value="">— Select account —</option>
+                      {accountList.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.type}{a.subType ? ` / ${a.subType}` : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-zinc-400 italic">
+                Click "Discover accounts" to load the chart of accounts from QuickBooks.
+              </p>
+            )}
           </div>
 
           {/* Admin */}
