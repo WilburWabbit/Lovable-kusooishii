@@ -18,7 +18,14 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
-import { exVAT } from "../_shared/vat.ts";
+import { toPence, fromPence } from "../_shared/vat.ts";
+import {
+  buildBalancedQBOLines,
+  assertQBOPayloadBalances,
+  QBOPayloadImbalanceError,
+  QBO_TAX_CODE_STANDARD_20,
+  QBO_TAX_CODE_NO_VAT,
+} from "../_shared/qbo-tax.ts";
 
 interface LineItemRow {
   id: string;
