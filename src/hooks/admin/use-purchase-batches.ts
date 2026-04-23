@@ -353,6 +353,99 @@ export function usePushPurchaseToQbo() {
   });
 }
 
+// ─── useUpdatePurchaseBatch ─────────────────────────────────
+
+export interface UpdateBatchInput {
+  batchId: string;
+  supplierName: string;
+  purchaseDate: string;
+  reference: string | null;
+  supplierVatRegistered: boolean;
+  sharedCosts: SharedCosts;
+}
+
+export interface UpdateBatchResult {
+  batch_id: string;
+  qbo_pushed: boolean;
+  qbo_error?: string;
+}
+
+export function useUpdatePurchaseBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateBatchInput): Promise<UpdateBatchResult> => {
+      // 1. Update the batch row. The DB trigger re-resolves supplier_id from
+      // supplier_name. total_shared_costs is recomputed from the new breakdown.
+      const total =
+        (input.sharedCosts.shipping || 0) +
+        (input.sharedCosts.broker_fee || 0) +
+        (input.sharedCosts.other || 0);
+
+      const { data: existing, error: loadErr } = await supabase
+        .from('purchase_batches' as never)
+        .select('qbo_purchase_id')
+        .eq('id', input.batchId)
+        .single();
+      if (loadErr) throw new Error(`Load batch failed: ${loadErr.message}`);
+      const qboPurchaseId = (existing as Record<string, unknown> | null)?.qbo_purchase_id as string | null;
+
+      const { error: updErr } = await supabase
+        .from('purchase_batches' as never)
+        .update({
+          supplier_name: input.supplierName,
+          purchase_date: input.purchaseDate,
+          reference: input.reference,
+          supplier_vat_registered: input.supplierVatRegistered,
+          shared_costs: input.sharedCosts as never,
+          total_shared_costs: total,
+        } as never)
+        .eq('id', input.batchId);
+      if (updErr) throw new Error(`Update batch failed: ${updErr.message}`);
+
+      // 2. Re-apportion landed costs across the existing line items / units.
+      const { error: rpcErr } = await supabase.rpc(
+        'v2_calculate_apportioned_costs' as never,
+        { p_batch_id: input.batchId } as never,
+      );
+      if (rpcErr) {
+        console.warn(`Re-apportion failed for ${input.batchId}: ${rpcErr.message}`);
+      }
+
+      // 3. If already in QBO, push the update.
+      if (qboPurchaseId) {
+        const { data, error } = await supabase.functions.invoke('v2-update-purchase-in-qbo', {
+          body: { batch_id: input.batchId },
+        });
+        if (error) {
+          const ctx = (error as { context?: Response }).context;
+          let detail = error.message;
+          if (ctx && typeof ctx.json === 'function') {
+            try {
+              const payload = await ctx.json();
+              if (payload?.error) detail = String(payload.error);
+            } catch (_) { /* ignore */ }
+          }
+          return { batch_id: input.batchId, qbo_pushed: false, qbo_error: detail };
+        }
+        if (data && typeof data === 'object' && 'error' in data) {
+          return {
+            batch_id: input.batchId,
+            qbo_pushed: false,
+            qbo_error: String((data as { error: unknown }).error),
+          };
+        }
+        return { batch_id: input.batchId, qbo_pushed: true };
+      }
+
+      return { batch_id: input.batchId, qbo_pushed: false };
+    },
+    onSuccess: (_data, input) => {
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.detail(input.batchId) });
+    },
+  });
+}
+
 // ─── useDeletePurchaseBatch ─────────────────────────────────
 
 export interface DeletePurchaseBatchResult {

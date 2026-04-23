@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, RefreshCw } from "lucide-react";
+import { Trash2, RefreshCw, Pencil } from "lucide-react";
 import { usePurchaseBatch, useDeletePurchaseBatch, usePushPurchaseToQbo } from "@/hooks/admin/use-purchase-batches";
 import { useBulkGradeStockUnits } from "@/hooks/admin/use-stock-units";
 import type { StockUnit, ConditionGrade, PurchaseLineItem } from "@/lib/types/admin";
@@ -15,6 +15,7 @@ import {
 } from "./ui-primitives";
 import { GradeSlideOut } from "./GradeSlideOut";
 import { BulkGradeDialog } from "./BulkGradeDialog";
+import { EditPurchaseDialog } from "./EditPurchaseDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +43,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showBulkGrade, setShowBulkGrade] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   const allUnits = useMemo(() => {
     if (!batch) return [];
@@ -244,6 +246,14 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
             </button>
           )}
           <button
+            onClick={() => setShowEditDialog(true)}
+            title="Edit purchase details (supplier, date, reference, VAT, shared costs) and push the changes to QuickBooks"
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-[13px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 hover:border-zinc-400"
+          >
+            <Pencil size={14} />
+            Edit
+          </button>
+          <button
             onClick={() => setShowDeleteDialog(true)}
             disabled={hasLockedUnits}
             title={hasLockedUnits ? "Cannot delete: some units are listed, sold or shipped" : "Delete this purchase batch"}
@@ -344,6 +354,13 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit purchase dialog */}
+      <EditPurchaseDialog
+        open={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        batch={batch}
+      />
     </div>
   );
 }
