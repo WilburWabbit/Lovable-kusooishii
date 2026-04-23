@@ -668,6 +668,61 @@ export function QboSettingsCard() {
             </div>
           </div>
 
+          {/* Account Mapping */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[9px] uppercase tracking-wider text-zinc-400">Account Mapping</p>
+              <div className="flex gap-1.5">
+                <Btn onClick={loadQboAccounts} busy={accountsLoading}>
+                  {accountsLoaded ? 'Reload accounts' : 'Discover accounts'}
+                </Btn>
+                {accountsLoaded && (
+                  <Btn onClick={saveQboAccounts} busy={accountsSaving}>Save mappings</Btn>
+                )}
+              </div>
+            </div>
+            <p className="text-[10px] text-zinc-500 mb-2">
+              Used when creating QBO Inventory items and Cash Purchases for new purchase batches.
+            </p>
+            {accountsLoaded ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {ACCOUNT_KEYS.map(({ key, label, help }) => (
+                  <div key={key} className="space-y-0.5">
+                    <label className="block text-[10px] font-medium text-zinc-700" title={help}>
+                      {label}
+                    </label>
+                    <select
+                      value={accountMappings[key]?.account_id ?? ''}
+                      onChange={(e) =>
+                        setAccountMappings((prev) => ({
+                          ...prev,
+                          [key]: {
+                            account_id: e.target.value,
+                            account_name: accountList.find((a) => a.id === e.target.value)?.name ?? null,
+                            account_type: accountList.find((a) => a.id === e.target.value)?.type ?? null,
+                          },
+                        }))
+                      }
+                      disabled={anyBusy}
+                      className="w-full text-[11px] border border-zinc-300 rounded px-2 py-1 bg-white disabled:opacity-50"
+                    >
+                      <option value="">— Select account —</option>
+                      {accountList.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.type}{a.subType ? ` / ${a.subType}` : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-zinc-400 italic">
+                Click "Discover accounts" to load the chart of accounts from QuickBooks.
+              </p>
+            )}
+          </div>
+
           {/* Admin */}
           <div>
             <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Admin</p>
