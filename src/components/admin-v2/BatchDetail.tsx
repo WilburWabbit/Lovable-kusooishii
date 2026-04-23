@@ -133,14 +133,25 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
             </span>
           </div>
         </div>
-        {selectedUnitIds.size > 0 && (
+        <div className="flex items-center gap-2">
+          {selectedUnitIds.size > 0 && (
+            <button
+              onClick={() => setShowBulkGrade(true)}
+              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
+            >
+              Bulk Grade {selectedUnitIds.size} Units
+            </button>
+          )}
           <button
-            onClick={() => setShowBulkGrade(true)}
-            className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
+            onClick={() => setShowDeleteDialog(true)}
+            disabled={hasLockedUnits}
+            title={hasLockedUnits ? "Cannot delete: some units are listed, sold or shipped" : "Delete this purchase batch"}
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-[13px] font-semibold text-red-600 transition-colors hover:bg-red-50 hover:border-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white disabled:hover:border-zinc-300"
           >
-            Bulk Grade {selectedUnitIds.size} Units
+            <Trash2 size={14} />
+            Delete
           </button>
-        )}
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -196,6 +207,42 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
         }}
         stockUnitIds={Array.from(selectedUnitIds)}
       />
+
+      {/* Delete confirmation */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete purchase batch {batch.id}?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                This will permanently delete the batch, its {totalUnits} stock unit(s) and {batch.lineItems.length} line item(s).
+              </span>
+              {batch.reference && (
+                <span className="block">
+                  If this batch is linked to QuickBooks (reference{" "}
+                  <span className="font-mono text-xs">{batch.reference}</span>), the matching Purchase will also be deleted in QuickBooks.
+                </span>
+              )}
+              <span className="block font-semibold text-red-600">
+                This action cannot be undone.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBatch.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmDelete();
+              }}
+              disabled={deleteBatch.isPending}
+              className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+            >
+              {deleteBatch.isPending ? "Deleting…" : "Delete batch"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
