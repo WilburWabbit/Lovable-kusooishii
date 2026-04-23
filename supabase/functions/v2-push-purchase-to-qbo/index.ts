@@ -256,34 +256,90 @@ Deno.serve(async (req) => {
       itemRefs.set(line.id, itemRef);
     }
 
-    // ─── 6. Build QBO Purchase payload ────────────────────
-    const qboLines = lines.map((line) => {
-      const grossUnit = line.unit_cost;
-      const exVatUnit = supplierVatRegistered ? grossUnit : exVAT(grossUnit);
-      const lineAmount = Number((exVatUnit * line.quantity).toFixed(2));
+    // ─── 6. Build QBO Purchase payload (always ex-VAT / TaxExcluded) ──
+    // Per business rule: every Purchase posted to QBO must be ex-VAT,
+    // mirroring the SalesReceipt flow. Use the QBO-stable line distributor
+    // so document totals balance to the penny under QBO's doc-level VAT
+    // recompute. `purchaseTaxCode` from settings is honoured for the
+    // standard (recoverable) lines; non-VAT-registered suppliers post
+    // as No-VAT so QBO records ex-VAT with zero input VAT.
+    const lineTaxCode = supplierVatRegistered
+      ? (purchaseTaxCode || QBO_TAX_CODE_STANDARD_20)
+      : QBO_TAX_CODE_NO_VAT;
+    const vatRate = supplierVatRegistered ? 0.2 : 0;
+
+    const grossPenceLines = lines.map((line) =>
+      toPence(line.unit_cost * line.quantity),
+    );
+    const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
+
+    let stableLines = buildBalancedQBOLines(grossPenceLines, vatRate);
+    // Override the per-line tax code (distributor defaults to STANDARD_20).
+    stableLines = stableLines.map((l) => ({
+      ...l,
+      taxCodeRef: l.kind === "rounding" ? QBO_TAX_CODE_NO_VAT : lineTaxCode,
+    }));
+
+    try {
+      assertQBOPayloadBalances(stableLines, totalGrossPence, vatRate);
+    } catch (e) {
+      if (e instanceof QBOPayloadImbalanceError) {
+        await setStatus(admin, batchId, "error", { qbo_sync_error: e.message });
+        return jsonResponse({ success: false, error: e.message }, 500);
+      }
+      throw e;
+    }
+
+    const qboLines = stableLines.map((s) => {
+      const lineNet = fromPence(s.netPence);
+      if (s.kind === "rounding") {
+        return {
+          DetailType: "ItemBasedExpenseLineDetail",
+          Amount: lineNet,
+          Description: "Rounding adjustment (per-line VAT recompute)",
+          ItemBasedExpenseLineDetail: {
+            ItemRef: { value: itemRefs.get(lines[0].id)! },
+            Qty: 1,
+            UnitPrice: lineNet,
+            TaxCodeRef: { value: QBO_TAX_CODE_NO_VAT },
+          },
+        };
+      }
+      const src = lines[s.sourceIndex!];
+      const qty = src.quantity;
+      const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
       return {
         DetailType: "ItemBasedExpenseLineDetail",
-        Amount: lineAmount,
-        Description: line.mpn,
+        Amount: lineNet,
+        Description: src.mpn,
         ItemBasedExpenseLineDetail: {
-          ItemRef: { value: itemRefs.get(line.id)! },
-          Qty: line.quantity,
-          UnitPrice: exVatUnit,
-          TaxCodeRef: { value: purchaseTaxCode },
+          ItemRef: { value: itemRefs.get(src.id)! },
+          Qty: qty,
+          UnitPrice: unitNet,
+          TaxCodeRef: { value: s.taxCodeRef },
         },
       };
     });
+
+    // DocNumber: prefer the supplier's external receipt/invoice reference
+    // (e.g. "510963248") over the internal batch id ("PO-669"). QBO caps
+    // DocNumber at 21 chars.
+    const docNumber = (
+      (batch.reference as string | null)?.trim() || batchId
+    ).slice(0, 21);
 
     const purchasePayload: Record<string, unknown> = {
       PaymentType: "Cash",
       AccountRef: { value: cashAccount },
       EntityRef: { value: vendorRef, type: "Vendor" },
       TxnDate: batch.purchase_date as string,
-      DocNumber: batchId.slice(0, 21), // QBO DocNumber max 21 chars
+      DocNumber: docNumber,
       Line: qboLines,
-      GlobalTaxCalculation: supplierVatRegistered ? "TaxInclusive" : "NotApplicable",
+      GlobalTaxCalculation: "TaxExcluded",
     };
-    if (batch.reference) purchasePayload.PrivateNote = batch.reference as string;
+    purchasePayload.PrivateNote = batch.reference
+      ? `Internal batch: ${batchId} | Supplier ref: ${batch.reference}`
+      : `Internal batch: ${batchId}`;
 
     // ─── 7. POST to QBO ───────────────────────────────────
     const purchaseRes = await fetchWithTimeout(
