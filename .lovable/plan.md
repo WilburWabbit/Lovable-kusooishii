@@ -1,78 +1,104 @@
 
 
-# Fix: New purchase batch creation fails with `sku_id NOT NULL` violation
+# Fix: Purchase batch creation still leaves orphan batches (PO-668)
 
-## What broke
+## What broke (again)
 
-The most recent attempt (PO-667, John Pye, MPN `76140-1` × 1 @ £7.00) created the batch header and one purchase_line_item row, but the stock_unit insert failed with:
+PO-668 was created at 12:19:30 with 9 line items, then the hook silently failed somewhere between line-items and stock_units. The "rollback" `try/catch` we added last round did NOT clean up — header + 9 line items + 9 products are still in the database, 0 SKUs, 0 stock units. The user saw a generic toast and the half-created batch is now sitting in the Purchases list.
 
-```
-ERROR: null value in column "sku_id" of relation "stock_unit" violates not-null constraint
-```
+Confirmed in DB:
+- `purchase_batches` PO-668: status `draft`, unit_counter 0
+- `purchase_line_items`: 9 rows for batch PO-668
+- `product`: 9 rows created at 12:19:30–33 (one per MPN)
+- `sku`: **0 rows for these MPNs**
+- `stock_unit`: **0 rows for batch PO-668**
 
-PO-667 is now an orphan in the DB (header + 1 line, **0 stock units**, status `draft`). The UI almost certainly showed a generic error. This will fail for **every** purchase created through the new form.
+The line items include several non-LEGO MPNs (`38881`, `PO702`, `TIP0284GRNONE`, `ricardo`, `B0F5B3VGFN`) — these are valid (consumables / raw materials in a mixed John Pye lot) and not the cause.
 
-## Root cause
+## Root causes
 
-`useCreatePurchaseBatch` in `src/hooks/admin/use-purchase-batches.ts` (lines 330–351) inserts stock_unit rows like this:
+1. **Multi-step client-side write with no real transaction.** The hook does 8+ sequential `supabase.from(...)` calls. If any one fails, the previous ones are already committed. The `try/catch` rollback uses 3 more network calls that are themselves subject to RLS, network errors, and the same `as never` typing fragility — and we have no logs proving they ran. PO-668 still being present is proof they didn't.
 
-```ts
-{ mpn, batch_id, line_item_id, v2_status: 'purchased', status: 'pending_receipt' }
-```
+2. **Errors swallowed by destructuring.** Lines 309 and 337 destructure `data` but discard `error`:
+   ```ts
+   let { data: product } = await supabase.from('product').select('id')...
+   let { data: sku } = await supabase.from('sku').select('id')...
+   ```
+   A failed select returns `data: null, error: <something>` — the code then assumes "row doesn't exist" and tries to insert. If the insert later fails for an unrelated reason, the user has no diagnostic and we don't know whether the select or insert was the real culprit.
 
-But the `stock_unit` table requires:
+3. **Rollback can't be trusted from the client.** Even if we capture errors better, the rollback still runs as 3 separate network calls with no guarantee they all succeed (RLS, network drop, concurrent edits). The only reliable way is one server-side transaction.
 
-| column | nullable | provided? |
-|---|---|---|
-| `sku_id` (uuid) | NO | ❌ missing |
-| `condition_grade` (enum) | NO | ❌ missing |
-| `mpn` | NO | ✅ |
-| `uid` | yes | ❌ (other paths reserve via `v2_reserve_stock_unit_uids`) |
+4. **`condition_grade` enum may reject the placeholder grade `'5'` when `saleable_flag=false`.** This isn't the root cause for PO-668 (no constraint enforces this), but the design uses grade 5 as a sentinel which has knock-on effects elsewhere (listings hooks filter on grade ≠ 5; pricing logic skips grade 5). Worth a small assertion test.
 
-The hook auto-creates a `product` row for new MPNs but never creates the corresponding `sku` row (or looks one up). The QBO sync (`qbo-process-pending`) and the receipt processor (`process-receipt`) both find-or-create a SKU and then attach `sku_id` + `condition_grade` to each unit — the new form simply skipped this step.
-
-Compounding the problem: at intake the user hasn't graded yet, so we don't actually know the final grade. The existing intake/grading flow handles regrading later, but the schema still demands a non-null grade up front.
+5. **No diagnostic surface.** The only way we found PO-667 / PO-668 was by querying the DB directly. There's no audit_event row written, no staging row, nothing. Repeated incidents are invisible until a human notices.
 
 ## The fix
 
-### 1. `src/hooks/admin/use-purchase-batches.ts` — make `useCreatePurchaseBatch` SKU-aware
+### 1. Move the entire create into one SECURITY DEFINER RPC (real transaction)
 
-For every distinct MPN in the batch:
+New migration: `v2_create_purchase_batch(p_input jsonb) returns jsonb`.
 
-1. Find or create the `product` row (already done).
-2. Find or create a **placeholder SKU** at the "ungraded" intake grade. Use `condition_grade = 5` (non-saleable / ungraded — the only grade that doesn't expose the unit to listings) with `sku_code = '<mpn>.5'`, `saleable_flag = false`, `active_flag = true`, `product_id = <new product id>`. This matches what the design spec already calls "grade 5 (non-saleable)" and keeps the unit invisible to listing/pricing logic until it's properly graded in `IntakeView` / `GradeSlideOut`.
-3. Reserve UIDs via `supabase.rpc('v2_reserve_stock_unit_uids', { p_batch_id, p_count })` — same call already used by both other ingestion paths — so the new units get proper UIDs and `unit_counter` is updated atomically.
-4. Insert each stock_unit with `sku_id`, `condition_grade: '5'`, `uid: reservedUids[i]`, `landed_cost: unit_cost` (apportionment RPC will refine), plus the existing `mpn / batch_id / line_item_id / v2_status: 'purchased' / status: 'pending_receipt'`.
-5. If any step fails, roll back: delete inserted stock_units → purchase_line_items → batch (mirror `process-receipt`'s rollback at lines 234–238).
+Inside one BEGIN/COMMIT it:
 
-The grading flow already updates `sku_id` and `condition_grade` when a unit is graded, so once the user grades a unit through `GradeSlideOut`, it gets re-pointed to the correct `<mpn>.<grade>` SKU. Verify that path actually does this — if it currently only updates `condition_grade`, also update `sku_id` to match the new grade's SKU (find-or-create `<mpn>.<grade>`).
+1. Inserts the `purchase_batches` row, returning the new batch id (continues to use the existing `PO-NNN` sequence — read max id + 1, or reuse whatever the current `id` default is).
+2. Inserts all `purchase_line_items` in a single statement.
+3. For each unique MPN: `INSERT … ON CONFLICT (mpn) DO NOTHING` into `product`, then `INSERT … ON CONFLICT (sku_code) DO NOTHING` into `sku` for `<mpn>.5` with `saleable_flag=false, active_flag=true, condition_grade='5'`. `RETURNING id` resolves to the existing or new row in both cases.
+4. Calls `v2_reserve_stock_unit_uids(batch_id, total_units)` (already exists).
+5. Bulk inserts all `stock_unit` rows with `sku_id`, `condition_grade='5'`, `uid`, `landed_cost`, `mpn`, `batch_id`, `line_item_id`, `v2_status='purchased'`, `status='pending_receipt'`.
+6. Calls `v2_calculate_apportioned_costs(batch_id)`.
+7. Writes one `audit_event` row of category `purchase_batch_created` with input + output payloads.
+8. Returns `{ batch_id, line_item_count, unit_count }`.
 
-### 2. Repair PO-667
+Any error → automatic transaction rollback → nothing persists. No orphan batches possible.
 
-The header and one line item exist with no units. Rather than leave it orphaned, delete it cleanly so the user can re-enter the purchase through the now-fixed form:
+Permissions: grant execute to `authenticated`. Inside the function, assert `has_role(auth.uid(), 'admin') OR has_role(auth.uid(), 'staff')` and raise if not.
 
-- delete `purchase_line_items where batch_id='PO-667'`
-- delete `purchase_batches where id='PO-667'`
+### 2. Replace the client hook body with a single RPC call
 
-(One-shot SQL migration.)
+`useCreatePurchaseBatch` becomes ~15 lines:
 
-### 3. Surface the error in the UI
+```ts
+const { data, error } = await supabase.rpc('v2_create_purchase_batch', { p_input: input });
+if (error) throw error;
+return (data as { batch_id: string }).batch_id;
+```
 
-The mutation currently throws but the form likely shows a vague "Something went wrong" toast. In `NewPurchaseForm.tsx` (and/or wherever the mutation's `onError` lives), surface `error.message` in the toast so this kind of schema failure is immediately visible next time instead of silently leaving an orphan batch.
+Drop the find-or-create product / SKU / UID / unit / apportionment / rollback code from the client. The rebrickable enrichment fire-and-forget stays in the client (post-success, iterate unique MPNs).
+
+### 3. Surface real errors in the form
+
+`NewPurchaseForm` `onError` toast must include `error.message` AND, when present, `error.details` / `error.hint` from the PostgrestError. Currently a Postgres error like `null value in column "sku_id"` is being collapsed to "Something went wrong".
+
+Also add a non-toast error banner inside the form panel that persists until the user dismisses it — toasts auto-hide too quickly to read DB error text.
+
+### 4. Always write an audit_event for create attempts
+
+Inside the RPC, write `audit_event` for both success and failure (failure path uses an EXCEPTION block that writes the audit row then re-raises). Category: `purchase_batch_create`. This gives us a permanent diagnostic trail for the next incident.
+
+### 5. Clean up PO-668
+
+One-shot migration (data, not schema — done via insert tool):
+- `DELETE FROM purchase_line_items WHERE batch_id='PO-668'`
+- `DELETE FROM purchase_batches WHERE id='PO-668'`
+- Leave the 9 `product` rows (they're useful and not orphaned).
+
+### 6. Add a backstop nightly drift check
+
+Tiny `pg_cron` job: any `purchase_batches` row with `status='draft'` AND `created_at < now() - interval '15 minutes'` AND `unit_counter = 0` → write an `audit_event` of category `purchase_batch_orphan_detected` (do NOT auto-delete — humans should review). This catches anything that slips through.
 
 ## Files touched
 
 | File | Change |
 |---|---|
-| `src/hooks/admin/use-purchase-batches.ts` | Find-or-create SKU per MPN at grade 5, reserve UIDs, include `sku_id`/`condition_grade`/`uid`/`landed_cost` on stock_unit insert, add rollback |
-| `src/components/admin-v2/NewPurchaseForm.tsx` | Toast `error.message` on failure |
-| `src/components/admin-v2/GradeSlideOut.tsx` (or `use-stock-units.ts` `useGradeStockUnit`) | Verify/ensure regrade also updates `sku_id` to the new `<mpn>.<grade>` SKU (find-or-create) |
-| New migration | Delete orphaned PO-667 |
+| New migration | `v2_create_purchase_batch(jsonb)` SECURITY DEFINER function + GRANT EXECUTE; nightly orphan-detection cron |
+| Data migration (insert tool) | Delete PO-668 line items + header |
+| `src/hooks/admin/use-purchase-batches.ts` | Replace `useCreatePurchaseBatch` mutation body with single `supabase.rpc('v2_create_purchase_batch', …)` call; keep rebrickable enrichment fire-and-forget after success |
+| `src/components/admin-v2/NewPurchaseForm.tsx` | Surface `error.message` + `error.details` in toast AND in a dismissible inline error banner |
 
 ## Verification
 
-1. Create a new purchase via the form for an MPN that has no existing SKU (e.g. retry `76140-1 × 1 @ £7.00`). Expect: batch created, line item created, **1 stock_unit at grade 5 with `sku_id` set and a `uid`**, no error.
-2. Grade that unit to grade 3 in `GradeSlideOut`. Confirm `stock_unit.condition_grade = 3` and `stock_unit.sku_id` now points to a `76140-1.3` SKU row.
-3. Run a second purchase for the same MPN — should reuse the existing grade-5 SKU rather than duplicate.
-4. Re-run the database error log query for the past hour and confirm zero `null value in column "sku_id"` errors.
+1. Retry the John Pye purchase that produced PO-668 (9 line items, mixed MPNs including non-LEGO). Expect: one new `PO-669` row with status `draft`, 9 line items, 9 stock units at grade 5 each with a `uid` and `sku_id`, 9 SKUs of form `<mpn>.5`. Zero orphan rows on any failure path.
+2. Force a failure (e.g. submit an invalid `unit_cost: 'abc'` via the network). Expect: zero rows persisted (no batch, no lines, no products, no SKUs, no units). Toast shows the actual Postgres error. Audit event row written with `purchase_batch_create_failed`.
+3. Run the nightly orphan check manually via `SELECT cron.schedule(...)` test invocation — confirm it does not flag the new healthy batch and would flag PO-668 if it still existed.
+4. Confirm `audit_event` now has a `purchase_batch_create` row per attempt.
 
