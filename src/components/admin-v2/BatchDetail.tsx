@@ -33,11 +33,14 @@ interface BatchDetailProps {
 
 export function BatchDetail({ batchId }: BatchDetailProps) {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { data: batch, isLoading } = usePurchaseBatch(batchId);
+  const deleteBatch = useDeletePurchaseBatch();
   const [gradingUnit, setGradingUnit] = useState<(StockUnit & { productName?: string }) | null>(null);
   const [bulkGradingUnits, setBulkGradingUnits] = useState<StockUnit[]>([]);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showBulkGrade, setShowBulkGrade] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const allUnits = useMemo(() => {
     if (!batch) return [];
@@ -52,6 +55,14 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
     ? batch.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0) + batch.totalSharedCosts
     : 0;
 
+  // A batch is safe to delete only if no unit has progressed past the
+  // pre-listing stages. Anything sold/shipped/listed/reserved blocks deletion;
+  // the edge function enforces this server-side as well.
+  const hasLockedUnits = allUnits.some((u) =>
+    ["sold", "shipped", "delivered", "listed", "reserved"].includes(String(u.status))
+    || Boolean(u.orderId)
+  );
+
   const toggleSelect = (id: string) => {
     setSelectedUnitIds((prev) => {
       const next = new Set(prev);
@@ -59,6 +70,30 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
       else next.add(id);
       return next;
     });
+  };
+
+  const handleConfirmDelete = async () => {
+    try {
+      const result = await deleteBatch.mutateAsync({ batchId });
+      const qboMsg = result.qbo_purchase_id
+        ? ("deleted" in result.qbo_result && result.qbo_result.deleted
+            ? " and removed from QuickBooks"
+            : ` (QuickBooks delete failed: ${("reason" in result.qbo_result && result.qbo_result.reason) || "unknown"})`)
+        : "";
+      toast({
+        title: `Batch ${batchId} deleted`,
+        description: `${result.units_deleted} unit(s) removed${qboMsg}.`,
+      });
+      setShowDeleteDialog(false);
+      navigate("/admin/purchases");
+    } catch (e) {
+      toast({
+        title: "Delete failed",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+        duration: 10000,
+      });
+    }
   };
 
   if (isLoading) {
