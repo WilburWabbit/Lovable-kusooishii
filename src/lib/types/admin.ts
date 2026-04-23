@@ -79,6 +79,8 @@ export type FeeBreakdown = Record<string, number>;
 
 // ─── 2.1 Purchase Batch ────────────────────────────────────
 
+export type QboSyncStatus = 'pending' | 'synced' | 'error' | 'skipped';
+
 export interface PurchaseBatch {
   id: string; // PO-NNN
   supplierId: string | null;
@@ -90,6 +92,9 @@ export interface PurchaseBatch {
   totalSharedCosts: number;
   totalUnitCosts: number;
   status: PurchaseBatchStatus;
+  qboPurchaseId: string | null;
+  qboSyncStatus: QboSyncStatus;
+  qboSyncError: string | null;
   createdAt: string;
   updatedAt: string;
 }
