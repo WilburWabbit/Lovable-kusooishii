@@ -322,6 +322,27 @@ export function NewPurchaseForm() {
         </div>
       </SurfaceCard>
 
+      {/* Persistent error banner — DB errors need time to read */}
+      {submitError && (
+        <div className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 flex items-start gap-3">
+          <div className="flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-red-700 mb-1">
+              Purchase batch creation failed
+            </div>
+            <div className="text-xs text-red-900 whitespace-pre-wrap break-words font-mono">
+              {submitError}
+            </div>
+          </div>
+          <button
+            onClick={() => setSubmitError(null)}
+            className="text-red-700 hover:text-red-900 text-sm bg-transparent border-none cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Submit */}
       <div className="flex gap-3">
         <button
