@@ -268,9 +268,67 @@ Deno.serve(async (req) => {
       : QBO_TAX_CODE_NO_VAT;
     const vatRate = supplierVatRegistered ? 0.2 : 0;
 
-    const grossPenceLines = lines.map((line) =>
+    // Item lines (gross, indexed 0..N-1)
+    const itemGrossPence = lines.map((line) =>
       toPence(line.unit_cost * line.quantity),
     );
+
+    // Shared cost lines (gross, indexed N..N+K-1) — appended so a single
+    // distributor pass balances item + shared cost VAT against the doc total.
+    type SharedCostEntry = {
+      label: string;
+      accountKey: string;
+      defaultLabel: string;
+    };
+    const sharedCostsRaw = (batch.shared_costs ?? {}) as Record<string, unknown>;
+    const sharedCostEntries: { entry: SharedCostEntry; gross: number }[] = [];
+    const sharedAccountFor = (key: string): string | undefined => {
+      const acc = accounts.get(key);
+      return acc;
+    };
+    const sharedDefs: Array<{ field: string; entry: SharedCostEntry }> = [
+      {
+        field: "shipping",
+        entry: {
+          label: "Shipping / postage",
+          accountKey: "qbo_shipping_expense_account_id",
+          defaultLabel: "Shipping",
+        },
+      },
+      {
+        field: "broker_fee",
+        entry: {
+          label: "Broker / buying fee",
+          accountKey: "qbo_broker_fee_expense_account_id",
+          defaultLabel: "Broker fee",
+        },
+      },
+      {
+        field: "other",
+        entry: {
+          label: (sharedCostsRaw.other_label as string)?.trim() || "Other purchase cost",
+          accountKey: "qbo_other_purchase_expense_account_id",
+          defaultLabel: "Other",
+        },
+      },
+    ];
+    for (const { field, entry } of sharedDefs) {
+      const raw = sharedCostsRaw[field];
+      const amt = typeof raw === "number" ? raw : Number(raw ?? 0);
+      if (!amt || amt <= 0) continue;
+      const accountId = sharedAccountFor(entry.accountKey);
+      if (!accountId) {
+        const msg = `Batch has shared cost "${entry.label}" (£${amt.toFixed(2)}) but no QBO expense account is mapped for "${entry.defaultLabel}". Open Settings → QuickBooks → Account Mapping and choose an account.`;
+        await setStatus(admin, batchId, "error", { qbo_sync_error: msg });
+        return jsonResponse({ error: msg }, 400);
+      }
+      sharedCostEntries.push({ entry, gross: toPence(amt) });
+    }
+
+    const grossPenceLines = [
+      ...itemGrossPence,
+      ...sharedCostEntries.map((s) => s.gross),
+    ];
     const totalGrossPence = grossPenceLines.reduce((s, g) => s + g, 0);
 
     let stableLines = buildBalancedQBOLines(grossPenceLines, vatRate);
@@ -290,6 +348,7 @@ Deno.serve(async (req) => {
       throw e;
     }
 
+    const itemCount = lines.length;
     const qboLines = stableLines.map((s) => {
       const lineNet = fromPence(s.netPence);
       if (s.kind === "rounding") {
@@ -305,17 +364,33 @@ Deno.serve(async (req) => {
           },
         };
       }
-      const src = lines[s.sourceIndex!];
-      const qty = src.quantity;
-      const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
+      const idx = s.sourceIndex!;
+      // Item line
+      if (idx < itemCount) {
+        const src = lines[idx];
+        const qty = src.quantity;
+        const unitNet = qty > 0 ? Math.round((lineNet / qty) * 100) / 100 : lineNet;
+        return {
+          DetailType: "ItemBasedExpenseLineDetail",
+          Amount: lineNet,
+          Description: src.mpn,
+          ItemBasedExpenseLineDetail: {
+            ItemRef: { value: itemRefs.get(src.id)! },
+            Qty: qty,
+            UnitPrice: unitNet,
+            TaxCodeRef: { value: s.taxCodeRef },
+          },
+        };
+      }
+      // Shared cost line → AccountBasedExpenseLineDetail
+      const shared = sharedCostEntries[idx - itemCount];
+      const accountId = accounts.get(shared.entry.accountKey)!;
       return {
-        DetailType: "ItemBasedExpenseLineDetail",
+        DetailType: "AccountBasedExpenseLineDetail",
         Amount: lineNet,
-        Description: src.mpn,
-        ItemBasedExpenseLineDetail: {
-          ItemRef: { value: itemRefs.get(src.id)! },
-          Qty: qty,
-          UnitPrice: unitNet,
+        Description: shared.entry.label,
+        AccountBasedExpenseLineDetail: {
+          AccountRef: { value: accountId },
           TaxCodeRef: { value: s.taxCodeRef },
         },
       };
