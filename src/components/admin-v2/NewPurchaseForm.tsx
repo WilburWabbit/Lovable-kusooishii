@@ -19,6 +19,9 @@ export function NewPurchaseForm() {
   const navigate = useNavigate();
   const createBatch = useCreatePurchaseBatch();
 
+  // Persistent error banner — toasts auto-hide too quickly to read DB errors
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   // Batch header
   const [supplierName, setSupplierName] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(
@@ -87,6 +90,7 @@ export function NewPurchaseForm() {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    setSubmitError(null);
 
     const sharedCosts: SharedCosts = {
       shipping,
@@ -112,7 +116,8 @@ export function NewPurchaseForm() {
       navigate(`/admin/purchases/${batchId}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create batch";
-      toast.error(message);
+      toast.error(message, { duration: 10000 });
+      setSubmitError(message);
     }
   };
 
