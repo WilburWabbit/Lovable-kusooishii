@@ -214,6 +214,15 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               Bulk Grade {selectedUnitIds.size} Units
             </button>
           )}
+          {(batch.qboSyncStatus === "error" || batch.qboPurchaseId) && (
+            <button
+              onClick={handleRepairItems}
+              title="Deactivate the existing QBO items for this batch and clear local refs so they can be recreated as proper Inventory items"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 hover:border-amber-400"
+            >
+              Repair QBO items
+            </button>
+          )}
           {(batch.qboSyncStatus === "pending" || batch.qboSyncStatus === "error") && (
             <button
               onClick={handlePushQbo}
