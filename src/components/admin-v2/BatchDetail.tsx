@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { usePurchaseBatch } from "@/hooks/admin/use-purchase-batches";
+import { Trash2 } from "lucide-react";
+import { usePurchaseBatch, useDeletePurchaseBatch } from "@/hooks/admin/use-purchase-batches";
 import { useBulkGradeStockUnits } from "@/hooks/admin/use-stock-units";
 import type { StockUnit, ConditionGrade, PurchaseLineItem } from "@/lib/types/admin";
 import {
@@ -14,6 +15,17 @@ import {
 } from "./ui-primitives";
 import { GradeSlideOut } from "./GradeSlideOut";
 import { BulkGradeDialog } from "./BulkGradeDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
 
 interface BatchDetailProps {
   batchId: string;
