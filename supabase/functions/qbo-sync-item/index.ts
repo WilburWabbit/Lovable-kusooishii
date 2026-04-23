@@ -1,8 +1,9 @@
-// Redeployed: 2026-04-08
 // ============================================================
 // QBO Sync Item
-// Creates or updates a QBO Item when a new SKU variant is created.
-// Supports re-grade transfers via optional oldSkuCode parameter.
+// Creates or updates a QBO Inventory Item for a SKU. Used both
+// by the new-purchase push flow (Inventory items, configured
+// account refs, ex-VAT PurchaseCost, fixed InvStartDate) and
+// by the re-grade transfer flow.
 // ============================================================
 
 import {
@@ -23,7 +24,40 @@ const GRADE_LABELS: Record<string, string> = {
   "2": "Silver Lining",
   "3": "Bronze Age",
   "4": "Black Sheep",
+  "5": "Non-saleable",
 };
+
+const INVENTORY_START_DATE = "2023-04-14";
+
+async function loadAccountRefs(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<{ asset: string; income: string; cogs: string }> {
+  const { data: rows } = await admin
+    .from("qbo_account_settings" as never)
+    .select("key, account_id");
+
+  const map = new Map<string, string>();
+  for (const r of (rows ?? []) as Record<string, unknown>[]) {
+    const k = r.key as string;
+    const v = r.account_id as string;
+    if (k && v) map.set(k, v);
+  }
+  const asset = map.get("qbo_inventory_asset_account_id");
+  const income = map.get("qbo_income_account_id");
+  const cogs = map.get("qbo_cogs_account_id");
+  if (!asset || !income || !cogs) {
+    const missing = [
+      !asset && "Inventory Asset",
+      !income && "Sales Income",
+      !cogs && "COGS",
+    ].filter(Boolean).join(", ");
+    throw new Error(
+      `QBO account mapping incomplete (missing: ${missing}). ` +
+      `Open Settings → QuickBooks → Accounts and pick the right accounts.`,
+    );
+  }
+  return { asset, income, cogs };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -33,7 +67,7 @@ Deno.serve(async (req) => {
     await authenticateRequest(req, admin);
     const { clientId, clientSecret, realmId } = getQBOConfig();
 
-    const { skuCode, oldSkuCode } = await req.json();
+    const { skuCode, oldSkuCode, purchaseCost, supplierVatRegistered } = await req.json();
     if (!skuCode) throw new Error("skuCode is required");
 
     // ─── 1. Fetch SKU + product ─────────────────────────────
@@ -57,7 +91,6 @@ Deno.serve(async (req) => {
     let existingQboItemId = (sku as Record<string, unknown>).qbo_item_id as string | null;
     let transferFromOldSku = false;
 
-    // If no QBO item on new SKU but oldSkuCode provided, transfer from old SKU
     if (!existingQboItemId && oldSkuCode) {
       const { data: oldSku } = await admin
         .from("sku")
@@ -76,7 +109,6 @@ Deno.serve(async (req) => {
     // ─── 3. Fetch existing QBO item if updating ─────────────
     let syncToken: string | null = null;
     let existingType: string | null = null;
-    let oldQtyOnHand: number | null = null;
 
     if (existingQboItemId) {
       const getRes = await fetchWithTimeout(
@@ -93,20 +125,17 @@ Deno.serve(async (req) => {
         const getData = await getRes.json();
         syncToken = getData.Item?.SyncToken ?? null;
         existingType = getData.Item?.Type ?? null;
-        // Capture QtyOnHand for potential inventory adjustment
-        if (transferFromOldSku) {
-          oldQtyOnHand = getData.Item?.QtyOnHand ?? 0;
-        }
       }
     }
 
     // ─── 4. Build QBO Item payload ──────────────────────────
     const skuRow = sku as Record<string, unknown>;
     const salePrice = (skuRow.price as number | null) ?? (skuRow.sale_price as number | null);
-    const description = `${productName} — ${gradeLabel}`;
+    const description = `${productName} (${skuCode})`;
+    const itemName = `${productName} (${skuCode})`;
 
     const itemPayload: Record<string, unknown> = {
-      Name: `${productName} (${skuCode})`,
+      Name: itemName.slice(0, 100), // QBO Name max 100 chars
       Description: description,
       PurchaseDesc: description,
       Taxable: true,
@@ -116,20 +145,32 @@ Deno.serve(async (req) => {
       itemPayload.UnitPrice = exVAT(salePrice);
     }
 
+    if (typeof purchaseCost === "number" && purchaseCost > 0) {
+      itemPayload.PurchaseCost = supplierVatRegistered ? purchaseCost : exVAT(purchaseCost);
+    } else if (skuRow.avg_cost && (skuRow.avg_cost as number) > 0) {
+      itemPayload.PurchaseCost = exVAT(skuRow.avg_cost as number);
+    }
+
     if (existingQboItemId && syncToken) {
-      // UPDATE — sparse update, preserve existing Type, omit account refs
+      // UPDATE — sparse, preserve existing Type / account refs
       itemPayload.Id = existingQboItemId;
       itemPayload.SyncToken = syncToken;
       itemPayload.sparse = true;
-      // Preserve the existing Type from QBO (e.g. "Inventory"/"NonInventory")
-      if (existingType) {
-        itemPayload.Type = existingType;
-      }
+      if (existingType) itemPayload.Type = existingType;
     } else {
-      // CREATE — set Type and account refs
-      itemPayload.Type = "NonInventory";
-      itemPayload.IncomeAccountRef = { value: "1" };
-      itemPayload.ExpenseAccountRef = { value: "2" };
+      // CREATE — Inventory item with configured account refs
+      const accounts = await loadAccountRefs(admin);
+      itemPayload.Type = "Inventory";
+      itemPayload.TrackQtyOnHand = true;
+      itemPayload.QtyOnHand = 0;
+      itemPayload.InvStartDate = INVENTORY_START_DATE;
+      itemPayload.AssetAccountRef = { value: accounts.asset };
+      itemPayload.IncomeAccountRef = { value: accounts.income };
+      itemPayload.ExpenseAccountRef = { value: accounts.cogs };
+      itemPayload.SalesTaxCodeRef = { value: "TAX" };
+      if (supplierVatRegistered) {
+        itemPayload.PurchaseTaxCodeRef = { value: "TAX" };
+      }
     }
 
     // ─── 5. POST to QBO ─────────────────────────────────────
@@ -148,7 +189,7 @@ Deno.serve(async (req) => {
       console.error(`QBO Item sync failed [${qboRes.status}]:`, errorText);
       return jsonResponse({
         success: false,
-        qbo_error: `QBO API error [${qboRes.status}]`,
+        qbo_error: `QBO API error [${qboRes.status}]: ${errorText.substring(0, 400)}`,
         skuCode,
       });
     }
@@ -171,38 +212,6 @@ Deno.serve(async (req) => {
       console.log(`Cleared qbo_item_id from old SKU ${oldSkuCode}`);
     }
 
-    // ─── 7.5. Inventory Adjustment if transferring stock ────
-    let adjustmentResult: string | null = null;
-    if (transferFromOldSku && oldQtyOnHand && oldQtyOnHand > 0) {
-      try {
-        console.log(`Creating inventory adjustment: ${oldQtyOnHand} units from old item ${existingQboItemId} → new item ${returnedId}`);
-
-        // We need the old item's current state after the Name update.
-        // The item ID is the same (we updated in-place), so we need to
-        // create a NEW QBO item for the old SKU first, or adjust using
-        // the same item. Since we renamed the item to the new SKU,
-        // the adjustment decreases the (now-renamed) item and... 
-        // Actually, the item was renamed — there's only one QBO item.
-        // We need to check: did the old SKU get a NEW QBO item created?
-        // No — the transfer means the old SKU's QBO item is now the new SKU's item.
-        // So there's no "old" vs "new" QBO item — it's the same item, just renamed.
-        // The QtyOnHand stays with the renamed item, which is correct.
-        // No inventory adjustment is needed when it's a simple rename/transfer.
-        
-        // However, if there IS a separate QBO item for the new SKU already,
-        // we'd need to move stock. But in the transfer case, there isn't one.
-        // So we only need an adjustment if both old and new SKUs have separate QBO items.
-        
-        // In the current transfer flow, the old item IS the new item (renamed).
-        // Stock stays with it. No adjustment needed.
-        console.log(`Inventory adjustment not needed — item was renamed in-place, stock carries over.`);
-        adjustmentResult = "not_needed_rename";
-      } catch (adjErr) {
-        console.error("Inventory adjustment failed (non-fatal):", adjErr);
-        adjustmentResult = "error";
-      }
-    }
-
     // ─── 8. Land raw response ───────────────────────────────
     await admin.from("landing_raw_qbo_item" as never).upsert(
       {
@@ -220,7 +229,6 @@ Deno.serve(async (req) => {
       qbo_item_id: returnedId,
       action: (existingQboItemId && syncToken) ? "updated" : "created",
       transferred: transferFromOldSku,
-      adjustment: adjustmentResult,
       skuCode,
     });
   } catch (err) {
