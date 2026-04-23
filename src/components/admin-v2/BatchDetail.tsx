@@ -383,10 +383,11 @@ interface LineItemCardProps {
   selectedUnitIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onEditMpn: () => void;
+  onEditLine: () => void;
   onGradeUnit: (unit: StockUnit) => void;
 }
 
-function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGradeUnit }: LineItemCardProps) {
+function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onEditLine, onGradeUnit }: LineItemCardProps) {
   return (
     <SurfaceCard noPadding className="mb-3 overflow-hidden">
       {/* Line header */}
@@ -396,6 +397,14 @@ function LineItemCard({ line, selectedUnitIds, onToggleSelect, onEditMpn, onGrad
           {line.productName && (
             <span className="text-zinc-600 text-sm truncate max-w-[280px]">{line.productName}</span>
           )}
+          <button
+            onClick={onEditLine}
+            title="Edit name and unit cost for this line"
+            className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold cursor-pointer transition-colors bg-transparent text-zinc-500 border border-zinc-300 hover:text-zinc-900 hover:border-zinc-400"
+          >
+            <Pencil size={11} />
+            Edit
+          </button>
         </div>
         <div className="flex items-center gap-3 text-xs text-zinc-500">
           <span>Qty: {line.quantity}</span>
