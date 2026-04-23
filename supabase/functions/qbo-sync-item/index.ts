@@ -169,17 +169,17 @@ Deno.serve(async (req) => {
       if (existingType) itemPayload.Type = existingType;
     } else {
       // CREATE — Inventory item with configured account refs
-      const accounts = await loadAccountRefs(admin);
+      const settings = await loadSettings(admin);
       itemPayload.Type = "Inventory";
       itemPayload.TrackQtyOnHand = true;
       itemPayload.QtyOnHand = 0;
       itemPayload.InvStartDate = INVENTORY_START_DATE;
-      itemPayload.AssetAccountRef = { value: accounts.asset };
-      itemPayload.IncomeAccountRef = { value: accounts.income };
-      itemPayload.ExpenseAccountRef = { value: accounts.cogs };
-      itemPayload.SalesTaxCodeRef = { value: "TAX" };
+      itemPayload.AssetAccountRef = { value: settings.asset };
+      itemPayload.IncomeAccountRef = { value: settings.income };
+      itemPayload.ExpenseAccountRef = { value: settings.cogs };
+      itemPayload.SalesTaxCodeRef = { value: settings.salesTax };
       if (supplierVatRegistered) {
-        itemPayload.PurchaseTaxCodeRef = { value: "TAX" };
+        itemPayload.PurchaseTaxCodeRef = { value: settings.purchaseTax };
       }
     }
 
