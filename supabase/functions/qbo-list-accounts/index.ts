@@ -50,6 +50,9 @@ Deno.serve(async (req) => {
         "qbo_income_account_id",
         "qbo_cogs_account_id",
         "qbo_cash_account_id",
+        "qbo_shipping_expense_account_id",
+        "qbo_broker_fee_expense_account_id",
+        "qbo_other_purchase_expense_account_id",
       ]);
       const rows: Array<Record<string, unknown>> = [];
       for (const [key, value] of Object.entries(mappings)) {

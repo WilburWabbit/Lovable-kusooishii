@@ -499,6 +499,9 @@ export function QboSettingsCard() {
     { key: 'qbo_income_account_id', label: 'Sales Income', help: 'Account credited when stock is sold (e.g. "Sales of Product Income").' },
     { key: 'qbo_cogs_account_id', label: 'Cost of Goods Sold', help: 'Account expensed when stock is sold (e.g. "Cost of Goods Sold").' },
     { key: 'qbo_cash_account_id', label: 'Cash / Bank', help: 'Bank or cash account used when pushing new purchase batches as Cash Purchases.' },
+    { key: 'qbo_shipping_expense_account_id', label: 'Shipping / Postage Expense', help: 'Expense account for inbound shipping/postage costs on purchase batches (shared cost).' },
+    { key: 'qbo_broker_fee_expense_account_id', label: 'Broker / Buying Fee Expense', help: 'Expense account for broker fees, auction fees, or buyer\'s premiums on purchase batches.' },
+    { key: 'qbo_other_purchase_expense_account_id', label: 'Other Purchase Expense', help: 'Expense account for miscellaneous shared costs on purchase batches (the "other" line).' },
   ];
 
   const loadQboAccounts = async () => {
