@@ -2394,6 +2394,10 @@ export type Database = {
           created_at: string
           id: string
           purchase_date: string
+          qbo_purchase_id: string | null
+          qbo_sync_attempted_at: string | null
+          qbo_sync_error: string | null
+          qbo_sync_status: string
           reference: string | null
           shared_costs: Json
           status: Database["public"]["Enums"]["purchase_batch_status"]
@@ -2408,6 +2412,10 @@ export type Database = {
           created_at?: string
           id?: string
           purchase_date?: string
+          qbo_purchase_id?: string | null
+          qbo_sync_attempted_at?: string | null
+          qbo_sync_error?: string | null
+          qbo_sync_status?: string
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
@@ -2422,6 +2430,10 @@ export type Database = {
           created_at?: string
           id?: string
           purchase_date?: string
+          qbo_purchase_id?: string | null
+          qbo_sync_attempted_at?: string | null
+          qbo_sync_error?: string | null
+          qbo_sync_status?: string
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
@@ -2510,6 +2522,33 @@ export type Database = {
           qbo_account_id?: string
           qbo_account_name?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      qbo_account_settings: {
+        Row: {
+          account_id: string
+          account_name: string | null
+          account_type: string | null
+          key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          account_id: string
+          account_name?: string | null
+          account_type?: string | null
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          account_id?: string
+          account_name?: string | null
+          account_type?: string | null
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
         }
         Relationships: []
       }

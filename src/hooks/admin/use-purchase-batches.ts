@@ -39,6 +39,9 @@ function mapBatch(row: Record<string, unknown>): PurchaseBatch {
     totalSharedCosts: (row.total_shared_costs as number) ?? 0,
     totalUnitCosts,
     status: row.status as PurchaseBatch['status'],
+    qboPurchaseId: (row.qbo_purchase_id as string) ?? null,
+    qboSyncStatus: (row.qbo_sync_status as PurchaseBatch['qboSyncStatus']) ?? 'pending',
+    qboSyncError: (row.qbo_sync_error as string) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -249,6 +252,7 @@ interface CreateBatchInput {
   sharedCosts: SharedCosts;
   lineItems: {
     mpn: string;
+    name?: string;
     quantity: number;
     unitCost: number;
   }[];
@@ -271,6 +275,7 @@ export function useCreatePurchaseBatch() {
         shared_costs: input.sharedCosts,
         line_items: input.lineItems.map((li) => ({
           mpn: li.mpn,
+          name: li.name ?? null,
           quantity: li.quantity,
           unit_cost: li.unitCost,
         })),
@@ -302,10 +307,48 @@ export function useCreatePurchaseBatch() {
           .catch((err) => console.warn(`Product enrichment for ${mpn} failed (non-blocking):`, err));
       }
 
+      // Fire-and-forget: push the batch to QBO. Failures are recorded on the
+      // batch row (qbo_sync_status='error') so the operator can retry from
+      // the BatchDetail page.
+      supabase.functions
+        .invoke('v2-push-purchase-to-qbo', { body: { batch_id: batchId } })
+        .catch((err) => console.warn(`QBO push for ${batchId} failed (non-blocking):`, err));
+
       return batchId;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
+    },
+  });
+}
+
+// ─── usePushPurchaseToQbo ───────────────────────────────────
+
+export function usePushPurchaseToQbo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: string) => {
+      const { data, error } = await supabase.functions.invoke('v2-push-purchase-to-qbo', {
+        body: { batch_id: batchId },
+      });
+      if (error) {
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const payload = await ctx.json();
+            if (payload?.error) throw new Error(payload.error);
+          } catch (_) { /* fall through */ }
+        }
+        throw new Error(error.message);
+      }
+      if (data && typeof data === 'object' && 'error' in data) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data as { success: boolean; batch_id: string; qbo_purchase_id?: string };
+    },
+    onSuccess: (_data, batchId) => {
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
+      queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.detail(batchId) });
     },
   });
 }

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2 } from "lucide-react";
-import { usePurchaseBatch, useDeletePurchaseBatch } from "@/hooks/admin/use-purchase-batches";
+import { Trash2, RefreshCw } from "lucide-react";
+import { usePurchaseBatch, useDeletePurchaseBatch, usePushPurchaseToQbo } from "@/hooks/admin/use-purchase-batches";
 import { useBulkGradeStockUnits } from "@/hooks/admin/use-stock-units";
 import type { StockUnit, ConditionGrade, PurchaseLineItem } from "@/lib/types/admin";
 import {
@@ -36,6 +36,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
   const { toast } = useToast();
   const { data: batch, isLoading } = usePurchaseBatch(batchId);
   const deleteBatch = useDeletePurchaseBatch();
+  const pushQbo = usePushPurchaseToQbo();
   const [gradingUnit, setGradingUnit] = useState<(StockUnit & { productName?: string }) | null>(null);
   const [bulkGradingUnits, setBulkGradingUnits] = useState<StockUnit[]>([]);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
@@ -124,6 +125,18 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
             ) : (
               <Badge label="All graded" color="#22C55E" />
             )}
+            {batch.qboSyncStatus === "synced" && batch.qboPurchaseId && (
+              <Badge label={`QBO #${batch.qboPurchaseId}`} color="#22C55E" />
+            )}
+            {batch.qboSyncStatus === "pending" && (
+              <Badge label="QBO: pending" color="#A1A1AA" />
+            )}
+            {batch.qboSyncStatus === "error" && (
+              <Badge label="QBO: error" color="#EF4444" />
+            )}
+            {batch.qboSyncStatus === "skipped" && (
+              <Badge label="QBO: skipped" color="#71717A" />
+            )}
           </div>
           <div className="flex gap-4 text-zinc-500 text-[13px]">
             <span>{batch.supplierName}</span>
@@ -132,6 +145,11 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               Total: <Mono color="teal">£{totalCost.toFixed(2)}</Mono>
             </span>
           </div>
+          {batch.qboSyncStatus === "error" && batch.qboSyncError && (
+            <div className="mt-2 max-w-2xl rounded border border-red-200 bg-red-50 p-2 text-[11px] text-red-800 font-mono break-words">
+              {batch.qboSyncError}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {selectedUnitIds.size > 0 && (
@@ -140,6 +158,21 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer hover:bg-amber-400 transition-colors"
             >
               Bulk Grade {selectedUnitIds.size} Units
+            </button>
+          )}
+          {(batch.qboSyncStatus === "pending" || batch.qboSyncStatus === "error") && (
+            <button
+              onClick={handlePushQbo}
+              disabled={pushQbo.isPending}
+              title="Push this batch to QuickBooks as a Cash Purchase"
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-[13px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={pushQbo.isPending ? "animate-spin" : ""} />
+              {pushQbo.isPending
+                ? "Pushing…"
+                : batch.qboSyncStatus === "error"
+                ? "Retry QBO sync"
+                : "Push to QBO"}
             </button>
           )}
           <button
