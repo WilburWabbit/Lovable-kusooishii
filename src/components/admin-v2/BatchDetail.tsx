@@ -354,6 +354,13 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit purchase dialog */}
+      <EditPurchaseDialog
+        open={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        batch={batch}
+      />
     </div>
   );
 }
