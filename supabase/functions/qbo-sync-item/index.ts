@@ -29,9 +29,15 @@ const GRADE_LABELS: Record<string, string> = {
 
 const INVENTORY_START_DATE = "2023-04-14";
 
-async function loadAccountRefs(
+async function loadSettings(
   admin: ReturnType<typeof createAdminClient>,
-): Promise<{ asset: string; income: string; cogs: string }> {
+): Promise<{
+  asset: string;
+  income: string;
+  cogs: string;
+  salesTax: string;
+  purchaseTax: string;
+}> {
   const { data: rows } = await admin
     .from("qbo_account_settings" as never)
     .select("key, account_id");
@@ -45,18 +51,22 @@ async function loadAccountRefs(
   const asset = map.get("qbo_inventory_asset_account_id");
   const income = map.get("qbo_income_account_id");
   const cogs = map.get("qbo_cogs_account_id");
-  if (!asset || !income || !cogs) {
+  const salesTax = map.get("qbo_sales_tax_code_id");
+  const purchaseTax = map.get("qbo_purchase_tax_code_id");
+  if (!asset || !income || !cogs || !salesTax || !purchaseTax) {
     const missing = [
       !asset && "Inventory Asset",
       !income && "Sales Income",
       !cogs && "COGS",
+      !salesTax && "Sales Tax Code",
+      !purchaseTax && "Purchase Tax Code",
     ].filter(Boolean).join(", ");
     throw new Error(
       `QBO account mapping incomplete (missing: ${missing}). ` +
       `Open Settings → QuickBooks → Accounts and pick the right accounts.`,
     );
   }
-  return { asset, income, cogs };
+  return { asset, income, cogs, salesTax, purchaseTax };
 }
 
 Deno.serve(async (req) => {
@@ -159,17 +169,17 @@ Deno.serve(async (req) => {
       if (existingType) itemPayload.Type = existingType;
     } else {
       // CREATE — Inventory item with configured account refs
-      const accounts = await loadAccountRefs(admin);
+      const settings = await loadSettings(admin);
       itemPayload.Type = "Inventory";
       itemPayload.TrackQtyOnHand = true;
       itemPayload.QtyOnHand = 0;
       itemPayload.InvStartDate = INVENTORY_START_DATE;
-      itemPayload.AssetAccountRef = { value: accounts.asset };
-      itemPayload.IncomeAccountRef = { value: accounts.income };
-      itemPayload.ExpenseAccountRef = { value: accounts.cogs };
-      itemPayload.SalesTaxCodeRef = { value: "TAX" };
+      itemPayload.AssetAccountRef = { value: settings.asset };
+      itemPayload.IncomeAccountRef = { value: settings.income };
+      itemPayload.ExpenseAccountRef = { value: settings.cogs };
+      itemPayload.SalesTaxCodeRef = { value: settings.salesTax };
       if (supplierVatRegistered) {
-        itemPayload.PurchaseTaxCodeRef = { value: "TAX" };
+        itemPayload.PurchaseTaxCodeRef = { value: settings.purchaseTax };
       }
     }
 

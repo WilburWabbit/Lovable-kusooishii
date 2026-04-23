@@ -225,6 +225,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: msg }, 400);
     }
 
+    const purchaseTaxCode = accounts.get("qbo_purchase_tax_code_id");
+    if (!purchaseTaxCode) {
+      const msg = "QBO purchase tax code is not configured. Open Settings → QuickBooks → Accounts and choose a Purchase Tax Code.";
+      await setStatus(admin, batchId, "error", { qbo_sync_error: msg });
+      return jsonResponse({ error: msg }, 400);
+    }
+
     // ─── 3. QBO connection ─────────────────────────────────
     const { clientId, clientSecret, realmId } = getQBOConfig();
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
@@ -255,7 +262,7 @@ Deno.serve(async (req) => {
           ItemRef: { value: itemRefs.get(line.id)! },
           Qty: line.quantity,
           UnitPrice: exVatUnit,
-          TaxCodeRef: { value: supplierVatRegistered ? "TAX" : "NON" },
+          TaxCodeRef: { value: purchaseTaxCode },
         },
       };
     });
