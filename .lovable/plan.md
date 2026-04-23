@@ -1,94 +1,78 @@
 
 
-# Fix eBay inventory desync after non-eBay sales
+# Fix: New purchase batch creation fails with `sku_id NOT NULL` violation
 
-## What's actually broken
+## What broke
 
-Right now **36 of 113 live eBay listings have stale `availableQuantity`** on eBay. Examples confirmed in the database:
+The most recent attempt (PO-667, John Pye, MPN `76140-1` × 1 @ £7.00) created the batch header and one purchase_line_item row, but the stock_unit insert failed with:
 
-| MPN / SKU | Available locally | Quantity on eBay listing | eBay listing ID |
-|---|---|---|---|
-| `31058-1.1` | 0 | 1 | 205909093672 |
-| `60438-1.1` | 0 | 1 | 205906621862 |
-| `42164-1.1` | 4 | 6 | 205913766372 |
-| `40776-1.1` | 3 | 5 | 206027612951 |
-| `10349-1.1` | 89 | 90 | 206005702262 |
-| …30 more | | | |
+```
+ERROR: null value in column "sku_id" of relation "stock_unit" violates not-null constraint
+```
 
-Both `31058-1` and `60438-1` had their last units sold via the website / admin (orders `53d4e0be-…` and `c732ae09-…`), not eBay. Their stock_units are correctly marked `sold`/`complete` in the app, but eBay still shows `1` available, so they remain biddable/buyable on eBay even though we can't fulfil them.
+PO-667 is now an orphan in the DB (header + 1 line, **0 stock units**, status `draft`). The UI almost certainly showed a generic error. This will fail for **every** purchase created through the new form.
 
 ## Root cause
 
-There are three code paths that consume stock and mark units sold:
+`useCreatePurchaseBatch` in `src/hooks/admin/use-purchase-batches.ts` (lines 330–351) inserts stock_unit rows like this:
 
-1. `ebay-process-order` — **does push updated quantity to eBay** (lines 1015-1023, calls `updateInventoryQuantity` and updates `channel_listing.listed_quantity`). This is why eBay-originated sales don't desync.
-2. `stripe-webhook` (website checkout) — closes the stock unit, audits it, and **stops there**. No call to eBay.
-3. `v2-process-order` (admin / generic post-order hook) — runs FIFO, links unit to order, **stops there**. No call to eBay.
-4. Manual admin order completion in `admin-data` — same: updates local stock only.
+```ts
+{ mpn, batch_id, line_item_id, v2_status: 'purchased', status: 'pending_receipt' }
+```
 
-`channel_listing.listed_quantity` is also never decremented in paths 2-4, which is why the mismatch query above finds 36 rows.
+But the `stock_unit` table requires:
 
-There is no trigger, cron, or hook that reconciles "stock units changed → push quantity to active eBay listings".
+| column | nullable | provided? |
+|---|---|---|
+| `sku_id` (uuid) | NO | ❌ missing |
+| `condition_grade` (enum) | NO | ❌ missing |
+| `mpn` | NO | ✅ |
+| `uid` | yes | ❌ (other paths reserve via `v2_reserve_stock_unit_uids`) |
+
+The hook auto-creates a `product` row for new MPNs but never creates the corresponding `sku` row (or looks one up). The QBO sync (`qbo-process-pending`) and the receipt processor (`process-receipt`) both find-or-create a SKU and then attach `sku_id` + `condition_grade` to each unit — the new form simply skipped this step.
+
+Compounding the problem: at intake the user hasn't graded yet, so we don't actually know the final grade. The existing intake/grading flow handles regrading later, but the schema still demands a non-null grade up front.
 
 ## The fix
 
-### 1. New helper: `pushEbayInventoryQuantity(skuId)` — single point of truth
+### 1. `src/hooks/admin/use-purchase-batches.ts` — make `useCreatePurchaseBatch` SKU-aware
 
-Add a small helper (in `supabase/functions/_shared/`, e.g. `ebay-inventory-sync.ts`) that:
+For every distinct MPN in the batch:
 
-- Looks up live `channel_listing` rows for `sku_id` where `channel='ebay'` and `external_listing_id` is not null.
-- Counts available stock units (`v2_status IN ('graded','listed')`) for that SKU.
-- For each listing, calls `PUT /sell/inventory/v1/inventory_item/{sku}` with the new `availability.shipToLocationAvailability.quantity`.
-- Writes `channel_listing.listed_quantity` and `synced_at` locally on success.
-- If quantity hits 0, also calls `POST /sell/inventory/v1/offer/{offerId}/withdraw` so the listing actually ends instead of just sitting at qty=0 (matches the "End listings when stock reaches zero" rule in the design spec).
-- On failure: insert a row into `audit_event` with `category: 'ebay_stock_desync'` (same shape as `ebay-process-order` already does), so we don't silently fail again.
+1. Find or create the `product` row (already done).
+2. Find or create a **placeholder SKU** at the "ungraded" intake grade. Use `condition_grade = 5` (non-saleable / ungraded — the only grade that doesn't expose the unit to listings) with `sku_code = '<mpn>.5'`, `saleable_flag = false`, `active_flag = true`, `product_id = <new product id>`. This matches what the design spec already calls "grade 5 (non-saleable)" and keeps the unit invisible to listing/pricing logic until it's properly graded in `IntakeView` / `GradeSlideOut`.
+3. Reserve UIDs via `supabase.rpc('v2_reserve_stock_unit_uids', { p_batch_id, p_count })` — same call already used by both other ingestion paths — so the new units get proper UIDs and `unit_counter` is updated atomically.
+4. Insert each stock_unit with `sku_id`, `condition_grade: '5'`, `uid: reservedUids[i]`, `landed_cost: unit_cost` (apportionment RPC will refine), plus the existing `mpn / batch_id / line_item_id / v2_status: 'purchased' / status: 'pending_receipt'`.
+5. If any step fails, roll back: delete inserted stock_units → purchase_line_items → batch (mirror `process-receipt`'s rollback at lines 234–238).
 
-This consolidates the three near-identical copies of `updateInventoryQuantity` already living in `ebay-sync`, `ebay-process-order`, and `ebay-push-listing`.
+The grading flow already updates `sku_id` and `condition_grade` when a unit is graded, so once the user grades a unit through `GradeSlideOut`, it gets re-pointed to the correct `<mpn>.<grade>` SKU. Verify that path actually does this — if it currently only updates `condition_grade`, also update `sku_id` to match the new grade's SKU (find-or-create `<mpn>.<grade>`).
 
-### 2. Wire the helper into every non-eBay sales path
+### 2. Repair PO-667
 
-- **`stripe-webhook`** — after the `update({ status: "closed" })` of the stock unit (around line 743), collect each affected `sku_id` and at the end of the order processing block fire `pushEbayInventoryQuantity` for each unique SKU. Fire-and-forget with `.catch(audit)`; do NOT block the webhook response (Stripe needs a fast 200).
-- **`v2-process-order`** — same pattern: after the `affectedSkus` set is built (it already exists at line 77/146), iterate it and call the helper.
-- **`admin-data`** order-completion / shipment / write-off branches that flip a unit to `sold`, `shipped`, or `written_off` — call the helper for each affected SKU.
-- **`v2-reconcile-payout`** — already touches units; safe to also nudge eBay quantity for any SKU it consumes (defensive, since reconciliation can also discover missed orders).
+The header and one line item exist with no units. Rather than leave it orphaned, delete it cleanly so the user can re-enter the purchase through the now-fixed form:
 
-In all four cases the helper call is **non-blocking** (the order/payout/webhook must still succeed even if eBay is unreachable), but failures are recorded as `ebay_stock_desync` audit events so they're visible.
+- delete `purchase_line_items where batch_id='PO-667'`
+- delete `purchase_batches where id='PO-667'`
 
-### 3. Backfill / repair the 36 currently desynced listings
+(One-shot SQL migration.)
 
-Add a tiny one-shot admin endpoint or extend `ebay-sync` `action: "push_stock"` (which already exists and does exactly the right loop, lines 678-710) so the user can run it once now. Then call it from the admin UI Channels tab or simply trigger it via `curl_edge_functions`. This will:
+### 3. Surface the error in the UI
 
-- Push correct quantities for all 36 listings.
-- Withdraw offers where the new quantity is 0 (this resolves `31058-1`, `60438-1`, and ~20 other zero-stock listings still live on eBay).
-
-### 4. Safety net: nightly drift check
-
-Add a cron (or extend the existing eBay sync schedule) to run the same comparison query nightly:
-
-```text
-local_available  vs  channel_listing.listed_quantity (per live ebay listing)
-```
-
-For any mismatch, call the helper. This catches edge cases (manual DB edits, failed pushes, eBay API outages) without manual intervention. Insert one summary `audit_event` per run.
+The mutation currently throws but the form likely shows a vague "Something went wrong" toast. In `NewPurchaseForm.tsx` (and/or wherever the mutation's `onError` lives), surface `error.message` in the toast so this kind of schema failure is immediately visible next time instead of silently leaving an orphan batch.
 
 ## Files touched
 
 | File | Change |
 |---|---|
-| `supabase/functions/_shared/ebay-inventory-sync.ts` | **NEW** — `pushEbayInventoryQuantity(admin, skuId)` helper |
-| `supabase/functions/stripe-webhook/index.ts` | Call helper for each SKU after order paid |
-| `supabase/functions/v2-process-order/index.ts` | Call helper for each SKU in `affectedSkus` |
-| `supabase/functions/admin-data/index.ts` | Call helper from manual ship/complete/write-off branches |
-| `supabase/functions/v2-reconcile-payout/index.ts` | Call helper after unit status updates |
-| `supabase/functions/ebay-process-order/index.ts` | Refactor to use the shared helper (drop the local copy) |
-| `supabase/functions/ebay-sync/index.ts` | Refactor `push_stock` action to use the shared helper; add a `withdraw if qty=0` branch |
-| New cron job (SQL) | Nightly drift check that calls the shared push for any mismatch |
+| `src/hooks/admin/use-purchase-batches.ts` | Find-or-create SKU per MPN at grade 5, reserve UIDs, include `sku_id`/`condition_grade`/`uid`/`landed_cost` on stock_unit insert, add rollback |
+| `src/components/admin-v2/NewPurchaseForm.tsx` | Toast `error.message` on failure |
+| `src/components/admin-v2/GradeSlideOut.tsx` (or `use-stock-units.ts` `useGradeStockUnit`) | Verify/ensure regrade also updates `sku_id` to the new `<mpn>.<grade>` SKU (find-or-create) |
+| New migration | Delete orphaned PO-667 |
 
-## Verification steps after deployment
+## Verification
 
-1. Run the one-shot push and confirm `31058-1.1` and `60438-1.1` listings on eBay flip to ended/withdrawn (quantity 0).
-2. Re-run the mismatch query — expect 0 rows.
-3. Place a test website checkout for an item with stock=2 on eBay. After Stripe webhook fires, confirm eBay shows quantity=1 within ~10 seconds.
-4. Manually mark a unit `written_off` in admin and confirm the corresponding eBay listing decrements.
-5. Confirm `audit_event` rows of category `ebay_stock_desync` only appear when the eBay API genuinely fails.
+1. Create a new purchase via the form for an MPN that has no existing SKU (e.g. retry `76140-1 × 1 @ £7.00`). Expect: batch created, line item created, **1 stock_unit at grade 5 with `sku_id` set and a `uid`**, no error.
+2. Grade that unit to grade 3 in `GradeSlideOut`. Confirm `stock_unit.condition_grade = 3` and `stock_unit.sku_id` now points to a `76140-1.3` SKU row.
+3. Run a second purchase for the same MPN — should reuse the existing grade-5 SKU rather than duplicate.
+4. Re-run the database error log query for the past hour and confirm zero `null value in column "sku_id"` errors.
 
