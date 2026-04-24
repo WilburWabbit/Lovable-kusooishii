@@ -212,9 +212,17 @@ Deno.serve(async (req) => {
       listingItemId = publishRes?.listingId ?? null;
       console.log(`eBay offer published: listing ${listingItemId}`);
     } catch (pubErr) {
-      // Offer may already be published — 409 Conflict is acceptable
+      // Only swallow the actual "already published" condition. eBay's
+      // errorId 25002 is a generic user-input bucket that ALSO covers
+      // missing photos, missing aspects, invalid price, etc — matching
+      // the bare code previously caused real validation failures to be
+      // reported as success.
       const errMsg = pubErr instanceof Error ? pubErr.message : String(pubErr);
-      if (errMsg.includes("409") || errMsg.includes("already published") || errMsg.includes("25002")) {
+      const isAlreadyPublished =
+        errMsg.includes("[409]") ||
+        /already\s+published/i.test(errMsg) ||
+        /offer.*already.*active/i.test(errMsg);
+      if (isAlreadyPublished) {
         console.log(`eBay offer ${offerId} already published — continuing`);
       } else {
         throw pubErr;
