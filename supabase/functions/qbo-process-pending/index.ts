@@ -1150,7 +1150,25 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         order = { id: matchedOrderId };
 
         // Reconcile line items: release stock on removed/changed, keep matching, allocate new
-        await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
+        const reconcileResult = await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
+
+        // Auto-clear needs_allocation when all lines are now allocated.
+        // Only flag needs_allocation if allocation actually failed (missing stock).
+        if (reconcileResult.missing === 0 && reconcileResult.allocated > 0) {
+          await admin
+            .from("sales_order")
+            .update({ v2_status: "new" } as never)
+            .eq("id", matchedOrderId)
+            .eq("v2_status", "needs_allocation");
+        } else if (reconcileResult.missing > 0) {
+          await admin
+            .from("sales_order")
+            .update({
+              v2_status: "needs_allocation",
+              qbo_sync_status: "needs_manual_review",
+            } as never)
+            .eq("id", matchedOrderId);
+        }
 
         await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
         processed++;
