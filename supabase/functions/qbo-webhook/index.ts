@@ -363,14 +363,20 @@ async function processWebhookInBackground(body: string, correlationId: string) {
     }
   }
 
-  // Auto-trigger processor with retry loop to drain all pending records
+  // Auto-trigger processor with retry loop to drain all pending records.
+  // Use a fresh AbortController scoped to the background task with a generous
+  // timeout — the request-scoped fetchWithTimeout helper races with isolate
+  // teardown after the response is returned and gets aborted prematurely.
   const maxAttempts = 3;
+  const PROCESSOR_TIMEOUT_MS = 120_000;
   await new Promise(r => setTimeout(r, 3000)); // let concurrent webhooks finish landing
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROCESSOR_TIMEOUT_MS);
     try {
       const processUrl = `${supabaseUrl}/functions/v1/qbo-process-pending`;
-      const processRes = await fetchWithTimeout(processUrl, {
+      const processRes = await fetch(processUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -378,6 +384,7 @@ async function processWebhookInBackground(body: string, correlationId: string) {
           "x-webhook-trigger": "true",
         },
         body: JSON.stringify({ batch_size: 50 }),
+        signal: controller.signal,
       });
       const result = await processRes.json();
       log.info("Processor attempt completed", {
@@ -393,6 +400,8 @@ async function processWebhookInBackground(body: string, correlationId: string) {
     } catch (err: any) {
       log.warn("Processor attempt failed (non-fatal)", { attempt, error: err.message });
       break;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
