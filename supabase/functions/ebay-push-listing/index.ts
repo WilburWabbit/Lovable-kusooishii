@@ -335,3 +335,34 @@ function mapGradeToEbayCondition(grade: string | null): string {
     default: return "NEW_OTHER";
   }
 }
+
+// ─── Recover existing offerId from eBay 25002 error ──────────
+// eBay returns an error body like:
+//   {"errors":[{"errorId":25002,"message":"...Offer entity already exists.",
+//     "parameters":[{"name":"offerId","value":"155956152011"}]}]}
+// Pull the existing offerId out so we can switch to PUT.
+function extractExistingOfferId(errMsg: string): string | null {
+  if (!/25002/.test(errMsg) || !/already exists/i.test(errMsg)) return null;
+  // Find the JSON body in the error message and parse it
+  const jsonStart = errMsg.indexOf("{");
+  if (jsonStart < 0) return null;
+  try {
+    const body = JSON.parse(errMsg.slice(jsonStart));
+    const errors = body?.errors;
+    if (!Array.isArray(errors)) return null;
+    for (const e of errors) {
+      const params = e?.parameters;
+      if (!Array.isArray(params)) continue;
+      for (const p of params) {
+        if (p?.name === "offerId" && typeof p?.value === "string") {
+          return p.value;
+        }
+      }
+    }
+  } catch {
+    // Fall through to regex fallback
+  }
+  // Regex fallback in case the JSON shape changes
+  const m = errMsg.match(/"name"\s*:\s*"offerId"\s*,\s*"value"\s*:\s*"(\d+)"/);
+  return m ? m[1] : null;
+}
