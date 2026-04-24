@@ -83,6 +83,35 @@ Deno.serve(async (req) => {
       .eq("sku_id", skuRow?.id as string)
       .in("v2_status", ["graded", "listed"]);
 
+    // ─── Look up product images (required by eBay) ─────────
+    // eBay rejects publish with errorId 25002 ("Add at least 1 photo")
+    // when no imageUrls are present on the inventory item.
+    const productId = (skuRow?.product_id ?? null) as string | null;
+    const imageUrls: string[] = [];
+    if (productId) {
+      const { data: mediaRows } = await admin
+        .from("product_media")
+        .select("sort_order, is_primary, media_asset:media_asset_id(original_url)")
+        .eq("product_id", productId)
+        .order("is_primary", { ascending: false })
+        .order("sort_order", { ascending: true });
+      for (const row of (mediaRows ?? []) as Array<Record<string, unknown>>) {
+        const asset = row.media_asset as { original_url?: string } | null;
+        const url = asset?.original_url;
+        if (typeof url === "string" && url.startsWith("https://")) {
+          imageUrls.push(url);
+        }
+      }
+    }
+    if (imageUrls.length === 0) {
+      throw new Error(
+        `Cannot publish ${effectiveSku} to eBay: no product images uploaded. ` +
+          `Add at least one image in the Copy & Media tab before listing.`,
+      );
+    }
+    // eBay caps imageUrls at 24 per inventory item.
+    const cappedImages = imageUrls.slice(0, 24);
+
     // ─── Get eBay access token ─────────────────────────────
     const accessToken = await getEbayAccessToken(admin);
 
@@ -95,6 +124,7 @@ Deno.serve(async (req) => {
           "Brand": ["LEGO"],
           "MPN": [product?.mpn ?? ""],
         },
+        imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
       condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
@@ -182,9 +212,17 @@ Deno.serve(async (req) => {
       listingItemId = publishRes?.listingId ?? null;
       console.log(`eBay offer published: listing ${listingItemId}`);
     } catch (pubErr) {
-      // Offer may already be published — 409 Conflict is acceptable
+      // Only swallow the actual "already published" condition. eBay's
+      // errorId 25002 is a generic user-input bucket that ALSO covers
+      // missing photos, missing aspects, invalid price, etc — matching
+      // the bare code previously caused real validation failures to be
+      // reported as success.
       const errMsg = pubErr instanceof Error ? pubErr.message : String(pubErr);
-      if (errMsg.includes("409") || errMsg.includes("already published") || errMsg.includes("25002")) {
+      const isAlreadyPublished =
+        errMsg.includes("[409]") ||
+        /already\s+published/i.test(errMsg) ||
+        /offer.*already.*active/i.test(errMsg);
+      if (isAlreadyPublished) {
         console.log(`eBay offer ${offerId} already published — continuing`);
       } else {
         throw pubErr;
