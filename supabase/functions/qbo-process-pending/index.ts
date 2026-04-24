@@ -881,7 +881,7 @@ async function reconcileSalesOrderLines(
   orderId: string,
   receipt: any,
   itemLines: any[],
-): Promise<void> {
+): Promise<{ allocated: number; missing: number }> {
   const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
 
   type DesiredLine = { skuId: string; unitPrice: number; taxCodeRef: string | null; taxCodeId: string | null };
