@@ -188,17 +188,41 @@ Deno.serve(async (req) => {
       console.log(`eBay offer updated: ${offerId}`);
     } else {
       // Create new offer
-      const offerRes = await ebayFetch(
-        accessToken,
-        `/sell/inventory/v1/offer`,
-        {
-          method: "POST",
-          body: JSON.stringify(offerPayload),
-        },
-      );
-      offerId = offerRes?.offerId;
-      if (!offerId) throw new Error("eBay offer creation did not return offerId");
-      console.log(`eBay offer created: ${offerId}`);
+      try {
+        const offerRes = await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer`,
+          {
+            method: "POST",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = offerRes?.offerId;
+        if (!offerId) throw new Error("eBay offer creation did not return offerId");
+        console.log(`eBay offer created: ${offerId}`);
+      } catch (createErr) {
+        // Recovery: eBay already has an offer for this SKU but our local
+        // channel_listing.external_listing_id was cleared (or never saved
+        // because a previous publish failed before step 4). eBay returns
+        // errorId 25002 with message "Offer entity already exists" and
+        // includes the existing offerId in the parameters array. Adopt
+        // that offerId and PUT to update the existing offer instead.
+        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+        const recoveredOfferId = extractExistingOfferId(errMsg);
+        if (!recoveredOfferId) throw createErr;
+        console.log(
+          `eBay offer already exists for ${effectiveSku} — adopting existing offerId ${recoveredOfferId} and updating`,
+        );
+        await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer/${recoveredOfferId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = recoveredOfferId;
+      }
     }
 
     // ─── Step 3: Publish the offer ─────────────────────────
