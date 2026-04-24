@@ -1,95 +1,95 @@
 
+# Fix silent eBay publish failures + missing image push + title override
 
-# Fix QBO purchase + item sync from new purchase batches
+## Root cause (confirmed from edge-function logs for offer 155956152011)
 
-## Three problems to fix
+`ebay-push-listing` swallows **all** eBay errors whose message contains the substring `"25002"`, treating them as "already published". eBay's `25002` is a generic catch-all for any user-input validation error — including the actual failure here: **"Add at least 1 photo"**. Because we never push image URLs in the inventory item payload, every first-time publish for a SKU without an image already on the inventory record fails 25002 → gets swallowed → returned as `{success: true}` → green toast. Meanwhile the unpublished offer sits in eBay Seller Hub as a draft.
 
-1. **No QBO Purchase was created for PO-669** because the app has no "create purchase in QBO" path — only a one-way pull (`qbo-sync-purchases`).
-2. **QBO Items were created with the MPN as the name** because the form has no name field, so `v2_create_purchase_batch` stores `product.name = mpn`, which `qbo-sync-item` then uses for `Name`, `Description`, and `PurchaseDesc`.
-3. **QBO Items are wrong type / missing fields**: created as `NonInventory`, no `PurchaseCost`, no tax code, no inventory start date.
+The "title override didn't persist" symptom is downstream of the same incident — I need to confirm whether `channel_listing.listing_title` actually saved before deciding if there is a second bug in the read path.
 
-## Fix 1 — Capture product name in the new purchase form
+## Changes
 
-**`src/components/admin-v2/NewPurchaseForm.tsx`**
+### 1. `supabase/functions/ebay-push-listing/index.ts` — stop swallowing real errors
 
-For each line item, when the typed MPN does NOT match an existing product in `useProducts()`, expand the row to show a required **"Product Name"** input. When the MPN matches an existing product, show the existing name read-only and skip the input.
+Replace the over-broad `25002` catch with a precise check for the actual "already published" sub-message that eBay returns. eBay's "offer is already published" response includes the literal phrase `"already published"` *or* the longer message `"This offer is already published"` — match those, not the bare error code.
 
-Pass `name` per line item up to the mutation. `canSubmit` must also require `name` for new MPNs.
+```ts
+} catch (pubErr) {
+  const errMsg = pubErr instanceof Error ? pubErr.message : String(pubErr);
+  const isAlreadyPublished =
+    errMsg.includes("409") ||
+    /already\s+published/i.test(errMsg) ||
+    /offer.*already.*active/i.test(errMsg);
+  if (isAlreadyPublished) {
+    console.log(`eBay offer ${offerId} already published — continuing`);
+  } else {
+    throw pubErr;  // surfaces to the toast via errorResponse
+  }
+}
+```
 
-**`src/hooks/admin/use-purchase-batches.ts` → `CreateBatchInput`**
+This alone would have made the original failure visible: the toast would have shown "Add at least 1 photo" instead of green-checking.
 
-Add optional `name?: string` to each line item and forward it in the RPC payload.
+### 2. `supabase/functions/ebay-push-listing/index.ts` — push images on the inventory item
 
-**Migration — `v2_create_purchase_batch`**
+Look up shared media for the SKU/product and include `imageUrls` on the PUT `inventory_item` payload. Order:
 
-When upserting `product`, use `COALESCE(NULLIF(elem->>'name',''), v_mpn)` as the insert value, and on conflict update `name` ONLY if the existing row's name equals its mpn (i.e. was a placeholder). This way real names overwrite placeholder names but never overwrite a real one.
+1. Read `product_media` joined to `media_asset` for the product, ordered by `is_primary desc, sort_order asc`.
+2. Pull `original_url` (must be a public HTTPS URL — Supabase Storage `media` bucket is already public, ✅).
+3. Add to the payload:
 
-## Fix 2 — Push the Purchase to QBO when a batch is created
+```ts
+product: {
+  title: …,
+  description: …,
+  aspects: { Brand: ["LEGO"], MPN: [product?.mpn ?? ""] },
+  ...(product?.ean ? { ean: [product.ean] } : {}),
+  ...(imageUrls.length > 0 ? { imageUrls } : {}),
+},
+```
 
-**New edge function `supabase/functions/v2-push-purchase-to-qbo/index.ts`**
+If `imageUrls` is empty, fail fast with a clear error before calling eBay:
 
-Called fire-and-forget from `useCreatePurchaseBatch` after the RPC succeeds (mirrors the pattern in `use-stock-units.ts` for `qbo-sync-item`). Inputs: `{ batch_id }`.
+```ts
+if (imageUrls.length === 0) {
+  throw new Error(`Cannot publish ${effectiveSku} to eBay: no product images uploaded. Add at least one image in Copy & Media first.`);
+}
+```
 
-Steps:
+### 3. Confirm + fix the title override
 
-1. Load batch + line items + supplier.
-2. `ensure_vendor` already runs in a trigger so `supplier_id` is set; resolve the vendor's QBO `VendorRef.value` (lookup via existing `vendor` table → `qbo_vendor_id`). If missing, call `qbo-upsert-vendor` (already exists pattern via `qbo-sync-vendors`) or fail gracefully and write an audit error.
-3. For each line item: resolve `qbo_item_id` for the placeholder grade-5 SKU (`<mpn>.5`). If absent, call `qbo-sync-item` first to create it (with the correct payload from Fix 3 below).
-4. Build a QBO **Purchase** payload (`PaymentType: "Cash"` with `AccountRef` = the configured cash/bank account, `TxnDate` = `purchase_date`, `EntityRef` = vendor, `DocNumber` = `batch.id`, `Line[]` = one `ItemBasedExpenseLineDetail` per line item with `ItemRef`, `Qty`, `UnitPrice`, `TaxCodeRef`).
-5. POST to `${baseUrl}/purchase?minorversion=65`. On success: store the returned `Id` on the batch (new column `qbo_purchase_id text`) and write an `audit_event`. On error: write the error and the payload to audit, do NOT roll back the local batch — operator can retry.
+Verify after the publish path is fixed:
 
-**Migration — extend `purchase_batches`**
+- Read the existing `channel_listing` row for SKU `31172-1.1` to confirm whether `listing_title` saved on the failed attempt.
+- If saved: the persistence bug doesn't exist — the user's perception is because the publish "succeeded" but the offer is unpublished on eBay (showing eBay's auto-generated draft title in Seller Hub, not our override). Reverifying after the fix above will resolve it.
+- If not saved: trace the read in `ChannelsTab.tsx` to see if it falls back to `product.name` when `listing_title` is null on a re-fetch (e.g. cache invalidation issue after the failed publish overwrites with `null`).
 
-Add `qbo_purchase_id text` and `qbo_sync_status text default 'pending'` (values: `pending | synced | error | skipped`) and `qbo_sync_error text`.
+I will read the row first thing in default mode and only patch the read path if the column is actually empty.
 
-**Repair PO-669**: call the new function once for PO-669 after deploy (one-shot via the BatchDetail "Retry QBO sync" button below). Migration also resets the existing 9 SKUs' `qbo_item_id` to `NULL` so re-sync recreates them with the corrected item payload (Fix 3) — and we must first delete the 9 broken NonInventory items already in QBO. Plan: a small admin action on the BatchDetail page that lists each linked QBO item and deletes them via `${baseUrl}/item?operation=delete` before re-creating.
+### 4. Repair PO-affected listing for `31172-1.1`
 
-## Fix 3 — Create QBO Items as Inventory with correct fields
+After the fix, the existing offer `155956152011` is still sat in eBay as an unpublished draft. The user can:
 
-**`supabase/functions/qbo-sync-item/index.ts`**
+- Go to the product → Channels tab → click **Update Listing** again. The new code will:
+  - PUT inventory item *with* imageUrls
+  - PUT (not POST) the existing offer
+  - POST publish → this time it will succeed (or surface a real error)
 
-Change the CREATE branch:
-
-- `Type: "Inventory"` (not `NonInventory`)
-- `TrackQtyOnHand: true`
-- `QtyOnHand: 0`
-- `InvStartDate: "2023-04-14"` (per the user's spec)
-- `AssetAccountRef: { value: <inventory_asset_account_id> }`
-- `IncomeAccountRef: { value: <sales_income_account_id> }`
-- `ExpenseAccountRef: { value: <cogs_account_id> }`
-- `PurchaseCost: exVAT(landedCost)` from the SKU's most recent stock_unit `landed_cost` (or `unit_cost` from the line item being processed — see batch-push flow).
-- `UnitPrice: exVAT(salePrice)` only when set.
-- `SalesTaxCodeRef: { value: "TAX" }` (and on UK accounts the standard 20% code) — keep current `Taxable: true` and add a `PurchaseTaxCodeRef` if the supplier is VAT-registered.
-- `Name: '<Product Name> (<SKU>)'`, `Description` and `PurchaseDesc` both = `'<Product Name> (<SKU>)'` per the user's spec.
-
-The current account refs are hardcoded `IncomeAccountRef.value = "1"` / `ExpenseAccountRef.value = "2"`. These need to be configurable. Add three new rows to `pricing_settings` (or a new `qbo_settings` keyed table) for `qbo_inventory_asset_account_id`, `qbo_income_account_id`, `qbo_cogs_account_id`. Surface them in `QboSettingsCard.tsx` as a small form with a one-shot "Discover accounts" button that lists active QBO Accounts via `${baseUrl}/query?query=SELECT * FROM Account` and lets the admin pick one for each role. Until configured, `qbo-sync-item` should fail fast with a clear message rather than silently send `"1"`/`"2"`.
-
-**Update signature**: `qbo-sync-item` currently takes `{ skuCode, oldSkuCode? }`. Add optional `{ purchaseCost?: number, supplierVatRegistered?: boolean }` so the batch-push flow can pass the per-line cost. When omitted (re-grade path), fall back to current behaviour.
-
-## Fix 4 — UI surface for QBO sync state on the batch page
-
-**`src/components/admin-v2/BatchDetail.tsx`**
-
-Header chip showing `qbo_sync_status` (`Synced #1234 / Pending / Error / Not synced`). When `error` or `pending`, show a "Push to QBO" button that calls the new edge function. Show `qbo_sync_error` inline when present.
-
-## Files touched
-
-| File | Change |
-|---|---|
-| New migration | `purchase_batches` adds `qbo_purchase_id`, `qbo_sync_status`, `qbo_sync_error`; new `qbo_account_settings` table or pricing_settings rows; updated `v2_create_purchase_batch` to use `name` from input and protect existing real names |
-| New edge fn `v2-push-purchase-to-qbo` | Build + POST QBO Purchase, store id back on batch, audit |
-| `supabase/functions/qbo-sync-item/index.ts` | Inventory type, configurable account refs, PurchaseCost, tax codes, fail-fast on missing config |
-| `src/components/admin-v2/NewPurchaseForm.tsx` | Per-line "Product Name" field for new MPNs; required validation |
-| `src/hooks/admin/use-purchase-batches.ts` | Forward `name` per line item; fire-and-forget call to `v2-push-purchase-to-qbo` after RPC success |
-| `src/components/admin-v2/BatchDetail.tsx` | QBO sync status chip + "Push to QBO" / "Retry" button + error display |
-| `src/components/admin-v2/QboSettingsCard.tsx` | Account-picker form for inventory asset / income / COGS accounts |
-| One-shot repair (BatchDetail action) | Delete the 9 wrong NonInventory items in QBO, clear their `qbo_item_id` on SKUs, then push PO-669 + recreate items as Inventory |
+No DB cleanup needed — the existing `external_listing_id` is the same offer ID and eBay will accept the republish.
 
 ## Verification
 
-1. Settings → QBO: configure inventory asset, income, COGS accounts.
-2. Create a new purchase batch with a brand-new MPN — name field appears, required.
-3. After submit: batch row has `qbo_sync_status='synced'` and `qbo_purchase_id` set; QBO shows a Cash Purchase with the supplier as vendor, `DocNumber = PO-NNN`, one line per MPN with the correct unit cost and tax code.
-4. QBO Items for each new MPN exist as **Inventory** with name `<Name> (<SKU>)`, description and purchase description identical, `PurchaseCost` = ex-VAT line unit cost, `QtyOnHand=0`, `InvStartDate=2023-04-14`, asset/income/COGS account refs from settings.
-5. Repair PO-669 from BatchDetail → "Retry QBO sync".
+1. Click **List on eBay** for `31172-1.1` with no images uploaded → red toast: "Cannot publish … no product images uploaded".
+2. Upload an image, click **List on eBay** again → green toast, listing visible at the returned `external_url` on ebay.co.uk.
+3. Set a custom title override, publish, refresh → override persists in the Channels tab and on the live eBay listing.
+4. Re-publish the same SKU → green toast, no duplicate offer, "already published" path still works.
 
+## Files touched
+
+- `supabase/functions/ebay-push-listing/index.ts` — narrow the publish-error catch + add image lookup + payload `imageUrls` + pre-flight image check.
+- (Conditional) `src/components/admin-v2/ChannelsTab.tsx` — only if step 3 reveals a read-side fallback bug.
+
+## Out of scope
+
+- Aspects beyond Brand/MPN (Theme, Piece Count, etc.) — separate eBay Cassini-quality improvement, not the cause of this failure.
+- Backfilling other listings that may have silently failed in the past — can be done as a one-off query after the fix lands if you want.
