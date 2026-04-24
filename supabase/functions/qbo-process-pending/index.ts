@@ -860,6 +860,145 @@ async function resolveSkuFromItem(
   return { skuId: skuByCode?.id ?? null, skuCode };
 }
 
+// Release a single allocated stock unit back to available/graded
+async function releaseStockUnit(admin: any, stockUnitId: string): Promise<void> {
+  await admin
+    .from("stock_unit")
+    .update({ status: "available", v2_status: "graded", order_id: null, sold_at: null })
+    .eq("id", stockUnitId)
+    .in("status", ["closed", "sold"]);
+}
+
+/**
+ * Reconcile sales_order_line rows against a QBO SalesReceipt payload.
+ * - Builds desired multiset of (skuId, unitPrice) from QBO item lines
+ * - Matches against existing lines; keeps preserved ones (with stock_unit_id intact)
+ * - Releases stock for removed/changed lines, then deletes them
+ * - Inserts new lines and allocates stock for additions
+ */
+async function reconcileSalesOrderLines(
+  admin: any,
+  orderId: string,
+  receipt: any,
+  itemLines: any[],
+): Promise<void> {
+  const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+
+  type DesiredLine = { skuId: string; unitPrice: number; taxCodeRef: string | null; taxCodeId: string | null };
+  const desired: DesiredLine[] = [];
+
+  for (const line of itemLines) {
+    const detail = line.SalesItemLineDetail;
+    const qty = detail.Qty ?? 1;
+    const unitPrice = Number(detail.UnitPrice ?? 0);
+    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+    const { data: itemLanding } = await admin
+      .from("landing_raw_qbo_item")
+      .select("raw_payload")
+      .eq("external_id", detail.ItemRef.value)
+      .maybeSingle();
+    const qboItemType = itemLanding?.raw_payload?.Type ?? "";
+    if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+      continue;
+    }
+
+    const { skuId } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
+    if (!skuId) continue;
+
+    let taxCodeId: string | null = null;
+    if (taxCodeRef) {
+      const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
+      taxCodeId = tc?.id ?? null;
+    }
+
+    for (let i = 0; i < qty; i++) {
+      desired.push({ skuId, unitPrice, taxCodeRef, taxCodeId });
+    }
+  }
+
+  const { data: existingLines } = await admin
+    .from("sales_order_line")
+    .select("id, sku_id, unit_price, stock_unit_id")
+    .eq("sales_order_id", orderId);
+
+  const existing = (existingLines ?? []) as Array<{
+    id: string; sku_id: string; unit_price: number | null; stock_unit_id: string | null;
+  }>;
+
+  // Greedy match: pair each desired with an existing on (sku, price); fall back to sku-only
+  const usedExistingIds = new Set<string>();
+  const matchedPairs: Array<{ existingId: string; desired: DesiredLine }> = [];
+  const unmatchedDesired: DesiredLine[] = [];
+
+  for (const d of desired) {
+    const exact = existing.find(
+      (e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId && Number(e.unit_price) === d.unitPrice,
+    );
+    if (exact) {
+      usedExistingIds.add(exact.id);
+      matchedPairs.push({ existingId: exact.id, desired: d });
+      continue;
+    }
+    const skuOnly = existing.find((e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId);
+    if (skuOnly) {
+      usedExistingIds.add(skuOnly.id);
+      matchedPairs.push({ existingId: skuOnly.id, desired: d });
+      continue;
+    }
+    unmatchedDesired.push(d);
+  }
+
+  // Existing lines not matched → release stock + delete
+  const toRemove = existing.filter((e) => !usedExistingIds.has(e.id));
+  for (const e of toRemove) {
+    if (e.stock_unit_id) await releaseStockUnit(admin, e.stock_unit_id);
+  }
+  if (toRemove.length > 0) {
+    await admin.from("sales_order_line").delete().in("id", toRemove.map((e) => e.id));
+  }
+
+  // Update matched pairs (refresh price + tax refs; keep stock_unit_id + cogs)
+  for (const { existingId, desired: d } of matchedPairs) {
+    await admin.from("sales_order_line").update({
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+    }).eq("id", existingId);
+  }
+
+  // Insert new lines + allocate stock for additions
+  for (const d of unmatchedDesired) {
+    const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
+      p_sku_id: d.skuId,
+      p_quantity: 1,
+      p_order_id: orderId,
+    });
+    if (allocErr) throw allocErr;
+    const stockUnitId: string | null = (allocatedIds ?? [])[0] ?? null;
+
+    let cogs: number | null = null;
+    if (stockUnitId) {
+      const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+      cogs = unitData?.landed_cost ?? null;
+    }
+
+    await admin.from("sales_order_line").insert({
+      sales_order_id: orderId,
+      sku_id: d.skuId,
+      quantity: 1,
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      stock_unit_id: stockUnitId,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+    });
+  }
+}
+
 async function processSalesReceipts(admin: any, batchSize: number): Promise<{ processed: number; errors: number; stock_matched: number; stock_missing: number }> {
   const { data: pending } = await admin
     .from("landing_raw_qbo_sales_receipt")
@@ -902,146 +1041,132 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         continue;
       }
 
-      // ── Match-first: try to find an existing order to enrich ──
+      // ── Match-first: try to find an existing order to enrich/update ──
       const docNumber = receipt.DocNumber ?? null;
       let matchedOrderId: string | null = null;
 
-      if (docNumber) {
-        // Check by origin_reference (eBay order ID, KO- number, etc)
+      // Priority 1: by qbo_sales_receipt_id (most reliable for updates)
+      const { data: byQboId } = await admin.from("sales_order")
+        .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
+      if (byQboId) matchedOrderId = byQboId.id;
+
+      // Priority 2: by origin_channel + origin_reference
+      if (!matchedOrderId) {
+        const { data: byOriginRef } = await admin.from("sales_order")
+          .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
+        if (byOriginRef) matchedOrderId = byOriginRef.id;
+      }
+
+      // Priority 3: by doc_number / order_number (legacy data)
+      if (!matchedOrderId && docNumber) {
         const { data: byRef } = await admin.from("sales_order")
           .select("id").eq("origin_reference", docNumber).maybeSingle();
-        if (byRef) {
-          const enrichFields: Record<string, any> = {
-            doc_number: docNumber, qbo_sales_receipt_id: qboId,
-            qbo_sync_status: "synced",
-          };
-          await admin.from("sales_order").update(enrichFields).eq("id", byRef.id);
-          // Check if this order has line items — if not, fall through to create them
-          const { count: lineCount } = await admin.from("sales_order_line")
-            .select("id", { count: "exact", head: true }).eq("sales_order_id", byRef.id);
-          if ((lineCount ?? 0) > 0) {
-            await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-            processed++;
-            continue;
-          }
-          console.log(`Matched order ${byRef.id} has 0 line items — will backfill from QBO receipt`);
-          matchedOrderId = byRef.id;
-        }
-
-        if (!matchedOrderId) {
-          // Check by doc_number
-          const { data: byDocNumber } = await admin.from("sales_order")
-            .select("id").eq("doc_number", docNumber).maybeSingle();
-          if (byDocNumber) {
-            await admin.from("sales_order").update({
-              qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-            }).eq("id", byDocNumber.id);
-            const { count: lineCount } = await admin.from("sales_order_line")
-              .select("id", { count: "exact", head: true }).eq("sales_order_id", byDocNumber.id);
-            if ((lineCount ?? 0) > 0) {
-              await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-              processed++;
-              continue;
-            }
-            console.log(`Matched order ${byDocNumber.id} by doc_number has 0 lines — will backfill`);
-            matchedOrderId = byDocNumber.id;
-          }
-        }
-
-        if (!matchedOrderId) {
-          // Check by order_number
-          const { data: byOrderNumber } = await admin.from("sales_order")
-            .select("id").eq("order_number", docNumber).maybeSingle();
-          if (byOrderNumber) {
-            await admin.from("sales_order").update({
-              qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-            }).eq("id", byOrderNumber.id);
-            const { count: lineCount } = await admin.from("sales_order_line")
-              .select("id", { count: "exact", head: true }).eq("sales_order_id", byOrderNumber.id);
-            if ((lineCount ?? 0) > 0) {
-              await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-              processed++;
-              continue;
-            }
-            console.log(`Matched order ${byOrderNumber.id} by order_number has 0 lines — will backfill`);
-            matchedOrderId = byOrderNumber.id;
-          }
-        }
+        if (byRef) matchedOrderId = byRef.id;
+      }
+      if (!matchedOrderId && docNumber) {
+        const { data: byDocNumber } = await admin.from("sales_order")
+          .select("id").eq("doc_number", docNumber).maybeSingle();
+        if (byDocNumber) matchedOrderId = byDocNumber.id;
+      }
+      if (!matchedOrderId && docNumber) {
+        const { data: byOrderNumber } = await admin.from("sales_order")
+          .select("id").eq("order_number", docNumber).maybeSingle();
+        if (byOrderNumber) matchedOrderId = byOrderNumber.id;
       }
 
-      let order: { id: string } | null = matchedOrderId ? { id: matchedOrderId } : null;
+      // ── Compute canonical header values from QBO payload ──
+      const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
+      const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
+      const txnDate = receipt.TxnDate ?? null;
+      const totalAmount = receipt.TotalAmt ?? 0;
+      const currency = receipt.CurrencyRef?.value ?? "GBP";
+      const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
+      const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
 
-      if (!matchedOrderId) {
-        // Same-channel dedup: delete existing order for re-creation using unified cleanup
-        const { data: existing } = await admin.from("sales_order")
-          .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
-        if (existing) {
-          await cleanupSalesOrder(admin, existing.id);
+      let merchandiseSubtotal: number, grossTotal: number;
+      if (globalTaxCalc === "TaxInclusive") {
+        merchandiseSubtotal = totalAmount - taxTotal;
+        grossTotal = totalAmount;
+      } else {
+        merchandiseSubtotal = totalAmount;
+        grossTotal = totalAmount + taxTotal;
+      }
+
+      let customerId: string | null = null;
+      if (customerRefValue) {
+        const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", customerRefValue).maybeSingle();
+        customerId = cust?.id ?? null;
+      }
+
+      const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
+
+      const headerPayload: Record<string, any> = {
+        merchandise_subtotal: merchandiseSubtotal,
+        tax_total: taxTotal,
+        gross_total: grossTotal,
+        net_amount: netAmount,
+        global_tax_calculation: globalTaxCalc,
+        currency,
+        customer_id: customerId,
+        txn_date: txnDate,
+        doc_number: docNumber,
+        qbo_sync_status: "synced",
+        qbo_sales_receipt_id: qboId,
+        qbo_customer_id: customerRefValue,
+      };
+
+      let order: { id: string } | null = null;
+
+      if (matchedOrderId) {
+        // ── UPDATE: smart-merge into existing order ──
+        let updateRes = await admin.from("sales_order").update(headerPayload).eq("id", matchedOrderId);
+        if (updateRes.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(updateRes.error.message ?? "")) {
+          const trimmed = { ...headerPayload };
+          delete trimmed.qbo_sync_status;
+          delete trimmed.qbo_sales_receipt_id;
+          delete trimmed.qbo_customer_id;
+          updateRes = await admin.from("sales_order").update(trimmed).eq("id", matchedOrderId);
         }
-        // Also check by qbo_sales_receipt_id for legacy data
-        const { data: existingByQboId } = await admin.from("sales_order")
-          .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
-        if (existingByQboId) {
-          await cleanupSalesOrder(admin, existingByQboId.id);
+        if (updateRes.error) {
+          errors++;
+          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", updateRes.error.message);
+          continue;
         }
+        order = { id: matchedOrderId };
 
-        const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
-        const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
-        const txnDate = receipt.TxnDate ?? null;
-        const totalAmount = receipt.TotalAmt ?? 0;
-        const currency = receipt.CurrencyRef?.value ?? "GBP";
-        const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
-        const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
+        // Reconcile line items: release stock on removed/changed, keep matching, allocate new
+        await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
 
-        let merchandiseSubtotal: number, grossTotal: number;
-        if (globalTaxCalc === "TaxInclusive") {
-          merchandiseSubtotal = totalAmount - taxTotal;
-          grossTotal = totalAmount;
-        } else {
-          merchandiseSubtotal = totalAmount;
-          grossTotal = totalAmount + taxTotal;
-        }
+        await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
+        processed++;
+        continue;
+      }
 
-        let customerId: string | null = null;
-        if (customerRefValue) {
-          const { data: cust } = await admin.from("customer").select("id").eq("qbo_customer_id", customerRefValue).maybeSingle();
-          customerId = cust?.id ?? null;
-        }
+      // ── INSERT: brand-new order ──
+      const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
 
-        const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+      const orderPayload: Record<string, any> = {
+        ...headerPayload,
+        origin_channel: originChannel,
+        origin_reference: originRef,
+        status: "complete",
+        guest_name: customerName,
+        guest_email: `qbo-sale-${qboId}@imported.local`,
+        shipping_name: customerName,
+        created_at: orderCreatedAt,
+        notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
+      };
 
-        // Use TxnDate for created_at so orders sort by actual transaction date
-        const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
-
-        const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
-
-        const orderPayload: Record<string, any> = {
-          origin_channel: originChannel, origin_reference: originRef,
-          status: "complete", guest_name: customerName,
-          guest_email: `qbo-sale-${qboId}@imported.local`,
-          shipping_name: customerName,
-          merchandise_subtotal: merchandiseSubtotal, tax_total: taxTotal,
-          gross_total: grossTotal, net_amount: netAmount,
-          global_tax_calculation: globalTaxCalc,
-          currency, customer_id: customerId, txn_date: txnDate,
-          doc_number: docNumber,
-          created_at: orderCreatedAt,
-          notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
-          qbo_sync_status: "synced", qbo_sales_receipt_id: qboId,
-          qbo_customer_id: customerRefValue,
-        };
-
-        let orderResult: { data: any; error: any };
+      let orderResult: { data: any; error: any };
+      orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
+      if (orderResult.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderResult.error.message ?? "")) {
+        delete orderPayload.qbo_sync_status;
+        delete orderPayload.qbo_sales_receipt_id;
+        delete orderPayload.qbo_customer_id;
         orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
-        if (orderResult.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderResult.error.message ?? "")) {
-          delete orderPayload.qbo_sync_status;
-          delete orderPayload.qbo_sales_receipt_id;
-          delete orderPayload.qbo_customer_id;
-          orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
-        }
-        if (orderResult.error) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderResult.error.message); continue; }
-        order = orderResult.data;
       }
+      if (orderResult.error) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderResult.error.message); continue; }
+      order = orderResult.data;
 
       // Resolve vatRateId for line items (needed for both new and matched orders)
       const vatRateIdForLines = await resolveVatRateId(admin, receipt.TxnTaxDetail);
