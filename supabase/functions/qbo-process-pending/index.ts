@@ -860,6 +860,145 @@ async function resolveSkuFromItem(
   return { skuId: skuByCode?.id ?? null, skuCode };
 }
 
+// Release a single allocated stock unit back to available/graded
+async function releaseStockUnit(admin: any, stockUnitId: string): Promise<void> {
+  await admin
+    .from("stock_unit")
+    .update({ status: "available", v2_status: "graded", order_id: null, sold_at: null })
+    .eq("id", stockUnitId)
+    .in("status", ["closed", "sold"]);
+}
+
+/**
+ * Reconcile sales_order_line rows against a QBO SalesReceipt payload.
+ * - Builds desired multiset of (skuId, unitPrice) from QBO item lines
+ * - Matches against existing lines; keeps preserved ones (with stock_unit_id intact)
+ * - Releases stock for removed/changed lines, then deletes them
+ * - Inserts new lines and allocates stock for additions
+ */
+async function reconcileSalesOrderLines(
+  admin: any,
+  orderId: string,
+  receipt: any,
+  itemLines: any[],
+): Promise<void> {
+  const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+
+  type DesiredLine = { skuId: string; unitPrice: number; taxCodeRef: string | null; taxCodeId: string | null };
+  const desired: DesiredLine[] = [];
+
+  for (const line of itemLines) {
+    const detail = line.SalesItemLineDetail;
+    const qty = detail.Qty ?? 1;
+    const unitPrice = Number(detail.UnitPrice ?? 0);
+    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+    const { data: itemLanding } = await admin
+      .from("landing_raw_qbo_item")
+      .select("raw_payload")
+      .eq("external_id", detail.ItemRef.value)
+      .maybeSingle();
+    const qboItemType = itemLanding?.raw_payload?.Type ?? "";
+    if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+      continue;
+    }
+
+    const { skuId } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
+    if (!skuId) continue;
+
+    let taxCodeId: string | null = null;
+    if (taxCodeRef) {
+      const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
+      taxCodeId = tc?.id ?? null;
+    }
+
+    for (let i = 0; i < qty; i++) {
+      desired.push({ skuId, unitPrice, taxCodeRef, taxCodeId });
+    }
+  }
+
+  const { data: existingLines } = await admin
+    .from("sales_order_line")
+    .select("id, sku_id, unit_price, stock_unit_id")
+    .eq("sales_order_id", orderId);
+
+  const existing = (existingLines ?? []) as Array<{
+    id: string; sku_id: string; unit_price: number | null; stock_unit_id: string | null;
+  }>;
+
+  // Greedy match: pair each desired with an existing on (sku, price); fall back to sku-only
+  const usedExistingIds = new Set<string>();
+  const matchedPairs: Array<{ existingId: string; desired: DesiredLine }> = [];
+  const unmatchedDesired: DesiredLine[] = [];
+
+  for (const d of desired) {
+    const exact = existing.find(
+      (e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId && Number(e.unit_price) === d.unitPrice,
+    );
+    if (exact) {
+      usedExistingIds.add(exact.id);
+      matchedPairs.push({ existingId: exact.id, desired: d });
+      continue;
+    }
+    const skuOnly = existing.find((e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId);
+    if (skuOnly) {
+      usedExistingIds.add(skuOnly.id);
+      matchedPairs.push({ existingId: skuOnly.id, desired: d });
+      continue;
+    }
+    unmatchedDesired.push(d);
+  }
+
+  // Existing lines not matched → release stock + delete
+  const toRemove = existing.filter((e) => !usedExistingIds.has(e.id));
+  for (const e of toRemove) {
+    if (e.stock_unit_id) await releaseStockUnit(admin, e.stock_unit_id);
+  }
+  if (toRemove.length > 0) {
+    await admin.from("sales_order_line").delete().in("id", toRemove.map((e) => e.id));
+  }
+
+  // Update matched pairs (refresh price + tax refs; keep stock_unit_id + cogs)
+  for (const { existingId, desired: d } of matchedPairs) {
+    await admin.from("sales_order_line").update({
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+    }).eq("id", existingId);
+  }
+
+  // Insert new lines + allocate stock for additions
+  for (const d of unmatchedDesired) {
+    const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
+      p_sku_id: d.skuId,
+      p_quantity: 1,
+      p_order_id: orderId,
+    });
+    if (allocErr) throw allocErr;
+    const stockUnitId: string | null = (allocatedIds ?? [])[0] ?? null;
+
+    let cogs: number | null = null;
+    if (stockUnitId) {
+      const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+      cogs = unitData?.landed_cost ?? null;
+    }
+
+    await admin.from("sales_order_line").insert({
+      sales_order_id: orderId,
+      sku_id: d.skuId,
+      quantity: 1,
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      stock_unit_id: stockUnitId,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+    });
+  }
+}
+
 async function processSalesReceipts(admin: any, batchSize: number): Promise<{ processed: number; errors: number; stock_matched: number; stock_missing: number }> {
   const { data: pending } = await admin
     .from("landing_raw_qbo_sales_receipt")
