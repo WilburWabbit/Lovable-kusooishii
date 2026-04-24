@@ -188,17 +188,41 @@ Deno.serve(async (req) => {
       console.log(`eBay offer updated: ${offerId}`);
     } else {
       // Create new offer
-      const offerRes = await ebayFetch(
-        accessToken,
-        `/sell/inventory/v1/offer`,
-        {
-          method: "POST",
-          body: JSON.stringify(offerPayload),
-        },
-      );
-      offerId = offerRes?.offerId;
-      if (!offerId) throw new Error("eBay offer creation did not return offerId");
-      console.log(`eBay offer created: ${offerId}`);
+      try {
+        const offerRes = await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer`,
+          {
+            method: "POST",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = offerRes?.offerId;
+        if (!offerId) throw new Error("eBay offer creation did not return offerId");
+        console.log(`eBay offer created: ${offerId}`);
+      } catch (createErr) {
+        // Recovery: eBay already has an offer for this SKU but our local
+        // channel_listing.external_listing_id was cleared (or never saved
+        // because a previous publish failed before step 4). eBay returns
+        // errorId 25002 with message "Offer entity already exists" and
+        // includes the existing offerId in the parameters array. Adopt
+        // that offerId and PUT to update the existing offer instead.
+        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+        const recoveredOfferId = extractExistingOfferId(errMsg);
+        if (!recoveredOfferId) throw createErr;
+        console.log(
+          `eBay offer already exists for ${effectiveSku} — adopting existing offerId ${recoveredOfferId} and updating`,
+        );
+        await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer/${recoveredOfferId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = recoveredOfferId;
+      }
     }
 
     // ─── Step 3: Publish the offer ─────────────────────────
@@ -310,4 +334,35 @@ function mapGradeToEbayCondition(grade: string | null): string {
     case "4": return "USED_GOOD";
     default: return "NEW_OTHER";
   }
+}
+
+// ─── Recover existing offerId from eBay 25002 error ──────────
+// eBay returns an error body like:
+//   {"errors":[{"errorId":25002,"message":"...Offer entity already exists.",
+//     "parameters":[{"name":"offerId","value":"155956152011"}]}]}
+// Pull the existing offerId out so we can switch to PUT.
+function extractExistingOfferId(errMsg: string): string | null {
+  if (!/25002/.test(errMsg) || !/already exists/i.test(errMsg)) return null;
+  // Find the JSON body in the error message and parse it
+  const jsonStart = errMsg.indexOf("{");
+  if (jsonStart < 0) return null;
+  try {
+    const body = JSON.parse(errMsg.slice(jsonStart));
+    const errors = body?.errors;
+    if (!Array.isArray(errors)) return null;
+    for (const e of errors) {
+      const params = e?.parameters;
+      if (!Array.isArray(params)) continue;
+      for (const p of params) {
+        if (p?.name === "offerId" && typeof p?.value === "string") {
+          return p.value;
+        }
+      }
+    }
+  } catch {
+    // Fall through to regex fallback
+  }
+  // Regex fallback in case the JSON shape changes
+  const m = errMsg.match(/"name"\s*:\s*"offerId"\s*,\s*"value"\s*:\s*"(\d+)"/);
+  return m ? m[1] : null;
 }
