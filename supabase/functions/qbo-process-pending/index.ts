@@ -881,7 +881,7 @@ async function reconcileSalesOrderLines(
   orderId: string,
   receipt: any,
   itemLines: any[],
-): Promise<void> {
+): Promise<{ allocated: number; missing: number }> {
   const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
 
   type DesiredLine = { skuId: string; unitPrice: number; taxCodeRef: string | null; taxCodeId: string | null };
@@ -970,6 +970,8 @@ async function reconcileSalesOrderLines(
   }
 
   // Insert new lines + allocate stock for additions
+  let allocated = 0;
+  let missing = 0;
   for (const d of unmatchedDesired) {
     const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
       p_sku_id: d.skuId,
@@ -995,8 +997,21 @@ async function reconcileSalesOrderLines(
       qbo_tax_code_ref: d.taxCodeRef,
       vat_rate_id: vatRateId,
       tax_code_id: d.taxCodeId,
+      cogs,
     });
+
+    if (stockUnitId) allocated++;
+    else missing++;
   }
+
+  // Count preserved/matched lines that already had stock allocated
+  for (const { existingId } of matchedPairs) {
+    const existingLine = existing.find((e) => e.id === existingId);
+    if (existingLine?.stock_unit_id) allocated++;
+    else missing++;
+  }
+
+  return { allocated, missing };
 }
 
 async function processSalesReceipts(admin: any, batchSize: number): Promise<{ processed: number; errors: number; stock_matched: number; stock_missing: number }> {
@@ -1135,7 +1150,25 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         order = { id: matchedOrderId };
 
         // Reconcile line items: release stock on removed/changed, keep matching, allocate new
-        await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
+        const reconcileResult = await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
+
+        // Auto-clear needs_allocation when all lines are now allocated.
+        // Only flag needs_allocation if allocation actually failed (missing stock).
+        if (reconcileResult.missing === 0 && reconcileResult.allocated > 0) {
+          await admin
+            .from("sales_order")
+            .update({ v2_status: "new" } as never)
+            .eq("id", matchedOrderId)
+            .eq("v2_status", "needs_allocation");
+        } else if (reconcileResult.missing > 0) {
+          await admin
+            .from("sales_order")
+            .update({
+              v2_status: "needs_allocation",
+              qbo_sync_status: "needs_manual_review",
+            } as never)
+            .eq("id", matchedOrderId);
+        }
 
         await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
         processed++;
