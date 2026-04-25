@@ -438,6 +438,8 @@ function mapCoreToEbayAspect(coreKey: string): string | null {
   };
   return map[coreKey.toLowerCase()] ?? null;
 }
+
+// ─── Recover existing offerId from eBay 25002 error ──────────
 // eBay returns an error body like:
 //   {"errors":[{"errorId":25002,"message":"...Offer entity already exists.",
 //     "parameters":[{"name":"offerId","value":"155956152011"}]}]}
