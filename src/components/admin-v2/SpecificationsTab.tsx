@@ -6,8 +6,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { productKeys } from "@/hooks/admin/use-products";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { EbayCategoryPicker } from "./EbayCategoryPicker";
-import { EbayAspectsForm } from "./EbayAspectsForm";
 
 interface SpecificationsTabProps {
   product: ProductDetail;
@@ -245,41 +243,6 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
               </div>
             );
           })}
-        </div>
-      </SurfaceCard>
-
-      {/* eBay Listing Details */}
-      <SurfaceCard>
-        <SectionHead>eBay Listing Details</SectionHead>
-        <div className="space-y-4 mt-2">
-          <EbayCategoryPicker
-            productId={product.id}
-            mpn={product.mpn}
-            marketplace={product.ebayMarketplace || "EBAY_GB"}
-            currentCategoryId={product.ebayCategoryId}
-          />
-          {product.ebayCategoryId ? (
-            <div className="pt-3 border-t border-zinc-100">
-              <EbayAspectsForm
-                product={product}
-                categoryId={product.ebayCategoryId}
-                marketplace={product.ebayMarketplace || "EBAY_GB"}
-              />
-            </div>
-          ) : (
-            <div className="text-[12px] text-zinc-500 pt-3 border-t border-zinc-100">
-              Select a category to load item specifics.
-            </div>
-          )}
-        </div>
-      </SurfaceCard>
-
-      {/* Google Merchant / Meta — placeholder for future channels */}
-      <SurfaceCard>
-        <SectionHead>Other Channels</SectionHead>
-        <div className="text-[12px] text-zinc-500 mt-1">
-          Google Merchant Center and Meta attribute mapping will use the same
-          model. Coming soon.
         </div>
       </SurfaceCard>
 
