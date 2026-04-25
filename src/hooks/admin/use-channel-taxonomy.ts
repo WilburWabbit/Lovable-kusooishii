@@ -1,7 +1,9 @@
 // ============================================================
 // Admin V2 — Channel Taxonomy & Item Specifics
 // Hooks for eBay (and future GMC/Meta) category selection,
-// aspect schema fetching, and per-product attribute storage.
+// auto-resolution, aspect schema fetching, and per-product
+// attribute storage. All channel-specific mapping happens on the
+// backend (see supabase/functions/_shared/channel-aspect-map.ts).
 // ============================================================
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -12,6 +14,34 @@ import type {
   ProductAttribute,
 } from "@/lib/types/admin";
 
+export type AspectSource = "core" | "brickeconomy" | "constant" | "custom";
+
+export interface ResolvedAspect {
+  key: string;
+  value: string;
+  source: AspectSource;
+  basis: string;
+}
+
+export interface ChannelAspectsResolution {
+  categoryId: string;
+  categoryName: string | null;
+  schemaLoaded: boolean;
+  resolvedCount: number;
+  totalSchemaCount: number;
+  missingRequiredCount: number;
+  resolved: Record<string, ResolvedAspect>;
+  missing: { key: string; required: boolean }[];
+}
+
+export interface AutoCategoryResult {
+  categoryId: string | null;
+  categoryName: string | null;
+  confidence: "high" | "medium" | "low";
+  basis: string;
+  ancestors?: { id: string; name: string }[];
+}
+
 export const taxonomyKeys = {
   suggest: (channel: string, marketplace: string, q: string) =>
     ["taxonomy", channel, marketplace, "suggest", q] as const,
@@ -19,9 +49,55 @@ export const taxonomyKeys = {
     ["taxonomy", channel, marketplace, "subtree", parentId ?? "root"] as const,
   aspects: (channel: string, marketplace: string, categoryId: string) =>
     ["taxonomy", channel, marketplace, "aspects", categoryId] as const,
+  resolved: (channel: string, marketplace: string, productId: string, categoryId: string) =>
+    ["taxonomy", channel, marketplace, "resolved", productId, categoryId] as const,
+  autoCategory: (productId: string, marketplace: string) =>
+    ["taxonomy", "ebay", marketplace, "auto-category", productId] as const,
   attributes: (productId: string, namespace?: string) =>
     ["product-attributes", productId, namespace ?? "all"] as const,
 };
+
+// ─── Auto category resolution (eBay) ───────────────────────
+
+export function useAutoResolveEbayCategory(
+  productId: string | undefined,
+  marketplace: string = "EBAY_GB",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.autoCategory(productId ?? "", marketplace),
+    enabled: enabled && !!productId,
+    staleTime: 1000 * 60 * 30,
+    queryFn: async (): Promise<AutoCategoryResult> => {
+      return await invokeWithAuth<AutoCategoryResult>("ebay-taxonomy", {
+        action: "auto-resolve-category",
+        product_id: productId,
+        marketplace,
+      });
+    },
+  });
+}
+
+// ─── Channel aspects resolution (server-side mapping) ──────
+
+export function useResolveEbayAspects(
+  productId: string | undefined,
+  categoryId: string | null | undefined,
+  marketplace: string = "EBAY_GB",
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.resolved("ebay", marketplace, productId ?? "", categoryId ?? ""),
+    enabled: !!productId && !!categoryId,
+    queryFn: async (): Promise<ChannelAspectsResolution> => {
+      return await invokeWithAuth<ChannelAspectsResolution>("ebay-taxonomy", {
+        action: "resolve-aspects",
+        product_id: productId,
+        categoryId,
+        marketplace,
+      });
+    },
+  });
+}
 
 // ─── eBay category suggestions ──────────────────────────────
 
