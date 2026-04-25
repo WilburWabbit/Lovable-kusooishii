@@ -2717,6 +2717,116 @@ Deno.serve(async (req) => {
         reconcileTriggered,
       };
 
+    } else if (action === "get-channel-schema") {
+      // params: { channel, marketplace?, category_id }
+      const channel = params.channel;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      const categoryId = params.category_id;
+      if (!channel || !categoryId) {
+        throw new ValidationError("channel and category_id are required");
+      }
+      const { data: schema } = await admin
+        .from("channel_category_schema")
+        .select("id, channel, marketplace, category_id, category_name, schema_fetched_at")
+        .eq("channel", channel)
+        .eq("marketplace", marketplace)
+        .eq("category_id", categoryId)
+        .maybeSingle();
+      if (!schema) {
+        result = { schema: null, attributes: [] };
+      } else {
+        const { data: attrs } = await admin
+          .from("channel_category_attribute")
+          .select("*")
+          .eq("schema_id", schema.id)
+          .order("sort_order", { ascending: true });
+        result = { schema, attributes: attrs ?? [] };
+      }
+    } else if (action === "get-product-attributes") {
+      // params: { product_id, namespace? }
+      const productId = params.product_id;
+      if (!productId) throw new ValidationError("product_id is required");
+      const query = admin
+        .from("product_attribute")
+        .select("id, namespace, key, value, value_json, source, updated_at")
+        .eq("product_id", productId);
+      if (params.namespace) query.eq("namespace", params.namespace);
+      const { data, error } = await query;
+      if (error) throw error;
+      result = data ?? [];
+    } else if (action === "save-product-attributes") {
+      // params: { product_id, namespace, attributes: Record<string, string|string[]>, source? }
+      const productId = params.product_id;
+      const namespace = params.namespace;
+      const attrs = params.attributes ?? {};
+      const source = params.source ?? "manual";
+      if (!productId || !namespace) {
+        throw new ValidationError("product_id and namespace are required");
+      }
+      if (!["core", "ebay", "gmc", "meta"].includes(namespace)) {
+        throw new ValidationError(`Invalid namespace: ${namespace}`);
+      }
+
+      const upserts: any[] = [];
+      const deletes: string[] = [];
+      for (const [key, raw] of Object.entries(attrs)) {
+        const isArray = Array.isArray(raw);
+        const isEmpty =
+          raw == null ||
+          (typeof raw === "string" && raw.trim() === "") ||
+          (isArray && (raw as unknown[]).length === 0);
+        if (isEmpty) {
+          deletes.push(key);
+          continue;
+        }
+        upserts.push({
+          product_id: productId,
+          namespace,
+          key,
+          value: isArray ? null : String(raw),
+          value_json: isArray ? raw : null,
+          source,
+        });
+      }
+
+      if (deletes.length > 0) {
+        await admin
+          .from("product_attribute")
+          .delete()
+          .eq("product_id", productId)
+          .eq("namespace", namespace)
+          .in("key", deletes);
+      }
+      if (upserts.length > 0) {
+        const { error } = await admin
+          .from("product_attribute")
+          .upsert(upserts, { onConflict: "product_id,namespace,key" });
+        if (error) throw error;
+      }
+      result = { success: true, upserted: upserts.length, deleted: deletes.length };
+    } else if (action === "set-product-channel-category") {
+      // params: { product_id, channel, category_id, marketplace? }
+      const productId = params.product_id;
+      const channel = params.channel;
+      const categoryId = params.category_id;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      if (!productId || !channel) {
+        throw new ValidationError("product_id and channel are required");
+      }
+      const updates: Record<string, unknown> = {};
+      if (channel === "ebay") {
+        updates.ebay_category_id = categoryId ?? null;
+        updates.ebay_marketplace = marketplace;
+      } else if (channel === "gmc") {
+        updates.gmc_product_category = categoryId ?? null;
+      } else if (channel === "meta") {
+        updates.meta_category = categoryId ?? null;
+      } else {
+        throw new ValidationError(`Unsupported channel: ${channel}`);
+      }
+      const { error } = await admin.from("product").update(updates).eq("id", productId);
+      if (error) throw error;
+      result = { success: true };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

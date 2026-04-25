@@ -269,6 +269,101 @@ export type Database = {
         }
         Relationships: []
       }
+      channel_category_attribute: {
+        Row: {
+          allowed_values: Json | null
+          allows_custom: boolean
+          cardinality: string
+          created_at: string
+          data_type: string
+          help_text: string | null
+          id: string
+          key: string
+          label: string | null
+          required: boolean
+          schema_id: string
+          sort_order: number
+        }
+        Insert: {
+          allowed_values?: Json | null
+          allows_custom?: boolean
+          cardinality?: string
+          created_at?: string
+          data_type?: string
+          help_text?: string | null
+          id?: string
+          key: string
+          label?: string | null
+          required?: boolean
+          schema_id: string
+          sort_order?: number
+        }
+        Update: {
+          allowed_values?: Json | null
+          allows_custom?: boolean
+          cardinality?: string
+          created_at?: string
+          data_type?: string
+          help_text?: string | null
+          id?: string
+          key?: string
+          label?: string | null
+          required?: boolean
+          schema_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_category_attribute_schema_id_fkey"
+            columns: ["schema_id"]
+            isOneToOne: false
+            referencedRelation: "channel_category_schema"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_category_schema: {
+        Row: {
+          category_id: string
+          category_name: string
+          channel: string
+          created_at: string
+          id: string
+          leaf: boolean
+          marketplace: string
+          parent_id: string | null
+          raw_payload: Json | null
+          schema_fetched_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          category_name: string
+          channel: string
+          created_at?: string
+          id?: string
+          leaf?: boolean
+          marketplace?: string
+          parent_id?: string | null
+          raw_payload?: Json | null
+          schema_fetched_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          category_name?: string
+          channel?: string
+          created_at?: string
+          id?: string
+          leaf?: boolean
+          marketplace?: string
+          parent_id?: string | null
+          raw_payload?: Json | null
+          schema_fetched_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       channel_fee_schedule: {
         Row: {
           active: boolean
@@ -2126,7 +2221,10 @@ export type Database = {
           description: string | null
           dimensions_cm: string | null
           ean: string | null
+          ebay_category_id: string | null
+          ebay_marketplace: string | null
           field_overrides: Json | null
+          gmc_product_category: string | null
           height_cm: number | null
           highlights: string | null
           id: string
@@ -2134,6 +2232,7 @@ export type Database = {
           include_catalog_img: boolean
           lego_catalog_id: string | null
           length_cm: number | null
+          meta_category: string | null
           minifigs_count: number | null
           mpn: string
           name: string | null
@@ -2170,7 +2269,10 @@ export type Database = {
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
+          ebay_category_id?: string | null
+          ebay_marketplace?: string | null
           field_overrides?: Json | null
+          gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
@@ -2178,6 +2280,7 @@ export type Database = {
           include_catalog_img?: boolean
           lego_catalog_id?: string | null
           length_cm?: number | null
+          meta_category?: string | null
           minifigs_count?: number | null
           mpn: string
           name?: string | null
@@ -2214,7 +2317,10 @@ export type Database = {
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
+          ebay_category_id?: string | null
+          ebay_marketplace?: string | null
           field_overrides?: Json | null
+          gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
@@ -2222,6 +2328,7 @@ export type Database = {
           include_catalog_img?: boolean
           lego_catalog_id?: string | null
           length_cm?: number | null
+          meta_category?: string | null
           minifigs_count?: number | null
           mpn?: string
           name?: string | null
@@ -2259,6 +2366,47 @@ export type Database = {
             columns: ["theme_id"]
             isOneToOne: false
             referencedRelation: "theme"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_attribute: {
+        Row: {
+          id: string
+          key: string
+          namespace: string
+          product_id: string
+          source: string
+          updated_at: string
+          value: string | null
+          value_json: Json | null
+        }
+        Insert: {
+          id?: string
+          key: string
+          namespace: string
+          product_id: string
+          source?: string
+          updated_at?: string
+          value?: string | null
+          value_json?: Json | null
+        }
+        Update: {
+          id?: string
+          key?: string
+          namespace?: string
+          product_id?: string
+          source?: string
+          updated_at?: string
+          value?: string | null
+          value_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_attribute_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product"
             referencedColumns: ["id"]
           },
         ]
