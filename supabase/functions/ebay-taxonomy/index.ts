@@ -260,6 +260,192 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "auto-resolve-category") {
+      // params: { product_id, marketplace? }
+      const productId: string = body.product_id;
+      if (!productId) throw new Error("product_id is required");
+
+      const { data: product, error: pErr } = await admin
+        .from("product")
+        .select("id, mpn, name, product_type, theme_id, subtheme_name, ebay_category_id")
+        .eq("id", productId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!product) throw new Error("Product not found");
+
+      let themeName: string | null = null;
+      if (product.theme_id) {
+        const { data: theme } = await admin
+          .from("theme")
+          .select("name")
+          .eq("id", product.theme_id)
+          .maybeSingle();
+        themeName = (theme?.name as string | undefined) ?? null;
+      }
+
+      const isMinifig = product.product_type === "minifig" || product.product_type === "minifigure";
+      const queryParts = [
+        "lego",
+        themeName,
+        product.subtheme_name,
+        product.name,
+        isMinifig ? "minifigure" : "set",
+      ].filter(Boolean) as string[];
+      const q = queryParts.join(" ").slice(0, 350);
+
+      const token = await getEbayAccessToken(admin);
+      const data = await ebayFetch(
+        token,
+        `/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(q)}`,
+        marketplace,
+      );
+
+      const suggestions = (data?.categorySuggestions ?? []) as any[];
+      const legoAncestors = LEGO_ANCESTOR_IDS[marketplace] ?? LEGO_ANCESTOR_IDS["EBAY_GB"];
+
+      // Pick first suggestion under a LEGO ancestor — that's "high" confidence.
+      // Fall back to first suggestion overall — "low" confidence.
+      let chosen: any = null;
+      let confidence: "high" | "medium" | "low" = "low";
+      for (const s of suggestions) {
+        const ancestors = (s.categoryTreeNodeAncestors ?? []) as any[];
+        if (ancestors.some((a) => legoAncestors.has(String(a.categoryId)))) {
+          chosen = s;
+          confidence = "high";
+          break;
+        }
+      }
+      if (!chosen && suggestions.length > 0) {
+        chosen = suggestions[0];
+        confidence = "low";
+      }
+
+      if (!chosen?.category) {
+        return jsonResponse({
+          categoryId: null,
+          categoryName: null,
+          confidence: "low",
+          basis: `no eBay suggestions for "${q}"`,
+        });
+      }
+
+      const categoryId = chosen.category.categoryId;
+      const categoryName = chosen.category.categoryName;
+      const ancestorPath = (chosen.categoryTreeNodeAncestors ?? [])
+        .map((a: any) => a.categoryName)
+        .reverse()
+        .join(" › ");
+      const basis = `query="${q}" → ${ancestorPath ? ancestorPath + " › " : ""}${categoryName}`;
+
+      return jsonResponse({
+        categoryId,
+        categoryName,
+        confidence,
+        basis,
+        ancestors: (chosen.categoryTreeNodeAncestors ?? []).map((a: any) => ({
+          id: a.categoryId,
+          name: a.categoryName,
+        })),
+      });
+    }
+
+    if (action === "resolve-aspects") {
+      // params: { product_id, categoryId, marketplace? }
+      const productId: string = body.product_id;
+      const categoryId: string = body.categoryId;
+      if (!productId || !categoryId) {
+        throw new Error("product_id and categoryId are required");
+      }
+
+      // 1. Load product, theme, BrickEconomy enrichment, custom-core attributes.
+      const { data: product, error: pErr } = await admin
+        .from("product")
+        .select(
+          "id, mpn, name, set_number, subtheme_name, piece_count, age_range, age_mark, ean, " +
+          "released_date, retired_date, release_year, weight_kg, weight_g, length_cm, width_cm, " +
+          "height_cm, product_type, brand, theme_id"
+        )
+        .eq("id", productId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!product) throw new Error("Product not found");
+
+      let themeName: string | null = null;
+      if (product.theme_id) {
+        const { data: theme } = await admin
+          .from("theme")
+          .select("name")
+          .eq("id", product.theme_id)
+          .maybeSingle();
+        themeName = (theme?.name as string | undefined) ?? null;
+      }
+
+      // BrickEconomy lookup — match either suffixed or bare set number.
+      const setNumber = (product as ProductRow).set_number ?? product.mpn?.split(".")[0]?.split("-")[0] ?? null;
+      let be: BrickEconomyRow | null = null;
+      if (setNumber) {
+        const variants = [setNumber, `${setNumber}-1`];
+        const { data: beRow } = await admin
+          .from("brickeconomy_collection")
+          .select("theme, subtheme, pieces_count, year, released_date, retired_date")
+          .eq("item_type", "set")
+          .in("item_number", variants)
+          .order("synced_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (beRow) be = beRow as BrickEconomyRow;
+      }
+
+      const { data: customRows } = await admin
+        .from("product_attribute")
+        .select("key, value, value_json")
+        .eq("product_id", productId)
+        .eq("namespace", "core");
+      const customCore: Record<string, string> = {};
+      for (const r of customRows ?? []) {
+        if (r.value != null && r.value !== "") customCore[r.key] = r.value;
+      }
+
+      // 2. Load cached aspect schema for the category.
+      const { data: schemaRow } = await admin
+        .from("channel_category_schema")
+        .select("id, category_name")
+        .eq("channel", "ebay")
+        .eq("marketplace", marketplace)
+        .eq("category_id", categoryId)
+        .maybeSingle();
+
+      let schemaAttrs: { key: string; required: boolean }[] = [];
+      if (schemaRow?.id) {
+        const { data: attrs } = await admin
+          .from("channel_category_attribute")
+          .select("key, required")
+          .eq("schema_id", schemaRow.id)
+          .order("sort_order", { ascending: true });
+        schemaAttrs = (attrs ?? []) as { key: string; required: boolean }[];
+      }
+
+      // 3. Map and reconcile.
+      const allResolved = buildEbayAspects({
+        product: product as ProductRow,
+        themeName,
+        be,
+        customCore,
+      });
+      const { resolved, missing } = reconcileWithSchema(allResolved, schemaAttrs);
+
+      return jsonResponse({
+        categoryId,
+        categoryName: schemaRow?.category_name ?? null,
+        schemaLoaded: schemaAttrs.length > 0,
+        resolvedCount: Object.keys(resolved).length,
+        totalSchemaCount: schemaAttrs.length,
+        missingRequiredCount: missing.filter((m) => m.required).length,
+        resolved,
+        missing,
+      });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (err) {
     console.error("ebay-taxonomy failed:", err);
