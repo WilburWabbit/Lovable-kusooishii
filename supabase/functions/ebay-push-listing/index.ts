@@ -414,7 +414,30 @@ function mapGradeToEbayCondition(grade: string | null): string {
   }
 }
 
-// ─── Recover existing offerId from eBay 25002 error ──────────
+// ─── Cross-channel attribute mapping ─────────────────────────
+// Maps a 'core' namespace attribute key to its eBay aspect equivalent.
+// Returning null means the core key is not relevant to eBay.
+function mapCoreToEbayAspect(coreKey: string): string | null {
+  const map: Record<string, string> = {
+    brand: "Brand",
+    mpn: "MPN",
+    ean: "EAN",
+    upc: "UPC",
+    gtin: "GTIN",
+    isbn: "ISBN",
+    color: "Colour",
+    colour: "Colour",
+    material: "Material",
+    theme: "Theme",
+    character_family: "Character Family",
+    character: "Character",
+    age_level: "Age Level",
+    piece_count: "Number of Pieces",
+    year_manufactured: "Year Manufactured",
+    type: "Type",
+  };
+  return map[coreKey.toLowerCase()] ?? null;
+}
 // eBay returns an error body like:
 //   {"errors":[{"errorId":25002,"message":"...Offer entity already exists.",
 //     "parameters":[{"name":"offerId","value":"155956152011"}]}]}
