@@ -115,15 +115,93 @@ Deno.serve(async (req) => {
     // ─── Get eBay access token ─────────────────────────────
     const accessToken = await getEbayAccessToken(admin);
 
+    // ─── Resolve eBay category + aspects from DB ───────────
+    // Read product's selected category. Without one, fall back to the legacy
+    // hardcoded LEGO Building Toys category so existing flows don't break,
+    // but warn so we know to migrate older products.
+    const { data: productRow } = await admin
+      .from("product")
+      .select("id, ebay_category_id, ebay_marketplace")
+      .eq("id", productId as string)
+      .maybeSingle();
+
+    const ebayCategoryId =
+      (productRow?.ebay_category_id as string | null) ?? "19006";
+    const marketplace =
+      (productRow?.ebay_marketplace as string | null) ?? "EBAY_GB";
+
+    // Build aspects: start with sensible defaults from intrinsic columns,
+    // then layer DB-stored namespace='ebay' attributes on top, then
+    // mapped 'core' namespace attributes (Brand, MPN, EAN, etc.).
+    const aspects: Record<string, string[]> = {};
+    const setAspect = (key: string, value: unknown) => {
+      if (value == null) return;
+      if (Array.isArray(value)) {
+        const arr = value.map((v) => String(v)).filter((v) => v.trim() !== "");
+        if (arr.length > 0) aspects[key] = arr;
+      } else {
+        const v = String(value).trim();
+        if (v) aspects[key] = [v];
+      }
+    };
+
+    // Defaults pulled from product columns
+    setAspect("Brand", "LEGO");
+    setAspect("MPN", product?.mpn);
+
+    // Pull stored attributes for this product
+    if (productId) {
+      const { data: attrRows } = await admin
+        .from("product_attribute")
+        .select("namespace, key, value, value_json")
+        .eq("product_id", productId)
+        .in("namespace", ["core", "ebay"]);
+
+      // Apply 'core' first (lower priority)
+      for (const row of (attrRows ?? []) as Array<Record<string, unknown>>) {
+        if (row.namespace !== "core") continue;
+        const key = mapCoreToEbayAspect(row.key as string);
+        if (!key) continue;
+        setAspect(key, row.value_json ?? row.value);
+      }
+      // Then 'ebay' (highest priority — overrides core mapping)
+      for (const row of (attrRows ?? []) as Array<Record<string, unknown>>) {
+        if (row.namespace !== "ebay") continue;
+        setAspect(row.key as string, row.value_json ?? row.value);
+      }
+    }
+
+    // Validate required aspects against cached schema if we have one
+    const { data: schemaRow } = await admin
+      .from("channel_category_schema")
+      .select("id")
+      .eq("channel", "ebay")
+      .eq("marketplace", marketplace)
+      .eq("category_id", ebayCategoryId)
+      .maybeSingle();
+    if (schemaRow?.id) {
+      const { data: requiredAttrs } = await admin
+        .from("channel_category_attribute")
+        .select("key, label")
+        .eq("schema_id", schemaRow.id)
+        .eq("required", true);
+      const missing = (requiredAttrs ?? [])
+        .filter((a: any) => !aspects[a.key as string]?.length)
+        .map((a: any) => a.label ?? a.key);
+      if (missing.length > 0) {
+        throw new Error(
+          `Cannot publish ${effectiveSku} to eBay: missing required aspects — ${missing.join(", ")}. ` +
+            `Set them in the Specifications tab.`,
+        );
+      }
+    }
+
     // ─── Step 1: Create/Update Inventory Item ──────────────
     const inventoryItemPayload = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
         description: (l.listing_description as string) ?? (product?.description as string) ?? "",
-        aspects: {
-          "Brand": ["LEGO"],
-          "MPN": [product?.mpn ?? ""],
-        },
+        aspects,
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
@@ -155,10 +233,10 @@ Deno.serve(async (req) => {
 
     const offerPayload = {
       sku: effectiveSku,
-      marketplaceId: "EBAY_GB",
+      marketplaceId: marketplace,
       format: "FIXED_PRICE",
       availableQuantity: onHandCount ?? 1,
-      categoryId: "19006", // LEGO Building Toys category
+      categoryId: ebayCategoryId,
       listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
       pricingSummary: {
         price: {
