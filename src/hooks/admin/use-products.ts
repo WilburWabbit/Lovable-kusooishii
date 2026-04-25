@@ -292,6 +292,10 @@ export function useProduct(mpn: string | undefined) {
         catalogImageUrl,
         includeCatalogImg,
         fieldOverrides,
+        ebayCategoryId: (rawProduct.ebay_category_id as string) ?? null,
+        ebayMarketplace: (rawProduct.ebay_marketplace as string) ?? null,
+        gmcProductCategory: (rawProduct.gmc_product_category as string) ?? null,
+        metaCategory: (rawProduct.meta_category as string) ?? null,
       };
     },
   });
