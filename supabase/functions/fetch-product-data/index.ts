@@ -119,17 +119,20 @@ Deno.serve(async (req) => {
     }
 
     // Store market prices in brickeconomy_collection for later use during grading.
-    // brickeconomy_collection has UNIQUE(item_type, item_number, paid_price, acquired_date)
-    // — not a single-column unique on item_number — so onConflict("item_number") fails
-    // silently. Instead, find the most recent row for this set and update it, or insert.
+    // IMPORTANT: lookup must match how the bulk sync stores rows. The bulk sync writes
+    // sets with their version suffix (e.g. "31172-1"), but historical rows may be bare
+    // ("31172"). Match either form to avoid creating an orphan duplicate row.
     if (brickEconomy) {
       const syncedAt = new Date().toISOString();
+      const mpnVariants = mpn.includes("-") ? [mpn, setNumber] : [setNumber, `${setNumber}-1`];
+      // Canonical form to write — always include the version suffix.
+      const canonicalItemNumber = mpn.includes("-") ? mpn : `${setNumber}-1`;
 
       const { data: existingCollectionRow } = await admin
         .from("brickeconomy_collection")
         .select("id")
         .eq("item_type", "set")
-        .eq("item_number", setNumber)
+        .in("item_number", mpnVariants)
         .order("synced_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -138,6 +141,7 @@ Deno.serve(async (req) => {
         await admin
           .from("brickeconomy_collection")
           .update({
+            item_number: canonicalItemNumber,
             current_value: brickEconomy.current_value,
             retail_price: brickEconomy.retail_price,
             synced_at: syncedAt,
@@ -146,7 +150,7 @@ Deno.serve(async (req) => {
       } else {
         await admin.from("brickeconomy_collection").insert({
           item_type: "set",
-          item_number: setNumber,
+          item_number: canonicalItemNumber,
           name: rebrickable?.name ?? null,
           theme: rebrickable?.theme ?? null,
           current_value: brickEconomy.current_value,
@@ -157,9 +161,8 @@ Deno.serve(async (req) => {
       }
 
       // Upsert a price history snapshot for this individual lookup — one row per day.
-      // Check for an existing row today (source='individual') and update it rather than
-      // inserting a duplicate. The unique index brickeconomy_price_history_daily_idx
-      // enforces uniqueness on (item_type, item_number, source, recorded_at::date).
+      // Note: brickeconomy_price_history intentionally stores the bare set number for
+      // chart consistency with bulk syncs, so we keep using `setNumber` here.
       const today = syncedAt.slice(0, 10); // "YYYY-MM-DD"
       const { data: existingHistoryRow } = await admin
         .from("brickeconomy_price_history")
