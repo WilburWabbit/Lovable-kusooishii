@@ -1,7 +1,9 @@
 // ============================================================
 // Admin V2 — Channel Taxonomy & Item Specifics
 // Hooks for eBay (and future GMC/Meta) category selection,
-// aspect schema fetching, and per-product attribute storage.
+// auto-resolution, aspect schema fetching, and per-product
+// attribute storage. All channel-specific mapping happens on the
+// backend (see supabase/functions/_shared/channel-aspect-map.ts).
 // ============================================================
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +13,34 @@ import type {
   ChannelCategoryAttribute,
   ProductAttribute,
 } from "@/lib/types/admin";
+
+export type AspectSource = "core" | "brickeconomy" | "constant" | "custom";
+
+export interface ResolvedAspect {
+  key: string;
+  value: string;
+  source: AspectSource;
+  basis: string;
+}
+
+export interface ChannelAspectsResolution {
+  categoryId: string;
+  categoryName: string | null;
+  schemaLoaded: boolean;
+  resolvedCount: number;
+  totalSchemaCount: number;
+  missingRequiredCount: number;
+  resolved: Record<string, ResolvedAspect>;
+  missing: { key: string; required: boolean }[];
+}
+
+export interface AutoCategoryResult {
+  categoryId: string | null;
+  categoryName: string | null;
+  confidence: "high" | "medium" | "low";
+  basis: string;
+  ancestors?: { id: string; name: string }[];
+}
 
 export const taxonomyKeys = {
   suggest: (channel: string, marketplace: string, q: string) =>
