@@ -6,6 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { productKeys } from "@/hooks/admin/use-products";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { EbayCategoryPicker } from "./EbayCategoryPicker";
+import { EbayAspectsForm } from "./EbayAspectsForm";
 
 interface SpecificationsTabProps {
   product: ProductDetail;
