@@ -49,9 +49,55 @@ export const taxonomyKeys = {
     ["taxonomy", channel, marketplace, "subtree", parentId ?? "root"] as const,
   aspects: (channel: string, marketplace: string, categoryId: string) =>
     ["taxonomy", channel, marketplace, "aspects", categoryId] as const,
+  resolved: (channel: string, marketplace: string, productId: string, categoryId: string) =>
+    ["taxonomy", channel, marketplace, "resolved", productId, categoryId] as const,
+  autoCategory: (productId: string, marketplace: string) =>
+    ["taxonomy", "ebay", marketplace, "auto-category", productId] as const,
   attributes: (productId: string, namespace?: string) =>
     ["product-attributes", productId, namespace ?? "all"] as const,
 };
+
+// ─── Auto category resolution (eBay) ───────────────────────
+
+export function useAutoResolveEbayCategory(
+  productId: string | undefined,
+  marketplace: string = "EBAY_GB",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.autoCategory(productId ?? "", marketplace),
+    enabled: enabled && !!productId,
+    staleTime: 1000 * 60 * 30,
+    queryFn: async (): Promise<AutoCategoryResult> => {
+      return await invokeWithAuth<AutoCategoryResult>("ebay-taxonomy", {
+        action: "auto-resolve-category",
+        product_id: productId,
+        marketplace,
+      });
+    },
+  });
+}
+
+// ─── Channel aspects resolution (server-side mapping) ──────
+
+export function useResolveEbayAspects(
+  productId: string | undefined,
+  categoryId: string | null | undefined,
+  marketplace: string = "EBAY_GB",
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.resolved("ebay", marketplace, productId ?? "", categoryId ?? ""),
+    enabled: !!productId && !!categoryId,
+    queryFn: async (): Promise<ChannelAspectsResolution> => {
+      return await invokeWithAuth<ChannelAspectsResolution>("ebay-taxonomy", {
+        action: "resolve-aspects",
+        product_id: productId,
+        categoryId,
+        marketplace,
+      });
+    },
+  });
+}
 
 // ─── eBay category suggestions ──────────────────────────────
 
