@@ -345,6 +345,42 @@ export interface ProductDetail extends Product {
   catalogImageUrl: string | null;
   includeCatalogImg: boolean;
   fieldOverrides: Record<string, FieldOverride>;
+  ebayCategoryId: string | null;
+  ebayMarketplace: string | null;
+  gmcProductCategory: string | null;
+  metaCategory: string | null;
+}
+
+// ─── Channel Taxonomy / Item Specifics ─────────────────────
+
+export interface ChannelCategorySuggestion {
+  categoryId: string;
+  categoryName: string;
+  ancestors: { id: string; name: string }[];
+}
+
+export interface ChannelCategoryAttribute {
+  id: string;
+  schema_id: string;
+  key: string;
+  label: string | null;
+  required: boolean;
+  cardinality: 'single' | 'multi';
+  data_type: string;
+  allowed_values: string[] | null;
+  allows_custom: boolean;
+  help_text: string | null;
+  sort_order: number;
+}
+
+export interface ProductAttribute {
+  id?: string;
+  namespace: 'core' | 'ebay' | 'gmc' | 'meta';
+  key: string;
+  value: string | null;
+  value_json: unknown;
+  source?: string | null;
+  updated_at?: string;
 }
 
 /** Order with its line items */
