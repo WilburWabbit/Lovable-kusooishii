@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
+import { supabase } from "@/integrations/supabase/client";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
 import { GradeSlideOut } from "./GradeSlideOut";
