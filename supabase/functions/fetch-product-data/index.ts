@@ -476,10 +476,10 @@ function hmacSha1(key: string, data: string): string {
   // Simple HMAC-SHA1 using Deno's std library approach
   // We'll use a synchronous fallback with manual HMAC calculation
   const BLOCK_SIZE = 64;
-  let keyBytes = keyData;
+  let keyBytes: Uint8Array = new Uint8Array(keyData);
   if (keyBytes.length > BLOCK_SIZE) {
     // SHA-1 hash the key if it's too long (unlikely for OAuth)
-    keyBytes = sha1Bytes(keyBytes);
+    keyBytes = new Uint8Array(sha1Bytes(keyBytes));
   }
 
   const iPad = new Uint8Array(BLOCK_SIZE);

@@ -32,18 +32,20 @@ function buildAddress(customer: Record<string, unknown>) {
   };
 }
 
-async function authenticateAdmin(req: Request, admin: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function authenticateAdmin(req: Request, admin: any) {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
   const token = authHeader.replace("Bearer ", "");
   const { data: { user }, error: userError } = await admin.auth.getUser(token);
   if (userError || !user) throw new Error("Unauthorized");
   const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-  const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
+  const hasAccess = ((roles ?? []) as Array<{ role: string }>).some((r) => r.role === "admin" || r.role === "staff");
   if (!hasAccess) throw new Error("Forbidden");
 }
 
-async function getStripeClient(admin: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function getStripeClient(admin: any) {
   const { data: appSettings } = await admin
     .from("app_settings")
     .select("stripe_test_mode")
@@ -120,7 +122,7 @@ Deno.serve(async (req) => {
 
         if (!stripeCustomer && email) {
           const existingByEmail = await stripe.customers.list({ email, limit: 10 });
-          stripeCustomer = existingByEmail.data.find((candidate) =>
+          stripeCustomer = existingByEmail.data.find((candidate: Stripe.Customer) =>
             candidate.metadata?.local_customer_id === localCustomerId
             || candidate.email?.toLowerCase() === email.toLowerCase()
           ) ?? null;

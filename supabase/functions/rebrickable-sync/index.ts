@@ -137,7 +137,8 @@ Deno.serve(async (req) => {
 
 // ─── Theme Sync ───────────────────────────────────────────────
 async function syncThemes(
-  admin: ReturnType<typeof createClient>,
+  // deno-lint-ignore no-explicit-any
+  admin: any,
   rbHeaders: Record<string, string>,
 ): Promise<Response> {
   const correlationId = crypto.randomUUID();
@@ -278,7 +279,8 @@ async function syncThemes(
 
 // ─── Sets Sync ────────────────────────────────────────────────
 async function syncSets(
-  admin: ReturnType<typeof createClient>,
+  // deno-lint-ignore no-explicit-any
+  admin: any,
   rbHeaders: Record<string, string>,
   body: Record<string, unknown>,
 ): Promise<Response> {
