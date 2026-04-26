@@ -242,6 +242,19 @@ export function ProductList() {
     { key: "name", dir: "asc" },
   );
 
+  // Selection state for bulk operations
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  const toggleRow = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // Build flattened rows
   const rows: ProductRow[] = useMemo(() => {
     return products.map((p) => {
@@ -280,6 +293,24 @@ export function ProductList() {
 
     return result;
   }, [rows, globalSearch, prefs.filters, prefs.sort]);
+
+  const visibleIds = useMemo(() => processedRows.map((r) => r.id), [processedRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleIds.some((id) => selected.has(id));
+
+  const toggleAllVisible = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [allVisibleSelected, visibleIds]);
 
   // Visible column defs in order
   const visibleCols = prefs.visibleColumns
