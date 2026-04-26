@@ -2324,12 +2324,15 @@ export type Database = {
           bricklink_item_no: string | null
           brickowl_boid: string | null
           call_to_action: string | null
+          compatible_lego_set: string | null
+          country_of_origin: string | null
           created_at: string
           description: string | null
           dimensions_cm: string | null
           ean: string | null
           ebay_category_id: string | null
           ebay_marketplace: string | null
+          features: string | null
           field_overrides: Json | null
           gmc_product_category: string | null
           height_cm: number | null
@@ -2337,11 +2340,21 @@ export type Database = {
           id: string
           img_url: string | null
           include_catalog_img: boolean
+          interests: string | null
           isbn: string | null
+          item_height: string | null
+          item_length: string | null
+          item_number: string | null
+          item_weight: string | null
+          item_width: string | null
           lego_catalog_id: string | null
+          lego_character: string | null
+          lego_set_name: string | null
           length_cm: number | null
+          material: string | null
           meta_category: string | null
           minifigs_count: number | null
+          minifigure_number: string | null
           mpn: string
           name: string | null
           piece_count: number | null
@@ -2351,6 +2364,7 @@ export type Database = {
           release_year: number | null
           released_date: string | null
           retail_price: number | null
+          retired: string | null
           retired_date: string | null
           retired_flag: boolean
           seo_description: string | null
@@ -2359,12 +2373,15 @@ export type Database = {
           status: string
           subtheme_name: string | null
           theme_id: string | null
+          unit_quantity: string | null
+          unit_type: string | null
           upc: string | null
           updated_at: string
           version_descriptor: string | null
           weight_g: number | null
           weight_kg: number | null
           width_cm: number | null
+          year_retired: string | null
         }
         Insert: {
           age_mark?: string | null
@@ -2374,12 +2391,15 @@ export type Database = {
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
           call_to_action?: string | null
+          compatible_lego_set?: string | null
+          country_of_origin?: string | null
           created_at?: string
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
           ebay_category_id?: string | null
           ebay_marketplace?: string | null
+          features?: string | null
           field_overrides?: Json | null
           gmc_product_category?: string | null
           height_cm?: number | null
@@ -2387,11 +2407,21 @@ export type Database = {
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          interests?: string | null
           isbn?: string | null
+          item_height?: string | null
+          item_length?: string | null
+          item_number?: string | null
+          item_weight?: string | null
+          item_width?: string | null
           lego_catalog_id?: string | null
+          lego_character?: string | null
+          lego_set_name?: string | null
           length_cm?: number | null
+          material?: string | null
           meta_category?: string | null
           minifigs_count?: number | null
+          minifigure_number?: string | null
           mpn: string
           name?: string | null
           piece_count?: number | null
@@ -2401,6 +2431,7 @@ export type Database = {
           release_year?: number | null
           released_date?: string | null
           retail_price?: number | null
+          retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
           seo_description?: string | null
@@ -2409,12 +2440,15 @@ export type Database = {
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          unit_quantity?: string | null
+          unit_type?: string | null
           upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_retired?: string | null
         }
         Update: {
           age_mark?: string | null
@@ -2424,12 +2458,15 @@ export type Database = {
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
           call_to_action?: string | null
+          compatible_lego_set?: string | null
+          country_of_origin?: string | null
           created_at?: string
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
           ebay_category_id?: string | null
           ebay_marketplace?: string | null
+          features?: string | null
           field_overrides?: Json | null
           gmc_product_category?: string | null
           height_cm?: number | null
@@ -2437,11 +2474,21 @@ export type Database = {
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          interests?: string | null
           isbn?: string | null
+          item_height?: string | null
+          item_length?: string | null
+          item_number?: string | null
+          item_weight?: string | null
+          item_width?: string | null
           lego_catalog_id?: string | null
+          lego_character?: string | null
+          lego_set_name?: string | null
           length_cm?: number | null
+          material?: string | null
           meta_category?: string | null
           minifigs_count?: number | null
+          minifigure_number?: string | null
           mpn?: string
           name?: string | null
           piece_count?: number | null
@@ -2451,6 +2498,7 @@ export type Database = {
           release_year?: number | null
           released_date?: string | null
           retail_price?: number | null
+          retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
           seo_description?: string | null
@@ -2459,12 +2507,15 @@ export type Database = {
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          unit_quantity?: string | null
+          unit_type?: string | null
           upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_retired?: string | null
         }
         Relationships: [
           {
