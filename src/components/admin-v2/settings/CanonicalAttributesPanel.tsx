@@ -206,6 +206,14 @@ function AttributeEditor({
       (value.provider_chain ?? []).filter((_, i) => i !== idx),
     );
 
+  const moveChainStep = (idx: number, dir: -1 | 1) => {
+    const chain = [...(value.provider_chain ?? [])];
+    const target = idx + dir;
+    if (target < 0 || target >= chain.length) return;
+    [chain[idx], chain[target]] = [chain[target], chain[idx]];
+    set("provider_chain", chain);
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -294,13 +302,18 @@ function AttributeEditor({
                 className="w-full px-2 py-1.5 border border-zinc-200 rounded"
               />
             </Field>
-            <Field label="DB column (for writes)">
+            <Field label="DB column (auto-created on save)">
               <input
                 value={value.db_column ?? ""}
                 onChange={(e) => set("db_column", e.target.value || null)}
-                placeholder="e.g. age_mark"
+                placeholder={value.editable ? value.key || "defaults to key" : "(none for read-only)"}
                 className="w-full px-2 py-1.5 border border-zinc-200 rounded font-mono"
               />
+              <p className="text-[10px] text-zinc-500 mt-1">
+                {value.editable
+                  ? "If blank, defaults to the key. The column will be created on the product table if it doesn't exist."
+                  : "Read-only attributes don't need a DB column."}
+              </p>
             </Field>
           </div>
 
@@ -338,40 +351,63 @@ function AttributeEditor({
               </button>
             </div>
             <div className="space-y-2">
-              {(value.provider_chain ?? []).map((step, idx) => (
-                <div key={idx} className="flex gap-2 items-center">
-                  <span className="text-zinc-400 text-[11px] w-4">{idx + 1}.</span>
-                  <select
-                    value={step.provider}
-                    onChange={(e) => updateChain(idx, "provider", e.target.value)}
-                    className="px-2 py-1.5 border border-zinc-200 rounded"
-                  >
-                    {PROVIDERS.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={step.field}
-                    onChange={(e) => updateChain(idx, "field", e.target.value)}
-                    placeholder={
-                      step.provider === "constant"
-                        ? "constant value"
-                        : step.provider === "derived"
-                          ? "derive rule (e.g. mpn_base)"
-                          : "field name"
-                    }
-                    className="flex-1 px-2 py-1.5 border border-zinc-200 rounded font-mono"
-                  />
-                  <button
-                    onClick={() => removeChainStep(idx)}
-                    className="text-red-500 hover:text-red-700 px-2"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              {(value.provider_chain ?? []).map((step, idx) => {
+                const chainLen = (value.provider_chain ?? []).length;
+                return (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <span className="text-zinc-400 text-[11px] w-4">{idx + 1}.</span>
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => moveChainStep(idx, -1)}
+                        disabled={idx === 0}
+                        title="Move up"
+                        className="text-zinc-400 hover:text-zinc-700 leading-none text-[10px] disabled:opacity-25 disabled:cursor-not-allowed"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveChainStep(idx, 1)}
+                        disabled={idx === chainLen - 1}
+                        title="Move down"
+                        className="text-zinc-400 hover:text-zinc-700 leading-none text-[10px] disabled:opacity-25 disabled:cursor-not-allowed"
+                      >
+                        ▼
+                      </button>
+                    </div>
+                    <select
+                      value={step.provider}
+                      onChange={(e) => updateChain(idx, "provider", e.target.value)}
+                      className="px-2 py-1.5 border border-zinc-200 rounded"
+                    >
+                      {PROVIDERS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={step.field}
+                      onChange={(e) => updateChain(idx, "field", e.target.value)}
+                      placeholder={
+                        step.provider === "constant"
+                          ? "constant value"
+                          : step.provider === "derived"
+                            ? "derive rule (e.g. mpn_base)"
+                            : "field name"
+                      }
+                      className="flex-1 px-2 py-1.5 border border-zinc-200 rounded font-mono"
+                    />
+                    <button
+                      onClick={() => removeChainStep(idx)}
+                      className="text-red-500 hover:text-red-700 px-2"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
