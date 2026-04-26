@@ -94,7 +94,39 @@ export const taxonomyKeys = {
     ["taxonomy", "ebay", marketplace, "auto-category", productId] as const,
   attributes: (productId: string, namespace?: string) =>
     ["product-attributes", productId, namespace ?? "all"] as const,
+  productCategories: (channel: string, marketplace: string) =>
+    ["taxonomy", channel, marketplace, "product-categories"] as const,
 };
+
+// ─── Categories already in use by products ─────────────────
+
+export interface ProductCategoryUsage {
+  categoryId: string;
+  categoryName: string | null;
+  productCount: number;
+}
+
+/**
+ * Fetch the distinct eBay categories already assigned to at least one
+ * product, with usage counts. Used by the Settings → Mappings page so
+ * staff can pick a category that exists in the catalog without typing.
+ */
+export function useProductChannelCategories(
+  channel: "ebay" | "gmc" | "meta" = "ebay",
+  marketplace: string = "EBAY_GB",
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.productCategories(channel, marketplace),
+    staleTime: 1000 * 60 * 5,
+    queryFn: async (): Promise<ProductCategoryUsage[]> => {
+      const res = await invokeWithAuth<{ categories: ProductCategoryUsage[] }>(
+        "ebay-taxonomy",
+        { action: "list-product-categories", channel, marketplace },
+      );
+      return res.categories ?? [];
+    },
+  });
+}
 
 // ─── Auto category resolution (eBay) ───────────────────────
 
@@ -226,8 +258,25 @@ export function useSetProductChannelCategory() {
         marketplace: input.marketplace,
       });
     },
-    onSuccess: (_d, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["v2", "products", vars.mpn] });
+    onSuccess: async (_d, vars) => {
+      // Invalidate the product detail (so ebayCategoryId re-reads from DB)
+      // AND the auto-resolve cache (which becomes stale once an override
+      // is set or cleared) AND the resolved-aspects cache for the product.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["v2", "products", vars.mpn] }),
+        queryClient.invalidateQueries({ queryKey: ["v2", "products"] }),
+        queryClient.invalidateQueries({
+          queryKey: taxonomyKeys.autoCategory(vars.productId, vars.marketplace ?? "EBAY_GB"),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["taxonomy", "ebay", vars.marketplace ?? "EBAY_GB", "resolved", vars.productId],
+        }),
+      ]);
+      // Force a refetch immediately so the UI shows the new value without
+      // waiting for the next render-driven fetch.
+      await queryClient.refetchQueries({
+        queryKey: ["v2", "products", vars.mpn],
+      });
     },
   });
 }

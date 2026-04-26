@@ -490,6 +490,56 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true });
     }
 
+    if (action === "list-product-categories") {
+      // Returns the distinct channel category IDs already assigned to one
+      // or more products, with usage counts and a friendly name pulled
+      // from channel_category_schema (if cached).
+      const channel = (body.channel as string) ?? "ebay";
+      const marketplace = (body.marketplace as string) ?? "EBAY_GB";
+      const column =
+        channel === "ebay"
+          ? "ebay_category_id"
+          : channel === "gmc"
+            ? "gmc_product_category"
+            : "meta_category";
+
+      const { data: rows, error } = await admin
+        .from("product")
+        .select(`${column}`)
+        .not(column, "is", null);
+      if (error) throw error;
+
+      const counts = new Map<string, number>();
+      for (const r of (rows ?? []) as Record<string, unknown>[]) {
+        const id = r[column] as string | null;
+        if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+
+      const ids = [...counts.keys()];
+      const names = new Map<string, string>();
+      if (ids.length > 0 && channel === "ebay") {
+        const { data: schemaRows } = await admin
+          .from("channel_category_schema")
+          .select("category_id, category_name")
+          .eq("channel", "ebay")
+          .eq("marketplace", marketplace)
+          .in("category_id", ids);
+        for (const r of (schemaRows ?? []) as Record<string, unknown>[]) {
+          names.set(r.category_id as string, r.category_name as string);
+        }
+      }
+
+      const categories = ids
+        .map((id) => ({
+          categoryId: id,
+          categoryName: names.get(id) ?? null,
+          productCount: counts.get(id) ?? 0,
+        }))
+        .sort((a, b) => b.productCount - a.productCount);
+
+      return jsonResponse({ categories });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (err) {
     console.error("ebay-taxonomy failed:", err);
