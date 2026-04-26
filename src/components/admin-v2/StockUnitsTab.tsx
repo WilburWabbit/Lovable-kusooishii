@@ -32,6 +32,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showWriteOff, setShowWriteOff] = useState(false);
   const [rawProductData, setRawProductData] = useState<Record<string, unknown> | null>(null);
+  const { filters, setFilter, processedRows } = useSimpleTableFilters(units, { accessor: unitAccessor });
 
   // Load raw product row so the grade slide-out can pre-populate physical fields
   useEffect(() => {
