@@ -523,7 +523,13 @@ function CategorySelector({
         {label}
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-[400px] bg-white border border-zinc-200 rounded-md shadow-lg z-20 p-2">
+        <>
+          {/* Click-away backdrop */}
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute right-0 mt-1 w-[min(400px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] bg-white border border-zinc-200 rounded-md shadow-lg z-20 p-2">
           {/* Quick "All" option */}
           <button
             onClick={() => handleSelect(null, "All categories (defaults)")}
