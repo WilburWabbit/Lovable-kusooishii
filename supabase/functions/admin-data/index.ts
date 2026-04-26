@@ -2838,14 +2838,16 @@ Deno.serve(async (req) => {
         throw new ValidationError("product_ids and channel are required");
       }
       if (channel === "ebay") {
-        // Use the dedicated RPC (handles category + marketplace + audit timestamp).
-        const { data: updated, error } = await (admin as any).rpc("bulk_set_ebay_category", {
-          p_product_ids: productIds,
-          p_category_id: categoryId,
-          p_marketplace: marketplace,
-        });
+        // Caller is already authorized as admin/staff above; the bulk_set_ebay_category
+        // RPC checks auth.uid() which is NULL under the service-role client, so we
+        // perform the update directly instead.
+        const { data: updatedRows, error } = await admin
+          .from("product")
+          .update({ ebay_category_id: categoryId, ebay_marketplace: marketplace })
+          .in("id", productIds)
+          .select("id");
         if (error) throw error;
-        result = { success: true, updated: updated ?? productIds.length };
+        result = { success: true, updated: updatedRows?.length ?? productIds.length };
       } else {
         const updates: Record<string, unknown> = {};
         if (channel === "gmc") updates.gmc_product_category = categoryId;
