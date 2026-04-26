@@ -2756,11 +2756,15 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = data ?? [];
     } else if (action === "save-product-attributes") {
-      // params: { product_id, namespace, attributes: Record<string, string|string[]>, source? }
+      // params: { product_id, namespace, attributes, source?,
+      //           channel?, marketplace?, category_id? }
       const productId = params.product_id;
       const namespace = params.namespace;
       const attrs = params.attributes ?? {};
       const source = params.source ?? "manual";
+      const channel = params.channel ?? null;
+      const marketplace = params.marketplace ?? null;
+      const categoryId = params.category_id ?? null;
       if (!productId || !namespace) {
         throw new ValidationError("product_id and namespace are required");
       }
@@ -2774,7 +2778,7 @@ Deno.serve(async (req) => {
         const isArray = Array.isArray(raw);
         const isEmpty =
           raw == null ||
-          (typeof raw === "string" && raw.trim() === "") ||
+          (typeof raw === "string" && (raw as string).trim() === "") ||
           (isArray && (raw as unknown[]).length === 0);
         if (isEmpty) {
           deletes.push(key);
@@ -2783,6 +2787,10 @@ Deno.serve(async (req) => {
         upserts.push({
           product_id: productId,
           namespace,
+          channel,
+          marketplace,
+          category_id: categoryId,
+          aspect_key: key,
           key,
           value: isArray ? null : String(raw),
           value_json: isArray ? raw : null,
@@ -2790,19 +2798,30 @@ Deno.serve(async (req) => {
         });
       }
 
-      if (deletes.length > 0) {
-        await admin
+      const buildScopedDelete = (keys: string[]) => {
+        let q = admin
           .from("product_attribute")
           .delete()
           .eq("product_id", productId)
           .eq("namespace", namespace)
-          .in("key", deletes);
+          .in("key", keys);
+        q = channel === null ? q.is("channel", null) : q.eq("channel", channel);
+        q = marketplace === null ? q.is("marketplace", null) : q.eq("marketplace", marketplace);
+        q = categoryId === null ? q.is("category_id", null) : q.eq("category_id", categoryId);
+        return q;
+      };
+
+      if (deletes.length > 0) {
+        await buildScopedDelete(deletes);
       }
       if (upserts.length > 0) {
-        const { error } = await admin
-          .from("product_attribute")
-          .upsert(upserts, { onConflict: "product_id,namespace,key" });
-        if (error) throw error;
+        // Delete-then-insert per row so the partial unique index that uses
+        // COALESCE on nullable scope cols works correctly.
+        for (const row of upserts) {
+          await buildScopedDelete([row.key]);
+          const { error } = await admin.from("product_attribute").insert(row);
+          if (error) throw error;
+        }
       }
       result = { success: true, upserted: upserts.length, deleted: deletes.length };
     } else if (action === "set-product-channel-category") {
