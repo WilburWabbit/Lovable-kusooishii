@@ -464,9 +464,11 @@ export function ChannelMappingsPanel() {
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-zinc-500 text-[12px]">
                     {baseRows.length === 0
-                      ? categoryId
-                        ? "Schema not loaded. Open a product with this category once to cache it, or refresh."
-                        : "Pick a category to see its eBay aspects, or add a default mapping below."
+                      ? viewScope === "all"
+                        ? "No mappings stored yet for this channel/marketplace."
+                        : categoryId
+                          ? "Schema not loaded. Open a product with this category once to cache it, or refresh."
+                          : "Pick a category to see its eBay aspects, or add a default mapping below."
                       : "No rows match the current filter."}
                   </td>
                 </tr>
