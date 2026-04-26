@@ -164,24 +164,35 @@ async function bootstrapCanonicalForCategory(
     );
     if (alreadyMapped) continue;
 
-    const canonicalKey = slug(aspect.key);
-    if (!canonicalKey) continue;
+    const rawSlug = slug(aspect.key);
+    if (!rawSlug) continue;
+
+    // Prefer an existing universal canonical via alias to avoid duplicates.
+    const canonicalKey = ALIASES[rawSlug] ?? rawSlug;
+    const isAlias = ALIASES[rawSlug] != null;
 
     const dt = dataTypeFor(aspect.data_type);
     const editor = editorFor(aspect.data_type);
 
     const existing = attrByKey.get(canonicalKey);
     if (existing) {
-      // Already exists — just ensure this category is in its scope list.
-      const cats = existing.applies_to_ebay_categories ?? [];
-      if (!cats.includes(categoryId)) {
-        await admin
-          .from("canonical_attribute")
-          .update({
-            applies_to_ebay_categories: [...cats, categoryId],
-            updated_at: new Date().toISOString(),
-          })
-          .eq("key", canonicalKey);
+      // Existing canonical:
+      // - If reused via an alias (e.g. "Type" -> product_type), do NOT
+      //   touch its scope. It is meant to apply universally.
+      // - Otherwise, if it already has explicit category scoping, append
+      //   this category so it remains visible here too. If it has NULL
+      //   scope (universal), leave it alone.
+      if (!isAlias) {
+        const cats = existing.applies_to_ebay_categories;
+        if (Array.isArray(cats) && cats.length > 0 && !cats.includes(categoryId)) {
+          await admin
+            .from("canonical_attribute")
+            .update({
+              applies_to_ebay_categories: [...cats, categoryId],
+              updated_at: new Date().toISOString(),
+            })
+            .eq("key", canonicalKey);
+        }
       }
     } else {
       // Create the product column first (idempotent via ensure_product_column).
