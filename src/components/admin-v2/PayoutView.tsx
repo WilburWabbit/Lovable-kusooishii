@@ -19,6 +19,7 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import type { Payout } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { toast } from "sonner";
 import { Download, Search } from "lucide-react";
 
