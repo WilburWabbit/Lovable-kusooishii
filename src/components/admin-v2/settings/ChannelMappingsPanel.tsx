@@ -288,7 +288,8 @@ export function ChannelMappingsPanel() {
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter aspects, canonical keys, constants…"
+          placeholder="Filter… (NULL = unmapped, NOT NULL = mapped)"
+          title="Type to filter aspects, canonical keys, constants, notes. Use NULL to show only unmapped, NOT NULL (or !NULL) to show only mapped."
           className="flex-1 min-w-[220px] px-2 py-1.5 text-[12px] border border-zinc-200 rounded"
         />
         <select
