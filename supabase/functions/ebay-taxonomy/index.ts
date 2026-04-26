@@ -115,6 +115,31 @@ async function bootstrapCanonicalForCategory(
       .replace(/^_+|_+$/g, "")
       .slice(0, 60);
 
+  // Map common eBay aspect names to existing universal canonical keys so we
+  // don't create duplicate columns like `type` when `product_type` exists.
+  const ALIASES: Record<string, string> = {
+    type: "product_type",
+    brand: "brand",
+    mpn: "mpn",
+    model: "mpn",
+    ean: "ean",
+    upc: "upc",
+    isbn: "isbn",
+    weight: "weight_g",
+    item_weight: "weight_g",
+    length: "length_cm",
+    item_length: "length_cm",
+    width: "width_cm",
+    item_width: "width_cm",
+    height: "height_cm",
+    item_height: "height_cm",
+    item_depth: "length_cm",
+    age_level: "age_mark",
+    recommended_age_range: "age_mark",
+    age_mark: "age_mark",
+    packaging: "packaging",
+  };
+
   const editorFor = (dt: string) => {
     const t = (dt ?? "string").toLowerCase();
     if (t === "number" || t === "int" || t === "decimal") return "number";
@@ -139,24 +164,35 @@ async function bootstrapCanonicalForCategory(
     );
     if (alreadyMapped) continue;
 
-    const canonicalKey = slug(aspect.key);
-    if (!canonicalKey) continue;
+    const rawSlug = slug(aspect.key);
+    if (!rawSlug) continue;
+
+    // Prefer an existing universal canonical via alias to avoid duplicates.
+    const canonicalKey = ALIASES[rawSlug] ?? rawSlug;
+    const isAlias = ALIASES[rawSlug] != null;
 
     const dt = dataTypeFor(aspect.data_type);
     const editor = editorFor(aspect.data_type);
 
     const existing = attrByKey.get(canonicalKey);
     if (existing) {
-      // Already exists — just ensure this category is in its scope list.
-      const cats = existing.applies_to_ebay_categories ?? [];
-      if (!cats.includes(categoryId)) {
-        await admin
-          .from("canonical_attribute")
-          .update({
-            applies_to_ebay_categories: [...cats, categoryId],
-            updated_at: new Date().toISOString(),
-          })
-          .eq("key", canonicalKey);
+      // Existing canonical:
+      // - If reused via an alias (e.g. "Type" -> product_type), do NOT
+      //   touch its scope. It is meant to apply universally.
+      // - Otherwise, if it already has explicit category scoping, append
+      //   this category so it remains visible here too. If it has NULL
+      //   scope (universal), leave it alone.
+      if (!isAlias) {
+        const cats = existing.applies_to_ebay_categories;
+        if (Array.isArray(cats) && cats.length > 0 && !cats.includes(categoryId)) {
+          await admin
+            .from("canonical_attribute")
+            .update({
+              applies_to_ebay_categories: [...cats, categoryId],
+              updated_at: new Date().toISOString(),
+            })
+            .eq("key", canonicalKey);
+        }
       }
     } else {
       // Create the product column first (idempotent via ensure_product_column).
@@ -292,6 +328,20 @@ Deno.serve(async (req) => {
           .select("*")
           .eq("schema_id", existing.id)
           .order("sort_order", { ascending: true });
+
+        // Idempotent bootstrap on cached schema reads too — ensures any
+        // categories whose schema was loaded before bootstrap was wired up
+        // (or whose mappings were wiped) get repaired automatically.
+        try {
+          await bootstrapCanonicalForCategory(admin, {
+            marketplace,
+            categoryId,
+            aspects: (attrs ?? []) as any[],
+          });
+        } catch (bootErr) {
+          console.error("bootstrap canonical (cached) failed:", bootErr);
+        }
+
         return jsonResponse({
           schemaId: existing.id,
           categoryId,
@@ -509,13 +559,11 @@ Deno.serve(async (req) => {
         throw new Error("product_id and categoryId are required");
       }
 
-      // 1. Resolve every canonical attribute for this product, scoped by
-      //    its product_type and the chosen eBay category.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
-        ebayCategoryId: categoryId,
-      });
-
-      // 2. Find the cached schema for the chosen category (if any).
+      // Find the cached schema for the chosen category (if any) FIRST so we
+      // can run an idempotent bootstrap for any aspects that don't yet have
+      // a canonical attribute / mapping. This is what makes the bottom-of-
+      // tab eBay aspects appear as editable canonical fields the next time
+      // around.
       const { data: schemaRow } = await admin
         .from("channel_category_schema")
         .select("id, category_name")
@@ -524,7 +572,30 @@ Deno.serve(async (req) => {
         .eq("category_id", categoryId)
         .maybeSingle();
 
-      // 3. Project canonical → channel aspects via the mapping table.
+      if (schemaRow?.id) {
+        const { data: schemaAttrs } = await admin
+          .from("channel_category_attribute")
+          .select("key, label, data_type, required")
+          .eq("schema_id", schemaRow.id);
+        try {
+          await bootstrapCanonicalForCategory(admin, {
+            marketplace,
+            categoryId,
+            aspects: (schemaAttrs ?? []) as any[],
+          });
+        } catch (bootErr) {
+          console.error("bootstrap canonical (resolve) failed:", bootErr);
+        }
+      }
+
+      // Now resolve every canonical attribute for this product, scoped by
+      // its product_type and the chosen eBay category. The bootstrap above
+      // means newly-created scoped canonicals appear in this resolution.
+      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
+        ebayCategoryId: categoryId,
+      });
+
+      // Project canonical → channel aspects via the mapping table.
       const projection = await projectToChannel(admin, {
         channel: "ebay",
         marketplace,
