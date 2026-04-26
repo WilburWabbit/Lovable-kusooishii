@@ -3960,6 +3960,10 @@ export type Database = {
         Args: { payload: Json; queue_name: string }
         Returns: number
       }
+      ensure_product_column: {
+        Args: { p_column_name: string; p_data_type: string }
+        Returns: Json
+      }
       ensure_product_exists:
         | { Args: { p_mpn: string; p_name?: string }; Returns: string }
         | {
