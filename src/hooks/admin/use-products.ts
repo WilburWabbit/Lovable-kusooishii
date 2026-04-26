@@ -48,6 +48,7 @@ function mapProduct(row: Record<string, unknown>): Product {
     cta: (row.call_to_action as string) ?? null,
     seoTitle: (row.seo_title as string) ?? null,
     seoDescription: (row.seo_description as string) ?? null,
+    ebayCategoryId: (row.ebay_category_id as string) ?? null,
     createdAt: row.created_at as string,
   };
 }
