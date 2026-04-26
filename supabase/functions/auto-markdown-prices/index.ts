@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       .eq("active", true);
 
     const feesByChannel = new Map<string, FeeScheduleRow[]>();
-    for (const row of (feeScheduleRows ?? []) as FeeScheduleRow & { channel: string }[]) {
+    for (const row of ((feeScheduleRows ?? []) as unknown as Array<FeeScheduleRow & { channel: string }>)) {
       const ch = row.channel?.toLowerCase() ?? "ebay";
       if (!feesByChannel.has(ch)) feesByChannel.set(ch, []);
       feesByChannel.get(ch)!.push(row);

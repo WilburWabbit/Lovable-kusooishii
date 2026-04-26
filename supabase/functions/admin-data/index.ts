@@ -2558,14 +2558,15 @@ Deno.serve(async (req) => {
       if (!targetPayoutId) throw new ValidationError("payoutId is required");
 
       // Resolve to local payout row (accept either the local UUID or the Stripe po_… id)
-      let payoutRow: { id: string; external_payout_id: string | null; channel: string | null; net_amount: number | null } | null = null;
+      type PayoutRow = { id: string; external_payout_id: string | null; channel: string | null; net_amount: number | null };
+      let payoutRow: PayoutRow | null = null;
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetPayoutId);
       if (isUuid) {
         const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("id", targetPayoutId).maybeSingle();
-        payoutRow = data as typeof payoutRow;
+        payoutRow = data as PayoutRow | null;
       } else {
         const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("external_payout_id", targetPayoutId).maybeSingle();
-        payoutRow = data as typeof payoutRow;
+        payoutRow = data as PayoutRow | null;
       }
       if (!payoutRow) throw new ValidationError(`Payout not found: ${targetPayoutId}`);
       if (payoutRow.channel !== "stripe") throw new ValidationError(`Payout ${payoutRow.id} is not a Stripe payout`);
@@ -2588,7 +2589,7 @@ Deno.serve(async (req) => {
       let starting_after: string | undefined = undefined;
       // Defensive cap to avoid runaway loops
       for (let page = 0; page < 20; page++) {
-        const resp = await stripe.balanceTransactions.list({
+        const resp: { data: BT[]; has_more: boolean } = await stripe.balanceTransactions.list({
           payout: payoutRow.external_payout_id,
           limit: 100,
           starting_after,
