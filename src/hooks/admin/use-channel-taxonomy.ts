@@ -62,6 +62,28 @@ export interface MappedAspect {
   constantValue: string | null;
 }
 
+export interface SpecRow {
+  key: string;
+  label: string;
+  required: boolean;
+  cardinality: "single" | "multi";
+  dataType: string;
+  allowedValues: string[] | null;
+  allowsCustom: boolean;
+  sortOrder: number;
+  mappingId: string | null;
+  mappingScope: "category" | "marketplace" | "default" | "none";
+  canonicalKey: string | null;
+  constantValue: string | null;
+  autoValue: string | null;
+  autoSource: CanonicalProvider | null;
+  savedValue: string | string[] | null;
+  isOverride: boolean;
+  sourceValue: string | null;
+  effectiveValue: string | string[] | null;
+  effectiveSource: "saved" | "constant" | "canonical" | "none";
+}
+
 export interface ChannelAspectsResolution {
   categoryId: string;
   categoryName: string | null;
@@ -71,6 +93,7 @@ export interface ChannelAspectsResolution {
   missingRequiredCount: number;
   canonical: ResolvedCanonicalValue[];
   aspects: MappedAspect[];
+  rows: SpecRow[];
 }
 
 export interface AutoCategoryResult {
