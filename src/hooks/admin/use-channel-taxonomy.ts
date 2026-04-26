@@ -279,3 +279,121 @@ export function useSaveProductAttributes() {
     },
   });
 }
+
+// ─── Canonical attribute registry CRUD ──────────────────────
+
+export interface CanonicalAttributeRecord {
+  id?: string;
+  key: string;
+  label: string;
+  attribute_group: string;
+  editor: string;
+  data_type: string;
+  unit: string | null;
+  db_column: string | null;
+  provider_chain: { provider: string; field: string }[];
+  editable: boolean;
+  sort_order: number;
+  active: boolean;
+}
+
+export const canonicalAttrKeys = {
+  list: () => ["canonical-attributes"] as const,
+};
+
+export function useCanonicalAttributes() {
+  return useQuery({
+    queryKey: canonicalAttrKeys.list(),
+    queryFn: async (): Promise<CanonicalAttributeRecord[]> => {
+      const res = await invokeWithAuth<{ attributes: CanonicalAttributeRecord[] }>(
+        "ebay-taxonomy",
+        { action: "list-canonical-attributes" },
+      );
+      return res.attributes ?? [];
+    },
+  });
+}
+
+export function useUpsertCanonicalAttribute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (attribute: CanonicalAttributeRecord) =>
+      invokeWithAuth("ebay-taxonomy", {
+        action: "upsert-canonical-attribute",
+        attribute,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: canonicalAttrKeys.list() }),
+  });
+}
+
+export function useDeleteCanonicalAttribute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (key: string) =>
+      invokeWithAuth("ebay-taxonomy", { action: "delete-canonical-attribute", key }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: canonicalAttrKeys.list() }),
+  });
+}
+
+// ─── Channel mapping CRUD ───────────────────────────────────
+
+export interface ChannelMappingRecord {
+  id?: string;
+  channel: string;
+  marketplace: string | null;
+  category_id: string | null;
+  aspect_key: string;
+  canonical_key: string | null;
+  constant_value: string | null;
+  transform: string | null;
+  notes: string | null;
+}
+
+export const channelMappingKeys = {
+  list: (channel: string, marketplace?: string, categoryId?: string | null) =>
+    ["channel-mappings", channel, marketplace ?? "all", categoryId ?? "default"] as const,
+};
+
+export function useChannelMappings(
+  channel: string = "ebay",
+  marketplace?: string,
+  categoryId?: string | null,
+) {
+  return useQuery({
+    queryKey: channelMappingKeys.list(channel, marketplace, categoryId),
+    queryFn: async (): Promise<ChannelMappingRecord[]> => {
+      const res = await invokeWithAuth<{ mappings: ChannelMappingRecord[] }>(
+        "ebay-taxonomy",
+        {
+          action: "list-channel-mappings",
+          channel,
+          marketplace,
+          categoryId,
+        },
+      );
+      return res.mappings ?? [];
+    },
+  });
+}
+
+export function useUpsertChannelMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (mapping: ChannelMappingRecord) =>
+      invokeWithAuth("ebay-taxonomy", {
+        action: "upsert-channel-mapping",
+        mapping,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["channel-mappings"] }),
+  });
+}
+
+export function useDeleteChannelMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      invokeWithAuth("ebay-taxonomy", { action: "delete-channel-mapping", id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["channel-mappings"] }),
+  });
+}
+
