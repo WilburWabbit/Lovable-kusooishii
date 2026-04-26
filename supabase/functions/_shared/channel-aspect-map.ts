@@ -69,9 +69,10 @@ export function buildEbayAspects(input: {
     out[key] = { key, value: String(value), source, basis };
   };
 
-  // Brand — always LEGO unless explicitly overridden
-  set("Brand", product.brand ?? "LEGO", product.brand ? "core" : "constant",
-      product.brand ? "product.brand" : "constant=LEGO");
+  // Brand — only emit when product.brand is explicitly set. Fallbacks like
+  // "always LEGO" must come from a channel_attribute_mapping constant so the
+  // operator can change brand per category/marketplace without a code edit.
+  set("Brand", product.brand ?? null, "core", "product.brand");
 
   // Theme / subtheme
   set("LEGO Theme", themeName ?? be?.theme ?? null,

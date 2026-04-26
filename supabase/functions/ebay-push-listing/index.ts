@@ -145,8 +145,9 @@ Deno.serve(async (req) => {
       }
     };
 
-    // Defaults pulled from product columns
-    setAspect("Brand", "LEGO");
+    // Defaults pulled from product columns. Brand intentionally omitted: it
+    // must flow through channel_attribute_mapping (e.g. constant_value="LEGO"
+    // for the relevant categories) so it stays operator-controlled.
     setAspect("MPN", product?.mpn);
 
     // Pull stored attributes for this product

@@ -47,8 +47,17 @@ export function ChannelMappingsPanel() {
   const [marketplace, setMarketplace] = useState<string>("EBAY_GB");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [categoryLabel, setCategoryLabel] = useState<string>("All categories (defaults)");
+  // "category" = single-row-per-aspect view scoped to selected category +
+  // inherited defaults. "all" = every mapping across every category, one row
+  // per stored mapping, with explicit scope shown.
+  const [viewScope, setViewScope] = useState<"category" | "all">("category");
 
-  const { data: mappings, isLoading } = useChannelMappings(channel, marketplace, categoryId);
+  const { data: mappings, isLoading } = useChannelMappings(
+    channel,
+    marketplace,
+    categoryId,
+    viewScope,
+  );
   const { data: canonicalAttrs } = useCanonicalAttributes();
   const { data: schemaResult } = useEbayCategoryAspects(categoryId, marketplace);
   const { data: productCategories } = useProductChannelCategories(channel, marketplace);
@@ -74,9 +83,23 @@ export function ChannelMappingsPanel() {
     }
   };
 
-  // Combined view: every aspect from the chosen category schema, plus any
-  // mappings that exist outside the schema (rare, but possible).
+  // Combined view:
+  //  - In "category" scope: every aspect from the chosen category schema, plus
+  //    any orphan mappings outside the schema, collapsed to the most-specific
+  //    mapping (category > marketplace > default).
+  //  - In "all" scope: one row per stored mapping (no collapsing) so you can
+  //    see and edit category-specific overrides side-by-side with defaults.
   const baseRows = useMemo(() => {
+    if (viewScope === "all") {
+      // One row per mapping. No schema overlay (would be ambiguous across cats).
+      return (mappings ?? []).map((m) => ({
+        aspectKey: m.aspect_key,
+        required: false,
+        mapping: m,
+        // unique row key so React doesn't collapse same-aspect-different-scope
+        rowKey: `${m.id ?? `${m.aspect_key}:${m.category_id ?? "*"}:${m.marketplace ?? "*"}`}`,
+      }));
+    }
     const byKey = new Map<string, ChannelMappingRecord>();
     for (const m of mappings ?? []) {
       // Prefer most-specific (category > default).
@@ -93,16 +116,17 @@ export function ChannelMappingsPanel() {
       aspectKey: a.key,
       required: a.required,
       mapping: byKey.get(a.key) ?? null,
+      rowKey: a.key,
     }));
     // Append any orphan mappings not in schema.
     const inSchema = new Set(aspects.map((a) => a.aspectKey));
     for (const [key, mapping] of byKey) {
       if (!inSchema.has(key)) {
-        aspects.push({ aspectKey: key, required: false, mapping });
+        aspects.push({ aspectKey: key, required: false, mapping, rowKey: key });
       }
     }
     return aspects;
-  }, [mappings, schemaResult]);
+  }, [mappings, schemaResult, viewScope]);
 
   // Apply text + status filter, then sort
   // Text filter supports NULL / NOT NULL / !NULL sentinels (case-insensitive):
@@ -254,10 +278,37 @@ export function ChannelMappingsPanel() {
           <p className="text-[11px] text-zinc-500 mt-1 max-w-2xl">
             Map each eBay item-specific to a canonical attribute or a constant
             value. Defaults apply to every category; pick a category to add an
-            override.
+            override. Switch to <span className="font-semibold">All mapped</span>{" "}
+            to audit every category-specific override at once.
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
+          <div className="inline-flex rounded border border-zinc-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewScope("category")}
+              className={`px-2 py-1.5 text-[11px] ${
+                viewScope === "category"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              title="Show every aspect for the selected category, with inherited defaults"
+            >
+              Selected category
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewScope("all")}
+              className={`px-2 py-1.5 text-[11px] border-l border-zinc-200 ${
+                viewScope === "all"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              title="Show every stored mapping across every category"
+            >
+              All mapped
+            </button>
+          </div>
           <select
             value={marketplace}
             onChange={(e) => setMarketplace(e.target.value)}
@@ -269,16 +320,18 @@ export function ChannelMappingsPanel() {
               </option>
             ))}
           </select>
-          <CategorySelector
-            marketplace={marketplace}
-            value={categoryId}
-            label={categoryLabel}
-            productCategories={productCategories ?? []}
-            onChange={(id, label) => {
-              setCategoryId(id);
-              setCategoryLabel(label);
-            }}
-          />
+          {viewScope === "category" && (
+            <CategorySelector
+              marketplace={marketplace}
+              value={categoryId}
+              label={categoryLabel}
+              productCategories={productCategories ?? []}
+              onChange={(id, label) => {
+                setCategoryId(id);
+                setCategoryLabel(label);
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -305,17 +358,19 @@ export function ChannelMappingsPanel() {
           </option>
         </select>
         <span className="text-[11px] text-zinc-500">{rows.length} shown</span>
-        <button
-          type="button"
-          onClick={handleQuickMapAll}
-          disabled={unmappedAspects.length === 0 || bulkMap.isPending}
-          className="ml-auto px-2.5 py-1.5 text-[11px] font-medium rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Create canonical attributes and mappings for every unmapped aspect in this view"
-        >
-          {bulkMap.isPending
-            ? "Mapping…"
-            : `⚡ Quick map ${unmappedAspects.length} unmapped`}
-        </button>
+        {viewScope === "category" && (
+          <button
+            type="button"
+            onClick={handleQuickMapAll}
+            disabled={unmappedAspects.length === 0 || bulkMap.isPending}
+            className="ml-auto px-2.5 py-1.5 text-[11px] font-medium rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Create canonical attributes and mappings for every unmapped aspect in this view"
+          >
+            {bulkMap.isPending
+              ? "Mapping…"
+              : `⚡ Quick map ${unmappedAspects.length} unmapped`}
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -341,8 +396,11 @@ export function ChannelMappingsPanel() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ aspectKey, required, mapping }) => (
-                <tr key={aspectKey} className="border-b border-zinc-100 hover:bg-zinc-50">
+              {rows.map((row) => {
+                const { aspectKey, required, mapping } = row;
+                const rowKey = (row as { rowKey?: string }).rowKey ?? aspectKey;
+                return (
+                <tr key={rowKey} className="border-b border-zinc-100 hover:bg-zinc-50">
                   <td className="py-2 px-2">
                     {required && <span className="text-red-500 mr-1" title="Required">*</span>}
                     <span className="font-mono text-zinc-900">{aspectKey}</span>
@@ -400,14 +458,17 @@ export function ChannelMappingsPanel() {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-zinc-500 text-[12px]">
                     {baseRows.length === 0
-                      ? categoryId
-                        ? "Schema not loaded. Open a product with this category once to cache it, or refresh."
-                        : "Pick a category to see its eBay aspects, or add a default mapping below."
+                      ? viewScope === "all"
+                        ? "No mappings stored yet for this channel/marketplace."
+                        : categoryId
+                          ? "Schema not loaded. Open a product with this category once to cache it, or refresh."
+                          : "Pick a category to see its eBay aspects, or add a default mapping below."
                       : "No rows match the current filter."}
                   </td>
                 </tr>

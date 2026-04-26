@@ -490,8 +490,11 @@ Deno.serve(async (req) => {
     }
 
     if (action === "list-channel-mappings") {
-      // params: { channel, marketplace?, categoryId? }
+      // params: { channel, marketplace?, categoryId?, scope? }
+      // scope: "all" → return EVERY mapping for the channel/marketplace
+      //        regardless of category (used by the cross-category view).
       const ch: string = body.channel ?? "ebay";
+      const scope: string | undefined = body.scope;
       let q = admin
         .from("channel_attribute_mapping")
         .select("*")
@@ -500,7 +503,7 @@ Deno.serve(async (req) => {
       if (body.marketplace) {
         q = q.or(`marketplace.eq.${body.marketplace},marketplace.is.null`);
       }
-      if (body.categoryId !== undefined) {
+      if (scope !== "all" && body.categoryId !== undefined) {
         if (body.categoryId === null) {
           q = q.is("category_id", null);
         } else {
