@@ -47,8 +47,17 @@ export function ChannelMappingsPanel() {
   const [marketplace, setMarketplace] = useState<string>("EBAY_GB");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [categoryLabel, setCategoryLabel] = useState<string>("All categories (defaults)");
+  // "category" = single-row-per-aspect view scoped to selected category +
+  // inherited defaults. "all" = every mapping across every category, one row
+  // per stored mapping, with explicit scope shown.
+  const [viewScope, setViewScope] = useState<"category" | "all">("category");
 
-  const { data: mappings, isLoading } = useChannelMappings(channel, marketplace, categoryId);
+  const { data: mappings, isLoading } = useChannelMappings(
+    channel,
+    marketplace,
+    categoryId,
+    viewScope,
+  );
   const { data: canonicalAttrs } = useCanonicalAttributes();
   const { data: schemaResult } = useEbayCategoryAspects(categoryId, marketplace);
   const { data: productCategories } = useProductChannelCategories(channel, marketplace);
@@ -74,9 +83,23 @@ export function ChannelMappingsPanel() {
     }
   };
 
-  // Combined view: every aspect from the chosen category schema, plus any
-  // mappings that exist outside the schema (rare, but possible).
+  // Combined view:
+  //  - In "category" scope: every aspect from the chosen category schema, plus
+  //    any orphan mappings outside the schema, collapsed to the most-specific
+  //    mapping (category > marketplace > default).
+  //  - In "all" scope: one row per stored mapping (no collapsing) so you can
+  //    see and edit category-specific overrides side-by-side with defaults.
   const baseRows = useMemo(() => {
+    if (viewScope === "all") {
+      // One row per mapping. No schema overlay (would be ambiguous across cats).
+      return (mappings ?? []).map((m) => ({
+        aspectKey: m.aspect_key,
+        required: false,
+        mapping: m,
+        // unique row key so React doesn't collapse same-aspect-different-scope
+        rowKey: `${m.id ?? `${m.aspect_key}:${m.category_id ?? "*"}:${m.marketplace ?? "*"}`}`,
+      }));
+    }
     const byKey = new Map<string, ChannelMappingRecord>();
     for (const m of mappings ?? []) {
       // Prefer most-specific (category > default).
@@ -93,16 +116,17 @@ export function ChannelMappingsPanel() {
       aspectKey: a.key,
       required: a.required,
       mapping: byKey.get(a.key) ?? null,
+      rowKey: a.key,
     }));
     // Append any orphan mappings not in schema.
     const inSchema = new Set(aspects.map((a) => a.aspectKey));
     for (const [key, mapping] of byKey) {
       if (!inSchema.has(key)) {
-        aspects.push({ aspectKey: key, required: false, mapping });
+        aspects.push({ aspectKey: key, required: false, mapping, rowKey: key });
       }
     }
     return aspects;
-  }, [mappings, schemaResult]);
+  }, [mappings, schemaResult, viewScope]);
 
   // Apply text + status filter, then sort
   // Text filter supports NULL / NOT NULL / !NULL sentinels (case-insensitive):
