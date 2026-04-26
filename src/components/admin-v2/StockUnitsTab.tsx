@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
 import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
+import { useSimpleTableFilters } from "@/hooks/useSimpleTableFilters";
 import { supabase } from "@/integrations/supabase/client";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { GradeSlideOut } from "./GradeSlideOut";
 import { WriteOffDialog } from "./WriteOffDialog";
+
+const UNIT_COLUMNS = [
+  { key: "uid", label: "Unit ID" },
+  { key: "grade", label: "Grade" },
+  { key: "batchId", label: "Batch" },
+  { key: "landedCost", label: "Landed Cost" },
+  { key: "status", label: "Status" },
+  { key: "orderId", label: "Order" },
+  { key: "payoutId", label: "Payout" },
+];
+
+function unitAccessor(u: StockUnit, key: string): unknown {
+  return (u as unknown as Record<string, unknown>)[key];
+}
 
 interface StockUnitsTabProps {
   mpn: string;
