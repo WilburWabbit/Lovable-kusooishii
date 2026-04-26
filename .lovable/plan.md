@@ -1,104 +1,60 @@
-# Clean up per-category attributes & auto-bootstrap new category aspects
+## Why it is still happening
 
-## What's wrong today
+The food processor product shown is still `product_type = set` in the database. The scoping added earlier hides LEGO-specific fields only when the product type is not `set`/`minifigure`, so this product still qualifies for LEGO-only attributes such as Set Number, Theme, Pieces, Minifigures, Retired and Version.
 
-I inspected the registry, mappings, and resolver. Three structural problems are causing the symptom you're seeing:
+There are two more issues:
 
-### 1. The Specifications tab shows **every** canonical attribute, regardless of category
-`resolveAllForProduct` in `supabase/functions/_shared/canonical-resolver.ts` selects all `active = true` rows from `canonical_attribute` with no scoping. So your KitchenAid Food Chopper is shown LEGO-only fields (Theme, Subtheme, Pieces, Minifigures, Set Number, Released, Retired, Version, …) and a LEGO product would be shown food-processor fields once we add them.
+1. eBay category `20673` is cached correctly as Food Processors, but its food-processor aspects were not bootstrapped into canonical editable fields/mappings because the schema was already cached after the reset. The current bootstrap only runs when the `aspects` endpoint fetches fresh data, not when a product resolves an existing cached schema.
+2. The bottom “Channel-only Aspects” section is intentionally read-only today. It only lists unmapped eBay aspects and sends the user to Settings, so there is no per-product editing surface for those fields.
 
-### 2. The `canonical_attribute` registry has accumulated duplicates
-Two parallel naming styles were seeded over previous iterations:
+## Plan
 
-| Concept | Duplicate keys present |
-|---|---|
-| Set Number | `setNumber` + `set_number` |
-| Pieces | `pieceCount` + `piece_count` |
-| Minifigs | `minifigsCount` + `minifig_count` |
-| Release year | `releaseYear` + `release_year` (+ `releasedDate`) |
-| Retired | `retiredDate` + `retired_flag` |
-| Weight | `weightG` |
-| Dimensions | `dimensionsCm` + `dimensions_cm` |
-| Age mark | `ageMark` (in `physical`) + `age_mark` (in `marketing`) |
-| Set name | `name` + `product_name` |
-| Product type | `productType` + `product_type` |
+1. **Clean up product type values for non-LEGO products**
+   - Add a database cleanup migration that changes products in the food processor eBay category (`20673`) from `product_type = 'set'` to a non-LEGO type such as `food_processor`.
+   - This will immediately stop LEGO-only canonical attributes from appearing for those products.
+   - Preserve true LEGO products as `set`/`minifigure`.
 
-The Specifications tab therefore shows things twice.
+2. **Make canonical scoping category-aware, not just product-type-aware**
+   - Tighten the LEGO-only canonical attributes so they apply to LEGO eBay categories as well as LEGO product types.
+   - This prevents a future non-LEGO item accidentally marked `set` from showing LEGO-only fields when its selected eBay category is Food Processors.
+   - Keep universal commerce fields visible across categories: Brand, Product Type, MPN/Product Name, EAN, UPC, ISBN, Weight, Length, Width, Height, Dimensions.
 
-### 3. New aspects from a freshly-fetched eBay category never become canonical
-When **Food Processors (20673)** was added, 32 aspects were inserted into `channel_category_attribute` (Capacity, Power, Voltage, Cable Length, Colour, Material, Number of Blades, …) but:
-- No matching `canonical_attribute` rows were created
-- No `channel_attribute_mapping` rows were created
-- No DB columns were added to `product`
+3. **Repair food-processor canonical attributes and mappings**
+   - Bootstrap all aspects from eBay category `20673` into editable canonical fields where no better existing canonical field exists.
+   - Reuse existing universal fields for obvious matches:
+     - `Brand` → `brand`
+     - `MPN`/`Model` → product model/MPN field, avoiding the current global `Model → set_number` LEGO mapping
+     - item dimensions/weight → existing product physical fields where appropriate
+     - `Type` → `product_type`
+   - Create missing category-scoped canonical fields for appliance-specific aspects such as Components Included, Number of Blades, Power Source, Capacity, Colour, Power, Appliance Uses, Features, Voltage, Unit Quantity, etc.
+   - Create category-specific `channel_attribute_mapping` rows for `20673` so these fields are considered mapped and editable.
 
-So they sit as "unmapped" forever and the Specifications tab has no field to capture them.
+4. **Fix the bootstrap path so cached categories also get repaired**
+   - Update `resolve-aspects` and/or cached `aspects` handling in `supabase/functions/ebay-taxonomy/index.ts` so if a category schema is already cached but missing mappings/canonical fields, it runs the bootstrap repair idempotently.
+   - This avoids needing a forced fresh fetch from eBay just to create editable fields.
 
-### 4. Mappings aren't scoped where they should be
-All current `channel_attribute_mapping` rows have `category_id = NULL` (global). Some of them are genuinely universal (`EAN → ean`, `MPN → mpn`) but `LEGO Set Number`, `LEGO Theme`, `LEGO Subtheme`, `Number of Pieces`, `Packaging = "Box"`, **`Brand = "LEGO"` (constant)** are LEGO-specific and shouldn't apply when the category is Food Processors. That's why your KitchenAid still says **Brand: LEGO**.
+5. **Make bottom eBay aspects editable from the product Specifications tab**
+   - Replace the read-only list of “Channel-only Aspects” with editable rows for unmapped/mapped eBay item specifics.
+   - Saving should write values back to canonical product columns when a canonical mapping exists.
+   - For unmapped fields, provide a quick action to create a category-scoped canonical field/mapping and then allow entering the value.
+   - Keep the Settings link for bulk mapping management, but do not force product-by-product users to leave the tab.
 
----
+6. **Fix global mappings that leak LEGO semantics into non-LEGO categories**
+   - Replace or scope down the current global `Model → set_number` mapping so it does not affect Food Processors.
+   - Ensure Food Processors use a category-specific mapping for Model/MPN that makes sense for appliances.
 
-## The fix — four coordinated changes
+7. **Validate with the KitchenAid product**
+   - Confirm product `5KFC3516BER` with eBay category Food Processors shows appliance-relevant fields only.
+   - Confirm LEGO-specific fields are gone from its Product Specifications tab.
+   - Confirm the previously listed bottom aspects are available for editing and/or mapped after bootstrap.
 
-### Change A — Add scoping metadata to `canonical_attribute`
-Migration adds two nullable columns:
+## Technical details
 
-- `applies_to_product_types text[]` — when set, only show this attribute for products with one of these `product_type` values (e.g. `{set, minifigure}` for LEGO‑only fields). NULL = applies to everything (universal fields like name, brand, weight, dimensions, EAN, UPC).
-- `applies_to_ebay_categories text[]` — when set, only show this attribute when the resolved eBay category is one of these IDs. NULL = no category restriction. (Used for category-specific fields like Capacity, Power, etc.)
+Files likely to change:
+- `supabase/migrations/...sql` for data cleanup and mapping repairs
+- `supabase/functions/ebay-taxonomy/index.ts` for idempotent bootstrap on cached schemas
+- `supabase/functions/_shared/canonical-resolver.ts` if stricter category/type scoping is needed
+- `src/components/admin-v2/SpecificationsTab.tsx` to make eBay aspects editable in-place
+- `src/hooks/admin/use-channel-taxonomy.ts` if a new quick-bootstrap/save action is needed
 
-The two filters are AND-ed with the current `active = true` filter.
-
-### Change B — Dedupe and re-key the canonical registry
-One idempotent migration:
-
-1. **Delete the camelCase duplicates** (`setNumber`, `pieceCount`, `minifigsCount`, `releaseYear`, `releasedDate`, `retiredDate`, `weightG`, `dimensionsCm`, `ageMark`, `productType`, `retailPrice`, `name`) **after** repointing any `channel_attribute_mapping.canonical_key` rows that still reference them to the snake_case survivors.
-2. Keep the snake_case canonical set as the single source of truth: `mpn`, `set_number`, `product_name`, `theme`, `subtheme`, `piece_count`, `minifig_count`, `release_year`, `retired_flag`, `version_descriptor`, `product_type`, `weight_g`, `length_cm`, `width_cm`, `height_cm`, `dimensions_cm`, `age_mark`, `condition`, `age_range`, `packaging`, `brand`, `ean`, `upc`, `isbn`.
-3. Set `applies_to_product_types` on the LEGO‑only attributes (`set_number`, `theme`, `subtheme`, `piece_count`, `minifig_count`, `release_year`, `retired_flag`, `version_descriptor`).
-4. Make `brand` editable + product‑sourced (column `brand` already exists on `product`) — no longer a hard-coded constant.
-
-### Change C — Auto-create canonical attributes & DB columns when a new eBay category schema is fetched
-Inside `ebay-taxonomy/index.ts`'s `category-aspects` action (right after the category schema is upserted), for every aspect that does **not** already have a canonical attribute or a channel mapping:
-
-1. Generate a slug key from the aspect name (e.g. `Cable Length` → `cable_length`, `Number of Speeds` → `number_of_speeds`).
-2. If no `canonical_attribute` row with that key exists, insert one with:
-   - `attribute_group = 'physical'` (or `'marketing'` if it looks like a tag/feature)
-   - `editor` mapped from eBay's `aspectDataType` (`STRING` → text, `NUMBER` → number, `DATE` → date)
-   - `data_type` matching
-   - `db_column = <slug>` and call the existing `ensure_product_column` RPC to add it to `product`
-   - `provider_chain = [{provider:'product', field:'<slug>'}]`
-   - `applies_to_ebay_categories = ARRAY[<categoryId>]` (so it only shows on products in that category)
-   - `editable = true`, `active = true`
-3. Insert a `channel_attribute_mapping` row scoped to that exact `(channel='ebay', marketplace, category_id, aspect_key)` pointing at the new canonical key.
-
-If the canonical attribute already exists but doesn't list this category yet, append the `categoryId` to its `applies_to_ebay_categories` array.
-
-This means: **the next time you fetch any new eBay category, its aspects are immediately visible & editable on the Specifications tab for products in that category, with no manual setup.**
-
-### Change D — Resolver respects scope
-Update `resolveAllForProduct` to accept `productType` and `effectiveCategoryId`, then filter:
-
-```ts
-.eq("active", true)
-.or(`applies_to_product_types.is.null,applies_to_product_types.cs.{${productType}}`)
-.or(`applies_to_ebay_categories.is.null,applies_to_ebay_categories.cs.{${effectiveCategoryId}}`)
-```
-
-The existing `resolve-aspects` action already knows both values, so it just passes them through.
-
----
-
-## What you'll see after this lands
-
-- KitchenAid product → Specifications tab shows: Brand, Product Name, MPN, Product Type, EAN/UPC/ISBN, Weight, Dimensions, Age Mark, Condition, Packaging, **plus** Capacity, Power, Voltage, Cable Length, Colour, Material, Number of Blades, Number of Speeds, etc. (all editable, all writing to real DB columns). **No** Theme/Subtheme/Pieces/Minifigures/Set Number/Released.
-- LEGO 75367-1 → Specifications tab shows the LEGO fields it always had (deduped — one Set Number, one Pieces, one Age Mark). **No** food-processor fields.
-- eBay Mappings page for **Food Processors** → all 32 aspects are pre-mapped to the new auto-created canonical keys, scoped to category 20673; you only manually map the few that need a constant.
-- eBay Mappings page for **LEGO Complete Sets** → unchanged, still shows LEGO Set Number / Theme / Pieces mapped.
-
-## Files that will change
-
-- `supabase/migrations/<timestamp>_canonical_attribute_scoping.sql` — adds 2 columns + dedupe + scope seeding (idempotent)
-- `supabase/functions/_shared/canonical-resolver.ts` — accept `productType` + `effectiveCategoryId`, filter rows
-- `supabase/functions/ebay-taxonomy/index.ts` — bootstrap canonical attributes + DB columns + mappings during `category-aspects` fetch; pass through scope params on `resolve-aspects`
-- `src/integrations/supabase/types.ts` — auto-regenerated for the new columns
-
-No frontend changes required — the Specifications tab and Channel Mappings panel both already render whatever the edge function returns.
+The migration and backend changes will be idempotent so re-running them does not duplicate attributes or mappings.
