@@ -2828,6 +2828,33 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("product").update(updates).eq("id", productId);
       if (error) throw error;
       result = { success: true };
+    } else if (action === "bulk-set-product-channel-category") {
+      // params: { product_ids: string[], channel, category_id, marketplace? }
+      const productIds: string[] = Array.isArray(params.product_ids) ? params.product_ids : [];
+      const channel = params.channel;
+      const categoryId = params.category_id ?? null;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      if (productIds.length === 0 || !channel) {
+        throw new ValidationError("product_ids and channel are required");
+      }
+      if (channel === "ebay") {
+        // Use the dedicated RPC (handles category + marketplace + audit timestamp).
+        const { data: updated, error } = await (admin as any).rpc("bulk_set_ebay_category", {
+          p_product_ids: productIds,
+          p_category_id: categoryId,
+          p_marketplace: marketplace,
+        });
+        if (error) throw error;
+        result = { success: true, updated: updated ?? productIds.length };
+      } else {
+        const updates: Record<string, unknown> = {};
+        if (channel === "gmc") updates.gmc_product_category = categoryId;
+        else if (channel === "meta") updates.meta_category = categoryId;
+        else throw new ValidationError(`Unsupported channel: ${channel}`);
+        const { error } = await admin.from("product").update(updates).in("id", productIds);
+        if (error) throw error;
+        result = { success: true, updated: productIds.length };
+      }
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
