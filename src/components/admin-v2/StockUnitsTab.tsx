@@ -158,6 +158,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
         unit={slideUnit}
         open={!!slideUnit}
         onClose={() => setSlideUnit(null)}
+        rawProductData={rawProductData}
       />
 
       <WriteOffDialog
