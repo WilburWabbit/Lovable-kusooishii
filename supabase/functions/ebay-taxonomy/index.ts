@@ -25,10 +25,7 @@ import {
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
-import {
-  resolveAllForProduct,
-  projectToChannel,
-} from "../_shared/canonical-resolver.ts";
+import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -65,182 +62,10 @@ async function ebayFetch(token: string, path: string, marketplace: string) {
   return JSON.parse(text);
 }
 
-// ─── Bootstrap canonical attributes for a newly fetched category ──
-// For every aspect that doesn't already have a mapping or canonical
-// attribute, create:
-//   1. a canonical_attribute scoped to this category
-//   2. a product table column to write its value to
-//   3. a channel_attribute_mapping pointing the aspect at the new key
-// If the canonical attribute already exists, just append this category
-// to its applies_to_ebay_categories list (keeps the field visible for
-// products in this category too).
-async function bootstrapCanonicalForCategory(
-  admin: any,
-  input: {
-    marketplace: string;
-    categoryId: string;
-    aspects: Array<{
-      key: string;
-      label: string;
-      data_type: string;
-      required: boolean;
-    }>;
-  },
-) {
-  const { marketplace, categoryId, aspects } = input;
-  if (!aspects.length) return;
+// (Bootstrap routine removed — categories no longer auto-create canonical
+//  attributes or mappings on first read. All mapping is explicit via the
+//  Channel Mappings settings page.)
 
-  // Existing mappings for this aspect set (any scope)
-  const aspectKeys = aspects.map((a) => a.key);
-  const { data: existingMappings } = await admin
-    .from("channel_attribute_mapping")
-    .select("aspect_key, canonical_key, category_id, marketplace")
-    .eq("channel", "ebay")
-    .in("aspect_key", aspectKeys);
-
-  // Existing canonical attribute keys (slug match)
-  const { data: existingAttrs } = await admin
-    .from("canonical_attribute")
-    .select("key, applies_to_ebay_categories");
-  const attrByKey = new Map<string, { applies_to_ebay_categories: string[] | null }>();
-  for (const a of (existingAttrs ?? []) as any[]) {
-    attrByKey.set(a.key, { applies_to_ebay_categories: a.applies_to_ebay_categories });
-  }
-
-  const slug = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/\(.+?\)/g, "")
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 60);
-
-  // Map common eBay aspect names to existing universal canonical keys so we
-  // don't create duplicate columns like `type` when `product_type` exists.
-  const ALIASES: Record<string, string> = {
-    type: "product_type",
-    brand: "brand",
-    mpn: "mpn",
-    model: "mpn",
-    ean: "ean",
-    upc: "upc",
-    isbn: "isbn",
-    weight: "weight_g",
-    item_weight: "weight_g",
-    length: "length_cm",
-    item_length: "length_cm",
-    width: "width_cm",
-    item_width: "width_cm",
-    height: "height_cm",
-    item_height: "height_cm",
-    item_depth: "length_cm",
-    age_level: "age_mark",
-    recommended_age_range: "age_mark",
-    age_mark: "age_mark",
-    packaging: "packaging",
-  };
-
-  const editorFor = (dt: string) => {
-    const t = (dt ?? "string").toLowerCase();
-    if (t === "number" || t === "int" || t === "decimal") return "number";
-    if (t === "date") return "date";
-    return "text";
-  };
-  const dataTypeFor = (dt: string) => {
-    const t = (dt ?? "string").toLowerCase();
-    if (t === "number" || t === "decimal") return "decimal";
-    if (t === "int" || t === "integer") return "int";
-    if (t === "date") return "date";
-    if (t === "bool" || t === "boolean") return "bool";
-    return "string";
-  };
-
-  for (const aspect of aspects) {
-    // Already mapped (in any scope)? Leave alone.
-    const alreadyMapped = (existingMappings ?? []).some(
-      (m: any) =>
-        m.aspect_key === aspect.key &&
-        (m.category_id === categoryId || m.category_id === null),
-    );
-    if (alreadyMapped) continue;
-
-    const rawSlug = slug(aspect.key);
-    if (!rawSlug) continue;
-
-    // Prefer an existing universal canonical via alias to avoid duplicates.
-    const canonicalKey = ALIASES[rawSlug] ?? rawSlug;
-    const isAlias = ALIASES[rawSlug] != null;
-
-    const dt = dataTypeFor(aspect.data_type);
-    const editor = editorFor(aspect.data_type);
-
-    const existing = attrByKey.get(canonicalKey);
-    if (existing) {
-      // Existing canonical:
-      // - If reused via an alias (e.g. "Type" -> product_type), do NOT
-      //   touch its scope. It is meant to apply universally.
-      // - Otherwise, if it already has explicit category scoping, append
-      //   this category so it remains visible here too. If it has NULL
-      //   scope (universal), leave it alone.
-      if (!isAlias) {
-        const cats = existing.applies_to_ebay_categories;
-        if (Array.isArray(cats) && cats.length > 0 && !cats.includes(categoryId)) {
-          await admin
-            .from("canonical_attribute")
-            .update({
-              applies_to_ebay_categories: [...cats, categoryId],
-              updated_at: new Date().toISOString(),
-            })
-            .eq("key", canonicalKey);
-        }
-      }
-    } else {
-      // Create the product column first (idempotent via ensure_product_column).
-      const { error: colErr } = await admin.rpc("ensure_product_column", {
-        p_column_name: canonicalKey,
-        p_data_type: dt,
-      });
-      if (colErr) {
-        console.error(`ensure_product_column failed for ${canonicalKey}:`, colErr);
-        continue;
-      }
-
-      const { error: insErr } = await admin.from("canonical_attribute").insert({
-        key: canonicalKey,
-        label: aspect.label || aspect.key,
-        attribute_group: "physical",
-        editor,
-        data_type: dt,
-        db_column: canonicalKey,
-        provider_chain: [{ provider: "product", field: canonicalKey }],
-        editable: true,
-        sort_order: 500,
-        active: true,
-        applies_to_ebay_categories: [categoryId],
-      });
-      if (insErr) {
-        console.error(`canonical_attribute insert failed for ${canonicalKey}:`, insErr);
-        continue;
-      }
-      attrByKey.set(canonicalKey, { applies_to_ebay_categories: [categoryId] });
-    }
-
-    // Insert mapping scoped to this exact (marketplace, category, aspect).
-    const { error: mapErr } = await admin.from("channel_attribute_mapping").insert({
-      channel: "ebay",
-      marketplace,
-      category_id: categoryId,
-      aspect_key: aspect.key,
-      canonical_key: canonicalKey,
-      constant_value: null,
-      transform: null,
-      notes: "Auto-bootstrapped from eBay category schema",
-    });
-    if (mapErr) {
-      console.error(`mapping insert failed for ${aspect.key}:`, mapErr);
-    }
-  }
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -329,18 +154,9 @@ Deno.serve(async (req) => {
           .eq("schema_id", existing.id)
           .order("sort_order", { ascending: true });
 
-        // Idempotent bootstrap on cached schema reads too — ensures any
-        // categories whose schema was loaded before bootstrap was wired up
-        // (or whose mappings were wiped) get repaired automatically.
-        try {
-          await bootstrapCanonicalForCategory(admin, {
-            marketplace,
-            categoryId,
-            aspects: (attrs ?? []) as any[],
-          });
-        } catch (bootErr) {
-          console.error("bootstrap canonical (cached) failed:", bootErr);
-        }
+        // (No bootstrap — categories no longer auto-create canonical
+        //  attributes/mappings. Mapping is explicit via Settings.)
+
 
         return jsonResponse({
           schemaId: existing.id,
@@ -440,18 +256,8 @@ Deno.serve(async (req) => {
         if (attrErr) throw attrErr;
       }
 
-      // Bootstrap canonical attributes + mappings for every aspect of this
-      // category that doesn't already have one. This ensures newly added
-      // categories produce editable Specifications fields with no manual setup.
-      try {
-        await bootstrapCanonicalForCategory(admin, {
-          marketplace,
-          categoryId,
-          aspects: attrRows,
-        });
-      } catch (bootErr) {
-        console.error("bootstrap canonical failed (non-fatal):", bootErr);
-      }
+      // (Bootstrap removed — mappings are managed explicitly via Settings.)
+
 
       return jsonResponse({
         schemaId,
@@ -564,57 +370,54 @@ Deno.serve(async (req) => {
       // a canonical attribute / mapping. This is what makes the bottom-of-
       // tab eBay aspects appear as editable canonical fields the next time
       // around.
-      const { data: schemaRow } = await admin
-        .from("channel_category_schema")
-        .select("id, category_name")
-        .eq("channel", "ebay")
-        .eq("marketplace", marketplace)
-        .eq("category_id", categoryId)
-        .maybeSingle();
-
-      if (schemaRow?.id) {
-        const { data: schemaAttrs } = await admin
-          .from("channel_category_attribute")
-          .select("key, label, data_type, required")
-          .eq("schema_id", schemaRow.id);
-        try {
-          await bootstrapCanonicalForCategory(admin, {
-            marketplace,
-            categoryId,
-            aspects: (schemaAttrs ?? []) as any[],
-          });
-        } catch (bootErr) {
-          console.error("bootstrap canonical (resolve) failed:", bootErr);
-        }
-      }
-
-      // Now resolve every canonical attribute for this product, scoped by
-      // its product_type and the chosen eBay category. The bootstrap above
-      // means newly-created scoped canonicals appear in this resolution.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
-        ebayCategoryId: categoryId,
-      });
-
-      // Project canonical → channel aspects via the mapping table.
-      const projection = await projectToChannel(admin, {
+      const resolved = await resolveSpecsForProduct(admin, {
+        productId,
         channel: "ebay",
         marketplace,
         categoryId,
-        schemaId: schemaRow?.id ?? null,
-        canonicalByKey: byKey,
       });
 
+      // Backwards-compatible response shape for the existing UI hook.
+      // The Specifications tab will be migrated to consume `rows` directly
+      // in a follow-up; for now we expose both shapes.
       return jsonResponse({
-        categoryId,
-        categoryName: schemaRow?.category_name ?? null,
-        schemaLoaded: projection.totalSchemaCount > 0,
-        resolvedCount: projection.resolvedCount,
-        totalSchemaCount: projection.totalSchemaCount,
-        missingRequiredCount: projection.missingRequiredCount,
-        canonical: resolved,
-        aspects: projection.mapped,
+        categoryId: resolved.categoryId,
+        categoryName: resolved.categoryName,
+        schemaLoaded: resolved.schemaLoaded,
+        resolvedCount: resolved.resolvedCount,
+        totalSchemaCount: resolved.totalCount,
+        missingRequiredCount: resolved.missingRequiredCount,
+        // New canonical shape — preferred going forward.
+        rows: resolved.rows,
+        // Legacy shape (kept so old UI keeps rendering until the rebuild
+        // of SpecificationsTab lands).
+        canonical: [],
+        aspects: resolved.rows.map((r) => ({
+          aspectKey: r.key,
+          required: r.required,
+          value:
+            typeof r.effectiveValue === "string"
+              ? r.effectiveValue
+              : Array.isArray(r.effectiveValue)
+                ? r.effectiveValue.join(", ")
+                : null,
+          source:
+            r.effectiveSource === "saved"
+              ? "canonical"
+              : r.effectiveSource === "constant"
+                ? "constant"
+                : r.effectiveSource === "canonical"
+                  ? "canonical"
+                  : r.mappingScope === "none"
+                    ? "unmapped"
+                    : "none",
+          canonicalKey: r.canonicalKey,
+          canonicalSource: r.autoSource,
+          constantValue: r.constantValue,
+        })),
       });
     }
+
 
     if (action === "list-canonical-attributes") {
       const { data, error } = await admin
