@@ -249,6 +249,19 @@ Deno.serve(async (req) => {
         if (attrErr) throw attrErr;
       }
 
+      // Bootstrap canonical attributes + mappings for every aspect of this
+      // category that doesn't already have one. This ensures newly added
+      // categories produce editable Specifications fields with no manual setup.
+      try {
+        await bootstrapCanonicalForCategory(admin, {
+          marketplace,
+          categoryId,
+          aspects: attrRows,
+        });
+      } catch (bootErr) {
+        console.error("bootstrap canonical failed (non-fatal):", bootErr);
+      }
+
       return jsonResponse({
         schemaId,
         categoryId,
