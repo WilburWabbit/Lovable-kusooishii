@@ -278,10 +278,37 @@ export function ChannelMappingsPanel() {
           <p className="text-[11px] text-zinc-500 mt-1 max-w-2xl">
             Map each eBay item-specific to a canonical attribute or a constant
             value. Defaults apply to every category; pick a category to add an
-            override.
+            override. Switch to <span className="font-semibold">All mapped</span>{" "}
+            to audit every category-specific override at once.
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
+          <div className="inline-flex rounded border border-zinc-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewScope("category")}
+              className={`px-2 py-1.5 text-[11px] ${
+                viewScope === "category"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              title="Show every aspect for the selected category, with inherited defaults"
+            >
+              Selected category
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewScope("all")}
+              className={`px-2 py-1.5 text-[11px] border-l border-zinc-200 ${
+                viewScope === "all"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              title="Show every stored mapping across every category"
+            >
+              All mapped
+            </button>
+          </div>
           <select
             value={marketplace}
             onChange={(e) => setMarketplace(e.target.value)}
@@ -293,16 +320,18 @@ export function ChannelMappingsPanel() {
               </option>
             ))}
           </select>
-          <CategorySelector
-            marketplace={marketplace}
-            value={categoryId}
-            label={categoryLabel}
-            productCategories={productCategories ?? []}
-            onChange={(id, label) => {
-              setCategoryId(id);
-              setCategoryLabel(label);
-            }}
-          />
+          {viewScope === "category" && (
+            <CategorySelector
+              marketplace={marketplace}
+              value={categoryId}
+              label={categoryLabel}
+              productCategories={productCategories ?? []}
+              onChange={(id, label) => {
+                setCategoryId(id);
+                setCategoryLabel(label);
+              }}
+            />
+          )}
         </div>
       </div>
 
