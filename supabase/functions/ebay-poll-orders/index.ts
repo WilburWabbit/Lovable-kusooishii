@@ -56,7 +56,7 @@ function extractGrade(sku: string): number | null {
 
 // ─── eBay OAuth Token Management ─────────────────────────────
 
-async function getEbayAccessToken(admin: ReturnType<typeof createClient>): Promise<string> {
+async function getEbayAccessToken(admin: any): Promise<string> {
   const { data: conn, error } = await admin
     .from("ebay_connection")
     .select("*")
@@ -132,7 +132,7 @@ async function ebayFetch(token: string, path: string) {
 
 // ─── Order Number Generator ──────────────────────────────────
 
-async function nextOrderNumber(admin: ReturnType<typeof createClient>): Promise<string> {
+async function nextOrderNumber(admin: any): Promise<string> {
   const { data } = await admin
     .from("sales_order")
     .select("order_number")
