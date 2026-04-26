@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
 // ─── Export ─────────────────────────────────────────────────
 
 async function handleExport(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { tableName: string; filters?: Record<string, unknown> },
 ) {
   const { tableName, filters } = params;
@@ -193,7 +193,7 @@ async function handleExport(
 // ─── Stage ──────────────────────────────────────────────────
 
 async function handleStage(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   userId: string,
   params: { tableName: string; filename: string; rows: Record<string, string>[] },
 ) {
@@ -238,7 +238,7 @@ async function handleStage(
 // ─── Diff ───────────────────────────────────────────────────
 
 async function handleDiff(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { sessionId: string },
 ) {
   const { sessionId } = params;
@@ -450,7 +450,7 @@ async function handleDiff(
  * Returns a map of row_id → error message for rows that cannot be deleted.
  */
 async function getDeleteBlockers(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   tableName: string,
   canonicalById: Map<string, Record<string, unknown>>,
   seenIds: Set<string>,
@@ -497,7 +497,7 @@ async function getDeleteBlockers(
 // ─── Apply ──────────────────────────────────────────────────
 
 async function handleApply(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { sessionId: string },
 ) {
   const { sessionId } = params;
@@ -541,7 +541,7 @@ async function handleApply(
 // ─── Get Changeset (for re-opening a session) ──────────────
 
 async function handleGetChangeset(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { sessionId: string },
 ) {
   const { sessionId } = params;
@@ -581,7 +581,7 @@ async function handleGetChangeset(
 // ─── Rollback ───────────────────────────────────────────────
 
 async function handleRollback(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { sessionId: string },
 ) {
   const { sessionId } = params;
@@ -597,7 +597,7 @@ async function handleRollback(
 // ─── History ────────────────────────────────────────────────
 
 async function handleHistory(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   params: { tableName?: string; limit?: number },
 ) {
   const { tableName, limit = 50 } = params;
