@@ -226,11 +226,26 @@ export function useSetProductChannelCategory() {
         marketplace: input.marketplace,
       });
     },
-    onSuccess: (_d, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["v2", "products", vars.mpn] });
+    onSuccess: async (_d, vars) => {
+      // Invalidate the product detail (so ebayCategoryId re-reads from DB)
+      // AND the auto-resolve cache (which becomes stale once an override
+      // is set or cleared) AND the resolved-aspects cache for the product.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["v2", "products", vars.mpn] }),
+        queryClient.invalidateQueries({ queryKey: ["v2", "products"] }),
+        queryClient.invalidateQueries({
+          queryKey: taxonomyKeys.autoCategory(vars.productId, vars.marketplace ?? "EBAY_GB"),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["taxonomy", "ebay", vars.marketplace ?? "EBAY_GB", "resolved", vars.productId],
+        }),
+      ]);
+      // Force a refetch immediately so the UI shows the new value without
+      // waiting for the next render-driven fetch.
+      await queryClient.refetchQueries({
+        queryKey: ["v2", "products", vars.mpn],
+      });
     },
-  });
-}
 
 // ─── Product attributes (per-namespace) ─────────────────────
 
