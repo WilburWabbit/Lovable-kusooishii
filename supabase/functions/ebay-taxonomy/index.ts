@@ -370,57 +370,54 @@ Deno.serve(async (req) => {
       // a canonical attribute / mapping. This is what makes the bottom-of-
       // tab eBay aspects appear as editable canonical fields the next time
       // around.
-      const { data: schemaRow } = await admin
-        .from("channel_category_schema")
-        .select("id, category_name")
-        .eq("channel", "ebay")
-        .eq("marketplace", marketplace)
-        .eq("category_id", categoryId)
-        .maybeSingle();
-
-      if (schemaRow?.id) {
-        const { data: schemaAttrs } = await admin
-          .from("channel_category_attribute")
-          .select("key, label, data_type, required")
-          .eq("schema_id", schemaRow.id);
-        try {
-          await bootstrapCanonicalForCategory(admin, {
-            marketplace,
-            categoryId,
-            aspects: (schemaAttrs ?? []) as any[],
-          });
-        } catch (bootErr) {
-          console.error("bootstrap canonical (resolve) failed:", bootErr);
-        }
-      }
-
-      // Now resolve every canonical attribute for this product, scoped by
-      // its product_type and the chosen eBay category. The bootstrap above
-      // means newly-created scoped canonicals appear in this resolution.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
-        ebayCategoryId: categoryId,
-      });
-
-      // Project canonical → channel aspects via the mapping table.
-      const projection = await projectToChannel(admin, {
+      const resolved = await resolveSpecsForProduct(admin, {
+        productId,
         channel: "ebay",
         marketplace,
         categoryId,
-        schemaId: schemaRow?.id ?? null,
-        canonicalByKey: byKey,
       });
 
+      // Backwards-compatible response shape for the existing UI hook.
+      // The Specifications tab will be migrated to consume `rows` directly
+      // in a follow-up; for now we expose both shapes.
       return jsonResponse({
-        categoryId,
-        categoryName: schemaRow?.category_name ?? null,
-        schemaLoaded: projection.totalSchemaCount > 0,
-        resolvedCount: projection.resolvedCount,
-        totalSchemaCount: projection.totalSchemaCount,
-        missingRequiredCount: projection.missingRequiredCount,
-        canonical: resolved,
-        aspects: projection.mapped,
+        categoryId: resolved.categoryId,
+        categoryName: resolved.categoryName,
+        schemaLoaded: resolved.schemaLoaded,
+        resolvedCount: resolved.resolvedCount,
+        totalSchemaCount: resolved.totalCount,
+        missingRequiredCount: resolved.missingRequiredCount,
+        // New canonical shape — preferred going forward.
+        rows: resolved.rows,
+        // Legacy shape (kept so old UI keeps rendering until the rebuild
+        // of SpecificationsTab lands).
+        canonical: [],
+        aspects: resolved.rows.map((r) => ({
+          aspectKey: r.key,
+          required: r.required,
+          value:
+            typeof r.effectiveValue === "string"
+              ? r.effectiveValue
+              : Array.isArray(r.effectiveValue)
+                ? r.effectiveValue.join(", ")
+                : null,
+          source:
+            r.effectiveSource === "saved"
+              ? "canonical"
+              : r.effectiveSource === "constant"
+                ? "constant"
+                : r.effectiveSource === "canonical"
+                  ? "canonical"
+                  : r.mappingScope === "none"
+                    ? "unmapped"
+                    : "none",
+          canonicalKey: r.canonicalKey,
+          canonicalSource: r.autoSource,
+          constantValue: r.constantValue,
+        })),
       });
     }
+
 
     if (action === "list-canonical-attributes") {
       const { data, error } = await admin
