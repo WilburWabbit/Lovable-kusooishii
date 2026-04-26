@@ -55,6 +55,7 @@ export function ChannelMappingsPanel() {
 
   const upsert = useUpsertChannelMapping();
   const remove = useDeleteChannelMapping();
+  const bulkMap = useBulkCreateAndMapAspects();
 
   const [editing, setEditing] = useState<ChannelMappingRecord | null>(null);
 
