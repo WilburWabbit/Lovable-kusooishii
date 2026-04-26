@@ -430,11 +430,9 @@ export function OrderList() {
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.sortable !== false ? (
-                    <input
+                    <TableFilterInput
                       value={prefs.filters[col.key] ?? ""}
-                      onChange={(e) => setFilter(col.key, e.target.value)}
-                      placeholder="Filter…"
-                      className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      onChange={(v) => setFilter(col.key, v)}
                     />
                   ) : (
                     <span />
