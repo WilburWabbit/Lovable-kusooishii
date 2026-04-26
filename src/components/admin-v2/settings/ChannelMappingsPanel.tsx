@@ -23,6 +23,7 @@ import {
   useEbayCategorySuggestions,
   useEbayCategoryAspects,
   useProductChannelCategories,
+  useBulkCreateAndMapAspects,
   type ChannelMappingRecord,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
@@ -54,6 +55,7 @@ export function ChannelMappingsPanel() {
 
   const upsert = useUpsertChannelMapping();
   const remove = useDeleteChannelMapping();
+  const bulkMap = useBulkCreateAndMapAspects();
 
   const [editing, setEditing] = useState<ChannelMappingRecord | null>(null);
 
@@ -195,6 +197,36 @@ export function ChannelMappingsPanel() {
     });
   };
 
+  const unmappedAspects = useMemo(
+    () => baseRows.filter((r) => !r.mapping).map((r) => r.aspectKey),
+    [baseRows],
+  );
+
+  const handleQuickMapAll = async () => {
+    if (unmappedAspects.length === 0) return;
+    const confirmed = confirm(
+      `Create canonical attributes and map ${unmappedAspects.length} unmapped aspect(s) for ${
+        categoryId ? `category ${categoryId}` : "all categories"
+      } / ${marketplace}?\n\nEach aspect will get a snake_case canonical key and a default mapping you can refine later.`,
+    );
+    if (!confirmed) return;
+    try {
+      const res = await bulkMap.mutateAsync({
+        channel,
+        marketplace,
+        categoryId,
+        aspects: unmappedAspects.map((aspect_key) => ({ aspect_key })),
+      });
+      toast.success(
+        `Mapped ${res.aspectsMapped?.length ?? 0} aspect(s) · created ${
+          res.canonicalCreated?.length ?? 0
+        } new canonical attribute(s)`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Quick map failed");
+    }
+  };
+
   // Map of categoryId → friendly name from product usage list (for scope display)
   const categoryNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -262,6 +294,17 @@ export function ChannelMappingsPanel() {
           </option>
         </select>
         <span className="text-[11px] text-zinc-500">{rows.length} shown</span>
+        <button
+          type="button"
+          onClick={handleQuickMapAll}
+          disabled={unmappedAspects.length === 0 || bulkMap.isPending}
+          className="ml-auto px-2.5 py-1.5 text-[11px] font-medium rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Create canonical attributes and mappings for every unmapped aspect in this view"
+        >
+          {bulkMap.isPending
+            ? "Mapping…"
+            : `⚡ Quick map ${unmappedAspects.length} unmapped`}
+        </button>
       </div>
 
       {isLoading ? (
