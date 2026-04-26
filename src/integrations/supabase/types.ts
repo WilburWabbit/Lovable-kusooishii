@@ -2331,6 +2331,7 @@ export type Database = {
           id: string
           img_url: string | null
           include_catalog_img: boolean
+          isbn: string | null
           lego_catalog_id: string | null
           length_cm: number | null
           meta_category: string | null
@@ -2352,6 +2353,7 @@ export type Database = {
           status: string
           subtheme_name: string | null
           theme_id: string | null
+          upc: string | null
           updated_at: string
           version_descriptor: string | null
           weight_g: number | null
@@ -2379,6 +2381,7 @@ export type Database = {
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          isbn?: string | null
           lego_catalog_id?: string | null
           length_cm?: number | null
           meta_category?: string | null
@@ -2400,6 +2403,7 @@ export type Database = {
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
           weight_g?: number | null
@@ -2427,6 +2431,7 @@ export type Database = {
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          isbn?: string | null
           lego_catalog_id?: string | null
           length_cm?: number | null
           meta_category?: string | null
@@ -2448,6 +2453,7 @@ export type Database = {
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
           weight_g?: number | null

@@ -209,9 +209,34 @@ function derive(
       if (kg == null) return null;
       return Math.round(kg * 1000);
     }
+    case "parse_dimensions_cm_length":
+      return parseDimensionsCm(bundle, 0);
+    case "parse_dimensions_cm_width":
+      return parseDimensionsCm(bundle, 1);
+    case "parse_dimensions_cm_height":
+      return parseDimensionsCm(bundle, 2);
+    case "compose_dimensions_cm": {
+      const l = bundle.product?.length_cm as number | null;
+      const w = bundle.product?.width_cm as number | null;
+      const h = bundle.product?.height_cm as number | null;
+      if (l == null && w == null && h == null) return null;
+      return [l, w, h].map((n) => (n == null ? "?" : String(n))).join("x");
+    }
     default:
       return null;
   }
+}
+
+// "38x26x7" / "38 x 26 x 7" / "38×26×7" → number at index, or null.
+function parseDimensionsCm(bundle: ProviderBundle, index: 0 | 1 | 2): number | null {
+  const raw = bundle.product?.dimensions_cm as string | null | undefined;
+  if (!raw || typeof raw !== "string") return null;
+  const parts = raw
+    .split(/[x×*,]/i)
+    .map((p) => Number(p.trim()))
+    .filter((n) => Number.isFinite(n));
+  if (parts.length <= index) return null;
+  return parts[index];
 }
 
 function isEmpty(v: unknown): boolean {
