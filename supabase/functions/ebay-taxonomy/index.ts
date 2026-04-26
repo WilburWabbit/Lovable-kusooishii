@@ -355,8 +355,11 @@ Deno.serve(async (req) => {
         throw new Error("product_id and categoryId are required");
       }
 
-      // 1. Resolve every canonical attribute for this product.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId);
+      // 1. Resolve every canonical attribute for this product, scoped by
+      //    its product_type and the chosen eBay category.
+      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
+        ebayCategoryId: categoryId,
+      });
 
       // 2. Find the cached schema for the chosen category (if any).
       const { data: schemaRow } = await admin
