@@ -358,17 +358,19 @@ export function ChannelMappingsPanel() {
           </option>
         </select>
         <span className="text-[11px] text-zinc-500">{rows.length} shown</span>
-        <button
-          type="button"
-          onClick={handleQuickMapAll}
-          disabled={unmappedAspects.length === 0 || bulkMap.isPending}
-          className="ml-auto px-2.5 py-1.5 text-[11px] font-medium rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Create canonical attributes and mappings for every unmapped aspect in this view"
-        >
-          {bulkMap.isPending
-            ? "Mapping…"
-            : `⚡ Quick map ${unmappedAspects.length} unmapped`}
-        </button>
+        {viewScope === "category" && (
+          <button
+            type="button"
+            onClick={handleQuickMapAll}
+            disabled={unmappedAspects.length === 0 || bulkMap.isPending}
+            className="ml-auto px-2.5 py-1.5 text-[11px] font-medium rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Create canonical attributes and mappings for every unmapped aspect in this view"
+          >
+            {bulkMap.isPending
+              ? "Mapping…"
+              : `⚡ Quick map ${unmappedAspects.length} unmapped`}
+          </button>
+        )}
       </div>
 
       {isLoading ? (
