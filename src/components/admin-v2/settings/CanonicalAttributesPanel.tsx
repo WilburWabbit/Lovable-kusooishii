@@ -302,13 +302,18 @@ function AttributeEditor({
                 className="w-full px-2 py-1.5 border border-zinc-200 rounded"
               />
             </Field>
-            <Field label="DB column (for writes)">
+            <Field label="DB column (auto-created on save)">
               <input
                 value={value.db_column ?? ""}
                 onChange={(e) => set("db_column", e.target.value || null)}
-                placeholder="e.g. age_mark"
+                placeholder={value.editable ? value.key || "defaults to key" : "(none for read-only)"}
                 className="w-full px-2 py-1.5 border border-zinc-200 rounded font-mono"
               />
+              <p className="text-[10px] text-zinc-500 mt-1">
+                {value.editable
+                  ? "If blank, defaults to the key. The column will be created on the product table if it doesn't exist."
+                  : "Read-only attributes don't need a DB column."}
+              </p>
             </Field>
           </div>
 
