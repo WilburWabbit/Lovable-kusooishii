@@ -2589,7 +2589,7 @@ Deno.serve(async (req) => {
       let starting_after: string | undefined = undefined;
       // Defensive cap to avoid runaway loops
       for (let page = 0; page < 20; page++) {
-        const resp = await stripe.balanceTransactions.list({
+        const resp: { data: BT[]; has_more: boolean } = await stripe.balanceTransactions.list({
           payout: payoutRow.external_payout_id,
           limit: 100,
           starting_after,
