@@ -128,18 +128,25 @@ export function CanonicalAttributesPanel() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
-                <th className="py-2 px-2">Key</th>
-                <th className="py-2 px-2">Label</th>
-                <th className="py-2 px-2">Group</th>
-                <th className="py-2 px-2">Editor</th>
-                <th className="py-2 px-2">DB column</th>
-                <th className="py-2 px-2">Provider chain</th>
-                <th className="py-2 px-2">Order</th>
+                {ATTR_COLUMNS.map((c) => (
+                  <th key={c.key} className="py-2 px-2">{c.label}</th>
+                ))}
                 <th className="py-2 px-2"></th>
+              </tr>
+              <tr className="bg-zinc-50 border-b border-zinc-200">
+                {ATTR_COLUMNS.map((c) => (
+                  <th key={c.key} className="px-2 py-1">
+                    <TableFilterInput
+                      value={filters[c.key] ?? ""}
+                      onChange={(v) => setFilter(c.key, v)}
+                    />
+                  </th>
+                ))}
+                <th />
               </tr>
             </thead>
             <tbody>
-              {sorted.map((a) => (
+              {processedRows.map((a) => (
                 <tr key={a.key} className="border-b border-zinc-100 hover:bg-zinc-50">
                   <td className="py-2 px-2 font-mono text-zinc-900">{a.key}</td>
                   <td className="py-2 px-2 text-zinc-700">{a.label}</td>
@@ -168,10 +175,12 @@ export function CanonicalAttributesPanel() {
                   </td>
                 </tr>
               ))}
-              {sorted.length === 0 && (
+              {processedRows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-zinc-500 text-[12px]">
-                    No attributes yet — click "New attribute" to seed the registry.
+                    {sorted.length === 0
+                      ? "No attributes yet — click \"New attribute\" to seed the registry."
+                      : "No attributes match your filters."}
                   </td>
                 </tr>
               )}
