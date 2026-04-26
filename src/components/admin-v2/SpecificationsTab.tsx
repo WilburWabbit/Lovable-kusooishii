@@ -1,47 +1,42 @@
 // ============================================================
 // SpecificationsTab
-// Single unified card for product specifications.
 //
-// Top: eBay category selector (auto-resolved with override). The
-// chosen category drives which channel-specific aspects are shown
-// as missing in the panel below.
-//
-// Middle: server-resolved canonical attributes — sourced from the
-// DB-driven canonical_attribute registry walked through its
-// provider chain (product → BrickEconomy → catalog → derived →
-// constant). Editable fields write back to the product table.
-//
-// Bottom: channel-only aspects (those that cannot be derived from
-// canonical data). For now this lists the eBay-only aspects; GMC
-// and Meta will plug in here later.
-//
-// All channel mapping is configured once in the Settings page at
-// /admin/settings/channel-mappings — never duplicated per product.
+// Top:    eBay category selector (auto-resolved with override).
+// Middle: Universal product facts (canonical DB-backed values like
+//         Brand, MPN, dimensions, weight). Editable; writes go to
+//         the product table.
+// Bottom: eBay category-specific item specifics. Each row shows the
+//         auto-resolved value (from the canonical mapping) plus an
+//         editable per-category override that persists into
+//         product_attribute scoped to channel/marketplace/category.
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAutoResolveEbayCategory,
   useResolveEbayAspects,
   useSetProductChannelCategory,
   useEbayCategorySuggestions,
-  type ResolvedCanonicalValue,
+  useCanonicalAttributes,
+  useSaveProductAttributes,
   type CanonicalProvider,
+  type SpecRow,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
-import type { ProductDetail, FieldOverride } from "@/lib/types/admin";
+import type { ProductDetail } from "@/lib/types/admin";
 
 interface SpecificationsTabProps {
   product: ProductDetail;
 }
 
-function SourceBadge({ source }: { source: CanonicalProvider }) {
+function SourceBadge({ source }: { source: CanonicalProvider | null }) {
+  if (!source) return null;
   const label =
     source === "override"
       ? "Override"
@@ -178,33 +173,30 @@ function CategoryOverridePicker({
   );
 }
 
-// ─── Single attribute row ──────────────────────────────────
+// ─── Universal product fact row ────────────────────────────
 
-function AttributeRow({
-  attr,
+function ProductFactRow({
+  label,
+  unit,
+  editor,
   value,
+  readOnly,
   onChange,
-  onRevert,
 }: {
-  attr: ResolvedCanonicalValue;
+  label: string;
+  unit: string | null;
+  editor: string;
   value: string;
+  readOnly: boolean;
   onChange: (v: string) => void;
-  onRevert?: () => void;
 }) {
-  const editor = attr.editor || (attr.editable ? "text" : "readOnly");
-  const isReadOnly = !attr.editable || editor === "readOnly";
-
   return (
     <div className="py-2 border-b border-zinc-100">
-      <div className="flex items-center gap-1.5 mb-1">
-        <label className="text-[11px] text-zinc-500 font-medium uppercase tracking-wider">
-          {attr.label}
-          {attr.unit && <span className="ml-1 text-zinc-400 normal-case">({attr.unit})</span>}
-        </label>
-        <SourceBadge source={attr.source} />
-      </div>
-
-      {isReadOnly ? (
+      <label className="block text-[11px] text-zinc-500 font-medium uppercase tracking-wider mb-1">
+        {label}
+        {unit && <span className="ml-1 text-zinc-400 normal-case">({unit})</span>}
+      </label>
+      {readOnly ? (
         <div className="text-[13px] text-zinc-900 py-1 font-mono">
           {value || <span className="text-amber-500/50">—</span>}
         </div>
@@ -223,15 +215,132 @@ function AttributeRow({
           className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] font-mono"
         />
       )}
+    </div>
+  );
+}
 
-      {attr.isOverride && onRevert && (
-        <button
-          type="button"
-          onClick={onRevert}
-          className="text-[10px] text-amber-600 hover:text-amber-700 underline mt-0.5 bg-transparent border-none p-0 cursor-pointer"
-        >
-          Revert to source value
-        </button>
+// ─── Aspect override row (per category) ────────────────────
+
+function AspectOverrideRow({
+  row,
+  override,
+  onChange,
+  onClear,
+}: {
+  row: SpecRow;
+  override: string | string[] | null;
+  onChange: (v: string | string[] | null) => void;
+  onClear: () => void;
+}) {
+  const isMulti = row.cardinality === "multi";
+  const allowed = row.allowedValues ?? [];
+  const hasAllowed = allowed.length > 0;
+  const customAllowed = row.allowsCustom !== false;
+
+  const autoDisplay =
+    typeof row.autoValue === "string" && row.autoValue.length > 0
+      ? row.autoValue
+      : "—";
+  const overrideStr = Array.isArray(override)
+    ? override.join(", ")
+    : (override ?? "");
+  const hasOverride = overrideStr.trim().length > 0;
+  const effective = hasOverride
+    ? overrideStr
+    : typeof row.autoValue === "string"
+      ? row.autoValue
+      : "";
+
+  return (
+    <div className="py-2 border-b border-zinc-100">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {row.required && (
+            <span className="text-red-500 leading-none" title="Required">
+              *
+            </span>
+          )}
+          <label className="text-[11px] text-zinc-700 font-medium truncate" title={row.label}>
+            {row.label}
+          </label>
+          <SourceBadge source={hasOverride ? "override" : row.autoSource} />
+          {row.mappingScope === "none" && (
+            <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-zinc-500 bg-zinc-50 border-zinc-200">
+              unmapped
+            </span>
+          )}
+        </div>
+        {hasOverride && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-[10px] text-amber-600 hover:underline whitespace-nowrap"
+          >
+            Revert
+          </button>
+        )}
+      </div>
+
+      {hasAllowed && !customAllowed ? (
+        isMulti ? (
+          <select
+            multiple
+            value={Array.isArray(override) ? override : override ? [override] : []}
+            onChange={(e) => {
+              const vals = Array.from(e.target.selectedOptions, (o) => o.value);
+              onChange(vals.length ? vals : null);
+            }}
+            className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-[13px] min-h-[80px]"
+          >
+            {allowed.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select
+            value={overrideStr}
+            onChange={(e) => onChange(e.target.value || null)}
+            className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-[13px]"
+          >
+            <option value="">— use auto ({autoDisplay}) —</option>
+            {allowed.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        )
+      ) : hasAllowed ? (
+        <input
+          list={`allowed-${row.key}`}
+          value={overrideStr}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder={hasOverride ? "" : `auto: ${autoDisplay}`}
+          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-[13px] font-mono"
+        />
+      ) : (
+        <input
+          value={overrideStr}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder={hasOverride ? "" : `auto: ${autoDisplay}`}
+          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-[13px] font-mono"
+        />
+      )}
+
+      {hasAllowed && customAllowed && (
+        <datalist id={`allowed-${row.key}`}>
+          {allowed.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+      )}
+
+      {!hasOverride && row.mappingScope !== "none" && effective !== "" && (
+        <div className="text-[10px] text-zinc-400 mt-0.5 font-mono truncate">
+          → {effective}
+        </div>
       )}
     </div>
   );
@@ -243,7 +352,6 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
   const queryClient = useQueryClient();
   const marketplace = product.ebayMarketplace || "EBAY_GB";
 
-  // Auto-resolve eBay category when no manual override.
   const auto = useAutoResolveEbayCategory(product.id, marketplace, !product.ebayCategoryId);
   const setCategory = useSetProductChannelCategory();
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -267,109 +375,157 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
 
   const effectiveCategoryId = product.ebayCategoryId ?? auto.data?.categoryId ?? null;
 
-  // Resolve all canonical attributes + the channel projection in one call.
   const aspects = useResolveEbayAspects(product.id, effectiveCategoryId, marketplace);
+  const { data: canonicalAttrs } = useCanonicalAttributes();
+  const saveAspects = useSaveProductAttributes();
 
-  // Editable form state, hydrated from resolved canonical values.
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  // ─── Universal product facts (canonical DB fields) ───────
+  // These render the canonical attributes that have a db_column on `product`,
+  // so users can still edit Brand, MPN, dimensions, weight, etc.
+  const productFacts = useMemo(() => {
+    const productType = (product as unknown as { productType?: string | null }).productType ?? null;
+    return (canonicalAttrs ?? [])
+      .filter((a) => a.active !== false)
+      .filter((a) => {
+        const types = (a as unknown as { applies_to_product_types?: string[] | null })
+          .applies_to_product_types;
+        if (Array.isArray(types) && types.length > 0) {
+          return productType ? types.includes(productType) : false;
+        }
+        return true;
+      })
+      .filter((a) => !!a.db_column)
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [canonicalAttrs, product]);
+
+  const [factForm, setFactForm] = useState<Record<string, string>>({});
+  const [factHydratedFor, setFactHydratedFor] = useState<string | null>(null);
   useEffect(() => {
-    if (!aspects.data?.canonical) return;
-    const sig = `${product.id}|${effectiveCategoryId ?? "none"}|${aspects.data.canonical.length}`;
-    if (sig === hydratedFor) return;
+    if (productFacts.length === 0) return;
+    const sig = `${product.id}|${productFacts.map((p) => p.key).join(",")}`;
+    if (sig === factHydratedFor) return;
     const next: Record<string, string> = {};
-    for (const a of aspects.data.canonical) next[a.key] = a.value ?? "";
-    setForm(next);
-    setHydratedFor(sig);
-  }, [aspects.data, product.id, effectiveCategoryId, hydratedFor]);
+    for (const a of productFacts) {
+      const col = a.db_column;
+      if (!col) continue;
+      const v = (product as unknown as Record<string, unknown>)[col];
+      next[a.key] = v == null ? "" : String(v);
+    }
+    setFactForm(next);
+    setFactHydratedFor(sig);
+  }, [productFacts, product, factHydratedFor]);
 
-  const editableAttrs = useMemo(
-    () => (aspects.data?.canonical ?? []).filter((a) => a.editable && a.dbColumn),
-    [aspects.data],
-  );
-  const isDirty = useMemo(
-    () =>
-      editableAttrs.some((a) => (form[a.key] ?? "") !== (a.value ?? "")),
-    [editableAttrs, form],
-  );
+  const factsDirty = useMemo(() => {
+    return productFacts.some((a) => {
+      const col = a.db_column;
+      if (!col) return false;
+      const cur = (product as unknown as Record<string, unknown>)[col];
+      const curStr = cur == null ? "" : String(cur);
+      return (factForm[a.key] ?? "") !== curStr;
+    });
+  }, [productFacts, factForm, product]);
 
-  const [saving, setSaving] = useState(false);
-
-  const handleChange = (key: string, value: string) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
-
-  const handleRevert = (a: ResolvedCanonicalValue) => {
-    // Revert by clearing the override field in field_overrides; the value
-    // will fall through to the next provider on re-resolve.
-    setForm((prev) => ({ ...prev, [a.key]: "" }));
-  };
-
-  const handleSave = async () => {
-    if (!aspects.data) return;
-    setSaving(true);
+  const [savingFacts, setSavingFacts] = useState(false);
+  const handleSaveFacts = async () => {
+    setSavingFacts(true);
     try {
       const updates: Record<string, unknown> = {};
-      const overrides: Record<string, FieldOverride> = { ...product.fieldOverrides };
-      let overridesChanged = false;
-
-      for (const a of editableAttrs) {
-        if (!a.dbColumn) continue;
-        const newRaw = form[a.key] ?? "";
-        const newVal = newRaw.trim() === "" ? null : newRaw;
-        const oldVal = a.value;
-        if (newVal === oldVal) continue;
-
-        // Coerce per data_type for DB write.
-        let coerced: unknown = newVal;
-        if (newVal != null) {
-          if (a.dataType === "number" || a.editor === "number") {
-            const n = Number(newVal);
-            coerced = Number.isFinite(n) ? n : null;
-          }
+      for (const a of productFacts) {
+        const col = a.db_column;
+        if (!col) continue;
+        const cur = (product as unknown as Record<string, unknown>)[col];
+        const curStr = cur == null ? "" : String(cur);
+        const next = factForm[a.key] ?? "";
+        if (next === curStr) continue;
+        if (next === "") {
+          updates[col] = null;
+        } else if (a.data_type === "int" || a.data_type === "decimal" || a.editor === "number") {
+          const n = Number(next);
+          updates[col] = Number.isFinite(n) ? n : null;
+        } else if (a.data_type === "bool") {
+          updates[col] = next === "true" || next === "1" || next.toLowerCase() === "yes";
         } else {
-          coerced = null;
-        }
-        updates[a.dbColumn] = coerced;
-
-        // Track override vs source. If a non-product source had a value and
-        // the user changed it, mark as override; if they cleared it, remove
-        // any existing override.
-        const cameFromExternalSource =
-          a.source === "brickeconomy" ||
-          a.source === "catalog" ||
-          a.source === "rebrickable" ||
-          a.source === "derived";
-
-        if (cameFromExternalSource && newVal != null) {
-          overrides[a.dbColumn] = {
-            overridden_at: new Date().toISOString(),
-            source_value: a.value ?? "",
-          };
-          overridesChanged = true;
-        } else if (newVal == null && overrides[a.dbColumn]) {
-          delete overrides[a.dbColumn];
-          overridesChanged = true;
+          updates[col] = next;
         }
       }
-
       if (Object.keys(updates).length === 0) {
-        setSaving(false);
+        setSavingFacts(false);
         return;
       }
-      if (overridesChanged) updates.field_overrides = overrides;
-
       await invokeWithAuth("admin-data", {
         action: "update-product",
         product_id: product.id,
         ...updates,
       });
-      toast.success("Specifications saved");
+      toast.success("Product facts saved");
       queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
       queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
-      setSaving(false);
+      setSavingFacts(false);
+    }
+  };
+
+  // ─── Per-category aspect overrides ───────────────────────
+  const rows: SpecRow[] = useMemo(
+    () => (aspects.data?.rows ?? []) as SpecRow[],
+    [aspects.data],
+  );
+
+  const [overrides, setOverrides] = useState<Record<string, string | string[] | null>>({});
+  const [overridesHydratedFor, setOverridesHydratedFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const sig = `${product.id}|${effectiveCategoryId ?? "none"}|${rows.map((r) => r.key).join(",")}`;
+    if (sig === overridesHydratedFor) return;
+    const next: Record<string, string | string[] | null> = {};
+    for (const r of rows) {
+      next[r.key] = r.savedValue;
+    }
+    setOverrides(next);
+    setOverridesHydratedFor(sig);
+  }, [rows, product.id, effectiveCategoryId, overridesHydratedFor]);
+
+  const aspectsDirty = useMemo(() => {
+    return rows.some((r) => {
+      const cur = r.savedValue;
+      const next = overrides[r.key];
+      const a = Array.isArray(cur) ? cur.join("\n") : (cur ?? "");
+      const b = Array.isArray(next) ? next.join("\n") : (next ?? "");
+      return a !== b;
+    });
+  }, [rows, overrides]);
+
+  const [savingAspects, setSavingAspects] = useState(false);
+  const handleSaveAspects = async () => {
+    if (!effectiveCategoryId) return;
+    setSavingAspects(true);
+    try {
+      const payload: Record<string, string | string[]> = {};
+      for (const r of rows) {
+        const v = overrides[r.key];
+        if (v == null || (typeof v === "string" && v.trim() === "")) {
+          // empty -> instruct backend to delete
+          payload[r.key] = "";
+        } else {
+          payload[r.key] = v;
+        }
+      }
+      await saveAspects.mutateAsync({
+        productId: product.id,
+        namespace: "ebay",
+        attributes: payload,
+        source: "manual",
+        channel: "ebay",
+        marketplace,
+        categoryId: effectiveCategoryId,
+      });
+      toast.success("Item specifics saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSavingAspects(false);
     }
   };
 
@@ -402,15 +558,9 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
     }
   };
 
-  // Channel-only aspects = aspects in the schema with no canonical mapping.
-  const channelOnlyAspects = useMemo(
-    () =>
-      (aspects.data?.aspects ?? []).filter(
-        (a) => a.source === "unmapped" || a.source === "none",
-      ),
-    [aspects.data],
+  const requiredMissing = rows.filter(
+    (r) => r.required && (r.effectiveValue == null || r.effectiveValue === ""),
   );
-  const requiredMissing = channelOnlyAspects.filter((a) => a.required);
 
   return (
     <div className="grid gap-4">
@@ -482,10 +632,10 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
         )}
       </SurfaceCard>
 
-      {/* Canonical specifications */}
+      {/* Universal product facts */}
       <SurfaceCard>
         <div className="flex items-center justify-between mb-3">
-          <SectionHead>Product Specifications</SectionHead>
+          <SectionHead>Universal Product Facts</SectionHead>
           <div className="flex items-center gap-3">
             <Link
               to="/admin/settings/channel-mappings"
@@ -494,24 +644,20 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
               Manage attributes & mappings
             </Link>
             <button
-              onClick={handleSave}
-              disabled={!isDirty || saving}
+              onClick={handleSaveFacts}
+              disabled={!factsDirty || savingFacts}
               className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
             >
-              {saving ? "Saving…" : "Save Specs"}
+              {savingFacts ? "Saving…" : "Save Facts"}
             </button>
           </div>
         </div>
         <p className="text-[11px] text-zinc-500 mb-3">
-          Single canonical record. Values are resolved per attribute through its
-          provider chain (product → BrickEconomy → catalog → derived). Edits save
-          to the product table; channel listings (eBay, GMC, Meta) project from
-          here automatically.
+          Canonical product values shared across every channel. These write back
+          to the product table.
         </p>
 
-        {aspects.isLoading || !aspects.data ? (
-          <div className="text-[12px] text-zinc-500 py-4">Loading specifications…</div>
-        ) : aspects.data.canonical.length === 0 ? (
+        {productFacts.length === 0 ? (
           <div className="text-[12px] text-zinc-500 py-4">
             No canonical attributes configured.{" "}
             <Link
@@ -524,66 +670,86 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            {aspects.data.canonical.map((a) => (
-              <AttributeRow
+            {productFacts.map((a) => (
+              <ProductFactRow
                 key={a.key}
-                attr={a}
-                value={form[a.key] ?? ""}
-                onChange={(v) => handleChange(a.key, v)}
-                onRevert={a.isOverride ? () => handleRevert(a) : undefined}
+                label={a.label}
+                unit={a.unit}
+                editor={a.editor}
+                readOnly={!a.editable || a.editor === "readOnly"}
+                value={factForm[a.key] ?? ""}
+                onChange={(v) =>
+                  setFactForm((prev) => ({ ...prev, [a.key]: v }))
+                }
               />
             ))}
           </div>
         )}
       </SurfaceCard>
 
-      {/* Channel-only aspects (eBay) */}
-      {effectiveCategoryId && aspects.data && (
+      {/* Per-category eBay item specifics */}
+      {effectiveCategoryId && (
         <SurfaceCard>
-          <SectionHead>Channel-only Aspects · eBay</SectionHead>
-          <p className="text-[11px] text-zinc-500 mb-3 mt-1">
-            These eBay item specifics for the chosen category are not derived from
-            canonical data. Map them once in{" "}
-            <Link
-              to="/admin/settings/channel-mappings"
-              className="text-amber-600 hover:underline"
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <SectionHead>eBay Item Specifics · {aspects.data?.categoryName ?? effectiveCategoryId}</SectionHead>
+              <p className="text-[11px] text-zinc-500 mt-1">
+                Each row shows the value resolved from your canonical mapping.
+                Type a per-category override to publish a different value to
+                eBay for this category only.
+              </p>
+            </div>
+            <button
+              onClick={handleSaveAspects}
+              disabled={!aspectsDirty || savingAspects}
+              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
             >
-              Settings
-            </Link>{" "}
-            (e.g. constant value, or a new canonical attribute).
-          </p>
-
-          <div className="text-[11px] text-zinc-600 mb-2">
-            <strong className="text-zinc-900">{aspects.data.resolvedCount}</strong> of{" "}
-            <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> aspects
-            resolved automatically
-            {requiredMissing.length > 0 && (
-              <span className="text-amber-700"> · {requiredMissing.length} required missing</span>
-            )}
+              {savingAspects ? "Saving…" : "Save Overrides"}
+            </button>
           </div>
 
-          {!aspects.data.schemaLoaded ? (
-            <div className="text-[12px] text-zinc-500">
+          {aspects.isLoading ? (
+            <div className="text-[12px] text-zinc-500 py-4">Loading specifications…</div>
+          ) : !aspects.data?.schemaLoaded ? (
+            <div className="text-[12px] text-zinc-500 py-4">
               Aspect schema not loaded for this category yet.
             </div>
-          ) : channelOnlyAspects.length === 0 ? (
-            <div className="text-[12px] text-emerald-600">
-              All aspects mapped from canonical data ✓
+          ) : rows.length === 0 ? (
+            <div className="text-[12px] text-zinc-500 py-4">
+              No aspects defined for this category.
             </div>
           ) : (
-            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-zinc-600">
-              {channelOnlyAspects.map((m) => (
-                <li key={m.aspectKey} className="flex items-center gap-1">
-                  {m.required && <span className="text-red-500">*</span>}
-                  <span>{m.aspectKey}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="text-[11px] text-zinc-600 mb-2">
+                <strong className="text-zinc-900">{aspects.data.resolvedCount}</strong> of{" "}
+                <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> aspects
+                resolved
+                {requiredMissing.length > 0 && (
+                  <span className="text-amber-700"> · {requiredMissing.length} required missing</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                {rows.map((r) => (
+                  <AspectOverrideRow
+                    key={r.key}
+                    row={r}
+                    override={overrides[r.key] ?? null}
+                    onChange={(v) =>
+                      setOverrides((prev) => ({ ...prev, [r.key]: v }))
+                    }
+                    onClear={() =>
+                      setOverrides((prev) => ({ ...prev, [r.key]: null }))
+                    }
+                  />
+                ))}
+              </div>
+            </>
           )}
         </SurfaceCard>
       )}
 
-      {/* Catalog image — kept here as it's a per-product spec choice */}
+      {/* Catalog image */}
       {product.catalogImageUrl && (
         <SurfaceCard>
           <SectionHead>Catalog Image</SectionHead>
