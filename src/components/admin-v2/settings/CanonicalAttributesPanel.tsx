@@ -14,6 +14,27 @@ import {
   type CanonicalAttributeRecord,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
+import { TableFilterInput } from "@/components/admin-v2/TableFilterInput";
+import { useSimpleTableFilters } from "@/hooks/useSimpleTableFilters";
+
+const ATTR_COLUMNS = [
+  { key: "key", label: "Key" },
+  { key: "label", label: "Label" },
+  { key: "attribute_group", label: "Group" },
+  { key: "editor", label: "Editor" },
+  { key: "db_column", label: "DB column" },
+  { key: "provider_chain_str", label: "Provider chain" },
+  { key: "sort_order", label: "Order" },
+];
+
+function attrAccessor(a: CanonicalAttributeRecord, key: string): unknown {
+  if (key === "provider_chain_str") {
+    return (a.provider_chain ?? [])
+      .map((s) => `${s.provider}.${s.field || "*"}`)
+      .join(" → ");
+  }
+  return (a as unknown as Record<string, unknown>)[key];
+}
 
 const PROVIDERS = [
   "product",
@@ -53,6 +74,8 @@ export function CanonicalAttributesPanel() {
     () => [...(attrs ?? [])].sort((a, b) => a.sort_order - b.sort_order),
     [attrs],
   );
+
+  const { filters, setFilter, processedRows } = useSimpleTableFilters(sorted, { accessor: attrAccessor });
 
   const handleSave = async () => {
     if (!editing) return;
