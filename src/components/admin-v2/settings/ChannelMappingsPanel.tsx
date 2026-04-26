@@ -611,7 +611,8 @@ function CategorySelector({
               <div className="text-[11px] text-zinc-500 p-2">No suggestions.</div>
             )}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
