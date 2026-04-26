@@ -65,7 +65,147 @@ async function ebayFetch(token: string, path: string, marketplace: string) {
   return JSON.parse(text);
 }
 
-Deno.serve(async (req) => {
+// ─── Bootstrap canonical attributes for a newly fetched category ──
+// For every aspect that doesn't already have a mapping or canonical
+// attribute, create:
+//   1. a canonical_attribute scoped to this category
+//   2. a product table column to write its value to
+//   3. a channel_attribute_mapping pointing the aspect at the new key
+// If the canonical attribute already exists, just append this category
+// to its applies_to_ebay_categories list (keeps the field visible for
+// products in this category too).
+async function bootstrapCanonicalForCategory(
+  admin: any,
+  input: {
+    marketplace: string;
+    categoryId: string;
+    aspects: Array<{
+      key: string;
+      label: string;
+      data_type: string;
+      required: boolean;
+    }>;
+  },
+) {
+  const { marketplace, categoryId, aspects } = input;
+  if (!aspects.length) return;
+
+  // Existing mappings for this aspect set (any scope)
+  const aspectKeys = aspects.map((a) => a.key);
+  const { data: existingMappings } = await admin
+    .from("channel_attribute_mapping")
+    .select("aspect_key, canonical_key, category_id, marketplace")
+    .eq("channel", "ebay")
+    .in("aspect_key", aspectKeys);
+
+  // Existing canonical attribute keys (slug match)
+  const { data: existingAttrs } = await admin
+    .from("canonical_attribute")
+    .select("key, applies_to_ebay_categories");
+  const attrByKey = new Map<string, { applies_to_ebay_categories: string[] | null }>();
+  for (const a of (existingAttrs ?? []) as any[]) {
+    attrByKey.set(a.key, { applies_to_ebay_categories: a.applies_to_ebay_categories });
+  }
+
+  const slug = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\(.+?\)/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 60);
+
+  const editorFor = (dt: string) => {
+    const t = (dt ?? "string").toLowerCase();
+    if (t === "number" || t === "int" || t === "decimal") return "number";
+    if (t === "date") return "date";
+    return "text";
+  };
+  const dataTypeFor = (dt: string) => {
+    const t = (dt ?? "string").toLowerCase();
+    if (t === "number" || t === "decimal") return "decimal";
+    if (t === "int" || t === "integer") return "int";
+    if (t === "date") return "date";
+    if (t === "bool" || t === "boolean") return "bool";
+    return "string";
+  };
+
+  for (const aspect of aspects) {
+    // Already mapped (in any scope)? Leave alone.
+    const alreadyMapped = (existingMappings ?? []).some(
+      (m: any) =>
+        m.aspect_key === aspect.key &&
+        (m.category_id === categoryId || m.category_id === null),
+    );
+    if (alreadyMapped) continue;
+
+    const canonicalKey = slug(aspect.key);
+    if (!canonicalKey) continue;
+
+    const dt = dataTypeFor(aspect.data_type);
+    const editor = editorFor(aspect.data_type);
+
+    const existing = attrByKey.get(canonicalKey);
+    if (existing) {
+      // Already exists — just ensure this category is in its scope list.
+      const cats = existing.applies_to_ebay_categories ?? [];
+      if (!cats.includes(categoryId)) {
+        await admin
+          .from("canonical_attribute")
+          .update({
+            applies_to_ebay_categories: [...cats, categoryId],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("key", canonicalKey);
+      }
+    } else {
+      // Create the product column first (idempotent via ensure_product_column).
+      const { error: colErr } = await admin.rpc("ensure_product_column", {
+        p_column_name: canonicalKey,
+        p_data_type: dt,
+      });
+      if (colErr) {
+        console.error(`ensure_product_column failed for ${canonicalKey}:`, colErr);
+        continue;
+      }
+
+      const { error: insErr } = await admin.from("canonical_attribute").insert({
+        key: canonicalKey,
+        label: aspect.label || aspect.key,
+        attribute_group: "physical",
+        editor,
+        data_type: dt,
+        db_column: canonicalKey,
+        provider_chain: [{ provider: "product", field: canonicalKey }],
+        editable: true,
+        sort_order: 500,
+        active: true,
+        applies_to_ebay_categories: [categoryId],
+      });
+      if (insErr) {
+        console.error(`canonical_attribute insert failed for ${canonicalKey}:`, insErr);
+        continue;
+      }
+      attrByKey.set(canonicalKey, { applies_to_ebay_categories: [categoryId] });
+    }
+
+    // Insert mapping scoped to this exact (marketplace, category, aspect).
+    const { error: mapErr } = await admin.from("channel_attribute_mapping").insert({
+      channel: "ebay",
+      marketplace,
+      category_id: categoryId,
+      aspect_key: aspect.key,
+      canonical_key: canonicalKey,
+      constant_value: null,
+      transform: null,
+      notes: "Auto-bootstrapped from eBay category schema",
+    });
+    if (mapErr) {
+      console.error(`mapping insert failed for ${aspect.key}:`, mapErr);
+    }
+  }
+}
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
@@ -249,6 +389,19 @@ Deno.serve(async (req) => {
         if (attrErr) throw attrErr;
       }
 
+      // Bootstrap canonical attributes + mappings for every aspect of this
+      // category that doesn't already have one. This ensures newly added
+      // categories produce editable Specifications fields with no manual setup.
+      try {
+        await bootstrapCanonicalForCategory(admin, {
+          marketplace,
+          categoryId,
+          aspects: attrRows,
+        });
+      } catch (bootErr) {
+        console.error("bootstrap canonical failed (non-fatal):", bootErr);
+      }
+
       return jsonResponse({
         schemaId,
         categoryId,
@@ -355,8 +508,11 @@ Deno.serve(async (req) => {
         throw new Error("product_id and categoryId are required");
       }
 
-      // 1. Resolve every canonical attribute for this product.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId);
+      // 1. Resolve every canonical attribute for this product, scoped by
+      //    its product_type and the chosen eBay category.
+      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
+        ebayCategoryId: categoryId,
+      });
 
       // 2. Find the cached schema for the chosen category (if any).
       const { data: schemaRow } = await admin
