@@ -351,40 +351,63 @@ function AttributeEditor({
               </button>
             </div>
             <div className="space-y-2">
-              {(value.provider_chain ?? []).map((step, idx) => (
-                <div key={idx} className="flex gap-2 items-center">
-                  <span className="text-zinc-400 text-[11px] w-4">{idx + 1}.</span>
-                  <select
-                    value={step.provider}
-                    onChange={(e) => updateChain(idx, "provider", e.target.value)}
-                    className="px-2 py-1.5 border border-zinc-200 rounded"
-                  >
-                    {PROVIDERS.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={step.field}
-                    onChange={(e) => updateChain(idx, "field", e.target.value)}
-                    placeholder={
-                      step.provider === "constant"
-                        ? "constant value"
-                        : step.provider === "derived"
-                          ? "derive rule (e.g. mpn_base)"
-                          : "field name"
-                    }
-                    className="flex-1 px-2 py-1.5 border border-zinc-200 rounded font-mono"
-                  />
-                  <button
-                    onClick={() => removeChainStep(idx)}
-                    className="text-red-500 hover:text-red-700 px-2"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              {(value.provider_chain ?? []).map((step, idx) => {
+                const chainLen = (value.provider_chain ?? []).length;
+                return (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <span className="text-zinc-400 text-[11px] w-4">{idx + 1}.</span>
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => moveChainStep(idx, -1)}
+                        disabled={idx === 0}
+                        title="Move up"
+                        className="text-zinc-400 hover:text-zinc-700 leading-none text-[10px] disabled:opacity-25 disabled:cursor-not-allowed"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveChainStep(idx, 1)}
+                        disabled={idx === chainLen - 1}
+                        title="Move down"
+                        className="text-zinc-400 hover:text-zinc-700 leading-none text-[10px] disabled:opacity-25 disabled:cursor-not-allowed"
+                      >
+                        ▼
+                      </button>
+                    </div>
+                    <select
+                      value={step.provider}
+                      onChange={(e) => updateChain(idx, "provider", e.target.value)}
+                      className="px-2 py-1.5 border border-zinc-200 rounded"
+                    >
+                      {PROVIDERS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={step.field}
+                      onChange={(e) => updateChain(idx, "field", e.target.value)}
+                      placeholder={
+                        step.provider === "constant"
+                          ? "constant value"
+                          : step.provider === "derived"
+                            ? "derive rule (e.g. mpn_base)"
+                            : "field name"
+                      }
+                      className="flex-1 px-2 py-1.5 border border-zinc-200 rounded font-mono"
+                    />
+                    <button
+                      onClick={() => removeChainStep(idx)}
+                      className="text-red-500 hover:text-red-700 px-2"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
