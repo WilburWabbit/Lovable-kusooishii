@@ -22,7 +22,7 @@ import {
 
 const APPLIES_TO_OPTIONS = ['sale_price', 'sale_plus_shipping', 'sale_price_inc_vat'];
 
-const FEE_COLUMNS = [
+const FEE_COLUMNS: { key: keyof ChannelFee | 'notes'; label: string }[] = [
   { key: 'fee_name', label: 'Fee Name' },
   { key: 'rate_percent', label: 'Rate %' },
   { key: 'fixed_amount', label: 'Fixed £' },
