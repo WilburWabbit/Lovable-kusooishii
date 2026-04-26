@@ -394,8 +394,11 @@ export function ChannelMappingsPanel() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ aspectKey, required, mapping }) => (
-                <tr key={aspectKey} className="border-b border-zinc-100 hover:bg-zinc-50">
+              {rows.map((row) => {
+                const { aspectKey, required, mapping } = row;
+                const rowKey = (row as { rowKey?: string }).rowKey ?? aspectKey;
+                return (
+                <tr key={rowKey} className="border-b border-zinc-100 hover:bg-zinc-50">
                   <td className="py-2 px-2">
                     {required && <span className="text-red-500 mr-1" title="Required">*</span>}
                     <span className="font-mono text-zinc-900">{aspectKey}</span>
@@ -453,7 +456,8 @@ export function ChannelMappingsPanel() {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-zinc-500 text-[12px]">
