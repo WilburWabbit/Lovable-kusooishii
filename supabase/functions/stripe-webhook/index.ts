@@ -1103,11 +1103,14 @@ async function handlePayoutPaid(payoutObj: Record<string, unknown>, isTestEvent:
       order_gross: grossById.get(orderId) ?? 0,
     }));
 
-    await supabase
-      .from("payout_orders")
-      .upsert(orderLinks as never, { onConflict: "payout_id,sales_order_id" as never })
-      .then(() => console.log(`Linked ${matchedOrderIds.length} orders to payout ${payoutId}`))
-      .catch((err: unknown) => console.warn("Failed to link orders to payout:", err));
+    try {
+      await supabase
+        .from("payout_orders")
+        .upsert(orderLinks as never, { onConflict: "payout_id,sales_order_id" as never });
+      console.log(`Linked ${matchedOrderIds.length} orders to payout ${payoutId}`);
+    } catch (err: unknown) {
+      console.warn("Failed to link orders to payout:", err);
+    }
   }
 
   // Insert per-charge payout_fee rows so reconciliation can populate
