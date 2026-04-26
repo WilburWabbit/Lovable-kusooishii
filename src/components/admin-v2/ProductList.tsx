@@ -9,6 +9,7 @@ import type { ProductStockCounts } from "@/hooks/admin/use-products";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { BulkCategoryAssignDialog } from "./BulkCategoryAssignDialog";
 import { Download, Search, Tag } from "lucide-react";
 

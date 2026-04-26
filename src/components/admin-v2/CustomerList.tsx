@@ -8,6 +8,7 @@ import type { CustomerRow } from "@/lib/types/admin";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { Download, Search } from "lucide-react";
 
 // ─── Value accessor ──────────────────────────────────────────

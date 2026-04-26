@@ -8,6 +8,7 @@ import type { OrderDetail } from "@/lib/types/admin";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, OrderStatusBadge, Badge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { CashSaleForm } from "./CashSaleForm";
 import { CompleteOrderModal } from "./CompleteOrderModal";
 import { Download, Search } from "lucide-react";
