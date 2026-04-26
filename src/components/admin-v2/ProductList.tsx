@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProducts, useProductStockCounts } from "@/hooks/admin/use-products";
 import { useTablePreferences } from "@/hooks/useTablePreferences";
@@ -9,7 +9,8 @@ import type { ProductStockCounts } from "@/hooks/admin/use-products";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
-import { Download, Search } from "lucide-react";
+import { BulkCategoryAssignDialog } from "./BulkCategoryAssignDialog";
+import { Download, Search, Tag } from "lucide-react";
 
 // ─── Flattened row type ──────────────────────────────────────
 
