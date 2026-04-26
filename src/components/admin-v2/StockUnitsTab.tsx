@@ -173,10 +173,10 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                 </td>
               </tr>
             ))}
-            {units.length === 0 && (
+            {processedRows.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-3 py-6 text-center text-zinc-500 text-sm">
-                  No stock units for this product.
+                  {units.length === 0 ? "No stock units for this product." : "No units match your filters."}
                 </td>
               </tr>
             )}
