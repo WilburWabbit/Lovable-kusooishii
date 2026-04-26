@@ -2602,31 +2602,49 @@ export type Database = {
       }
       product_attribute: {
         Row: {
+          aspect_key: string | null
+          category_id: string | null
+          channel: string | null
           id: string
+          is_override: boolean
           key: string
+          marketplace: string | null
           namespace: string
           product_id: string
           source: string
+          source_value: string | null
           updated_at: string
           value: string | null
           value_json: Json | null
         }
         Insert: {
+          aspect_key?: string | null
+          category_id?: string | null
+          channel?: string | null
           id?: string
+          is_override?: boolean
           key: string
+          marketplace?: string | null
           namespace: string
           product_id: string
           source?: string
+          source_value?: string | null
           updated_at?: string
           value?: string | null
           value_json?: Json | null
         }
         Update: {
+          aspect_key?: string | null
+          category_id?: string | null
+          channel?: string | null
           id?: string
+          is_override?: boolean
           key?: string
+          marketplace?: string | null
           namespace?: string
           product_id?: string
           source?: string
+          source_value?: string | null
           updated_at?: string
           value?: string | null
           value_json?: Json | null
@@ -4060,6 +4078,14 @@ export type Database = {
           total_stock: number
         }[]
       }
+      bulk_set_ebay_category: {
+        Args: {
+          p_category_id: string
+          p_marketplace?: string
+          p_product_ids: string[]
+        }
+        Returns: number
+      }
       catalog_filter_options: {
         Args: {
           filter_subtheme?: string
@@ -4116,6 +4142,19 @@ export type Database = {
           p_vendor_type?: Database["public"]["Enums"]["vendor_type"]
         }
         Returns: string
+      }
+      get_ebay_category_schema: {
+        Args: { p_category_id: string; p_marketplace: string }
+        Returns: {
+          allowed_values: Json
+          allows_custom: boolean
+          aspect_key: string
+          cardinality: string
+          data_type: string
+          label: string
+          required: boolean
+          sort_order: number
+        }[]
       }
       get_my_order_lines: {
         Args: { p_order_id: string }
