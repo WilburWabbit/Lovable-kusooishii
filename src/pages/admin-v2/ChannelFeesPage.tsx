@@ -3,9 +3,7 @@ import { AdminV2Layout } from '@/components/admin-v2/AdminV2Layout';
 import { SurfaceCard, SectionHead } from '@/components/admin-v2/ui-primitives';
 import { PricingSettingsCard } from '@/components/admin-v2/PricingSettingsCard';
 import { PricingActionsCard } from '@/components/admin-v2/PricingActionsCard';
-import { TableFilterInput } from '@/components/admin-v2/TableFilterInput';
 import { useChannelFees, useUpsertChannelFee, useDeleteChannelFee, type ChannelFee } from '@/hooks/admin/use-channel-fees';
-import { filterRows } from '@/lib/table-utils';
 import { toast } from 'sonner';
 import { Plus, Trash2, Check, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -21,17 +19,6 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const APPLIES_TO_OPTIONS = ['sale_price', 'sale_plus_shipping', 'sale_price_inc_vat'];
-
-const FEE_COLUMNS: { key: keyof ChannelFee | 'notes'; label: string }[] = [
-  { key: 'fee_name', label: 'Fee Name' },
-  { key: 'rate_percent', label: 'Rate %' },
-  { key: 'fixed_amount', label: 'Fixed £' },
-  { key: 'applies_to', label: 'Applies To' },
-  { key: 'min_amount', label: 'Min' },
-  { key: 'max_amount', label: 'Max' },
-  { key: 'active', label: 'Active' },
-  { key: 'notes', label: 'Notes' },
-];
 
 function emptyFee(channel: string): Partial<ChannelFee> & { channel: string; fee_name: string } {
   return { channel, fee_name: '', rate_percent: 0, fixed_amount: 0, applies_to: 'sale_price', active: true, notes: '' };
