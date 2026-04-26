@@ -105,9 +105,19 @@ export function ChannelMappingsPanel() {
   }, [mappings, schemaResult]);
 
   // Apply text + status filter, then sort
+  // Text filter supports NULL / NOT NULL / !NULL sentinels (case-insensitive):
+  //   NULL → only rows with no mapping (unmapped)
+  //   NOT NULL / !NULL → only rows that are mapped
   const rows = useMemo(() => {
-    const q = filter.trim().toLowerCase();
+    const trimmed = filter.trim();
+    const upper = trimmed.toUpperCase();
+    const isNullFilter = upper === "NULL";
+    const isNotNullFilter = upper === "NOT NULL" || upper === "!NULL";
+    const q = isNullFilter || isNotNullFilter ? "" : trimmed.toLowerCase();
+
     const filtered = baseRows.filter((r) => {
+      if (isNullFilter && r.mapping) return false;
+      if (isNotNullFilter && !r.mapping) return false;
       if (q) {
         const haystack = [
           r.aspectKey,
