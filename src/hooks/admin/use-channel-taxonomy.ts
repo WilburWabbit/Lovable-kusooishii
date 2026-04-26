@@ -366,6 +366,9 @@ export function useSaveProductAttributes() {
       namespace: "core" | "ebay" | "gmc" | "meta";
       attributes: Record<string, string | string[]>;
       source?: string;
+      channel?: string | null;
+      marketplace?: string | null;
+      categoryId?: string | null;
     }) => {
       return await invokeWithAuth("admin-data", {
         action: "save-product-attributes",
@@ -373,6 +376,9 @@ export function useSaveProductAttributes() {
         namespace: input.namespace,
         attributes: input.attributes,
         source: input.source,
+        channel: input.channel ?? input.namespace,
+        marketplace: input.marketplace ?? null,
+        category_id: input.categoryId ?? null,
       });
     },
     onSuccess: (_d, vars) => {
@@ -382,6 +388,7 @@ export function useSaveProductAttributes() {
       queryClient.invalidateQueries({
         queryKey: taxonomyKeys.attributes(vars.productId, "all"),
       });
+      queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
     },
   });
 }
