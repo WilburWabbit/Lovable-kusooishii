@@ -149,13 +149,19 @@ export function SummaryCard({ label, value, color = "#18181B" }: SummaryCardProp
 
 // ─── SectionHead ────────────────────────────────────────────
 
-export function SectionHead({ children }: { children: React.ReactNode }) {
+export const SectionHead = React.forwardRef<
+  HTMLHeadingElement,
+  { children: React.ReactNode }
+>(function SectionHead({ children }, ref) {
   return (
-    <h3 className="text-[11px] text-zinc-500 font-semibold uppercase tracking-[0.06em] mb-3">
+    <h3
+      ref={ref}
+      className="text-[11px] text-zinc-500 font-semibold uppercase tracking-[0.06em] mb-3"
+    >
       {children}
     </h3>
   );
-}
+});
 
 // ─── BackButton ─────────────────────────────────────────────
 
