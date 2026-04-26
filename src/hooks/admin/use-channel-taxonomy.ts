@@ -23,6 +23,45 @@ export interface ResolvedAspect {
   basis: string;
 }
 
+// ─── DB-driven canonical resolution ─────────────────────────
+
+export type CanonicalProvider =
+  | "product"
+  | "brickeconomy"
+  | "catalog"
+  | "rebrickable"
+  | "theme"
+  | "constant"
+  | "derived"
+  | "override"
+  | "none";
+
+export interface ResolvedCanonicalValue {
+  key: string;
+  label: string;
+  value: string | null;
+  source: CanonicalProvider;
+  sourceField: string | null;
+  editor: string;
+  dataType: string;
+  unit: string | null;
+  dbColumn: string | null;
+  editable: boolean;
+  sortOrder: number;
+  group: string;
+  isOverride: boolean;
+}
+
+export interface MappedAspect {
+  aspectKey: string;
+  required: boolean;
+  value: string | null;
+  source: "canonical" | "constant" | "unmapped" | "none";
+  canonicalKey: string | null;
+  canonicalSource: CanonicalProvider | null;
+  constantValue: string | null;
+}
+
 export interface ChannelAspectsResolution {
   categoryId: string;
   categoryName: string | null;
@@ -30,8 +69,8 @@ export interface ChannelAspectsResolution {
   resolvedCount: number;
   totalSchemaCount: number;
   missingRequiredCount: number;
-  resolved: Record<string, ResolvedAspect>;
-  missing: { key: string; required: boolean }[];
+  canonical: ResolvedCanonicalValue[];
+  aspects: MappedAspect[];
 }
 
 export interface AutoCategoryResult {
