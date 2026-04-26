@@ -161,6 +161,7 @@ export interface Product {
   cta: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
+  ebayCategoryId: string | null;
   createdAt: string;
 }
 

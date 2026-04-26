@@ -183,6 +183,13 @@ const COLUMNS: ColumnDef<ProductRow>[] = [
     render: (r) => <Mono>{r.weightG ?? "—"}</Mono>,
   },
   {
+    key: "ebayCategoryId",
+    label: "eBay Category",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color={r.ebayCategoryId ? undefined : "dim"}>{r.ebayCategoryId ?? "—"}</Mono>,
+  },
+  {
     key: "createdAt",
     label: "Added",
     defaultVisible: false,
