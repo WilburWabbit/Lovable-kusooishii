@@ -23,6 +23,7 @@ import {
   useEbayCategorySuggestions,
   useEbayCategoryAspects,
   useProductChannelCategories,
+  useBulkCreateAndMapAspects,
   type ChannelMappingRecord,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
