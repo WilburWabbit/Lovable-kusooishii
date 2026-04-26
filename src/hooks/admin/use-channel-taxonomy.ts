@@ -463,17 +463,28 @@ export interface ChannelMappingRecord {
 }
 
 export const channelMappingKeys = {
-  list: (channel: string, marketplace?: string, categoryId?: string | null) =>
-    ["channel-mappings", channel, marketplace ?? "all", categoryId ?? "default"] as const,
+  list: (
+    channel: string,
+    marketplace?: string,
+    categoryId?: string | null,
+    scope?: "category" | "all",
+  ) =>
+    [
+      "channel-mappings",
+      channel,
+      marketplace ?? "all",
+      scope === "all" ? "__all__" : (categoryId ?? "default"),
+    ] as const,
 };
 
 export function useChannelMappings(
   channel: string = "ebay",
   marketplace?: string,
   categoryId?: string | null,
+  scope: "category" | "all" = "category",
 ) {
   return useQuery({
-    queryKey: channelMappingKeys.list(channel, marketplace, categoryId),
+    queryKey: channelMappingKeys.list(channel, marketplace, categoryId, scope),
     queryFn: async (): Promise<ChannelMappingRecord[]> => {
       const res = await invokeWithAuth<{ mappings: ChannelMappingRecord[] }>(
         "ebay-taxonomy",
@@ -481,7 +492,8 @@ export function useChannelMappings(
           action: "list-channel-mappings",
           channel,
           marketplace,
-          categoryId,
+          categoryId: scope === "all" ? undefined : categoryId,
+          scope,
         },
       );
       return res.mappings ?? [];
