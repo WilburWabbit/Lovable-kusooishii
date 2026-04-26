@@ -400,11 +400,27 @@ Deno.serve(async (req) => {
     if (action === "upsert-canonical-attribute") {
       const row = body.attribute;
       if (!row?.key || !row?.label) throw new Error("key and label are required");
+
+      // Auto-create product column for editable attributes that need a write target.
+      // If db_column is omitted but the attribute is editable, default it to the key.
+      let columnInfo: { created: boolean; column: string; sql_type: string } | null = null;
+      if (row.editable && !row.db_column) {
+        row.db_column = row.key;
+      }
+      if (row.db_column) {
+        const { data: ensured, error: ensureErr } = await (admin as any).rpc(
+          "ensure_product_column",
+          { p_column_name: row.db_column, p_data_type: row.data_type ?? "string" },
+        );
+        if (ensureErr) throw new Error(`Failed to ensure column: ${ensureErr.message}`);
+        columnInfo = ensured as typeof columnInfo;
+      }
+
       const { error } = await admin
         .from("canonical_attribute")
         .upsert(row, { onConflict: "key" });
       if (error) throw error;
-      return jsonResponse({ success: true });
+      return jsonResponse({ success: true, column: columnInfo });
     }
 
     if (action === "delete-canonical-attribute") {
