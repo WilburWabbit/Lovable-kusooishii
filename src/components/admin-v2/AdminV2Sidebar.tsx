@@ -10,6 +10,7 @@ import {
   ArrowUpDown,
   Receipt,
   Truck,
+  Settings,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -199,6 +200,13 @@ export function AdminV2Sidebar({
           label="Shipping Rates"
           to="/admin/shipping-rates"
           active={isActive("/admin/shipping-rates")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={Settings}
+          label="Channel Mappings"
+          to="/admin/settings/channel-mappings"
+          active={isActive("/admin/settings/channel-mappings")}
           onNavigate={onClose}
         />
       </div>
