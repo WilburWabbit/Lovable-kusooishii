@@ -2319,12 +2319,18 @@ export type Database = {
         Row: {
           age_mark: string | null
           age_range: string | null
+          appliance_capabilities: string | null
+          appliance_uses: string | null
           brand: string | null
           brickeconomy_id: string | null
           bricklink_item_no: string | null
           brickowl_boid: string | null
+          cable_length: string | null
           call_to_action: string | null
+          capacity: string | null
+          colour: string | null
           compatible_lego_set: string | null
+          components_included: string | null
           country_of_origin: string | null
           created_at: string
           description: string | null
@@ -2332,8 +2338,11 @@ export type Database = {
           ean: string | null
           ebay_category_id: string | null
           ebay_marketplace: string | null
+          ec_range: string | null
+          energy_efficiency_rating: string | null
           features: string | null
           field_overrides: Json | null
+          food_compatibility: string | null
           gmc_product_category: string | null
           height_cm: number | null
           highlights: string | null
@@ -2342,6 +2351,7 @@ export type Database = {
           include_catalog_img: boolean
           interests: string | null
           isbn: string | null
+          item_diameter: string | null
           item_height: string | null
           item_length: string | null
           item_number: string | null
@@ -2350,14 +2360,24 @@ export type Database = {
           lego_catalog_id: string | null
           lego_character: string | null
           lego_set_name: string | null
+          lego_set_number: string | null
+          lego_subtheme: string | null
+          lego_theme: string | null
           length_cm: number | null
+          manufacturer_warranty: string | null
           material: string | null
           meta_category: string | null
           minifigs_count: number | null
           minifigure_number: string | null
           mpn: string
           name: string | null
+          number_of_blades: string | null
+          number_of_items: string | null
+          number_of_settings_programs: string | null
+          number_of_speeds: string | null
           piece_count: number | null
+          power: string | null
+          power_source: string | null
           product_hook: string | null
           product_type: string
           rebrickable_id: string | null
@@ -2378,20 +2398,28 @@ export type Database = {
           upc: string | null
           updated_at: string
           version_descriptor: string | null
+          voltage: string | null
           weight_g: number | null
           weight_kg: number | null
           width_cm: number | null
+          year_manufactured: string | null
           year_retired: string | null
         }
         Insert: {
           age_mark?: string | null
           age_range?: string | null
+          appliance_capabilities?: string | null
+          appliance_uses?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
+          cable_length?: string | null
           call_to_action?: string | null
+          capacity?: string | null
+          colour?: string | null
           compatible_lego_set?: string | null
+          components_included?: string | null
           country_of_origin?: string | null
           created_at?: string
           description?: string | null
@@ -2399,8 +2427,11 @@ export type Database = {
           ean?: string | null
           ebay_category_id?: string | null
           ebay_marketplace?: string | null
+          ec_range?: string | null
+          energy_efficiency_rating?: string | null
           features?: string | null
           field_overrides?: Json | null
+          food_compatibility?: string | null
           gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
@@ -2409,6 +2440,7 @@ export type Database = {
           include_catalog_img?: boolean
           interests?: string | null
           isbn?: string | null
+          item_diameter?: string | null
           item_height?: string | null
           item_length?: string | null
           item_number?: string | null
@@ -2417,14 +2449,24 @@ export type Database = {
           lego_catalog_id?: string | null
           lego_character?: string | null
           lego_set_name?: string | null
+          lego_set_number?: string | null
+          lego_subtheme?: string | null
+          lego_theme?: string | null
           length_cm?: number | null
+          manufacturer_warranty?: string | null
           material?: string | null
           meta_category?: string | null
           minifigs_count?: number | null
           minifigure_number?: string | null
           mpn: string
           name?: string | null
+          number_of_blades?: string | null
+          number_of_items?: string | null
+          number_of_settings_programs?: string | null
+          number_of_speeds?: string | null
           piece_count?: number | null
+          power?: string | null
+          power_source?: string | null
           product_hook?: string | null
           product_type?: string
           rebrickable_id?: string | null
@@ -2445,20 +2487,28 @@ export type Database = {
           upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          voltage?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_manufactured?: string | null
           year_retired?: string | null
         }
         Update: {
           age_mark?: string | null
           age_range?: string | null
+          appliance_capabilities?: string | null
+          appliance_uses?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
+          cable_length?: string | null
           call_to_action?: string | null
+          capacity?: string | null
+          colour?: string | null
           compatible_lego_set?: string | null
+          components_included?: string | null
           country_of_origin?: string | null
           created_at?: string
           description?: string | null
@@ -2466,8 +2516,11 @@ export type Database = {
           ean?: string | null
           ebay_category_id?: string | null
           ebay_marketplace?: string | null
+          ec_range?: string | null
+          energy_efficiency_rating?: string | null
           features?: string | null
           field_overrides?: Json | null
+          food_compatibility?: string | null
           gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
@@ -2476,6 +2529,7 @@ export type Database = {
           include_catalog_img?: boolean
           interests?: string | null
           isbn?: string | null
+          item_diameter?: string | null
           item_height?: string | null
           item_length?: string | null
           item_number?: string | null
@@ -2484,14 +2538,24 @@ export type Database = {
           lego_catalog_id?: string | null
           lego_character?: string | null
           lego_set_name?: string | null
+          lego_set_number?: string | null
+          lego_subtheme?: string | null
+          lego_theme?: string | null
           length_cm?: number | null
+          manufacturer_warranty?: string | null
           material?: string | null
           meta_category?: string | null
           minifigs_count?: number | null
           minifigure_number?: string | null
           mpn?: string
           name?: string | null
+          number_of_blades?: string | null
+          number_of_items?: string | null
+          number_of_settings_programs?: string | null
+          number_of_speeds?: string | null
           piece_count?: number | null
+          power?: string | null
+          power_source?: string | null
           product_hook?: string | null
           product_type?: string
           rebrickable_id?: string | null
@@ -2512,9 +2576,11 @@ export type Database = {
           upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          voltage?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_manufactured?: string | null
           year_retired?: string | null
         }
         Relationships: [
