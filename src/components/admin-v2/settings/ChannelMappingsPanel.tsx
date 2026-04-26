@@ -197,6 +197,36 @@ export function ChannelMappingsPanel() {
     });
   };
 
+  const unmappedAspects = useMemo(
+    () => baseRows.filter((r) => !r.mapping).map((r) => r.aspectKey),
+    [baseRows],
+  );
+
+  const handleQuickMapAll = async () => {
+    if (unmappedAspects.length === 0) return;
+    const confirmed = confirm(
+      `Create canonical attributes and map ${unmappedAspects.length} unmapped aspect(s) for ${
+        categoryId ? `category ${categoryId}` : "all categories"
+      } / ${marketplace}?\n\nEach aspect will get a snake_case canonical key and a default mapping you can refine later.`,
+    );
+    if (!confirmed) return;
+    try {
+      const res = await bulkMap.mutateAsync({
+        channel,
+        marketplace,
+        categoryId,
+        aspects: unmappedAspects.map((aspect_key) => ({ aspect_key })),
+      });
+      toast.success(
+        `Mapped ${res.aspectsMapped?.length ?? 0} aspect(s) · created ${
+          res.canonicalCreated?.length ?? 0
+        } new canonical attribute(s)`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Quick map failed");
+    }
+  };
+
   // Map of categoryId → friendly name from product usage list (for scope display)
   const categoryNameById = useMemo(() => {
     const m = new Map<string, string>();
