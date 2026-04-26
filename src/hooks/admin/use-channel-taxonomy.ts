@@ -281,6 +281,40 @@ export function useSetProductChannelCategory() {
   });
 }
 
+export function useBulkSetProductChannelCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      productIds: string[];
+      channel: "ebay" | "gmc" | "meta";
+      categoryId: string | null;
+      marketplace?: string;
+    }) => {
+      return await invokeWithAuth<{ success: boolean; updated: number }>(
+        "admin-data",
+        {
+          action: "bulk-set-product-channel-category",
+          product_ids: input.productIds,
+          channel: input.channel,
+          category_id: input.categoryId,
+          marketplace: input.marketplace,
+        },
+      );
+    },
+    onSuccess: async (_d, vars) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["v2", "products"] }),
+        queryClient.invalidateQueries({
+          queryKey: taxonomyKeys.productCategories(
+            vars.channel,
+            vars.marketplace ?? "EBAY_GB",
+          ),
+        }),
+      ]);
+    },
+  });
+}
+
 // ─── Product attributes (per-namespace) ─────────────────────
 
 export function useProductAttributes(
