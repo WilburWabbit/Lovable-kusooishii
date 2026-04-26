@@ -272,6 +272,8 @@ export type Database = {
       canonical_attribute: {
         Row: {
           active: boolean
+          applies_to_ebay_categories: string[] | null
+          applies_to_product_types: string[] | null
           attribute_group: string
           created_at: string
           data_type: string
@@ -288,6 +290,8 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          applies_to_ebay_categories?: string[] | null
+          applies_to_product_types?: string[] | null
           attribute_group?: string
           created_at?: string
           data_type?: string
@@ -304,6 +308,8 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          applies_to_ebay_categories?: string[] | null
+          applies_to_product_types?: string[] | null
           attribute_group?: string
           created_at?: string
           data_type?: string
