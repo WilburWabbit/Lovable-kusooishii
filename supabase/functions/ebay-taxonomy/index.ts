@@ -43,7 +43,8 @@ function treeIdFor(marketplace: string): string {
 }
 
 async function ebayFetch(token: string, path: string, marketplace: string) {
-  const res = await fetchWithTimeout(`${EBAY_API}${path}`, {
+  const url = `${EBAY_API}${path}`;
+  const init: RequestInit = {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -51,7 +52,30 @@ async function ebayFetch(token: string, path: string, marketplace: string) {
       "X-EBAY-C-MARKETPLACE-ID": marketplace,
       "Accept-Language": "en-GB",
     },
-  });
+  };
+
+  // Retry transient DNS / connect errors that the Supabase edge runtime
+  // occasionally surfaces when contacting api.ebay.com.
+  let res: Response | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      res = await fetchWithTimeout(url, init);
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient =
+        msg.includes("dns error") ||
+        msg.includes("Name or service not known") ||
+        msg.includes("error sending request") ||
+        msg.includes("client error (Connect)");
+      if (!transient || attempt === 2) throw err;
+      await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+    }
+  }
+  if (!res) throw lastErr ?? new Error("eBay Taxonomy: no response");
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`eBay Taxonomy [${res.status}]: ${text}`);
