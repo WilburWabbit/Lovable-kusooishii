@@ -149,7 +149,7 @@ export function SummaryCard({ label, value, color = "#18181B" }: SummaryCardProp
 
 // ─── SectionHead ────────────────────────────────────────────
 
-export const SectionHead = React.forwardRef<
+export const SectionHead = forwardRef<
   HTMLHeadingElement,
   { children: React.ReactNode }
 >(function SectionHead({ children }, ref) {
