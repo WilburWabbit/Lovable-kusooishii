@@ -115,6 +115,31 @@ async function bootstrapCanonicalForCategory(
       .replace(/^_+|_+$/g, "")
       .slice(0, 60);
 
+  // Map common eBay aspect names to existing universal canonical keys so we
+  // don't create duplicate columns like `type` when `product_type` exists.
+  const ALIASES: Record<string, string> = {
+    type: "product_type",
+    brand: "brand",
+    mpn: "mpn",
+    model: "mpn",
+    ean: "ean",
+    upc: "upc",
+    isbn: "isbn",
+    weight: "weight_g",
+    item_weight: "weight_g",
+    length: "length_cm",
+    item_length: "length_cm",
+    width: "width_cm",
+    item_width: "width_cm",
+    height: "height_cm",
+    item_height: "height_cm",
+    item_depth: "length_cm",
+    age_level: "age_mark",
+    recommended_age_range: "age_mark",
+    age_mark: "age_mark",
+    packaging: "packaging",
+  };
+
   const editorFor = (dt: string) => {
     const t = (dt ?? "string").toLowerCase();
     if (t === "number" || t === "int" || t === "decimal") return "number";
