@@ -206,6 +206,14 @@ function AttributeEditor({
       (value.provider_chain ?? []).filter((_, i) => i !== idx),
     );
 
+  const moveChainStep = (idx: number, dir: -1 | 1) => {
+    const chain = [...(value.provider_chain ?? [])];
+    const target = idx + dir;
+    if (target < 0 || target >= chain.length) return;
+    [chain[idx], chain[target]] = [chain[target], chain[idx]];
+    set("provider_chain", chain);
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
