@@ -83,18 +83,31 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
           <thead>
             <tr className="border-b border-zinc-200">
               <th className="w-8 px-2.5 py-2" />
-              {["Unit ID", "Grade", "Batch", "Landed Cost", "Status", "Order", "Payout", ""].map((h) => (
+              {UNIT_COLUMNS.map((c) => (
                 <th
-                  key={h}
+                  key={c.key}
                   className="px-2.5 py-2 text-left text-zinc-500 font-medium text-[10px] uppercase tracking-wider"
                 >
-                  {h}
+                  {c.label}
                 </th>
               ))}
+              <th />
+            </tr>
+            <tr className="border-b border-zinc-200 bg-zinc-50">
+              <th />
+              {UNIT_COLUMNS.map((c) => (
+                <th key={c.key} className="px-2 py-1">
+                  <TableFilterInput
+                    value={filters[c.key] ?? ""}
+                    onChange={(v) => setFilter(c.key, v)}
+                  />
+                </th>
+              ))}
+              <th />
             </tr>
           </thead>
           <tbody>
-            {units.map((u) => (
+            {processedRows.map((u) => (
               <tr
                 key={u.id}
                 className="border-b border-zinc-200"
