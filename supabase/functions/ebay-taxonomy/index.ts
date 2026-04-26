@@ -523,13 +523,11 @@ Deno.serve(async (req) => {
         throw new Error("product_id and categoryId are required");
       }
 
-      // 1. Resolve every canonical attribute for this product, scoped by
-      //    its product_type and the chosen eBay category.
-      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
-        ebayCategoryId: categoryId,
-      });
-
-      // 2. Find the cached schema for the chosen category (if any).
+      // Find the cached schema for the chosen category (if any) FIRST so we
+      // can run an idempotent bootstrap for any aspects that don't yet have
+      // a canonical attribute / mapping. This is what makes the bottom-of-
+      // tab eBay aspects appear as editable canonical fields the next time
+      // around.
       const { data: schemaRow } = await admin
         .from("channel_category_schema")
         .select("id, category_name")
@@ -538,7 +536,30 @@ Deno.serve(async (req) => {
         .eq("category_id", categoryId)
         .maybeSingle();
 
-      // 3. Project canonical → channel aspects via the mapping table.
+      if (schemaRow?.id) {
+        const { data: schemaAttrs } = await admin
+          .from("channel_category_attribute")
+          .select("key, label, data_type, required")
+          .eq("schema_id", schemaRow.id);
+        try {
+          await bootstrapCanonicalForCategory(admin, {
+            marketplace,
+            categoryId,
+            aspects: (schemaAttrs ?? []) as any[],
+          });
+        } catch (bootErr) {
+          console.error("bootstrap canonical (resolve) failed:", bootErr);
+        }
+      }
+
+      // Now resolve every canonical attribute for this product, scoped by
+      // its product_type and the chosen eBay category. The bootstrap above
+      // means newly-created scoped canonicals appear in this resolution.
+      const { resolved, byKey } = await resolveAllForProduct(admin, productId, {
+        ebayCategoryId: categoryId,
+      });
+
+      // Project canonical → channel aspects via the mapping table.
       const projection = await projectToChannel(admin, {
         channel: "ebay",
         marketplace,
