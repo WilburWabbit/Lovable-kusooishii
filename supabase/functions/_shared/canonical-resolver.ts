@@ -34,6 +34,8 @@ export interface CanonicalAttributeRow {
   editable: boolean;
   sort_order: number;
   active: boolean;
+  applies_to_product_types: string[] | null;
+  applies_to_ebay_categories: string[] | null;
 }
 
 export interface ResolvedCanonicalValue {
@@ -294,6 +296,7 @@ export function resolveAttribute(
 export async function resolveAllForProduct(
   admin: SupabaseClient,
   productId: string,
+  scope?: { productType?: string | null; ebayCategoryId?: string | null },
 ): Promise<{
   bundle: ProviderBundle;
   attributes: CanonicalAttributeRow[];
@@ -302,15 +305,40 @@ export async function resolveAllForProduct(
 }> {
   const bundle = await loadProviderBundle(admin, productId);
 
+  // Pull product_type from the bundle if not explicitly provided.
+  const productType =
+    scope?.productType ??
+    (bundle.product?.product_type as string | null | undefined) ??
+    null;
+  const ebayCategoryId =
+    scope?.ebayCategoryId ??
+    (bundle.product?.ebay_category_id as string | null | undefined) ??
+    null;
+
   const { data: attrRows } = await admin
     .from("canonical_attribute")
     .select(
-      "key, label, attribute_group, editor, data_type, unit, db_column, provider_chain, editable, sort_order, active"
+      "key, label, attribute_group, editor, data_type, unit, db_column, provider_chain, editable, sort_order, active, applies_to_product_types, applies_to_ebay_categories"
     )
     .eq("active", true)
     .order("sort_order", { ascending: true });
 
-  const attributes = (attrRows ?? []) as CanonicalAttributeRow[];
+  const allRows = (attrRows ?? []) as CanonicalAttributeRow[];
+
+  // Apply scope filters: if an attribute declares applies_to_*, the
+  // corresponding value must match. NULL/empty arrays = applies to all.
+  const attributes = allRows.filter((a) => {
+    const types = a.applies_to_product_types;
+    if (Array.isArray(types) && types.length > 0) {
+      if (!productType || !types.includes(productType)) return false;
+    }
+    const cats = a.applies_to_ebay_categories;
+    if (Array.isArray(cats) && cats.length > 0) {
+      if (!ebayCategoryId || !cats.includes(ebayCategoryId)) return false;
+    }
+    return true;
+  });
+
   const resolved = attributes.map((a) => resolveAttribute(a, bundle));
   const byKey: Record<string, ResolvedCanonicalValue> = {};
   for (const r of resolved) byKey[r.key] = r;
