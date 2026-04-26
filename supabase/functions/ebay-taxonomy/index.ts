@@ -25,10 +25,7 @@ import {
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
-import {
-  resolveAllForProduct,
-  projectToChannel,
-} from "../_shared/canonical-resolver.ts";
+import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
