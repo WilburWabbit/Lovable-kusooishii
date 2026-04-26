@@ -94,7 +94,39 @@ export const taxonomyKeys = {
     ["taxonomy", "ebay", marketplace, "auto-category", productId] as const,
   attributes: (productId: string, namespace?: string) =>
     ["product-attributes", productId, namespace ?? "all"] as const,
+  productCategories: (channel: string, marketplace: string) =>
+    ["taxonomy", channel, marketplace, "product-categories"] as const,
 };
+
+// ─── Categories already in use by products ─────────────────
+
+export interface ProductCategoryUsage {
+  categoryId: string;
+  categoryName: string | null;
+  productCount: number;
+}
+
+/**
+ * Fetch the distinct eBay categories already assigned to at least one
+ * product, with usage counts. Used by the Settings → Mappings page so
+ * staff can pick a category that exists in the catalog without typing.
+ */
+export function useProductChannelCategories(
+  channel: "ebay" | "gmc" | "meta" = "ebay",
+  marketplace: string = "EBAY_GB",
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.productCategories(channel, marketplace),
+    staleTime: 1000 * 60 * 5,
+    queryFn: async (): Promise<ProductCategoryUsage[]> => {
+      const res = await invokeWithAuth<{ categories: ProductCategoryUsage[] }>(
+        "ebay-taxonomy",
+        { action: "list-product-categories", channel, marketplace },
+      );
+      return res.categories ?? [];
+    },
+  });
+}
 
 // ─── Auto category resolution (eBay) ───────────────────────
 
