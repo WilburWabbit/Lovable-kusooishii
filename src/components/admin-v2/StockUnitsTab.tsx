@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
 import { useStockUnitsByMPN } from "@/hooks/admin/use-stock-units";
+import { useSimpleTableFilters } from "@/hooks/useSimpleTableFilters";
 import { supabase } from "@/integrations/supabase/client";
 import type { StockUnit } from "@/lib/types/admin";
 import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { GradeSlideOut } from "./GradeSlideOut";
 import { WriteOffDialog } from "./WriteOffDialog";
+
+const UNIT_COLUMNS = [
+  { key: "uid", label: "Unit ID" },
+  { key: "grade", label: "Grade" },
+  { key: "batchId", label: "Batch" },
+  { key: "landedCost", label: "Landed Cost" },
+  { key: "status", label: "Status" },
+  { key: "orderId", label: "Order" },
+  { key: "payoutId", label: "Payout" },
+];
+
+function unitAccessor(u: StockUnit, key: string): unknown {
+  return (u as unknown as Record<string, unknown>)[key];
+}
 
 interface StockUnitsTabProps {
   mpn: string;
@@ -16,6 +32,7 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showWriteOff, setShowWriteOff] = useState(false);
   const [rawProductData, setRawProductData] = useState<Record<string, unknown> | null>(null);
+  const { filters, setFilter, processedRows } = useSimpleTableFilters(units, { accessor: unitAccessor });
 
   // Load raw product row so the grade slide-out can pre-populate physical fields
   useEffect(() => {
@@ -66,18 +83,31 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
           <thead>
             <tr className="border-b border-zinc-200">
               <th className="w-8 px-2.5 py-2" />
-              {["Unit ID", "Grade", "Batch", "Landed Cost", "Status", "Order", "Payout", ""].map((h) => (
+              {UNIT_COLUMNS.map((c) => (
                 <th
-                  key={h}
+                  key={c.key}
                   className="px-2.5 py-2 text-left text-zinc-500 font-medium text-[10px] uppercase tracking-wider"
                 >
-                  {h}
+                  {c.label}
                 </th>
               ))}
+              <th />
+            </tr>
+            <tr className="border-b border-zinc-200 bg-zinc-50">
+              <th />
+              {UNIT_COLUMNS.map((c) => (
+                <th key={c.key} className="px-2 py-1">
+                  <TableFilterInput
+                    value={filters[c.key] ?? ""}
+                    onChange={(v) => setFilter(c.key, v)}
+                  />
+                </th>
+              ))}
+              <th />
             </tr>
           </thead>
           <tbody>
-            {units.map((u) => (
+            {processedRows.map((u) => (
               <tr
                 key={u.id}
                 className="border-b border-zinc-200"
@@ -143,10 +173,10 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                 </td>
               </tr>
             ))}
-            {units.length === 0 && (
+            {processedRows.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-3 py-6 text-center text-zinc-500 text-sm">
-                  No stock units for this product.
+                  {units.length === 0 ? "No stock units for this product." : "No units match your filters."}
                 </td>
               </tr>
             )}

@@ -105,9 +105,19 @@ export function ChannelMappingsPanel() {
   }, [mappings, schemaResult]);
 
   // Apply text + status filter, then sort
+  // Text filter supports NULL / NOT NULL / !NULL sentinels (case-insensitive):
+  //   NULL → only rows with no mapping (unmapped)
+  //   NOT NULL / !NULL → only rows that are mapped
   const rows = useMemo(() => {
-    const q = filter.trim().toLowerCase();
+    const trimmed = filter.trim();
+    const upper = trimmed.toUpperCase();
+    const isNullFilter = upper === "NULL";
+    const isNotNullFilter = upper === "NOT NULL" || upper === "!NULL";
+    const q = isNullFilter || isNotNullFilter ? "" : trimmed.toLowerCase();
+
     const filtered = baseRows.filter((r) => {
+      if (isNullFilter && r.mapping) return false;
+      if (isNotNullFilter && !r.mapping) return false;
       if (q) {
         const haystack = [
           r.aspectKey,
@@ -278,7 +288,8 @@ export function ChannelMappingsPanel() {
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter aspects, canonical keys, constants…"
+          placeholder="Filter… (NULL = unmapped, NOT NULL = mapped)"
+          title="Type to filter aspects, canonical keys, constants, notes. Use NULL to show only unmapped, NOT NULL (or !NULL) to show only mapped."
           className="flex-1 min-w-[220px] px-2 py-1.5 text-[12px] border border-zinc-200 rounded"
         />
         <select

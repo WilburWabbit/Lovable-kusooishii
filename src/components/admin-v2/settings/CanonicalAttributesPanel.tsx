@@ -14,6 +14,27 @@ import {
   type CanonicalAttributeRecord,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
+import { TableFilterInput } from "@/components/admin-v2/TableFilterInput";
+import { useSimpleTableFilters } from "@/hooks/useSimpleTableFilters";
+
+const ATTR_COLUMNS = [
+  { key: "key", label: "Key" },
+  { key: "label", label: "Label" },
+  { key: "attribute_group", label: "Group" },
+  { key: "editor", label: "Editor" },
+  { key: "db_column", label: "DB column" },
+  { key: "provider_chain_str", label: "Provider chain" },
+  { key: "sort_order", label: "Order" },
+];
+
+function attrAccessor(a: CanonicalAttributeRecord, key: string): unknown {
+  if (key === "provider_chain_str") {
+    return (a.provider_chain ?? [])
+      .map((s) => `${s.provider}.${s.field || "*"}`)
+      .join(" → ");
+  }
+  return (a as unknown as Record<string, unknown>)[key];
+}
 
 const PROVIDERS = [
   "product",
@@ -53,6 +74,8 @@ export function CanonicalAttributesPanel() {
     () => [...(attrs ?? [])].sort((a, b) => a.sort_order - b.sort_order),
     [attrs],
   );
+
+  const { filters, setFilter, processedRows } = useSimpleTableFilters(sorted, { accessor: attrAccessor });
 
   const handleSave = async () => {
     if (!editing) return;
@@ -105,18 +128,25 @@ export function CanonicalAttributesPanel() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
-                <th className="py-2 px-2">Key</th>
-                <th className="py-2 px-2">Label</th>
-                <th className="py-2 px-2">Group</th>
-                <th className="py-2 px-2">Editor</th>
-                <th className="py-2 px-2">DB column</th>
-                <th className="py-2 px-2">Provider chain</th>
-                <th className="py-2 px-2">Order</th>
+                {ATTR_COLUMNS.map((c) => (
+                  <th key={c.key} className="py-2 px-2">{c.label}</th>
+                ))}
                 <th className="py-2 px-2"></th>
+              </tr>
+              <tr className="bg-zinc-50 border-b border-zinc-200">
+                {ATTR_COLUMNS.map((c) => (
+                  <th key={c.key} className="px-2 py-1">
+                    <TableFilterInput
+                      value={filters[c.key] ?? ""}
+                      onChange={(v) => setFilter(c.key, v)}
+                    />
+                  </th>
+                ))}
+                <th />
               </tr>
             </thead>
             <tbody>
-              {sorted.map((a) => (
+              {processedRows.map((a) => (
                 <tr key={a.key} className="border-b border-zinc-100 hover:bg-zinc-50">
                   <td className="py-2 px-2 font-mono text-zinc-900">{a.key}</td>
                   <td className="py-2 px-2 text-zinc-700">{a.label}</td>
@@ -145,10 +175,12 @@ export function CanonicalAttributesPanel() {
                   </td>
                 </tr>
               ))}
-              {sorted.length === 0 && (
+              {processedRows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-zinc-500 text-[12px]">
-                    No attributes yet — click "New attribute" to seed the registry.
+                    {sorted.length === 0
+                      ? "No attributes yet — click \"New attribute\" to seed the registry."
+                      : "No attributes match your filters."}
                   </td>
                 </tr>
               )}
