@@ -15,6 +15,25 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
   const [slideUnit, setSlideUnit] = useState<StockUnit | null>(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [showWriteOff, setShowWriteOff] = useState(false);
+  const [rawProductData, setRawProductData] = useState<Record<string, unknown> | null>(null);
+
+  // Load raw product row so the grade slide-out can pre-populate physical fields
+  useEffect(() => {
+    let cancelled = false;
+    if (!mpn) {
+      setRawProductData(null);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from('product')
+        .select('*')
+        .eq('mpn', mpn)
+        .maybeSingle();
+      if (!cancelled) setRawProductData((data as Record<string, unknown>) ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [mpn]);
 
   const toggleSelect = (id: string) => {
     setSelectedUnitIds((prev) => {
