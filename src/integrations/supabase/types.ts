@@ -269,6 +269,107 @@ export type Database = {
         }
         Relationships: []
       }
+      canonical_attribute: {
+        Row: {
+          active: boolean
+          attribute_group: string
+          created_at: string
+          data_type: string
+          db_column: string | null
+          editable: boolean
+          editor: string
+          id: string
+          key: string
+          label: string
+          provider_chain: Json
+          sort_order: number
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          attribute_group?: string
+          created_at?: string
+          data_type?: string
+          db_column?: string | null
+          editable?: boolean
+          editor?: string
+          id?: string
+          key: string
+          label: string
+          provider_chain?: Json
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          attribute_group?: string
+          created_at?: string
+          data_type?: string
+          db_column?: string | null
+          editable?: boolean
+          editor?: string
+          id?: string
+          key?: string
+          label?: string
+          provider_chain?: Json
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      channel_attribute_mapping: {
+        Row: {
+          aspect_key: string
+          canonical_key: string | null
+          category_id: string | null
+          channel: string
+          constant_value: string | null
+          created_at: string
+          id: string
+          marketplace: string | null
+          notes: string | null
+          transform: string | null
+          updated_at: string
+        }
+        Insert: {
+          aspect_key: string
+          canonical_key?: string | null
+          category_id?: string | null
+          channel: string
+          constant_value?: string | null
+          created_at?: string
+          id?: string
+          marketplace?: string | null
+          notes?: string | null
+          transform?: string | null
+          updated_at?: string
+        }
+        Update: {
+          aspect_key?: string
+          canonical_key?: string | null
+          category_id?: string | null
+          channel?: string
+          constant_value?: string | null
+          created_at?: string
+          id?: string
+          marketplace?: string | null
+          notes?: string | null
+          transform?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_attribute_mapping_canonical_key_fkey"
+            columns: ["canonical_key"]
+            isOneToOne: false
+            referencedRelation: "canonical_attribute"
+            referencedColumns: ["key"]
+          },
+        ]
+      }
       channel_category_attribute: {
         Row: {
           allowed_values: Json | null

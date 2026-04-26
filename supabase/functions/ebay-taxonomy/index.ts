@@ -24,13 +24,11 @@ import {
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
 import {
-  buildEbayAspects,
-  reconcileWithSchema,
-  LEGO_ANCESTOR_IDS,
-  type ProductRow,
-  type BrickEconomyRow,
-} from "../_shared/channel-aspect-map.ts";
+  resolveAllForProduct,
+  projectToChannel,
+} from "../_shared/canonical-resolver.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -357,56 +355,10 @@ Deno.serve(async (req) => {
         throw new Error("product_id and categoryId are required");
       }
 
-      // 1. Load product, theme, BrickEconomy enrichment, custom-core attributes.
-      const { data: product, error: pErr } = await admin
-        .from("product")
-        .select(
-          "id, mpn, name, set_number, subtheme_name, piece_count, age_range, age_mark, ean, " +
-          "released_date, retired_date, release_year, weight_kg, weight_g, length_cm, width_cm, " +
-          "height_cm, product_type, brand, theme_id"
-        )
-        .eq("id", productId)
-        .maybeSingle();
-      if (pErr) throw pErr;
-      if (!product) throw new Error("Product not found");
+      // 1. Resolve every canonical attribute for this product.
+      const { resolved, byKey } = await resolveAllForProduct(admin, productId);
 
-      let themeName: string | null = null;
-      if (product.theme_id) {
-        const { data: theme } = await admin
-          .from("theme")
-          .select("name")
-          .eq("id", product.theme_id)
-          .maybeSingle();
-        themeName = (theme?.name as string | undefined) ?? null;
-      }
-
-      // BrickEconomy lookup — match either suffixed or bare set number.
-      const setNumber = (product as ProductRow).set_number ?? product.mpn?.split(".")[0]?.split("-")[0] ?? null;
-      let be: BrickEconomyRow | null = null;
-      if (setNumber) {
-        const variants = [setNumber, `${setNumber}-1`];
-        const { data: beRow } = await admin
-          .from("brickeconomy_collection")
-          .select("theme, subtheme, pieces_count, year, released_date, retired_date")
-          .eq("item_type", "set")
-          .in("item_number", variants)
-          .order("synced_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (beRow) be = beRow as BrickEconomyRow;
-      }
-
-      const { data: customRows } = await admin
-        .from("product_attribute")
-        .select("key, value, value_json")
-        .eq("product_id", productId)
-        .eq("namespace", "core");
-      const customCore: Record<string, string> = {};
-      for (const r of customRows ?? []) {
-        if (r.value != null && r.value !== "") customCore[r.key] = r.value;
-      }
-
-      // 2. Load cached aspect schema for the category.
+      // 2. Find the cached schema for the chosen category (if any).
       const { data: schemaRow } = await admin
         .from("channel_category_schema")
         .select("id, category_name")
@@ -415,35 +367,111 @@ Deno.serve(async (req) => {
         .eq("category_id", categoryId)
         .maybeSingle();
 
-      let schemaAttrs: { key: string; required: boolean }[] = [];
-      if (schemaRow?.id) {
-        const { data: attrs } = await admin
-          .from("channel_category_attribute")
-          .select("key, required")
-          .eq("schema_id", schemaRow.id)
-          .order("sort_order", { ascending: true });
-        schemaAttrs = (attrs ?? []) as { key: string; required: boolean }[];
-      }
-
-      // 3. Map and reconcile.
-      const allResolved = buildEbayAspects({
-        product: product as ProductRow,
-        themeName,
-        be,
-        customCore,
+      // 3. Project canonical → channel aspects via the mapping table.
+      const projection = await projectToChannel(admin, {
+        channel: "ebay",
+        marketplace,
+        categoryId,
+        schemaId: schemaRow?.id ?? null,
+        canonicalByKey: byKey,
       });
-      const { resolved, missing } = reconcileWithSchema(allResolved, schemaAttrs);
 
       return jsonResponse({
         categoryId,
         categoryName: schemaRow?.category_name ?? null,
-        schemaLoaded: schemaAttrs.length > 0,
-        resolvedCount: Object.keys(resolved).length,
-        totalSchemaCount: schemaAttrs.length,
-        missingRequiredCount: missing.filter((m) => m.required).length,
-        resolved,
-        missing,
+        schemaLoaded: projection.totalSchemaCount > 0,
+        resolvedCount: projection.resolvedCount,
+        totalSchemaCount: projection.totalSchemaCount,
+        missingRequiredCount: projection.missingRequiredCount,
+        canonical: resolved,
+        aspects: projection.mapped,
       });
+    }
+
+    if (action === "list-canonical-attributes") {
+      const { data, error } = await admin
+        .from("canonical_attribute")
+        .select("*")
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return jsonResponse({ attributes: data ?? [] });
+    }
+
+    if (action === "upsert-canonical-attribute") {
+      const row = body.attribute;
+      if (!row?.key || !row?.label) throw new Error("key and label are required");
+      const { error } = await admin
+        .from("canonical_attribute")
+        .upsert(row, { onConflict: "key" });
+      if (error) throw error;
+      return jsonResponse({ success: true });
+    }
+
+    if (action === "delete-canonical-attribute") {
+      const key: string = body.key;
+      if (!key) throw new Error("key is required");
+      const { error } = await admin
+        .from("canonical_attribute")
+        .delete()
+        .eq("key", key);
+      if (error) throw error;
+      return jsonResponse({ success: true });
+    }
+
+    if (action === "list-channel-mappings") {
+      // params: { channel, marketplace?, categoryId? }
+      const ch: string = body.channel ?? "ebay";
+      let q = admin
+        .from("channel_attribute_mapping")
+        .select("*")
+        .eq("channel", ch)
+        .order("aspect_key", { ascending: true });
+      if (body.marketplace) {
+        q = q.or(`marketplace.eq.${body.marketplace},marketplace.is.null`);
+      }
+      if (body.categoryId !== undefined) {
+        if (body.categoryId === null) {
+          q = q.is("category_id", null);
+        } else {
+          q = q.or(`category_id.eq.${body.categoryId},category_id.is.null`);
+        }
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResponse({ mappings: data ?? [] });
+    }
+
+    if (action === "upsert-channel-mapping") {
+      const row = body.mapping;
+      if (!row?.channel || !row?.aspect_key) {
+        throw new Error("channel and aspect_key are required");
+      }
+      if (!row.canonical_key && !row.constant_value) {
+        throw new Error("Either canonical_key or constant_value must be set");
+      }
+      // Use a delete-then-insert to honour the partial unique index that
+      // includes COALESCE(...) — Postgres ON CONFLICT can't target it.
+      await admin
+        .from("channel_attribute_mapping")
+        .delete()
+        .eq("channel", row.channel)
+        .eq("aspect_key", row.aspect_key)
+        .eq("marketplace", row.marketplace ?? null)
+        .eq("category_id", row.category_id ?? null);
+      const { error } = await admin.from("channel_attribute_mapping").insert(row);
+      if (error) throw error;
+      return jsonResponse({ success: true });
+    }
+
+    if (action === "delete-channel-mapping") {
+      const id: string = body.id;
+      if (!id) throw new Error("id is required");
+      const { error } = await admin
+        .from("channel_attribute_mapping")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      return jsonResponse({ success: true });
     }
 
     throw new Error(`Unknown action: ${action}`);
