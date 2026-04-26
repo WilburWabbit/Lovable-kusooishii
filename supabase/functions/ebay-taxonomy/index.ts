@@ -154,18 +154,9 @@ Deno.serve(async (req) => {
           .eq("schema_id", existing.id)
           .order("sort_order", { ascending: true });
 
-        // Idempotent bootstrap on cached schema reads too — ensures any
-        // categories whose schema was loaded before bootstrap was wired up
-        // (or whose mappings were wiped) get repaired automatically.
-        try {
-          await bootstrapCanonicalForCategory(admin, {
-            marketplace,
-            categoryId,
-            aspects: (attrs ?? []) as any[],
-          });
-        } catch (bootErr) {
-          console.error("bootstrap canonical (cached) failed:", bootErr);
-        }
+        // (No bootstrap — categories no longer auto-create canonical
+        //  attributes/mappings. Mapping is explicit via Settings.)
+
 
         return jsonResponse({
           schemaId: existing.id,
