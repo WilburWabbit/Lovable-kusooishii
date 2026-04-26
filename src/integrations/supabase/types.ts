@@ -2352,7 +2352,6 @@ export type Database = {
           interests: string | null
           isbn: string | null
           item_diameter: string | null
-          item_height: string | null
           item_length: string | null
           item_number: string | null
           item_weight: string | null
@@ -2441,7 +2440,6 @@ export type Database = {
           interests?: string | null
           isbn?: string | null
           item_diameter?: string | null
-          item_height?: string | null
           item_length?: string | null
           item_number?: string | null
           item_weight?: string | null
@@ -2530,7 +2528,6 @@ export type Database = {
           interests?: string | null
           isbn?: string | null
           item_diameter?: string | null
-          item_height?: string | null
           item_length?: string | null
           item_number?: string | null
           item_weight?: string | null
