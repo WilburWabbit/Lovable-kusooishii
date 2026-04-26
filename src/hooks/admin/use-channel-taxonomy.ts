@@ -246,6 +246,8 @@ export function useSetProductChannelCategory() {
         queryKey: ["v2", "products", vars.mpn],
       });
     },
+  });
+}
 
 // ─── Product attributes (per-namespace) ─────────────────────
 
