@@ -567,22 +567,62 @@ Deno.serve(async (req) => {
           .replace(/^_+|_+$/g, "")
           .slice(0, 60);
 
-      // Load existing canonical keys to avoid duplicates
-      const desiredKeys = aspects.map((a) => toKey(a.aspect_key));
-      const { data: existing } = await admin
+      // Synonym map: well-known eBay aspect names -> existing canonical keys.
+      // Prevents duplicates like `item_height` when `height_cm` already exists.
+      const SYNONYMS: Record<string, string> = {
+        item_height: "height_cm",
+        height: "height_cm",
+        item_length: "length_cm",
+        length: "length_cm",
+        item_width: "width_cm",
+        width: "width_cm",
+        item_weight: "weight_g",
+        weight: "weight_g",
+        number_of_pieces: "piece_count",
+        pieces: "piece_count",
+        lego_set_number: "set_number",
+        model: "set_number",
+        lego_set_name: "product_name",
+        set_name: "product_name",
+        name: "product_name",
+        lego_theme: "theme",
+        theme: "theme",
+        lego_subtheme: "subtheme",
+        subtheme: "subtheme",
+        year_manufactured: "release_year",
+        year: "release_year",
+        release_year: "release_year",
+        age_level: "age_mark",
+        recommended_age_range: "age_mark",
+        age_mark: "age_mark",
+        brand: "brand",
+        mpn: "mpn",
+        ean: "ean",
+        upc: "upc",
+        isbn: "isbn",
+        type: "product_type",
+        product_type: "product_type",
+        retired: "retired_flag",
+        version: "version_descriptor",
+      };
+
+      // Load ALL existing canonical keys so we can reuse via synonym map
+      const { data: allCanon } = await admin
         .from("canonical_attribute")
-        .select("key")
-        .in("key", desiredKeys);
+        .select("key");
       const existingKeys = new Set(
-        ((existing ?? []) as Array<{ key: string }>).map((r) => r.key),
+        ((allCanon ?? []) as Array<{ key: string }>).map((r) => r.key),
       );
 
       const created: string[] = [];
       const mapped: string[] = [];
 
       for (const a of aspects) {
-        const key = toKey(a.aspect_key);
-        if (!key) continue;
+        const rawKey = toKey(a.aspect_key);
+        if (!rawKey) continue;
+        // Prefer synonym match; fall back to the snake-cased aspect key
+        const synonym = SYNONYMS[rawKey];
+        const key = synonym && existingKeys.has(synonym) ? synonym : rawKey;
 
         // 1. Ensure canonical attribute exists
         if (!existingKeys.has(key)) {
