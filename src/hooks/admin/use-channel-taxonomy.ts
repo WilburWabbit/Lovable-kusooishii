@@ -281,6 +281,40 @@ export function useSetProductChannelCategory() {
   });
 }
 
+export function useBulkSetProductChannelCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      productIds: string[];
+      channel: "ebay" | "gmc" | "meta";
+      categoryId: string | null;
+      marketplace?: string;
+    }) => {
+      return await invokeWithAuth<{ success: boolean; updated: number }>(
+        "admin-data",
+        {
+          action: "bulk-set-product-channel-category",
+          product_ids: input.productIds,
+          channel: input.channel,
+          category_id: input.categoryId,
+          marketplace: input.marketplace,
+        },
+      );
+    },
+    onSuccess: async (_d, vars) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["v2", "products"] }),
+        queryClient.invalidateQueries({
+          queryKey: taxonomyKeys.productCategories(
+            vars.channel,
+            vars.marketplace ?? "EBAY_GB",
+          ),
+        }),
+      ]);
+    },
+  });
+}
+
 // ─── Product attributes (per-namespace) ─────────────────────
 
 export function useProductAttributes(
@@ -421,6 +455,34 @@ export function useChannelMappings(
         },
       );
       return res.mappings ?? [];
+    },
+  });
+}
+
+export function useBulkCreateAndMapAspects() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      channel: string;
+      marketplace: string | null;
+      categoryId: string | null;
+      aspects: { aspect_key: string; label?: string; attribute_group?: string }[];
+    }) =>
+      invokeWithAuth<{
+        success: boolean;
+        canonicalCreated: string[];
+        aspectsMapped: string[];
+      }>("ebay-taxonomy", {
+        action: "bulk-create-and-map-aspects",
+        channel: input.channel,
+        marketplace: input.marketplace,
+        category_id: input.categoryId,
+        aspects: input.aspects,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channel-mappings"] });
+      qc.invalidateQueries({ queryKey: canonicalAttrKeys.list() });
+      qc.invalidateQueries({ queryKey: ["taxonomy"] });
     },
   });
 }

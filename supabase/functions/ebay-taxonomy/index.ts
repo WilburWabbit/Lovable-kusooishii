@@ -521,6 +521,106 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true });
     }
 
+    if (action === "bulk-create-and-map-aspects") {
+      // params: { channel, marketplace, category_id (nullable),
+      //          aspects: [{ aspect_key, label, attribute_group? }] }
+      const ch: string = body.channel ?? "ebay";
+      const mkt: string | null = body.marketplace ?? null;
+      const catId: string | null = body.category_id ?? null;
+      const aspects: Array<{
+        aspect_key: string;
+        label?: string;
+        attribute_group?: string;
+      }> = Array.isArray(body.aspects) ? body.aspects : [];
+      if (aspects.length === 0) throw new Error("aspects array is required");
+
+      // Snake-case helper
+      const toKey = (s: string) =>
+        s
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 60);
+
+      // Load existing canonical keys to avoid duplicates
+      const desiredKeys = aspects.map((a) => toKey(a.aspect_key));
+      const { data: existing } = await admin
+        .from("canonical_attribute")
+        .select("key")
+        .in("key", desiredKeys);
+      const existingKeys = new Set(
+        ((existing ?? []) as Array<{ key: string }>).map((r) => r.key),
+      );
+
+      const created: string[] = [];
+      const mapped: string[] = [];
+
+      for (const a of aspects) {
+        const key = toKey(a.aspect_key);
+        if (!key) continue;
+
+        // 1. Ensure canonical attribute exists
+        if (!existingKeys.has(key)) {
+          const { error: ensureErr } = await (admin as any).rpc(
+            "ensure_product_column",
+            { p_column_name: key, p_data_type: "string" },
+          );
+          if (ensureErr) {
+            console.warn("ensure_product_column failed for", key, ensureErr);
+          }
+          const { error: insErr } = await admin
+            .from("canonical_attribute")
+            .insert({
+              key,
+              label: a.label ?? a.aspect_key,
+              attribute_group: a.attribute_group ?? "other",
+              editor: "text",
+              data_type: "string",
+              db_column: key,
+              provider_chain: [{ provider: "product", field: key }],
+              editable: true,
+              active: true,
+              sort_order: 500,
+            });
+          if (insErr && !String(insErr.message).includes("duplicate")) {
+            throw insErr;
+          }
+          created.push(key);
+          existingKeys.add(key);
+        }
+
+        // 2. Upsert the channel mapping for the current scope
+        await admin
+          .from("channel_attribute_mapping")
+          .delete()
+          .eq("channel", ch)
+          .eq("aspect_key", a.aspect_key)
+          .eq("marketplace", mkt)
+          .eq("category_id", catId);
+        const { error: mapErr } = await admin
+          .from("channel_attribute_mapping")
+          .insert({
+            channel: ch,
+            marketplace: mkt,
+            category_id: catId,
+            aspect_key: a.aspect_key,
+            canonical_key: key,
+            constant_value: null,
+            transform: null,
+            notes: null,
+          });
+        if (mapErr) throw mapErr;
+        mapped.push(a.aspect_key);
+      }
+
+      return jsonResponse({
+        success: true,
+        canonicalCreated: created,
+        aspectsMapped: mapped,
+      });
+    }
+
     if (action === "list-product-categories") {
       // Returns the distinct channel category IDs already assigned to one
       // or more products, with usage counts and a friendly name pulled

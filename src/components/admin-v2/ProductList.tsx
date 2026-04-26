@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProducts, useProductStockCounts } from "@/hooks/admin/use-products";
 import { useTablePreferences } from "@/hooks/useTablePreferences";
@@ -9,7 +9,8 @@ import type { ProductStockCounts } from "@/hooks/admin/use-products";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
-import { Download, Search } from "lucide-react";
+import { BulkCategoryAssignDialog } from "./BulkCategoryAssignDialog";
+import { Download, Search, Tag } from "lucide-react";
 
 // ─── Flattened row type ──────────────────────────────────────
 
@@ -241,6 +242,19 @@ export function ProductList() {
     { key: "name", dir: "asc" },
   );
 
+  // Selection state for bulk operations
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  const toggleRow = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // Build flattened rows
   const rows: ProductRow[] = useMemo(() => {
     return products.map((p) => {
@@ -279,6 +293,24 @@ export function ProductList() {
 
     return result;
   }, [rows, globalSearch, prefs.filters, prefs.sort]);
+
+  const visibleIds = useMemo(() => processedRows.map((r) => r.id), [processedRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleIds.some((id) => selected.has(id));
+
+  const toggleAllVisible = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [allVisibleSelected, visibleIds]);
 
   // Visible column defs in order
   const visibleCols = prefs.visibleColumns
@@ -321,15 +353,53 @@ export function ProductList() {
           </button>
         </div>
       </div>
-      <p className="text-zinc-500 text-[13px] mb-5">
-        {processedRows.length} of {products.length} products
-      </p>
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-zinc-500 text-[13px]">
+          {processedRows.length} of {products.length} products
+          {selected.size > 0 && (
+            <>
+              {" · "}
+              <span className="text-amber-700 font-medium">
+                {selected.size} selected
+              </span>
+              {" · "}
+              <button
+                onClick={() => setSelected(new Set())}
+                className="text-zinc-500 hover:text-zinc-700 underline"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </p>
+        {selected.size > 0 && (
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] font-medium border border-amber-300 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Set eBay category ({selected.size})
+          </button>
+        )}
+      </div>
 
       <SurfaceCard noPadding className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             {/* Sort headers */}
             <tr className="border-b border-zinc-200">
+              <th className="px-3 py-2.5 w-8">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someVisibleSelected;
+                  }}
+                  onChange={toggleAllVisible}
+                  className="accent-amber-500 cursor-pointer"
+                  aria-label="Select all visible"
+                />
+              </th>
               {visibleCols.map((col) => (
                 <SortableTableHead
                   key={col.key}
@@ -346,6 +416,7 @@ export function ProductList() {
             </tr>
             {/* Filter row */}
             <tr className="border-b border-zinc-200 bg-zinc-50">
+              <th className="px-3 py-1" />
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.sortable !== false ? (
@@ -363,26 +434,47 @@ export function ProductList() {
             </tr>
           </thead>
           <tbody>
-            {processedRows.map((row) => (
-              <tr
-                key={row.mpn}
-                onClick={() => navigate(`/admin/products/${row.mpn}`)}
-                className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
-              >
-                {visibleCols.map((col) => (
+            {processedRows.map((row) => {
+              const isSelected = selected.has(row.id);
+              return (
+                <tr
+                  key={row.mpn}
+                  onClick={() => navigate(`/admin/products/${row.mpn}`)}
+                  className={`border-b border-zinc-200 cursor-pointer transition-colors ${
+                    isSelected ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-zinc-50"
+                  }`}
+                >
                   <td
-                    key={col.key}
-                    className={`px-3 py-2.5 ${col.align === "right" ? "text-right" : ""}`}
+                    className="px-3 py-2.5 w-8"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleRow(row.id);
+                    }}
                   >
-                    {col.render(row)}
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleRow(row.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="accent-amber-500 cursor-pointer"
+                      aria-label={`Select ${row.mpn}`}
+                    />
                   </td>
-                ))}
-              </tr>
-            ))}
+                  {visibleCols.map((col) => (
+                    <td
+                      key={col.key}
+                      className={`px-3 py-2.5 ${col.align === "right" ? "text-right" : ""}`}
+                    >
+                      {col.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
             {processedRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={visibleCols.length}
+                  colSpan={visibleCols.length + 1}
                   className="px-3 py-8 text-center text-zinc-500 text-sm"
                 >
                   No products match your filters.
@@ -392,6 +484,12 @@ export function ProductList() {
           </tbody>
         </table>
       </SurfaceCard>
+
+      <BulkCategoryAssignDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        productIds={Array.from(selected)}
+      />
     </div>
   );
 }
