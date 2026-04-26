@@ -55,15 +55,15 @@ Deno.serve(async (req) => {
 
     // ── Track scan (non-blocking) ──
     const isFirstScan = !welcome.scanned_at;
-    admin
-      .from("welcome_code")
-      .update({
-        scan_count: (welcome.scan_count || 0) + 1,
-        ...(isFirstScan ? { scanned_at: new Date().toISOString() } : {}),
-      })
-      .eq("id", welcome.id)
-      .then(() => {})
-      .catch((err: any) => console.error("Failed to track scan:", err.message));
+    Promise.resolve(
+      admin
+        .from("welcome_code")
+        .update({
+          scan_count: (welcome.scan_count || 0) + 1,
+          ...(isFirstScan ? { scanned_at: new Date().toISOString() } : {}),
+        })
+        .eq("id", welcome.id)
+    ).catch((err: any) => console.error("Failed to track scan:", err?.message));
 
     // ── Return public-safe data ──
     return new Response(

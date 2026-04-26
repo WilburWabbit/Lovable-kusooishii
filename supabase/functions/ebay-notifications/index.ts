@@ -118,7 +118,7 @@ async function verifyEbaySignature(rawBody: string, signatureHeader: string): Pr
 
   // The signature is over the digest bytes
   const verifier = createVerify("sha256");
-  verifier.update(Buffer.from(digestBase64));
+  verifier.update(new TextEncoder().encode(digestBase64));
   verifier.end();
 
   return verifier.verify(pemKey, header.signature, "base64");

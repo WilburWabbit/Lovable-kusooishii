@@ -12,6 +12,7 @@
 // Can be called manually or registered as pg_cron (every 15 min).
 // ============================================================
 
+// deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 const corsHeaders = {

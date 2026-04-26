@@ -1241,7 +1241,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
             p_sku_id: skuId,
             p_quantity: qty,
-            p_order_id: order.id,
+            p_order_id: order!.id,
           });
           if (allocErr) throw allocErr;
           const unitIds: string[] = allocatedIds ?? [];
@@ -1255,7 +1255,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
               cogs = unitData?.landed_cost ?? null;
             }
             const { error: lineErr } = await admin.from("sales_order_line").insert({
-              sales_order_id: order.id, sku_id: skuId, quantity: 1,
+              sales_order_id: order!.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
               stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
               vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
@@ -1270,7 +1270,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
 
         if (unresolvedLines.length > 0) {
-          await cleanupSalesOrder(admin, order.id);
+          await cleanupSalesOrder(admin, order!.id);
 
           errors++;
           await markLanding(
@@ -1283,7 +1283,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           continue;
         }
       } catch (lineErr: any) {
-        await cleanupSalesOrder(admin, order.id);
+        await cleanupSalesOrder(admin, order!.id);
         throw lineErr;
       }
 
@@ -1457,7 +1457,7 @@ async function processVendors(admin: any, batchSize: number): Promise<{ processe
 // 6. PROCESS CUSTOMERS
 // ════════════════════════════════════════════════════════════
 
-async function processCustomers(admin: any, batchSize: number): Promise<{ processed: number; errors: number; orders_linked: number }> {
+async function processCustomers(admin: any, batchSize: number): Promise<{ processed: number; errors: number; orders_linked: number; orphans_deleted: number }> {
   const { data: pending } = await admin
     .from("landing_raw_qbo_customer")
     .select("id, external_id, raw_payload")
