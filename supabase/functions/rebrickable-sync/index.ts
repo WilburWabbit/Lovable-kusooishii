@@ -493,6 +493,7 @@ async function enrichMode(
     sets_total: setNums.length,
     sets_missing_links_before: missing.length,
     sets_missing_links_remaining: Math.max(missing.length - setsProcessed, 0),
+    sets_needing_bricklink_ids_before: needsBl.length,
     catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
