@@ -292,6 +292,7 @@ async function enrichMode(
   );
 
   let setsProcessed = 0;
+  let catalogUpdated = 0;
   let figsProcessed = 0;
   let bricklinkAdded = 0;
 
@@ -301,6 +302,7 @@ async function enrichMode(
       const result = await syncSet(db, apiKey, setNum as string);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
+      if (result.catalog_updated) catalogUpdated++;
     } catch (err) {
       // Skip sets that 404 on Rebrickable; keep going
       const msg = err instanceof Error ? err.message : String(err);
@@ -313,6 +315,7 @@ async function enrichMode(
   return {
     sets_processed: setsProcessed,
     sets_total: setNums.length,
+    catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
     has_more: setsProcessed < setNums.length,
