@@ -376,98 +376,9 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
   const effectiveCategoryId = product.ebayCategoryId ?? auto.data?.categoryId ?? null;
 
   const aspects = useResolveEbayAspects(product.id, effectiveCategoryId, marketplace);
-  const { data: canonicalAttrs } = useCanonicalAttributes();
   const saveAspects = useSaveProductAttributes();
 
-  // ─── Universal product facts (canonical DB fields) ───────
-  // These render the canonical attributes that have a db_column on `product`,
-  // so users can still edit Brand, MPN, dimensions, weight, etc.
-  const productFacts = useMemo(() => {
-    const productType = (product as unknown as { productType?: string | null }).productType ?? null;
-    return (canonicalAttrs ?? [])
-      .filter((a) => a.active !== false)
-      .filter((a) => {
-        const types = (a as unknown as { applies_to_product_types?: string[] | null })
-          .applies_to_product_types;
-        if (Array.isArray(types) && types.length > 0) {
-          return productType ? types.includes(productType) : false;
-        }
-        return true;
-      })
-      .filter((a) => !!a.db_column)
-      .sort((a, b) => a.sort_order - b.sort_order);
-  }, [canonicalAttrs, product]);
 
-  const [factForm, setFactForm] = useState<Record<string, string>>({});
-  const [factHydratedFor, setFactHydratedFor] = useState<string | null>(null);
-  useEffect(() => {
-    if (productFacts.length === 0) return;
-    const sig = `${product.id}|${productFacts.map((p) => p.key).join(",")}`;
-    if (sig === factHydratedFor) return;
-    const next: Record<string, string> = {};
-    for (const a of productFacts) {
-      const col = a.db_column;
-      if (!col) continue;
-      const v = (product as unknown as Record<string, unknown>)[col];
-      next[a.key] = v == null ? "" : String(v);
-    }
-    setFactForm(next);
-    setFactHydratedFor(sig);
-  }, [productFacts, product, factHydratedFor]);
-
-  const factsDirty = useMemo(() => {
-    return productFacts.some((a) => {
-      const col = a.db_column;
-      if (!col) return false;
-      const cur = (product as unknown as Record<string, unknown>)[col];
-      const curStr = cur == null ? "" : String(cur);
-      return (factForm[a.key] ?? "") !== curStr;
-    });
-  }, [productFacts, factForm, product]);
-
-  const [savingFacts, setSavingFacts] = useState(false);
-  const handleSaveFacts = async () => {
-    setSavingFacts(true);
-    try {
-      const updates: Record<string, unknown> = {};
-      for (const a of productFacts) {
-        const col = a.db_column;
-        if (!col) continue;
-        const cur = (product as unknown as Record<string, unknown>)[col];
-        const curStr = cur == null ? "" : String(cur);
-        const next = factForm[a.key] ?? "";
-        if (next === curStr) continue;
-        if (next === "") {
-          updates[col] = null;
-        } else if (a.data_type === "int" || a.data_type === "decimal" || a.editor === "number") {
-          const n = Number(next);
-          updates[col] = Number.isFinite(n) ? n : null;
-        } else if (a.data_type === "bool") {
-          updates[col] = next === "true" || next === "1" || next.toLowerCase() === "yes";
-        } else {
-          updates[col] = next;
-        }
-      }
-      if (Object.keys(updates).length === 0) {
-        setSavingFacts(false);
-        return;
-      }
-      await invokeWithAuth("admin-data", {
-        action: "update-product",
-        product_id: product.id,
-        ...updates,
-      });
-      toast.success("Product facts saved");
-      queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
-      queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSavingFacts(false);
-    }
-  };
-
-  // ─── Per-category aspect overrides ───────────────────────
   const rows: SpecRow[] = useMemo(
     () => (aspects.data?.rows ?? []) as SpecRow[],
     [aspects.data],
