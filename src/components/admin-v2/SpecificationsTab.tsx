@@ -171,52 +171,6 @@ function CategoryOverridePicker({
   );
 }
 
-// ─── Universal product fact row ────────────────────────────
-
-function ProductFactRow({
-  label,
-  unit,
-  editor,
-  value,
-  readOnly,
-  onChange,
-}: {
-  label: string;
-  unit: string | null;
-  editor: string;
-  value: string;
-  readOnly: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="py-2 border-b border-zinc-100">
-      <label className="block text-[11px] text-zinc-500 font-medium uppercase tracking-wider mb-1">
-        {label}
-        {unit && <span className="ml-1 text-zinc-400 normal-case">({unit})</span>}
-      </label>
-      {readOnly ? (
-        <div className="text-[13px] text-zinc-900 py-1 font-mono">
-          {value || <span className="text-amber-500/50">—</span>}
-        </div>
-      ) : editor === "textarea" ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
-        />
-      ) : (
-        <input
-          type={editor === "date" ? "date" : editor === "number" ? "number" : "text"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] font-mono"
-        />
-      )}
-    </div>
-  );
-}
-
 // ─── Aspect override row (per category) ────────────────────
 
 function AspectOverrideRow({
