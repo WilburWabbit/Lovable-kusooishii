@@ -190,13 +190,23 @@ async function syncSet(
     }
   } catch (err) {
     if (err instanceof RbHttpError && err.status === 404) {
-      return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+      return {
+        set_num: setNum,
+        figs_processed: 0,
+        bricklink_ids_added: 0,
+        catalog_updated: catalogUpdated,
+      };
     }
     throw err;
   }
 
   if (setFigs.length === 0) {
-    return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+    return {
+      set_num: setNum,
+      figs_processed: 0,
+      bricklink_ids_added: 0,
+      catalog_updated: catalogUpdated,
+    };
   }
 
   const figNums = setFigs.map((f) => f.fig_num);
