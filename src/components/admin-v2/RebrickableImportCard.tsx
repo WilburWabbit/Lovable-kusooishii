@@ -276,6 +276,10 @@ export function RebrickableImportCard() {
   return (
     <>
       <SurfaceCard>
+        <RebrickableApiSyncSection />
+
+        <div className="my-6 border-t border-zinc-200" />
+
         <SectionHead>Rebrickable Reference Data</SectionHead>
         <p className="text-xs text-zinc-500 mb-4">
           Export, edit, delete, and re-import the Rebrickable lookup tables.
