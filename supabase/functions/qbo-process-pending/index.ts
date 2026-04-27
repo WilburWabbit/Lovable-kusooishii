@@ -35,6 +35,21 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   return { mpn, conditionGrade };
 }
 
+/**
+ * Extract a SKU-shaped token from a QBO item Name when the Sku field is empty.
+ * QBO names follow the convention "Display Name (MPN[.grade])", so we look at
+ * the LAST parenthesised group and accept it only if it has no spaces. This
+ * prevents the entire display name being treated as the MPN (which previously
+ * created orphan product/sku rows like "KitchenAid ... (5KFC3516BER").
+ */
+function extractSkuFromName(name: string): string | null {
+  const matches = [...name.matchAll(/\(([^()]+)\)/g)];
+  if (matches.length === 0) return null;
+  const candidate = matches[matches.length - 1][1].trim();
+  if (!candidate || /\s/.test(candidate)) return null;
+  return candidate;
+}
+
 function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
@@ -285,27 +300,34 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
       const item = entry.raw_payload;
       const qboItemId = String(item.Id);
 
-      // Parse SKU
+      // Parse SKU. Prefer the explicit Sku field; if absent, extract from
+      // the trailing "(MPN.grade)" suffix of the Name. Never feed an entire
+      // display name into parseSku — that creates orphan rows where the MPN
+      // is actually the truncated product name.
       let mpn: string | null = null;
       let conditionGrade = "1";
+      let rawSku: string | null = null;
+
       const skuField = item.Sku;
       if (skuField && String(skuField).trim()) {
-        const parsed = parseSku(String(skuField));
-        mpn = parsed.mpn;
-        conditionGrade = parsed.conditionGrade;
+        rawSku = String(skuField).trim();
       } else if (item.Name) {
-        const parsed = parseSku(String(item.Name));
+        const extracted = extractSkuFromName(String(item.Name));
+        if (extracted) rawSku = extracted;
+      }
+
+      if (rawSku) {
+        const parsed = parseSku(rawSku);
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
       }
 
-      if (!mpn) {
+      if (!mpn || !rawSku) {
         await markLanding(admin, "landing_raw_qbo_item", entry.id, "skipped", "No MPN");
         processed++;
         continue;
       }
 
-      const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
 
       // Resolve parent category
