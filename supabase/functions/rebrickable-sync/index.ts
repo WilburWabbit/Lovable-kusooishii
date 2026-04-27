@@ -431,24 +431,110 @@ async function fullMode(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: incremental — fetch only minifigs modified on Rebrickable since the
-// cursor stored in sync_state.key = 'rebrickable_incremental_sync'.
+// Mode: incremental — fetch only sets and minifigs modified on Rebrickable
+// since the per-entity cursors stored in
+// sync_state.key = 'rebrickable_incremental_sync'.
 //
-// Rebrickable has no server-side "modified-since" filter, so we order by
-// -last_modified_dt (newest first) and stop pagination as soon as we hit a
-// record older than the cursor. On success we advance the cursor to the
-// newest last_modified_dt seen this run; on failure the cursor is left
-// unchanged so the next run picks up where this one left off.
+// Cursor shape:
+//   { sets: { last_modified_dt }, minifigs: { last_modified_dt }, last_run_at }
+//
+// Rebrickable has no server-side "modified-since" filter, so we order each
+// list by -last_modified_dt (newest first) and stop pagination as soon as we
+// hit a record older than the cursor for that entity. On success we advance
+// each cursor independently to the newest last_modified_dt seen this run; on
+// failure / timeout the cursor is left unchanged so the next run picks up
+// where this one left off.
 //
 // Initial baseline: today at 00:00 UTC (the seed CSV snapshot date).
 // ---------------------------------------------------------------------------
 const INCREMENTAL_KEY = "rebrickable_incremental_sync";
+
+interface IncrementalCursor {
+  sets?: { last_modified_dt?: string };
+  minifigs?: { last_modified_dt?: string };
+  last_modified_dt?: string; // legacy: pre-sets cursor (minifigs only)
+  last_run_at?: string | null;
+}
 
 function todayMidnightUtcIso(): string {
   const now = new Date();
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   ).toISOString();
+}
+
+interface IncrementalEntityResult {
+  cursor_from: string;
+  cursor_advanced_to: string | null;
+  pages_processed: number;
+  rows_upserted: number;
+  stopped_reason: "cursor" | "exhausted" | "timeout";
+}
+
+// Generic "fetch newest-first until <= cursor" helper.
+async function syncIncrementalEntity<T extends { last_modified_dt?: string }>(
+  apiKey: string,
+  startMs: number,
+  listUrl: string,
+  cursorIso: string,
+  upsert: (rows: T[]) => Promise<void>,
+): Promise<IncrementalEntityResult> {
+  const cursorMs = Date.parse(cursorIso);
+  let nextUrl: string | null = listUrl;
+  let pagesProcessed = 0;
+  let rowsUpserted = 0;
+  let newestSeenIso: string | null = null;
+  let stopped: "cursor" | "exhausted" | "timeout" = "exhausted";
+
+  while (nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) {
+      stopped = "timeout";
+      break;
+    }
+
+    const page: RbPage<T> = await rbFetch<RbPage<T>>(nextUrl, apiKey);
+
+    const fresh: T[] = [];
+    let hitCursor = false;
+
+    for (const r of page.results) {
+      const ts = r.last_modified_dt
+        ? Date.parse(r.last_modified_dt)
+        : Number.NaN;
+      if (Number.isFinite(ts) && ts <= cursorMs) {
+        hitCursor = true;
+        break;
+      }
+      if (!newestSeenIso && r.last_modified_dt) {
+        newestSeenIso = r.last_modified_dt;
+      }
+      fresh.push(r);
+    }
+
+    if (fresh.length > 0) {
+      await upsert(fresh);
+      rowsUpserted += fresh.length;
+    }
+
+    pagesProcessed++;
+
+    if (hitCursor) {
+      stopped = "cursor";
+      break;
+    }
+
+    nextUrl = page.next;
+    if (nextUrl) await sleep();
+  }
+
+  return {
+    cursor_from: cursorIso,
+    cursor_advanced_to:
+      stopped !== "timeout" && newestSeenIso ? newestSeenIso : null,
+    pages_processed: pagesProcessed,
+    rows_upserted: rowsUpserted,
+    stopped_reason: stopped,
+  };
 }
 
 async function incrementalMode(
@@ -464,113 +550,95 @@ async function incrementalMode(
     .maybeSingle();
 
   const baseline = todayMidnightUtcIso();
-  const cursorIso =
-    (stateRow?.value as { last_modified_dt?: string } | null)
-      ?.last_modified_dt ?? baseline;
-  const cursorMs = Date.parse(cursorIso);
+  const saved = (stateRow?.value ?? null) as IncrementalCursor | null;
 
-  // 2. Page through minifigs newest-first; stop on first record <= cursor.
-  let nextUrl: string | null =
-    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`;
+  // Migrate legacy cursor (minifigs-only) to the new shape.
+  const setsCursor = saved?.sets?.last_modified_dt ?? baseline;
+  const minifigsCursor = saved?.minifigs?.last_modified_dt ??
+    saved?.last_modified_dt ?? baseline;
 
-  let pagesProcessed = 0;
-  let figsUpserted = 0;
-  let newestSeenIso: string | null = null;
-  let stopped: "cursor" | "exhausted" | "timeout" = "exhausted";
+  // 2. Phase A — sets → lego_catalog
+  const setsResult = await syncIncrementalEntity<RbSet>(
+    apiKey,
+    startMs,
+    `${RB_BASE}/sets/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`,
+    setsCursor,
+    (rows) => upsertCatalogSets(db, rows),
+  );
 
-  while (nextUrl) {
-    if (Date.now() - startMs > TIMEOUT_MS) {
-      stopped = "timeout";
-      break;
-    }
+  // Brief pacing between phases to stay under 1 req/s
+  if (setsResult.stopped_reason !== "timeout") await sleep();
 
-    const page: RbPage<RbFig & { last_modified_dt?: string }> =
-      await rbFetch<RbPage<RbFig & { last_modified_dt?: string }>>(
-        nextUrl,
-        apiKey,
-      );
+  // 3. Phase B — minifigs → rebrickable_minifigs (only if we still have time)
+  let figsResult: IncrementalEntityResult = {
+    cursor_from: minifigsCursor,
+    cursor_advanced_to: null,
+    pages_processed: 0,
+    rows_upserted: 0,
+    stopped_reason: "timeout",
+  };
 
-    const fresh: RbFig[] = [];
-    let hitCursor = false;
-
-    for (const f of page.results) {
-      const ts = f.last_modified_dt
-        ? Date.parse(f.last_modified_dt)
-        : Number.NaN;
-      if (Number.isFinite(ts) && ts <= cursorMs) {
-        hitCursor = true;
-        break;
-      }
-      if (!newestSeenIso && f.last_modified_dt) {
-        newestSeenIso = f.last_modified_dt;
-      }
-      fresh.push(f);
-    }
-
-    if (fresh.length > 0) {
-      await upsertBatched(
-        db,
-        "rebrickable_minifigs",
-        fresh.map((f) => ({
-          fig_num: f.fig_num,
-          name: f.name,
-          num_parts: f.num_parts,
-          img_url: f.img_url,
-        })),
-        "fig_num",
-      );
-      figsUpserted += fresh.length;
-    }
-
-    pagesProcessed++;
-
-    if (hitCursor) {
-      stopped = "cursor";
-      break;
-    }
-
-    nextUrl = page.next;
-    if (nextUrl) await sleep();
-  }
-
-  // 3. Advance the cursor only if we saw new data AND didn't time out
-  //    mid-run (timeout means we may have missed older-but-still-newer rows).
-  let cursorAdvancedTo: string | null = null;
-  if (stopped !== "timeout" && newestSeenIso) {
-    cursorAdvancedTo = newestSeenIso;
-    await db.from("sync_state").upsert(
-      {
-        key: INCREMENTAL_KEY,
-        value: {
-          last_modified_dt: newestSeenIso,
-          last_run_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" },
-    );
-  } else if (!stateRow) {
-    // First run with no fresh data — persist baseline so future runs have a cursor.
-    await db.from("sync_state").upsert(
-      {
-        key: INCREMENTAL_KEY,
-        value: {
-          last_modified_dt: baseline,
-          last_run_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" },
+  if (Date.now() - startMs <= TIMEOUT_MS) {
+    figsResult = await syncIncrementalEntity<RbFig>(
+      apiKey,
+      startMs,
+      `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`,
+      minifigsCursor,
+      (figs) =>
+        upsertBatched(
+          db,
+          "rebrickable_minifigs",
+          figs.map((f) => ({
+            fig_num: f.fig_num,
+            name: f.name,
+            num_parts: f.num_parts,
+            img_url: f.img_url,
+          })),
+          "fig_num",
+        ),
     );
   }
+
+  // 4. Persist cursors. Each entity advances independently. If an entity
+  //    timed out, its cursor stays put so the next run resumes there.
+  const newCursor: IncrementalCursor = {
+    sets: {
+      last_modified_dt: setsResult.cursor_advanced_to ?? setsCursor,
+    },
+    minifigs: {
+      last_modified_dt: figsResult.cursor_advanced_to ?? minifigsCursor,
+    },
+    last_run_at: new Date().toISOString(),
+  };
+
+  await db.from("sync_state").upsert(
+    {
+      key: INCREMENTAL_KEY,
+      value: newCursor,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "key" },
+  );
+
+  const hasMore = setsResult.stopped_reason === "timeout" ||
+    figsResult.stopped_reason === "timeout";
 
   return {
-    cursor_from: cursorIso,
-    cursor_advanced_to: cursorAdvancedTo,
-    pages_processed: pagesProcessed,
-    figs_upserted: figsUpserted,
-    stopped_reason: stopped,
-    has_more: stopped === "timeout",
+    sets: {
+      cursor_from: setsResult.cursor_from,
+      cursor_advanced_to: setsResult.cursor_advanced_to,
+      pages_processed: setsResult.pages_processed,
+      catalog_rows_upserted: setsResult.rows_upserted,
+      stopped_reason: setsResult.stopped_reason,
+    },
+    minifigs: {
+      cursor_from: figsResult.cursor_from,
+      cursor_advanced_to: figsResult.cursor_advanced_to,
+      pages_processed: figsResult.pages_processed,
+      figs_upserted: figsResult.rows_upserted,
+      stopped_reason: figsResult.stopped_reason,
+    },
+    has_more: hasMore,
   };
 }
 
