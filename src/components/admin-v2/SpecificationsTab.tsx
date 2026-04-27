@@ -189,8 +189,11 @@ function AspectOverrideRow({
   const hasAllowed = allowed.length > 0;
   const customAllowed = row.allowsCustom !== false;
 
-  const autoDisplay =
-    typeof row.autoValue === "string" && row.autoValue.length > 0
+  const autoDisplay = Array.isArray(row.autoValue)
+    ? row.autoValue.length > 0
+      ? row.autoValue.join(", ")
+      : "—"
+    : typeof row.autoValue === "string" && row.autoValue.length > 0
       ? row.autoValue
       : "—";
   const overrideStr = Array.isArray(override)
@@ -199,9 +202,11 @@ function AspectOverrideRow({
   const hasOverride = overrideStr.trim().length > 0;
   const effective = hasOverride
     ? overrideStr
-    : typeof row.autoValue === "string"
-      ? row.autoValue
-      : "";
+    : Array.isArray(row.autoValue)
+      ? row.autoValue.join(", ")
+      : typeof row.autoValue === "string"
+        ? row.autoValue
+        : "";
 
   return (
     <div className="py-2 border-b border-zinc-100">
