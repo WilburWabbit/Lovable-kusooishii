@@ -59,6 +59,15 @@ type Supabase = any;
 // ---------------------------------------------------------------------------
 const sleep = (ms = RATE_MS) => new Promise((r) => setTimeout(r, ms));
 
+class RbHttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "RbHttpError";
+  }
+}
+
 async function rbFetch<T>(url: string, apiKey: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -68,7 +77,10 @@ async function rbFetch<T>(url: string, apiKey: string): Promise<T> {
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`Rebrickable ${res.status}: ${await res.text()}`);
+      throw new RbHttpError(
+        res.status,
+        `Rebrickable ${res.status}: ${await res.text()}`,
+      );
     }
     return (await res.json()) as T;
   } finally {
