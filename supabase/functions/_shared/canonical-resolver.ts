@@ -41,7 +41,7 @@ export interface CanonicalAttributeRow {
 export interface ResolvedCanonicalValue {
   key: string;
   label: string;
-  value: string | null;
+  value: string | string[] | null;
   raw: unknown;
   source: ProviderName | "override" | "none";
   sourceField: string | null;
@@ -65,12 +65,21 @@ export interface ChannelAspectMappingRow {
   transform: string | null;
 }
 
+export interface SetMinifigRow {
+  fig_num: string;
+  minifig_name: string | null;
+  bricklink_id: string | null;
+  minifig_img_url: string | null;
+  quantity: number | null;
+}
+
 export interface ProviderBundle {
   product: Record<string, unknown> | null;
   theme: Record<string, unknown> | null;
   brickeconomy: Record<string, unknown> | null;
   catalog: Record<string, unknown> | null;
   rebrickable: Record<string, unknown> | null;
+  minifigs: SetMinifigRow[];
   fieldOverrides: Record<string, unknown>;
 }
 
