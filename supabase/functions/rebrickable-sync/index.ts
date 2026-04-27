@@ -326,6 +326,150 @@ async function fullMode(
 }
 
 // ---------------------------------------------------------------------------
+// Mode: incremental — fetch only minifigs modified on Rebrickable since the
+// cursor stored in sync_state.key = 'rebrickable_incremental_sync'.
+//
+// Rebrickable has no server-side "modified-since" filter, so we order by
+// -last_modified_dt (newest first) and stop pagination as soon as we hit a
+// record older than the cursor. On success we advance the cursor to the
+// newest last_modified_dt seen this run; on failure the cursor is left
+// unchanged so the next run picks up where this one left off.
+//
+// Initial baseline: today at 00:00 UTC (the seed CSV snapshot date).
+// ---------------------------------------------------------------------------
+const INCREMENTAL_KEY = "rebrickable_incremental_sync";
+
+function todayMidnightUtcIso(): string {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  ).toISOString();
+}
+
+async function incrementalMode(
+  db: Supabase,
+  apiKey: string,
+  startMs: number,
+): Promise<Record<string, unknown>> {
+  // 1. Load the cursor (or seed it to today 00:00 UTC on first run).
+  const { data: stateRow } = await db
+    .from("sync_state")
+    .select("value")
+    .eq("key", INCREMENTAL_KEY)
+    .maybeSingle();
+
+  const baseline = todayMidnightUtcIso();
+  const cursorIso =
+    (stateRow?.value as { last_modified_dt?: string } | null)
+      ?.last_modified_dt ?? baseline;
+  const cursorMs = Date.parse(cursorIso);
+
+  // 2. Page through minifigs newest-first; stop on first record <= cursor.
+  let nextUrl: string | null =
+    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`;
+
+  let pagesProcessed = 0;
+  let figsUpserted = 0;
+  let newestSeenIso: string | null = null;
+  let stopped: "cursor" | "exhausted" | "timeout" = "exhausted";
+
+  while (nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) {
+      stopped = "timeout";
+      break;
+    }
+
+    const page: RbPage<RbFig & { last_modified_dt?: string }> =
+      await rbFetch<RbPage<RbFig & { last_modified_dt?: string }>>(
+        nextUrl,
+        apiKey,
+      );
+
+    const fresh: RbFig[] = [];
+    let hitCursor = false;
+
+    for (const f of page.results) {
+      const ts = f.last_modified_dt
+        ? Date.parse(f.last_modified_dt)
+        : Number.NaN;
+      if (Number.isFinite(ts) && ts <= cursorMs) {
+        hitCursor = true;
+        break;
+      }
+      if (!newestSeenIso && f.last_modified_dt) {
+        newestSeenIso = f.last_modified_dt;
+      }
+      fresh.push(f);
+    }
+
+    if (fresh.length > 0) {
+      await upsertBatched(
+        db,
+        "rebrickable_minifigs",
+        fresh.map((f) => ({
+          fig_num: f.fig_num,
+          name: f.name,
+          num_parts: f.num_parts,
+          img_url: f.img_url,
+        })),
+        "fig_num",
+      );
+      figsUpserted += fresh.length;
+    }
+
+    pagesProcessed++;
+
+    if (hitCursor) {
+      stopped = "cursor";
+      break;
+    }
+
+    nextUrl = page.next;
+    if (nextUrl) await sleep();
+  }
+
+  // 3. Advance the cursor only if we saw new data AND didn't time out
+  //    mid-run (timeout means we may have missed older-but-still-newer rows).
+  let cursorAdvancedTo: string | null = null;
+  if (stopped !== "timeout" && newestSeenIso) {
+    cursorAdvancedTo = newestSeenIso;
+    await db.from("sync_state").upsert(
+      {
+        key: INCREMENTAL_KEY,
+        value: {
+          last_modified_dt: newestSeenIso,
+          last_run_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
+  } else if (!stateRow) {
+    // First run with no fresh data — persist baseline so future runs have a cursor.
+    await db.from("sync_state").upsert(
+      {
+        key: INCREMENTAL_KEY,
+        value: {
+          last_modified_dt: baseline,
+          last_run_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
+  }
+
+  return {
+    cursor_from: cursorIso,
+    cursor_advanced_to: cursorAdvancedTo,
+    pages_processed: pagesProcessed,
+    figs_upserted: figsUpserted,
+    stopped_reason: stopped,
+    has_more: stopped === "timeout",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Auth: allow either (a) admin/staff JWT, or (b) service-role bearer (cron)
 // ---------------------------------------------------------------------------
 async function ensureAuthorized(
