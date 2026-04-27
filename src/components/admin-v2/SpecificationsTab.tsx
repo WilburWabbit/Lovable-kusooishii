@@ -632,80 +632,36 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
         )}
       </SurfaceCard>
 
-      {/* Universal product facts */}
-      <SurfaceCard>
-        <div className="flex items-center justify-between mb-3">
-          <SectionHead>Universal Product Facts</SectionHead>
-          <div className="flex items-center gap-3">
-            <Link
-              to="/admin/settings/channel-mappings"
-              className="text-[11px] text-zinc-500 hover:text-zinc-700 underline"
-            >
-              Manage attributes & mappings
-            </Link>
-            <button
-              onClick={handleSaveFacts}
-              disabled={!factsDirty || savingFacts}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
-            >
-              {savingFacts ? "Saving…" : "Save Facts"}
-            </button>
-          </div>
-        </div>
-        <p className="text-[11px] text-zinc-500 mb-3">
-          Canonical product values shared across every channel. These write back
-          to the product table.
-        </p>
-
-        {productFacts.length === 0 ? (
-          <div className="text-[12px] text-zinc-500 py-4">
-            No canonical attributes configured.{" "}
-            <Link
-              to="/admin/settings/channel-mappings"
-              className="text-amber-600 hover:underline"
-            >
-              Add some in Settings
-            </Link>
-            .
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            {productFacts.map((a) => (
-              <ProductFactRow
-                key={a.key}
-                label={a.label}
-                unit={a.unit}
-                editor={a.editor}
-                readOnly={!a.editable || a.editor === "readOnly"}
-                value={factForm[a.key] ?? ""}
-                onChange={(v) =>
-                  setFactForm((prev) => ({ ...prev, [a.key]: v }))
-                }
-              />
-            ))}
-          </div>
-        )}
-      </SurfaceCard>
-
-      {/* Per-category eBay item specifics */}
+      {/* Specifications — single card driven by the canonical mapping
+          for the resolved eBay category. */}
       {effectiveCategoryId && (
         <SurfaceCard>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <SectionHead>eBay Item Specifics · {aspects.data?.categoryName ?? effectiveCategoryId}</SectionHead>
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <SectionHead>
+                Specifications · {aspects.data?.categoryName ?? effectiveCategoryId}
+              </SectionHead>
               <p className="text-[11px] text-zinc-500 mt-1">
-                Each row shows the value resolved from your canonical mapping.
-                Type a per-category override to publish a different value to
-                eBay for this category only.
+                Canonical attribute fields for this category, per the channel
+                mapping. Each row shows the auto-resolved value; type a value
+                to publish a per-category override.
               </p>
             </div>
-            <button
-              onClick={handleSaveAspects}
-              disabled={!aspectsDirty || savingAspects}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
-            >
-              {savingAspects ? "Saving…" : "Save Overrides"}
-            </button>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <Link
+                to="/admin/settings/channel-mappings"
+                className="text-[11px] text-zinc-500 hover:text-zinc-700 underline whitespace-nowrap"
+              >
+                Manage mappings
+              </Link>
+              <button
+                onClick={handleSaveAspects}
+                disabled={!aspectsDirty || savingAspects}
+                className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
+              >
+                {savingAspects ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
 
           {aspects.isLoading ? (
@@ -722,7 +678,7 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
             <>
               <div className="text-[11px] text-zinc-600 mb-2">
                 <strong className="text-zinc-900">{aspects.data.resolvedCount}</strong> of{" "}
-                <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> aspects
+                <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> attributes
                 resolved
                 {requiredMissing.length > 0 && (
                   <span className="text-amber-700"> · {requiredMissing.length} required missing</span>
