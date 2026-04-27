@@ -144,7 +144,46 @@ Deno.serve(async (req) => {
       facts.push(`Dimensions: ${product.length_cm} × ${product.width_cm} × ${product.height_cm} cm`);
     }
 
-    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
+    // Pull included minifigs from the rebrickable inventory view so the
+    // narrative can name them. Match either the bare set number or the
+    // version-suffixed form (e.g. "75367" or "75367-1").
+    try {
+      const mpnRaw = String(product.mpn ?? "");
+      const setNumber = (product.set_number as string | null) ??
+        (mpnRaw.split(".")[0]?.split("-")[0] || null);
+      if (setNumber) {
+        const candidates = Array.from(new Set([setNumber, `${setNumber}-1`]));
+        const { data: figs } = await admin
+          .from("lego_set_minifigs")
+          .select("fig_num, minifig_name, quantity")
+          .in("set_num", candidates);
+        const list = (figs ?? []) as Array<{
+          fig_num: string;
+          minifig_name: string | null;
+          quantity: number | null;
+        }>;
+        if (list.length > 0) {
+          // Sort by name, dedupe on fig_num
+          const seen = new Set<string>();
+          const lines: string[] = [];
+          for (const m of list) {
+            if (!m.fig_num || seen.has(m.fig_num)) continue;
+            seen.add(m.fig_num);
+            const name = (m.minifig_name ?? "").trim();
+            const qty = m.quantity && m.quantity > 1 ? ` ×${m.quantity}` : "";
+            lines.push(name ? `${name} (${m.fig_num})${qty}` : `${m.fig_num}${qty}`);
+          }
+          lines.sort((a, b) => a.localeCompare(b));
+          if (lines.length > 0) {
+            facts.push(`Included minifigures (${lines.length}):\n  - ${lines.join("\n  - ")}`);
+          }
+        }
+      }
+    } catch (figErr) {
+      console.error("minifig fetch failed (non-fatal):", figErr);
+    }
+
+    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below. When the set includes minifigures, weave at least one of their names into the Description naturally for collector flavour — do not list them as bullets.\n\n${facts.join("\n")}`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
