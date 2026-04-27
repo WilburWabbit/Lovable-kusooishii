@@ -197,7 +197,9 @@ Deno.serve(async (req) => {
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
-      condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
+      condition: mapGradeToEbayCondition(
+        (availableStockUnits[0]?.condition_grade as string | null) ?? (skuRow?.condition_grade as string),
+      ),
       availability: {
         shipToLocationAvailability: {
           quantity: onHandCount,
@@ -397,6 +399,73 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   const text = await res.text();
   if (!text?.trim()) return null;
   return JSON.parse(text);
+}
+
+// ─── Stock availability lookup ───────────────────────────────
+
+async function findAvailableStockUnits(
+  admin: any,
+  skuRow: Record<string, unknown> | null,
+  product: Record<string, unknown> | null,
+  effectiveSku: string,
+): Promise<Array<Record<string, unknown>>> {
+  const rowsById = new Map<string, Record<string, unknown>>();
+  const statuses = ["graded", "listed"];
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade";
+
+  const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of rows ?? []) {
+      const id = row.id as string | undefined;
+      if (id) rowsById.set(id, row);
+    }
+  };
+
+  const skuId = typeof skuRow?.id === "string" ? skuRow.id : null;
+  if (skuId) {
+    const { data, error } = await admin
+      .from("stock_unit")
+      .select(selectCols)
+      .eq("sku_id", skuId)
+      .in("v2_status", statuses);
+    if (error) throw new Error(`Stock lookup by SKU failed: ${error.message}`);
+    addRows(data as Array<Record<string, unknown>> | null);
+  }
+
+  const mpnCandidates = buildMpnCandidates([skuRow?.mpn, product?.mpn, effectiveSku]);
+  if (mpnCandidates.length > 0) {
+    const { data, error } = await admin
+      .from("stock_unit")
+      .select(selectCols)
+      .in("mpn", mpnCandidates)
+      .in("v2_status", statuses);
+    if (error) throw new Error(`Stock lookup by MPN failed: ${error.message}`);
+    addRows(data as Array<Record<string, unknown>> | null);
+  }
+
+  return [...rowsById.values()];
+}
+
+function buildMpnCandidates(values: unknown[]): string[] {
+  const candidates: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const raw = value.trim();
+    if (!raw) continue;
+    candidates.push(raw, raw.replace(/\.\d+$/, ""));
+    for (const token of raw.match(/[A-Za-z0-9][A-Za-z0-9._-]{4,}/g) ?? []) {
+      if (/[A-Za-z]/.test(token) && /\d/.test(token)) {
+        candidates.push(token, token.replace(/\.\d+$/, ""));
+      }
+    }
+  }
+  return uniqueStrings(candidates);
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return [...new Set(values
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0))];
 }
 
 // ─── Grade → eBay Condition Mapping ──────────────────────────
