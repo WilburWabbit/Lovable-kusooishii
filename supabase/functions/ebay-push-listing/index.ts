@@ -17,6 +17,7 @@ import {
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
@@ -130,71 +131,53 @@ Deno.serve(async (req) => {
     const marketplace =
       (productRow?.ebay_marketplace as string | null) ?? "EBAY_GB";
 
-    // Build aspects: start with sensible defaults from intrinsic columns,
-    // then layer DB-stored namespace='ebay' attributes on top, then
-    // mapped 'core' namespace attributes (Brand, MPN, EAN, etc.).
+    // Build aspects via the same canonical specs resolver the
+    // Specifications tab uses, so the mapping table (channel_attribute_mapping)
+    // is the single source of truth and the publisher cannot disagree with
+    // the UI about which aspects are populated.
     const aspects: Record<string, string[]> = {};
-    const setAspect = (key: string, value: unknown) => {
-      if (value == null) return;
-      if (Array.isArray(value)) {
-        const arr = value.map((v) => String(v)).filter((v) => v.trim() !== "");
-        if (arr.length > 0) aspects[key] = arr;
-      } else {
-        const v = String(value).trim();
-        if (v) aspects[key] = [v];
-      }
-    };
-
-    // Defaults pulled from product columns. Brand intentionally omitted: it
-    // must flow through channel_attribute_mapping (e.g. constant_value="LEGO"
-    // for the relevant categories) so it stays operator-controlled.
-    setAspect("MPN", product?.mpn);
-
-    // Pull stored attributes for this product
+    let resolved: Awaited<ReturnType<typeof resolveSpecsForProduct>> | null = null;
     if (productId) {
-      const { data: attrRows } = await admin
-        .from("product_attribute")
-        .select("namespace, key, value, value_json")
-        .eq("product_id", productId)
-        .in("namespace", ["core", "ebay"]);
+      resolved = await resolveSpecsForProduct(admin, {
+        productId,
+        channel: "ebay",
+        marketplace,
+        categoryId: ebayCategoryId,
+      });
 
-      // Apply 'core' first (lower priority)
-      for (const row of (attrRows ?? []) as Array<Record<string, unknown>>) {
-        if (row.namespace !== "core") continue;
-        const key = mapCoreToEbayAspect(row.key as string);
-        if (!key) continue;
-        setAspect(key, row.value_json ?? row.value);
+      for (const row of resolved.rows) {
+        const v = row.effectiveValue;
+        if (v == null) continue;
+        if (Array.isArray(v)) {
+          const arr = v
+            .map((x) => String(x).trim())
+            .filter((x) => x.length > 0);
+          if (arr.length > 0) aspects[row.key] = arr;
+        } else {
+          const s = String(v).trim();
+          if (s) aspects[row.key] = [s];
+        }
       }
-      // Then 'ebay' (highest priority — overrides core mapping)
-      for (const row of (attrRows ?? []) as Array<Record<string, unknown>>) {
-        if (row.namespace !== "ebay") continue;
-        setAspect(row.key as string, row.value_json ?? row.value);
+
+      // Surface required-but-empty aspects with the same labels the UI shows.
+      if (resolved.schemaLoaded) {
+        const missing = resolved.rows
+          .filter((r) => r.required && (r.effectiveValue == null ||
+            (Array.isArray(r.effectiveValue) && r.effectiveValue.length === 0) ||
+            (typeof r.effectiveValue === "string" && r.effectiveValue.trim() === "")))
+          .map((r) => r.label ?? r.key);
+        if (missing.length > 0) {
+          throw new Error(
+            `Cannot publish ${effectiveSku} to eBay: missing required aspects — ${missing.join(", ")}. ` +
+              `Set them in the Specifications tab.`,
+          );
+        }
       }
     }
 
-    // Validate required aspects against cached schema if we have one
-    const { data: schemaRow } = await admin
-      .from("channel_category_schema")
-      .select("id")
-      .eq("channel", "ebay")
-      .eq("marketplace", marketplace)
-      .eq("category_id", ebayCategoryId)
-      .maybeSingle();
-    if (schemaRow?.id) {
-      const { data: requiredAttrs } = await admin
-        .from("channel_category_attribute")
-        .select("key, label")
-        .eq("schema_id", schemaRow.id)
-        .eq("required", true);
-      const missing = (requiredAttrs ?? [])
-        .filter((a: any) => !aspects[a.key as string]?.length)
-        .map((a: any) => a.label ?? a.key);
-      if (missing.length > 0) {
-        throw new Error(
-          `Cannot publish ${effectiveSku} to eBay: missing required aspects — ${missing.join(", ")}. ` +
-            `Set them in the Specifications tab.`,
-        );
-      }
+    // Safety net: ensure MPN is present even if no mapping exists yet.
+    if (!aspects["MPN"] && product?.mpn) {
+      aspects["MPN"] = [String(product.mpn)];
     }
 
     // ─── Step 1: Create/Update Inventory Item ──────────────
