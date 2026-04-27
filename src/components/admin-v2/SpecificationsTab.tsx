@@ -14,18 +14,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAutoResolveEbayCategory,
   useResolveEbayAspects,
   useSetProductChannelCategory,
   useEbayCategorySuggestions,
-  useCanonicalAttributes,
   useSaveProductAttributes,
   type CanonicalProvider,
   type SpecRow,
 } from "@/hooks/admin/use-channel-taxonomy";
-import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
