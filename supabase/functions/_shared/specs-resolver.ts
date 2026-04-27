@@ -339,7 +339,7 @@ export async function resolveSpecsForProduct(
     marketplace,
     categoryId,
     categoryName,
-    schemaLoaded: aspects.length > 0,
+    schemaLoaded: rows.length > 0,
     rows,
     resolvedCount,
     totalCount: rows.length,
