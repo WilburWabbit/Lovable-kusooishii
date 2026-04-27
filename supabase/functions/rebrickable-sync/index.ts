@@ -246,7 +246,25 @@ async function syncSet(
     };
   }
 
-  const figNums = setFigs.map((f) => f.fig_num);
+  // Normalise: pair each row with its fig identifier and drop rows we can't
+  // identify (defensive — Rebrickable occasionally returns nulls).
+  const setFigPairs: { fig_num: string; row: RbSetFig }[] = [];
+  for (const row of setFigs) {
+    const fig = readFigNum(row);
+    if (fig) setFigPairs.push({ fig_num: fig, row });
+  }
+  const figNums = Array.from(new Set(setFigPairs.map((p) => p.fig_num)));
+
+  if (figNums.length === 0) {
+    return {
+      set_num: setNum,
+      figs_processed: 0,
+      bricklink_ids_added: 0,
+      catalog_updated: catalogUpdated,
+      inventory_id: null,
+      inventory_links_written: 0,
+    };
+  }
 
   // 2. Find which figs are missing bricklink_id (or not in DB at all)
   const { data: existing, error } = await db
@@ -302,8 +320,7 @@ async function syncSet(
   // 4. Make sure every fig in this set exists in rebrickable_minifigs before
   //    we write inventory_minifigs (FK constraint). For figs we already know
   //    about we keep their bricklink_id; for unknown figs we insert a minimal
-  //    placeholder row using the data the /sets/{n}/minifigs/ endpoint gives
-  //    us. Either way, the link table can then point at them safely.
+  //    placeholder row using the data the /sets/{n}/minifigs/ endpoint gives us.
   const { data: knownAfter } = await db
     .from("rebrickable_minifigs")
     .select("fig_num")
@@ -311,19 +328,21 @@ async function syncSet(
   const knownSet = new Set<string>(
     (knownAfter ?? []).map((r: { fig_num: string }) => r.fig_num),
   );
-  const missingFigs = setFigs.filter((f) => !knownSet.has(f.fig_num));
-  if (missingFigs.length > 0) {
-    // Cast to a loose record because RbSetFig may carry name/img/num_parts in
-    // newer Rebrickable responses even though our minimal interface omits them.
-    const placeholderRows = missingFigs.map((f) => {
-      const r = f as unknown as Record<string, unknown>;
-      return {
-        fig_num: f.fig_num,
-        name: (r.set_name as string | undefined) ?? f.fig_num,
-        num_parts: (r.num_parts as number | undefined) ?? 0,
-        img_url: (r.set_img_url as string | undefined) ?? null,
-      };
-    });
+  const missingPairs = setFigPairs.filter((p) => !knownSet.has(p.fig_num));
+  if (missingPairs.length > 0) {
+    // Dedupe by fig_num so the upsert isn't fed duplicate keys.
+    const seen = new Set<string>();
+    const placeholderRows: Record<string, unknown>[] = [];
+    for (const { fig_num, row } of missingPairs) {
+      if (seen.has(fig_num)) continue;
+      seen.add(fig_num);
+      placeholderRows.push({
+        fig_num,
+        name: row.set_name ?? fig_num,
+        num_parts: 0,
+        img_url: row.set_img_url ?? null,
+      });
+    }
     await upsertBatched(db, "rebrickable_minifigs", placeholderRows, "fig_num");
   }
 
