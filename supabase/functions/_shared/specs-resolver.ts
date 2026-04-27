@@ -225,8 +225,42 @@ export async function resolveSpecsForProduct(
     if (row.aspect_key) savedByAspect.set(row.aspect_key, row);
   }
 
-  // 5. Build the rows
-  const rows: SpecRow[] = aspects.map((a) => {
+  // 5. Build the rows.
+  //
+  // We iterate the union of:
+  //   • aspects defined in the eBay official category schema, AND
+  //   • aspect_keys present in channel_attribute_mapping for this scope
+  //     but NOT in the schema (custom aspects added by the operator).
+  //
+  // eBay accepts custom item specifics, so any mapping the operator has
+  // added — even one that is not in eBay's published schema for the
+  // category — must surface in the Specifications tab and be sent to
+  // eBay when publishing.
+  const aspectByKey = new Map<string, AspectRow>();
+  for (const a of aspects) aspectByKey.set(a.key, a);
+
+  const orphanKeys = Array.from(mapByAspect.keys()).filter(
+    (k) => !aspectByKey.has(k),
+  );
+  let nextSort = aspects.length;
+  for (const k of orphanKeys) {
+    aspectByKey.set(k, {
+      key: k,
+      label: k,
+      required: false,
+      cardinality: "single",
+      dataType: "string",
+      allowedValues: null,
+      allowsCustom: true,
+      sortOrder: nextSort++,
+    });
+  }
+
+  const allAspects = Array.from(aspectByKey.values()).sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
+
+  const rows: SpecRow[] = allAspects.map((a) => {
     const mapping = mapByAspect.get(a.key) ?? null;
     const saved = savedByAspect.get(a.key) ?? null;
 
