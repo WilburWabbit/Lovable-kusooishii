@@ -5,6 +5,7 @@ import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
 import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
 import { CsvSyncPage } from "@/components/admin-v2/csv-sync/CsvSyncPage";
 import { StagingErrorsPanel } from "@/components/admin-v2/StagingErrorsPanel";
+import { RebrickableImportCard } from "@/components/admin-v2/RebrickableImportCard";
 
 export default function DataSyncPage() {
   return (
@@ -20,6 +21,7 @@ export default function DataSyncPage() {
           <EbaySettingsCard />
           <BrickEconomySettingsCard />
         </div>
+        <RebrickableImportCard />
         <CsvSyncPage />
       </div>
     </AdminV2Layout>
