@@ -113,17 +113,28 @@ async function syncSet(
   set_num: string;
   figs_processed: number;
   bricklink_ids_added: number;
+  figs_skipped?: number;
 }> {
-  // 1. Fetch all minifigs for this set (paginated)
+  // 1. Fetch all minifigs for this set (paginated). Tolerate 404 (set not on Rebrickable).
   let url: string | null =
     `${RB_BASE}/sets/${setNum}/minifigs/?page_size=${PAGE_SIZE}`;
   const setFigs: RbSetFig[] = [];
 
-  while (url) {
-    const page: RbPage<RbSetFig> = await rbFetch<RbPage<RbSetFig>>(url, apiKey);
-    setFigs.push(...page.results);
-    url = page.next;
-    if (url) await sleep();
+  try {
+    while (url) {
+      const page: RbPage<RbSetFig> = await rbFetch<RbPage<RbSetFig>>(
+        url,
+        apiKey,
+      );
+      setFigs.push(...page.results);
+      url = page.next;
+      if (url) await sleep();
+    }
+  } catch (err) {
+    if (err instanceof RbHttpError && err.status === 404) {
+      return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+    }
+    throw err;
   }
 
   if (setFigs.length === 0) {
@@ -148,12 +159,23 @@ async function syncSet(
   );
   const toEnrich = figNums.filter((f) => !knownWithId.has(f));
 
-  // 3. Fetch detail for each fig that needs enriching
+  // 3. Fetch detail for each fig that needs enriching. Skip individual 404s.
   let bricklinkAdded = 0;
+  let skipped = 0;
 
   for (const figNum of toEnrich) {
     await sleep();
-    const fig = await rbFetch<RbFig>(`${RB_BASE}/minifigs/${figNum}/`, apiKey);
+    let fig: RbFig;
+    try {
+      fig = await rbFetch<RbFig>(`${RB_BASE}/minifigs/${figNum}/`, apiKey);
+    } catch (err) {
+      if (err instanceof RbHttpError && err.status === 404) {
+        console.warn(`syncSet: minifig ${figNum} not found on Rebrickable`);
+        skipped++;
+        continue;
+      }
+      throw err;
+    }
     const bricklinkId = fig.external_ids?.BrickLink?.[0] ?? null;
 
     const { error: upsertErr } = await db
@@ -176,6 +198,7 @@ async function syncSet(
     set_num: setNum,
     figs_processed: figNums.length,
     bricklink_ids_added: bricklinkAdded,
+    figs_skipped: skipped,
   };
 }
 
