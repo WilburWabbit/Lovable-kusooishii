@@ -401,6 +401,7 @@ async function enrichMode(
   let catalogUpdated = 0;
   let figsProcessed = 0;
   let bricklinkAdded = 0;
+  let inventoryLinksWritten = 0;
 
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
@@ -408,6 +409,7 @@ async function enrichMode(
       const result = await syncSet(db, apiKey, setNum as string);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
+      inventoryLinksWritten += result.inventory_links_written;
       if (result.catalog_updated) catalogUpdated++;
     } catch (err) {
       // Skip sets that 404 on Rebrickable; keep going
@@ -424,6 +426,7 @@ async function enrichMode(
     catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
+    inventory_links_written: inventoryLinksWritten,
     has_more: setsProcessed < setNums.length,
   };
 }
