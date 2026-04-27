@@ -6,7 +6,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
-import { Download, Upload, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import {
+  Download,
+  Upload,
+  AlertTriangle,
+  Loader2,
+  Trash2,
+  Sparkles,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
 import { supabase } from "@/integrations/supabase/client";
@@ -267,6 +276,10 @@ export function RebrickableImportCard() {
   return (
     <>
       <SurfaceCard>
+        <RebrickableApiSyncSection />
+
+        <div className="my-6 border-t border-zinc-200" />
+
         <SectionHead>Rebrickable Reference Data</SectionHead>
         <p className="text-xs text-zinc-500 mb-4">
           Export, edit, delete, and re-import the Rebrickable lookup tables.
@@ -469,4 +482,306 @@ function ImportButton({
       </label>
     </>
   );
+}
+
+// ============================================================
+// Rebrickable API Sync Section
+// Live enrichment & metadata refresh via the Rebrickable API
+// (rebrickable-sync edge function). Modes: enrich | set | full.
+// ============================================================
+
+type SyncMode = "enrich" | "set" | "full";
+
+function RebrickableApiSyncSection() {
+  const [busyMode, setBusyMode] = useState<SyncMode | null>(null);
+  const [setNumOpen, setSetNumOpen] = useState(false);
+  const [setNumValue, setSetNumValue] = useState("");
+  const [cursorState, setCursorState] = useState<"loading" | "active" | "none">(
+    "loading",
+  );
+
+  const refreshCursor = useCallback(async () => {
+    try {
+      // Best-effort lookup; if the table doesn't exist yet we treat it as "no cursor"
+      const { data, error } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .from("sync_state" as any)
+        .select("key")
+        .eq("key", "rebrickable_full_sync")
+        .maybeSingle();
+      if (error) {
+        setCursorState("none");
+        return;
+      }
+      setCursorState(data ? "active" : "none");
+    } catch {
+      setCursorState("none");
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCursor();
+  }, [refreshCursor]);
+
+  const invokeSync = useCallback(
+    async (mode: SyncMode, body: Record<string, unknown>) => {
+      setBusyMode(mode);
+      try {
+        const { data, error } = await supabase.functions.invoke(
+          "rebrickable-sync",
+          { body },
+        );
+        if (error) {
+          // Try to surface a useful message from the response
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const msg = (error as any)?.message ?? String(error);
+          toast.error(`Rebrickable sync failed: ${msg}`);
+          return;
+        }
+        toast.success(formatSyncResult(mode, data));
+        await refreshCursor();
+      } catch (err) {
+        toast.error(
+          `Rebrickable sync failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        setBusyMode(null);
+      }
+    },
+    [refreshCursor],
+  );
+
+  const handleSetSubmit = () => {
+    const trimmed = setNumValue.trim();
+    if (!trimmed) {
+      toast.error("Enter a set number first (e.g. 75367-1)");
+      return;
+    }
+    invokeSync("set", { mode: "set", set_num: trimmed }).then(() => {
+      setSetNumOpen(false);
+      setSetNumValue("");
+    });
+  };
+
+  return (
+    <div>
+      <SectionHead>Rebrickable API Sync</SectionHead>
+      <p className="text-xs text-zinc-500 mb-4">
+        Live enrichment and metadata refresh via the Rebrickable API.
+      </p>
+
+      <div className="space-y-2">
+        {/* Enrich Catalogue */}
+        <SyncRow
+          icon={<Sparkles className="h-3.5 w-3.5" />}
+          label="Enrich Catalogue"
+          description="Fetches BrickLink IDs for every minifig in your stocked sets. Safe to re-run — skips figs already enriched."
+          buttonLabel="Run Enrich"
+          busy={busyMode === "enrich"}
+          disabled={busyMode !== null}
+          onClick={() => invokeSync("enrich", { mode: "enrich" })}
+        />
+
+        {/* Sync Single Set */}
+        <div className="flex flex-col gap-2 px-3 py-3 rounded border border-zinc-200 bg-white">
+          <div className="flex flex-col md:flex-row md:items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-zinc-500" />
+                <span className="text-sm font-medium text-zinc-900">
+                  Sync Single Set
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Enriches one set by set number. Runs automatically when a new
+                product is added to the catalogue.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSetNumOpen((o) => !o)}
+                disabled={busyMode !== null}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                {busyMode === "set" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Search className="h-3.5 w-3.5" />
+                )}
+                {busyMode === "set" ? "Running…" : "Sync Set"}
+              </button>
+            </div>
+          </div>
+          {setNumOpen && (
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                value={setNumValue}
+                onChange={(e) => setSetNumValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSetSubmit();
+                  if (e.key === "Escape") setSetNumOpen(false);
+                }}
+                placeholder="e.g. 75367-1"
+                disabled={busyMode !== null}
+                className="flex-1 px-2.5 py-1.5 rounded border border-zinc-300 text-xs font-mono text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 disabled:opacity-50"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleSetSubmit}
+                disabled={busyMode !== null}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSetNumOpen(false);
+                  setSetNumValue("");
+                }}
+                disabled={busyMode !== null}
+                className="px-3 py-1.5 rounded border border-zinc-300 bg-white text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Full Refresh */}
+        <SyncRow
+          icon={<RefreshCw className="h-3.5 w-3.5" />}
+          label="Full Refresh"
+          description="Paginates the entire Rebrickable minifig catalogue to refresh names and images. Scheduled weekly — only run manually if data looks stale. May time out and resume on re-trigger."
+          buttonLabel="Run Full Refresh"
+          busy={busyMode === "full"}
+          disabled={busyMode !== null}
+          onClick={() => invokeSync("full", { mode: "full" })}
+          badge={
+            <span className="inline-block px-1.5 py-px rounded bg-teal-50 text-teal-700 border border-teal-200 text-[10px] font-mono">
+              Resume-safe
+            </span>
+          }
+        />
+      </div>
+
+      {/* Last sync row */}
+      <div className="mt-3 px-3 py-2 rounded border border-zinc-200 bg-zinc-50">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium">
+            Last sync
+          </span>
+          {cursorState === "loading" && (
+            <span className="text-xs text-zinc-400">Checking…</span>
+          )}
+          {cursorState === "active" && (
+            <span className="text-xs text-amber-700 font-medium">
+              Full refresh in progress — cursor saved
+            </span>
+          )}
+          {cursorState === "none" && (
+            <span className="text-xs text-zinc-500">No active cursor</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SyncRow({
+  icon,
+  label,
+  description,
+  buttonLabel,
+  busy,
+  disabled,
+  onClick,
+  badge,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  buttonLabel: string;
+  busy: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  badge?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col md:flex-row md:items-center gap-3 px-3 py-3 rounded border border-zinc-200 bg-white">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-900">
+            <span className="text-zinc-500">{icon}</span>
+            {label}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+          <p className="text-xs text-zinc-500">{description}</p>
+          {badge}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors"
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            icon
+          )}
+          {busy ? "Running…" : buttonLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatSyncResult(mode: SyncMode, data: unknown): string {
+  if (!data || typeof data !== "object") {
+    return `${labelForMode(mode)} complete`;
+  }
+  const d = data as Record<string, unknown>;
+  const parts: string[] = [];
+  const pushIfNum = (key: string, suffix: string) => {
+    const v = d[key];
+    if (typeof v === "number") parts.push(`${v.toLocaleString()} ${suffix}`);
+  };
+
+  if (mode === "enrich") {
+    pushIfNum("sets_processed", "sets");
+    pushIfNum("sets_upserted", "sets");
+    pushIfNum("figs_processed", "figs");
+    pushIfNum("bricklink_ids_added", "BrickLink IDs added");
+  } else if (mode === "set") {
+    if (typeof d.set_num === "string") parts.push(`set ${d.set_num}`);
+    pushIfNum("figs_processed", "figs");
+    pushIfNum("bricklink_ids_added", "BrickLink IDs added");
+  } else if (mode === "full") {
+    pushIfNum("pages_processed", "pages");
+    pushIfNum("figs_upserted", "figs upserted");
+    if (d.has_more === true) parts.push("more pages remain — re-run to resume");
+  }
+
+  const head = `${labelForMode(mode)} complete`;
+  return parts.length > 0 ? `${head}: ${parts.join(", ")}` : head;
+}
+
+function labelForMode(mode: SyncMode): string {
+  switch (mode) {
+    case "enrich":
+      return "Enrich";
+    case "set":
+      return "Set sync";
+    case "full":
+      return "Full refresh";
+  }
 }
