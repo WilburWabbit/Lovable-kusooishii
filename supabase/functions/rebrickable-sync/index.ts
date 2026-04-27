@@ -371,10 +371,10 @@ async function syncSet(
       // Collapse duplicates (Rebrickable can list the same fig twice with
       // different inventory rows) by summing quantity per fig.
       const qtyByFig = new Map<string, number>();
-      for (const f of setFigs) {
+      for (const { fig_num, row } of setFigPairs) {
         qtyByFig.set(
-          f.fig_num,
-          (qtyByFig.get(f.fig_num) ?? 0) + (f.quantity ?? 1),
+          fig_num,
+          (qtyByFig.get(fig_num) ?? 0) + (row.quantity ?? 1),
         );
       }
       const linkRows = Array.from(qtyByFig.entries()).map(
