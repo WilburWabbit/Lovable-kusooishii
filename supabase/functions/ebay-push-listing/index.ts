@@ -17,6 +17,7 @@ import {
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
