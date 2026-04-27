@@ -323,50 +323,83 @@ async function enrichMode(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: full — paginated refresh of all Rebrickable minifig metadata
-// Cursor-based: saves progress to sync_state so we resume on re-trigger.
-// bricklink_id is intentionally preserved (list endpoint omits external_ids).
+// Mode: full — paginated refresh of every Rebrickable set (lego_catalog) AND
+// minifig (rebrickable_minifigs). Two-phase, cursor-based:
+//   phase = 'sets'     — paginate /lego/sets/ → upsert lego_catalog
+//   phase = 'minifigs' — paginate /lego/minifigs/ → upsert rebrickable_minifigs
+// On timeout the cursor (phase + next_url) is saved so the next trigger
+// resumes from the same page. bricklink_id is preserved (list endpoints
+// omit external_ids).
 // ---------------------------------------------------------------------------
 async function fullMode(
   db: Supabase,
   apiKey: string,
   startMs: number,
 ): Promise<Record<string, unknown>> {
+  const FULL_KEY = "rebrickable_full_sync";
+
   const { data: stateRow } = await db
     .from("sync_state")
     .select("value")
-    .eq("key", "rebrickable_full_sync")
+    .eq("key", FULL_KEY)
     .maybeSingle();
 
-  const savedCursor =
-    (stateRow?.value as { next_url?: string } | null)?.next_url;
-  let nextUrl: string | null =
-    savedCursor ??
-    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=fig_num`;
+  const savedState = (stateRow?.value ?? null) as
+    | { phase?: "sets" | "minifigs"; next_url?: string }
+    | null;
+  const resuming = !!savedState?.next_url;
+
+  let phase: "sets" | "minifigs" = savedState?.phase ?? "sets";
+  let nextUrl: string | null = savedState?.next_url ??
+    `${RB_BASE}/sets/?page_size=${PAGE_SIZE}&ordering=set_num`;
 
   let pagesProcessed = 0;
+  let setsUpserted = 0;
   let figsUpserted = 0;
-  const resuming = !!savedCursor;
 
-  while (nextUrl) {
-    if (Date.now() - startMs > TIMEOUT_MS) {
-      await db.from("sync_state").upsert(
-        {
-          key: "rebrickable_full_sync",
-          value: { next_url: nextUrl },
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" },
-      );
-      return {
-        status: "partial — re-trigger to resume",
-        resuming,
-        pages_processed: pagesProcessed,
-        figs_upserted: figsUpserted,
-        cursor_saved: nextUrl,
-        has_more: true,
-      };
+  const saveCursorAndExit = async (): Promise<Record<string, unknown>> => {
+    await db.from("sync_state").upsert(
+      {
+        key: FULL_KEY,
+        value: { phase, next_url: nextUrl },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
+    return {
+      status: "partial — re-trigger to resume",
+      resuming,
+      phase,
+      pages_processed: pagesProcessed,
+      sets_upserted: setsUpserted,
+      figs_upserted: figsUpserted,
+      cursor_saved: nextUrl,
+      has_more: true,
+    };
+  };
+
+  // Phase 1: SETS → lego_catalog
+  while (phase === "sets" && nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) return await saveCursorAndExit();
+
+    const page: RbPage<RbSet> = await rbFetch<RbPage<RbSet>>(nextUrl, apiKey);
+    await upsertCatalogSets(db, page.results);
+    setsUpserted += page.results.length;
+    pagesProcessed++;
+    nextUrl = page.next;
+
+    if (!nextUrl) {
+      // Sets exhausted — advance to minifigs phase
+      phase = "minifigs";
+      nextUrl =
+        `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=fig_num`;
     }
+    await sleep();
+  }
+
+  // Phase 2: MINIFIGS → rebrickable_minifigs
+  while (phase === "minifigs" && nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) return await saveCursorAndExit();
 
     const page: RbPage<RbFig> = await rbFetch<RbPage<RbFig>>(nextUrl, apiKey);
 
@@ -376,7 +409,6 @@ async function fullMode(
       num_parts: f.num_parts,
       img_url: f.img_url,
     }));
-
     await upsertBatched(db, "rebrickable_minifigs", rows, "fig_num");
     figsUpserted += rows.length;
     pagesProcessed++;
@@ -385,13 +417,14 @@ async function fullMode(
     if (nextUrl) await sleep();
   }
 
-  // Sync complete — clear cursor
-  await db.from("sync_state").delete().eq("key", "rebrickable_full_sync");
+  // Both phases complete — clear cursor
+  await db.from("sync_state").delete().eq("key", FULL_KEY);
 
   return {
     status: "complete",
     resuming,
     pages_processed: pagesProcessed,
+    sets_upserted: setsUpserted,
     figs_upserted: figsUpserted,
     has_more: false,
   };
