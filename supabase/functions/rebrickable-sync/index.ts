@@ -33,7 +33,8 @@ const FETCH_TIMEOUT_MS = 30_000;
 // Types
 // ---------------------------------------------------------------------------
 interface RbFig {
-  fig_num: string;
+  fig_num?: string;
+  set_num?: string; // /lego/minifigs/{n}/ sometimes returns set_num instead
   name: string;
   num_parts: number;
   img_url: string;
