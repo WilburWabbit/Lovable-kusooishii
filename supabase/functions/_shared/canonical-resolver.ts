@@ -253,6 +253,23 @@ function derive(
       if (l == null && w == null && h == null) return null;
       return [l, w, h].map((n) => (n == null ? "?" : String(n))).join("x");
     }
+    case "minifigs_lego_character": {
+      // Build "<Name> (<fig_num>)" for every minifig in the set, sorted
+      // by name for stable output. Returned as an array so multi-value
+      // eBay aspects (LEGO Character) get one entry per minifig.
+      const figs = bundle.minifigs ?? [];
+      if (figs.length === 0) return null;
+      const items = figs
+        .filter((m) => m.fig_num)
+        .map((m) => {
+          const name = (m.minifig_name ?? "").trim();
+          const fig = m.fig_num.trim();
+          return name ? `${name} (${fig})` : fig;
+        });
+      const unique = Array.from(new Set(items));
+      unique.sort((a, b) => a.localeCompare(b));
+      return unique.length > 0 ? unique : null;
+    }
     default:
       return null;
   }
@@ -302,10 +319,16 @@ export function resolveAttribute(
 
   if (isOverride) source = "override";
 
+  const value: string | string[] | null = raw == null
+    ? null
+    : Array.isArray(raw)
+      ? (raw as unknown[]).map((x) => String(x))
+      : String(raw);
+
   return {
     key: attr.key,
     label: attr.label,
-    value: raw == null ? null : String(raw),
+    value,
     raw,
     source,
     sourceField,
