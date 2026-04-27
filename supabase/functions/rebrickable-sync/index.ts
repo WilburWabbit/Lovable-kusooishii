@@ -40,9 +40,22 @@ interface RbFig {
   external_ids?: { BrickLink?: string[]; BrickOwl?: string[] };
 }
 
+// /lego/sets/{set_num}/minifigs/ returns inventory rows that describe a
+// minifig contained within a set. Rebrickable models minifigs as a special
+// kind of set, so the row's identifier comes back as `set_num` (the minifig's
+// fig number, e.g. "fig-001234"). Some integrations also surface it as
+// `fig_num`. We accept either and normalise downstream.
 interface RbSetFig {
-  fig_num: string;
+  fig_num?: string;
+  set_num?: string;
+  set_name?: string;
+  set_img_url?: string;
   quantity: number;
+}
+
+function readFigNum(row: RbSetFig): string | null {
+  const v = (row.fig_num ?? row.set_num ?? "").trim();
+  return v.length > 0 ? v : null;
 }
 
 interface RbSet {
