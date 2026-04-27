@@ -35,6 +35,21 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   return { mpn, conditionGrade };
 }
 
+/**
+ * Extract a SKU-shaped token from a QBO item Name when the Sku field is empty.
+ * QBO names follow the convention "Display Name (MPN[.grade])", so we look at
+ * the LAST parenthesised group and accept it only if it has no spaces. This
+ * prevents the entire display name being treated as the MPN (which previously
+ * created orphan product/sku rows like "KitchenAid ... (5KFC3516BER").
+ */
+function extractSkuFromName(name: string): string | null {
+  const matches = [...name.matchAll(/\(([^()]+)\)/g)];
+  if (matches.length === 0) return null;
+  const candidate = matches[matches.length - 1][1].trim();
+  if (!candidate || /\s/.test(candidate)) return null;
+  return candidate;
+}
+
 function cleanQboName(raw: string): string {
   return raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
