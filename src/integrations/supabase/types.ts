@@ -2340,6 +2340,7 @@ export type Database = {
           ebay_marketplace: string | null
           ec_range: string | null
           energy_efficiency_rating: string | null
+          eprel_registration_number: string | null
           features: string | null
           field_overrides: Json | null
           food_compatibility: string | null
@@ -2428,6 +2429,7 @@ export type Database = {
           ebay_marketplace?: string | null
           ec_range?: string | null
           energy_efficiency_rating?: string | null
+          eprel_registration_number?: string | null
           features?: string | null
           field_overrides?: Json | null
           food_compatibility?: string | null
@@ -2516,6 +2518,7 @@ export type Database = {
           ebay_marketplace?: string | null
           ec_range?: string | null
           energy_efficiency_rating?: string | null
+          eprel_registration_number?: string | null
           features?: string | null
           field_overrides?: Json | null
           food_compatibility?: string | null

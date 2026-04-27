@@ -14,18 +14,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAutoResolveEbayCategory,
   useResolveEbayAspects,
   useSetProductChannelCategory,
   useEbayCategorySuggestions,
-  useCanonicalAttributes,
   useSaveProductAttributes,
   type CanonicalProvider,
   type SpecRow,
 } from "@/hooks/admin/use-channel-taxonomy";
-import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
@@ -169,52 +167,6 @@ function CategoryOverridePicker({
           <div className="text-[12px] text-zinc-500 p-2">No suggestions.</div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── Universal product fact row ────────────────────────────
-
-function ProductFactRow({
-  label,
-  unit,
-  editor,
-  value,
-  readOnly,
-  onChange,
-}: {
-  label: string;
-  unit: string | null;
-  editor: string;
-  value: string;
-  readOnly: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="py-2 border-b border-zinc-100">
-      <label className="block text-[11px] text-zinc-500 font-medium uppercase tracking-wider mb-1">
-        {label}
-        {unit && <span className="ml-1 text-zinc-400 normal-case">({unit})</span>}
-      </label>
-      {readOnly ? (
-        <div className="text-[13px] text-zinc-900 py-1 font-mono">
-          {value || <span className="text-amber-500/50">—</span>}
-        </div>
-      ) : editor === "textarea" ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px]"
-        />
-      ) : (
-        <input
-          type={editor === "date" ? "date" : editor === "number" ? "number" : "text"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] font-mono"
-        />
-      )}
     </div>
   );
 }
@@ -376,98 +328,9 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
   const effectiveCategoryId = product.ebayCategoryId ?? auto.data?.categoryId ?? null;
 
   const aspects = useResolveEbayAspects(product.id, effectiveCategoryId, marketplace);
-  const { data: canonicalAttrs } = useCanonicalAttributes();
   const saveAspects = useSaveProductAttributes();
 
-  // ─── Universal product facts (canonical DB fields) ───────
-  // These render the canonical attributes that have a db_column on `product`,
-  // so users can still edit Brand, MPN, dimensions, weight, etc.
-  const productFacts = useMemo(() => {
-    const productType = (product as unknown as { productType?: string | null }).productType ?? null;
-    return (canonicalAttrs ?? [])
-      .filter((a) => a.active !== false)
-      .filter((a) => {
-        const types = (a as unknown as { applies_to_product_types?: string[] | null })
-          .applies_to_product_types;
-        if (Array.isArray(types) && types.length > 0) {
-          return productType ? types.includes(productType) : false;
-        }
-        return true;
-      })
-      .filter((a) => !!a.db_column)
-      .sort((a, b) => a.sort_order - b.sort_order);
-  }, [canonicalAttrs, product]);
 
-  const [factForm, setFactForm] = useState<Record<string, string>>({});
-  const [factHydratedFor, setFactHydratedFor] = useState<string | null>(null);
-  useEffect(() => {
-    if (productFacts.length === 0) return;
-    const sig = `${product.id}|${productFacts.map((p) => p.key).join(",")}`;
-    if (sig === factHydratedFor) return;
-    const next: Record<string, string> = {};
-    for (const a of productFacts) {
-      const col = a.db_column;
-      if (!col) continue;
-      const v = (product as unknown as Record<string, unknown>)[col];
-      next[a.key] = v == null ? "" : String(v);
-    }
-    setFactForm(next);
-    setFactHydratedFor(sig);
-  }, [productFacts, product, factHydratedFor]);
-
-  const factsDirty = useMemo(() => {
-    return productFacts.some((a) => {
-      const col = a.db_column;
-      if (!col) return false;
-      const cur = (product as unknown as Record<string, unknown>)[col];
-      const curStr = cur == null ? "" : String(cur);
-      return (factForm[a.key] ?? "") !== curStr;
-    });
-  }, [productFacts, factForm, product]);
-
-  const [savingFacts, setSavingFacts] = useState(false);
-  const handleSaveFacts = async () => {
-    setSavingFacts(true);
-    try {
-      const updates: Record<string, unknown> = {};
-      for (const a of productFacts) {
-        const col = a.db_column;
-        if (!col) continue;
-        const cur = (product as unknown as Record<string, unknown>)[col];
-        const curStr = cur == null ? "" : String(cur);
-        const next = factForm[a.key] ?? "";
-        if (next === curStr) continue;
-        if (next === "") {
-          updates[col] = null;
-        } else if (a.data_type === "int" || a.data_type === "decimal" || a.editor === "number") {
-          const n = Number(next);
-          updates[col] = Number.isFinite(n) ? n : null;
-        } else if (a.data_type === "bool") {
-          updates[col] = next === "true" || next === "1" || next.toLowerCase() === "yes";
-        } else {
-          updates[col] = next;
-        }
-      }
-      if (Object.keys(updates).length === 0) {
-        setSavingFacts(false);
-        return;
-      }
-      await invokeWithAuth("admin-data", {
-        action: "update-product",
-        product_id: product.id,
-        ...updates,
-      });
-      toast.success("Product facts saved");
-      queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
-      queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSavingFacts(false);
-    }
-  };
-
-  // ─── Per-category aspect overrides ───────────────────────
   const rows: SpecRow[] = useMemo(
     () => (aspects.data?.rows ?? []) as SpecRow[],
     [aspects.data],
@@ -632,80 +495,36 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
         )}
       </SurfaceCard>
 
-      {/* Universal product facts */}
-      <SurfaceCard>
-        <div className="flex items-center justify-between mb-3">
-          <SectionHead>Universal Product Facts</SectionHead>
-          <div className="flex items-center gap-3">
-            <Link
-              to="/admin/settings/channel-mappings"
-              className="text-[11px] text-zinc-500 hover:text-zinc-700 underline"
-            >
-              Manage attributes & mappings
-            </Link>
-            <button
-              onClick={handleSaveFacts}
-              disabled={!factsDirty || savingFacts}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
-            >
-              {savingFacts ? "Saving…" : "Save Facts"}
-            </button>
-          </div>
-        </div>
-        <p className="text-[11px] text-zinc-500 mb-3">
-          Canonical product values shared across every channel. These write back
-          to the product table.
-        </p>
-
-        {productFacts.length === 0 ? (
-          <div className="text-[12px] text-zinc-500 py-4">
-            No canonical attributes configured.{" "}
-            <Link
-              to="/admin/settings/channel-mappings"
-              className="text-amber-600 hover:underline"
-            >
-              Add some in Settings
-            </Link>
-            .
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            {productFacts.map((a) => (
-              <ProductFactRow
-                key={a.key}
-                label={a.label}
-                unit={a.unit}
-                editor={a.editor}
-                readOnly={!a.editable || a.editor === "readOnly"}
-                value={factForm[a.key] ?? ""}
-                onChange={(v) =>
-                  setFactForm((prev) => ({ ...prev, [a.key]: v }))
-                }
-              />
-            ))}
-          </div>
-        )}
-      </SurfaceCard>
-
-      {/* Per-category eBay item specifics */}
+      {/* Specifications — single card driven by the canonical mapping
+          for the resolved eBay category. */}
       {effectiveCategoryId && (
         <SurfaceCard>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <SectionHead>eBay Item Specifics · {aspects.data?.categoryName ?? effectiveCategoryId}</SectionHead>
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <SectionHead>
+                Specifications · {aspects.data?.categoryName ?? effectiveCategoryId}
+              </SectionHead>
               <p className="text-[11px] text-zinc-500 mt-1">
-                Each row shows the value resolved from your canonical mapping.
-                Type a per-category override to publish a different value to
-                eBay for this category only.
+                Canonical attribute fields for this category, per the channel
+                mapping. Each row shows the auto-resolved value; type a value
+                to publish a per-category override.
               </p>
             </div>
-            <button
-              onClick={handleSaveAspects}
-              disabled={!aspectsDirty || savingAspects}
-              className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
-            >
-              {savingAspects ? "Saving…" : "Save Overrides"}
-            </button>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <Link
+                to="/admin/settings/channel-mappings"
+                className="text-[11px] text-zinc-500 hover:text-zinc-700 underline whitespace-nowrap"
+              >
+                Manage mappings
+              </Link>
+              <button
+                onClick={handleSaveAspects}
+                disabled={!aspectsDirty || savingAspects}
+                className="bg-amber-500 text-zinc-900 border-none rounded-md px-4 py-1.5 font-bold text-[12px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-400 transition-colors"
+              >
+                {savingAspects ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
 
           {aspects.isLoading ? (
@@ -722,7 +541,7 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
             <>
               <div className="text-[11px] text-zinc-600 mb-2">
                 <strong className="text-zinc-900">{aspects.data.resolvedCount}</strong> of{" "}
-                <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> aspects
+                <strong className="text-zinc-900">{aspects.data.totalSchemaCount}</strong> attributes
                 resolved
                 {requiredMissing.length > 0 && (
                   <span className="text-amber-700"> · {requiredMissing.length} required missing</span>
