@@ -155,11 +155,12 @@ Deno.serve(async (req) => {
         const candidates = Array.from(new Set([setNumber, `${setNumber}-1`]));
         const { data: figs } = await admin
           .from("lego_set_minifigs")
-          .select("fig_num, minifig_name, quantity")
+          .select("fig_num, minifig_name, bricklink_id, quantity")
           .in("set_num", candidates);
         const list = (figs ?? []) as Array<{
           fig_num: string;
           minifig_name: string | null;
+          bricklink_id: string | null;
           quantity: number | null;
         }>;
         if (list.length > 0) {
@@ -171,7 +172,9 @@ Deno.serve(async (req) => {
             seen.add(m.fig_num);
             const name = (m.minifig_name ?? "").trim();
             const qty = m.quantity && m.quantity > 1 ? ` ×${m.quantity}` : "";
-            lines.push(name ? `${name} (${m.fig_num})${qty}` : `${m.fig_num}${qty}`);
+            // Prefer LEGO/BrickLink minifig MPN over Rebrickable's internal id.
+            const id = (m.bricklink_id ?? "").trim() || m.fig_num;
+            lines.push(name ? `${name} (${id})${qty}` : `${id}${qty}`);
           }
           lines.sort((a, b) => a.localeCompare(b));
           if (lines.length > 0) {

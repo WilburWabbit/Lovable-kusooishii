@@ -263,8 +263,11 @@ function derive(
         .filter((m) => m.fig_num)
         .map((m) => {
           const name = (m.minifig_name ?? "").trim();
-          const fig = m.fig_num.trim();
-          return name ? `${name} (${fig})` : fig;
+          // Prefer the LEGO/BrickLink minifig MPN (e.g. sw0001) over
+          // Rebrickable's internal fig_num (e.g. fig-000001).
+          const bl = (m.bricklink_id ?? "").trim();
+          const id = bl || m.fig_num.trim();
+          return name ? `${name} (${id})` : id;
         });
       const unique = Array.from(new Set(items));
       unique.sort((a, b) => a.localeCompare(b));

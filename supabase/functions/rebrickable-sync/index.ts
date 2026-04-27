@@ -432,10 +432,7 @@ async function enrichMode(
     new Set((rows ?? []).map((r: { mpn: string }) => r.mpn).filter(Boolean)),
   ) as string[];
 
-  // 2. Find which of those already have an inventory row in our DB. We only
-  //    skip sets that have a row AND at least one minifig link OR an
-  //    explicit "no minifigs" marker (row exists, link count = 0 after a
-  //    successful run). Simplest heuristic: skip if inventory row exists.
+  // 2. Find which of those already have an inventory row in our DB.
   const { data: invRows, error: invErr } = await db
     .from("rebrickable_inventories")
     .select("set_num")
@@ -446,11 +443,27 @@ async function enrichMode(
     (invRows ?? []).map((r: { set_num: string }) => r.set_num),
   );
 
-  // Process missing first; append already-linked at the tail so a long-running
-  // job will eventually refresh them too.
+  // 2b. Of the linked sets, find which still have at least one minifig
+  //     missing a bricklink_id (LEGO MPN). Those need re-syncing so the
+  //     per-fig /minifigs/{n}/ fetch can populate external_ids.BrickLink.
+  const linkedSets = stockedMpns.filter((m) => alreadyLinked.has(m));
+  const setsNeedingBricklink = new Set<string>();
+  if (linkedSets.length > 0) {
+    const { data: needRows } = await db
+      .from("lego_set_minifigs" as never)
+      .select("set_num")
+      .in("set_num", linkedSets)
+      .is("bricklink_id", null);
+    for (const r of (needRows ?? []) as Array<{ set_num: string }>) {
+      setsNeedingBricklink.add(r.set_num);
+    }
+  }
+
+  // Priority: missing inventory → linked-but-needs-bricklink → fully done.
   const missing = stockedMpns.filter((m) => !alreadyLinked.has(m));
-  const linked = stockedMpns.filter((m) => alreadyLinked.has(m));
-  const setNums = [...missing, ...linked];
+  const needsBl = linkedSets.filter((m) => setsNeedingBricklink.has(m));
+  const done = linkedSets.filter((m) => !setsNeedingBricklink.has(m));
+  const setNums = [...missing, ...needsBl, ...done];
 
   let setsProcessed = 0;
   let catalogUpdated = 0;
@@ -480,6 +493,7 @@ async function enrichMode(
     sets_total: setNums.length,
     sets_missing_links_before: missing.length,
     sets_missing_links_remaining: Math.max(missing.length - setsProcessed, 0),
+    sets_needing_bricklink_ids_before: needsBl.length,
     catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,

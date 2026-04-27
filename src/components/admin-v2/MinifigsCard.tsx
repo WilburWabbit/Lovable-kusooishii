@@ -164,7 +164,7 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
 
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent text-white text-[10px] px-1.5 py-1 truncate">
                     <div className="truncate font-medium">{m.name ?? "—"}</div>
-                    <div className="truncate font-mono text-[9px] opacity-80">{m.figNum}</div>
+                    <div className="truncate font-mono text-[9px] opacity-80">{m.bricklinkId || m.figNum}</div>
                   </div>
                 </button>
               );
