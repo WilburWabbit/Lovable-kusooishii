@@ -45,6 +45,17 @@ interface RbSetFig {
   quantity: number;
 }
 
+interface RbSet {
+  set_num: string;
+  name: string;
+  year: number | null;
+  theme_id: number | null;
+  num_parts: number | null;
+  set_img_url: string | null;
+  set_url?: string | null;
+  last_modified_dt?: string | null;
+}
+
 interface RbPage<T> {
   count: number;
   next: string | null;
@@ -102,8 +113,49 @@ async function upsertBatched(
   }
 }
 
+// Map a Rebrickable set payload onto a lego_catalog row.
+// theme_id is intentionally omitted — Rebrickable's integer theme_id can't be
+// resolved to our public.theme.id (uuid) without a separate themes import.
+function rbSetToCatalogRow(s: RbSet): Record<string, unknown> {
+  return {
+    mpn: s.set_num,
+    name: s.name,
+    product_type: "set",
+    rebrickable_id: s.set_num,
+    release_year: s.year ?? null,
+    piece_count: s.num_parts ?? null,
+    img_url: s.set_img_url ?? null,
+    status: "active",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function upsertCatalogSets(db: Supabase, sets: RbSet[]): Promise<void> {
+  if (sets.length === 0) return;
+  const rows = sets.map(rbSetToCatalogRow);
+  await upsertBatched(db, "lego_catalog", rows, "mpn");
+}
+
+async function fetchAndUpsertSet(
+  db: Supabase,
+  apiKey: string,
+  setNum: string,
+): Promise<boolean> {
+  try {
+    const set = await rbFetch<RbSet>(`${RB_BASE}/sets/${setNum}/`, apiKey);
+    await upsertCatalogSets(db, [set]);
+    return true;
+  } catch (err) {
+    if (err instanceof RbHttpError && err.status === 404) {
+      console.warn(`fetchAndUpsertSet: ${setNum} not found on Rebrickable`);
+      return false;
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Mode: set — enrich a single set's minifigs
+// Mode: set — refresh a single set in lego_catalog and enrich its minifigs
 // ---------------------------------------------------------------------------
 async function syncSet(
   db: Supabase,
@@ -114,7 +166,13 @@ async function syncSet(
   figs_processed: number;
   bricklink_ids_added: number;
   figs_skipped?: number;
+  catalog_updated: boolean;
 }> {
+  // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
+  //    Tolerated 404 — we still try to sync minifigs below.
+  const catalogUpdated = await fetchAndUpsertSet(db, apiKey, setNum);
+  await sleep();
+
   // 1. Fetch all minifigs for this set (paginated). Tolerate 404 (set not on Rebrickable).
   let url: string | null =
     `${RB_BASE}/sets/${setNum}/minifigs/?page_size=${PAGE_SIZE}`;
@@ -132,13 +190,23 @@ async function syncSet(
     }
   } catch (err) {
     if (err instanceof RbHttpError && err.status === 404) {
-      return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+      return {
+        set_num: setNum,
+        figs_processed: 0,
+        bricklink_ids_added: 0,
+        catalog_updated: catalogUpdated,
+      };
     }
     throw err;
   }
 
   if (setFigs.length === 0) {
-    return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+    return {
+      set_num: setNum,
+      figs_processed: 0,
+      bricklink_ids_added: 0,
+      catalog_updated: catalogUpdated,
+    };
   }
 
   const figNums = setFigs.map((f) => f.fig_num);
@@ -199,6 +267,7 @@ async function syncSet(
     figs_processed: figNums.length,
     bricklink_ids_added: bricklinkAdded,
     figs_skipped: skipped,
+    catalog_updated: catalogUpdated,
   };
 }
 
@@ -223,6 +292,7 @@ async function enrichMode(
   );
 
   let setsProcessed = 0;
+  let catalogUpdated = 0;
   let figsProcessed = 0;
   let bricklinkAdded = 0;
 
@@ -232,6 +302,7 @@ async function enrichMode(
       const result = await syncSet(db, apiKey, setNum as string);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
+      if (result.catalog_updated) catalogUpdated++;
     } catch (err) {
       // Skip sets that 404 on Rebrickable; keep going
       const msg = err instanceof Error ? err.message : String(err);
@@ -244,6 +315,7 @@ async function enrichMode(
   return {
     sets_processed: setsProcessed,
     sets_total: setNums.length,
+    catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
     has_more: setsProcessed < setNums.length,
@@ -251,50 +323,83 @@ async function enrichMode(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: full — paginated refresh of all Rebrickable minifig metadata
-// Cursor-based: saves progress to sync_state so we resume on re-trigger.
-// bricklink_id is intentionally preserved (list endpoint omits external_ids).
+// Mode: full — paginated refresh of every Rebrickable set (lego_catalog) AND
+// minifig (rebrickable_minifigs). Two-phase, cursor-based:
+//   phase = 'sets'     — paginate /lego/sets/ → upsert lego_catalog
+//   phase = 'minifigs' — paginate /lego/minifigs/ → upsert rebrickable_minifigs
+// On timeout the cursor (phase + next_url) is saved so the next trigger
+// resumes from the same page. bricklink_id is preserved (list endpoints
+// omit external_ids).
 // ---------------------------------------------------------------------------
 async function fullMode(
   db: Supabase,
   apiKey: string,
   startMs: number,
 ): Promise<Record<string, unknown>> {
+  const FULL_KEY = "rebrickable_full_sync";
+
   const { data: stateRow } = await db
     .from("sync_state")
     .select("value")
-    .eq("key", "rebrickable_full_sync")
+    .eq("key", FULL_KEY)
     .maybeSingle();
 
-  const savedCursor =
-    (stateRow?.value as { next_url?: string } | null)?.next_url;
-  let nextUrl: string | null =
-    savedCursor ??
-    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=fig_num`;
+  const savedState = (stateRow?.value ?? null) as
+    | { phase?: "sets" | "minifigs"; next_url?: string }
+    | null;
+  const resuming = !!savedState?.next_url;
+
+  let phase: "sets" | "minifigs" = savedState?.phase ?? "sets";
+  let nextUrl: string | null = savedState?.next_url ??
+    `${RB_BASE}/sets/?page_size=${PAGE_SIZE}&ordering=set_num`;
 
   let pagesProcessed = 0;
+  let setsUpserted = 0;
   let figsUpserted = 0;
-  const resuming = !!savedCursor;
 
-  while (nextUrl) {
-    if (Date.now() - startMs > TIMEOUT_MS) {
-      await db.from("sync_state").upsert(
-        {
-          key: "rebrickable_full_sync",
-          value: { next_url: nextUrl },
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" },
-      );
-      return {
-        status: "partial — re-trigger to resume",
-        resuming,
-        pages_processed: pagesProcessed,
-        figs_upserted: figsUpserted,
-        cursor_saved: nextUrl,
-        has_more: true,
-      };
+  const saveCursorAndExit = async (): Promise<Record<string, unknown>> => {
+    await db.from("sync_state").upsert(
+      {
+        key: FULL_KEY,
+        value: { phase, next_url: nextUrl },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
+    return {
+      status: "partial — re-trigger to resume",
+      resuming,
+      phase,
+      pages_processed: pagesProcessed,
+      sets_upserted: setsUpserted,
+      figs_upserted: figsUpserted,
+      cursor_saved: nextUrl,
+      has_more: true,
+    };
+  };
+
+  // Phase 1: SETS → lego_catalog
+  while (phase === "sets" && nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) return await saveCursorAndExit();
+
+    const page: RbPage<RbSet> = await rbFetch<RbPage<RbSet>>(nextUrl, apiKey);
+    await upsertCatalogSets(db, page.results);
+    setsUpserted += page.results.length;
+    pagesProcessed++;
+    nextUrl = page.next;
+
+    if (!nextUrl) {
+      // Sets exhausted — advance to minifigs phase
+      phase = "minifigs";
+      nextUrl =
+        `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=fig_num`;
     }
+    await sleep();
+  }
+
+  // Phase 2: MINIFIGS → rebrickable_minifigs
+  while (phase === "minifigs" && nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) return await saveCursorAndExit();
 
     const page: RbPage<RbFig> = await rbFetch<RbPage<RbFig>>(nextUrl, apiKey);
 
@@ -304,7 +409,6 @@ async function fullMode(
       num_parts: f.num_parts,
       img_url: f.img_url,
     }));
-
     await upsertBatched(db, "rebrickable_minifigs", rows, "fig_num");
     figsUpserted += rows.length;
     pagesProcessed++;
@@ -313,37 +417,124 @@ async function fullMode(
     if (nextUrl) await sleep();
   }
 
-  // Sync complete — clear cursor
-  await db.from("sync_state").delete().eq("key", "rebrickable_full_sync");
+  // Both phases complete — clear cursor
+  await db.from("sync_state").delete().eq("key", FULL_KEY);
 
   return {
     status: "complete",
     resuming,
     pages_processed: pagesProcessed,
+    sets_upserted: setsUpserted,
     figs_upserted: figsUpserted,
     has_more: false,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Mode: incremental — fetch only minifigs modified on Rebrickable since the
-// cursor stored in sync_state.key = 'rebrickable_incremental_sync'.
+// Mode: incremental — fetch only sets and minifigs modified on Rebrickable
+// since the per-entity cursors stored in
+// sync_state.key = 'rebrickable_incremental_sync'.
 //
-// Rebrickable has no server-side "modified-since" filter, so we order by
-// -last_modified_dt (newest first) and stop pagination as soon as we hit a
-// record older than the cursor. On success we advance the cursor to the
-// newest last_modified_dt seen this run; on failure the cursor is left
-// unchanged so the next run picks up where this one left off.
+// Cursor shape:
+//   { sets: { last_modified_dt }, minifigs: { last_modified_dt }, last_run_at }
+//
+// Rebrickable has no server-side "modified-since" filter, so we order each
+// list by -last_modified_dt (newest first) and stop pagination as soon as we
+// hit a record older than the cursor for that entity. On success we advance
+// each cursor independently to the newest last_modified_dt seen this run; on
+// failure / timeout the cursor is left unchanged so the next run picks up
+// where this one left off.
 //
 // Initial baseline: today at 00:00 UTC (the seed CSV snapshot date).
 // ---------------------------------------------------------------------------
 const INCREMENTAL_KEY = "rebrickable_incremental_sync";
+
+interface IncrementalCursor {
+  sets?: { last_modified_dt?: string };
+  minifigs?: { last_modified_dt?: string };
+  last_modified_dt?: string; // legacy: pre-sets cursor (minifigs only)
+  last_run_at?: string | null;
+}
 
 function todayMidnightUtcIso(): string {
   const now = new Date();
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   ).toISOString();
+}
+
+interface IncrementalEntityResult {
+  cursor_from: string;
+  cursor_advanced_to: string | null;
+  pages_processed: number;
+  rows_upserted: number;
+  stopped_reason: "cursor" | "exhausted" | "timeout";
+}
+
+// Generic "fetch newest-first until <= cursor" helper.
+async function syncIncrementalEntity<T extends { last_modified_dt?: string }>(
+  apiKey: string,
+  startMs: number,
+  listUrl: string,
+  cursorIso: string,
+  upsert: (rows: T[]) => Promise<void>,
+): Promise<IncrementalEntityResult> {
+  const cursorMs = Date.parse(cursorIso);
+  let nextUrl: string | null = listUrl;
+  let pagesProcessed = 0;
+  let rowsUpserted = 0;
+  let newestSeenIso: string | null = null;
+  let stopped: "cursor" | "exhausted" | "timeout" = "exhausted";
+
+  while (nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) {
+      stopped = "timeout";
+      break;
+    }
+
+    const page: RbPage<T> = await rbFetch<RbPage<T>>(nextUrl, apiKey);
+
+    const fresh: T[] = [];
+    let hitCursor = false;
+
+    for (const r of page.results) {
+      const ts = r.last_modified_dt
+        ? Date.parse(r.last_modified_dt)
+        : Number.NaN;
+      if (Number.isFinite(ts) && ts <= cursorMs) {
+        hitCursor = true;
+        break;
+      }
+      if (!newestSeenIso && r.last_modified_dt) {
+        newestSeenIso = r.last_modified_dt;
+      }
+      fresh.push(r);
+    }
+
+    if (fresh.length > 0) {
+      await upsert(fresh);
+      rowsUpserted += fresh.length;
+    }
+
+    pagesProcessed++;
+
+    if (hitCursor) {
+      stopped = "cursor";
+      break;
+    }
+
+    nextUrl = page.next;
+    if (nextUrl) await sleep();
+  }
+
+  return {
+    cursor_from: cursorIso,
+    cursor_advanced_to:
+      stopped !== "timeout" && newestSeenIso ? newestSeenIso : null,
+    pages_processed: pagesProcessed,
+    rows_upserted: rowsUpserted,
+    stopped_reason: stopped,
+  };
 }
 
 async function incrementalMode(
@@ -359,113 +550,95 @@ async function incrementalMode(
     .maybeSingle();
 
   const baseline = todayMidnightUtcIso();
-  const cursorIso =
-    (stateRow?.value as { last_modified_dt?: string } | null)
-      ?.last_modified_dt ?? baseline;
-  const cursorMs = Date.parse(cursorIso);
+  const saved = (stateRow?.value ?? null) as IncrementalCursor | null;
 
-  // 2. Page through minifigs newest-first; stop on first record <= cursor.
-  let nextUrl: string | null =
-    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`;
+  // Migrate legacy cursor (minifigs-only) to the new shape.
+  const setsCursor = saved?.sets?.last_modified_dt ?? baseline;
+  const minifigsCursor = saved?.minifigs?.last_modified_dt ??
+    saved?.last_modified_dt ?? baseline;
 
-  let pagesProcessed = 0;
-  let figsUpserted = 0;
-  let newestSeenIso: string | null = null;
-  let stopped: "cursor" | "exhausted" | "timeout" = "exhausted";
+  // 2. Phase A — sets → lego_catalog
+  const setsResult = await syncIncrementalEntity<RbSet>(
+    apiKey,
+    startMs,
+    `${RB_BASE}/sets/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`,
+    setsCursor,
+    (rows) => upsertCatalogSets(db, rows),
+  );
 
-  while (nextUrl) {
-    if (Date.now() - startMs > TIMEOUT_MS) {
-      stopped = "timeout";
-      break;
-    }
+  // Brief pacing between phases to stay under 1 req/s
+  if (setsResult.stopped_reason !== "timeout") await sleep();
 
-    const page: RbPage<RbFig & { last_modified_dt?: string }> =
-      await rbFetch<RbPage<RbFig & { last_modified_dt?: string }>>(
-        nextUrl,
-        apiKey,
-      );
+  // 3. Phase B — minifigs → rebrickable_minifigs (only if we still have time)
+  let figsResult: IncrementalEntityResult = {
+    cursor_from: minifigsCursor,
+    cursor_advanced_to: null,
+    pages_processed: 0,
+    rows_upserted: 0,
+    stopped_reason: "timeout",
+  };
 
-    const fresh: RbFig[] = [];
-    let hitCursor = false;
-
-    for (const f of page.results) {
-      const ts = f.last_modified_dt
-        ? Date.parse(f.last_modified_dt)
-        : Number.NaN;
-      if (Number.isFinite(ts) && ts <= cursorMs) {
-        hitCursor = true;
-        break;
-      }
-      if (!newestSeenIso && f.last_modified_dt) {
-        newestSeenIso = f.last_modified_dt;
-      }
-      fresh.push(f);
-    }
-
-    if (fresh.length > 0) {
-      await upsertBatched(
-        db,
-        "rebrickable_minifigs",
-        fresh.map((f) => ({
-          fig_num: f.fig_num,
-          name: f.name,
-          num_parts: f.num_parts,
-          img_url: f.img_url,
-        })),
-        "fig_num",
-      );
-      figsUpserted += fresh.length;
-    }
-
-    pagesProcessed++;
-
-    if (hitCursor) {
-      stopped = "cursor";
-      break;
-    }
-
-    nextUrl = page.next;
-    if (nextUrl) await sleep();
-  }
-
-  // 3. Advance the cursor only if we saw new data AND didn't time out
-  //    mid-run (timeout means we may have missed older-but-still-newer rows).
-  let cursorAdvancedTo: string | null = null;
-  if (stopped !== "timeout" && newestSeenIso) {
-    cursorAdvancedTo = newestSeenIso;
-    await db.from("sync_state").upsert(
-      {
-        key: INCREMENTAL_KEY,
-        value: {
-          last_modified_dt: newestSeenIso,
-          last_run_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" },
-    );
-  } else if (!stateRow) {
-    // First run with no fresh data — persist baseline so future runs have a cursor.
-    await db.from("sync_state").upsert(
-      {
-        key: INCREMENTAL_KEY,
-        value: {
-          last_modified_dt: baseline,
-          last_run_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" },
+  if (Date.now() - startMs <= TIMEOUT_MS) {
+    figsResult = await syncIncrementalEntity<RbFig>(
+      apiKey,
+      startMs,
+      `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=-last_modified_dt`,
+      minifigsCursor,
+      (figs) =>
+        upsertBatched(
+          db,
+          "rebrickable_minifigs",
+          figs.map((f) => ({
+            fig_num: f.fig_num,
+            name: f.name,
+            num_parts: f.num_parts,
+            img_url: f.img_url,
+          })),
+          "fig_num",
+        ),
     );
   }
+
+  // 4. Persist cursors. Each entity advances independently. If an entity
+  //    timed out, its cursor stays put so the next run resumes there.
+  const newCursor: IncrementalCursor = {
+    sets: {
+      last_modified_dt: setsResult.cursor_advanced_to ?? setsCursor,
+    },
+    minifigs: {
+      last_modified_dt: figsResult.cursor_advanced_to ?? minifigsCursor,
+    },
+    last_run_at: new Date().toISOString(),
+  };
+
+  await db.from("sync_state").upsert(
+    {
+      key: INCREMENTAL_KEY,
+      value: newCursor,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "key" },
+  );
+
+  const hasMore = setsResult.stopped_reason === "timeout" ||
+    figsResult.stopped_reason === "timeout";
 
   return {
-    cursor_from: cursorIso,
-    cursor_advanced_to: cursorAdvancedTo,
-    pages_processed: pagesProcessed,
-    figs_upserted: figsUpserted,
-    stopped_reason: stopped,
-    has_more: stopped === "timeout",
+    sets: {
+      cursor_from: setsResult.cursor_from,
+      cursor_advanced_to: setsResult.cursor_advanced_to,
+      pages_processed: setsResult.pages_processed,
+      catalog_rows_upserted: setsResult.rows_upserted,
+      stopped_reason: setsResult.stopped_reason,
+    },
+    minifigs: {
+      cursor_from: figsResult.cursor_from,
+      cursor_advanced_to: figsResult.cursor_advanced_to,
+      pages_processed: figsResult.pages_processed,
+      figs_upserted: figsResult.rows_upserted,
+      stopped_reason: figsResult.stopped_reason,
+    },
+    has_more: hasMore,
   };
 }
 
