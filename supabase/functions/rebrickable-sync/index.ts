@@ -555,11 +555,14 @@ Deno.serve(async (req) => {
       case "full":
         result = await fullMode(db, apiKey, startMs);
         break;
+      case "incremental":
+        result = await incrementalMode(db, apiKey, startMs);
+        break;
       default:
         return jsonResponse(
           {
             error:
-              `Unknown mode: ${mode}. Expected one of: set | enrich | full`,
+              `Unknown mode: ${mode}. Expected one of: set | enrich | full | incremental`,
           },
           400,
         );
