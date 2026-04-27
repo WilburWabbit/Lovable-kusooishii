@@ -341,16 +341,21 @@ Deno.serve(async (req) => {
       } as never)
       .eq("id", listingId);
 
-    // Promote graded stock units to 'listed' for this SKU
-    if (skuRow?.id) {
+    // Promote the same units counted for this publish to 'listed'. Do not rely
+    // only on channel_listing.sku_id because legacy duplicate SKU rows can point
+    // the listing at a different SKU than the physical stock unit.
+    const stockUnitIdsToList = availableStockUnits
+      .filter((u) => u.v2_status === "graded")
+      .map((u) => u.id as string)
+      .filter(Boolean);
+    if (stockUnitIdsToList.length > 0) {
       await admin
         .from("stock_unit")
         .update({
           v2_status: "listed",
           listed_at: now,
         } as never)
-        .eq("sku_id", skuRow.id as string)
-        .eq("v2_status" as never, "graded");
+        .in("id", stockUnitIdsToList);
     }
 
     return jsonResponse({
