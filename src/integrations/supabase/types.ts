@@ -2978,6 +2978,88 @@ export type Database = {
         }
         Relationships: []
       }
+      rebrickable_inventories: {
+        Row: {
+          id: number
+          set_num: string
+          version: number
+        }
+        Insert: {
+          id: number
+          set_num: string
+          version?: number
+        }
+        Update: {
+          id?: number
+          set_num?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      rebrickable_inventory_minifigs: {
+        Row: {
+          fig_num: string
+          inventory_id: number
+          quantity: number
+        }
+        Insert: {
+          fig_num: string
+          inventory_id: number
+          quantity?: number
+        }
+        Update: {
+          fig_num?: string
+          inventory_id?: number
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
+            columns: ["fig_num"]
+            isOneToOne: false
+            referencedRelation: "rebrickable_minifigs"
+            referencedColumns: ["fig_num"]
+          },
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
+            columns: ["fig_num"]
+            isOneToOne: false
+            referencedRelation: "set_minifigs"
+            referencedColumns: ["fig_num"]
+          },
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "rebrickable_inventories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rebrickable_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_num: string
+          img_url: string | null
+          name: string
+          num_parts: number
+        }
+        Insert: {
+          bricklink_id?: string | null
+          fig_num: string
+          img_url?: string | null
+          name: string
+          num_parts?: number
+        }
+        Update: {
+          bricklink_id?: string | null
+          fig_num?: string
+          img_url?: string | null
+          name?: string
+          num_parts?: number
+        }
+        Relationships: []
+      }
       sales_order: {
         Row: {
           blue_bell_club: boolean
@@ -3887,6 +3969,19 @@ export type Database = {
           name?: string | null
           postcode?: string | null
           slug?: string | null
+        }
+        Relationships: []
+      }
+      set_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_img_url: string | null
+          fig_name: string | null
+          fig_num: string | null
+          fig_num_parts: number | null
+          inventory_version: number | null
+          quantity: number | null
+          set_num: string | null
         }
         Relationships: []
       }
