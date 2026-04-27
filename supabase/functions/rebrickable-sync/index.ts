@@ -286,12 +286,94 @@ async function syncSet(
     if (bricklinkId) bricklinkAdded++;
   }
 
+  // 4. Make sure every fig in this set exists in rebrickable_minifigs before
+  //    we write inventory_minifigs (FK constraint). For figs we already know
+  //    about we keep their bricklink_id; for unknown figs we insert a minimal
+  //    placeholder row using the data the /sets/{n}/minifigs/ endpoint gives
+  //    us. Either way, the link table can then point at them safely.
+  const { data: knownAfter } = await db
+    .from("rebrickable_minifigs")
+    .select("fig_num")
+    .in("fig_num", figNums);
+  const knownSet = new Set<string>(
+    (knownAfter ?? []).map((r: { fig_num: string }) => r.fig_num),
+  );
+  const missingFigs = setFigs.filter((f) => !knownSet.has(f.fig_num));
+  if (missingFigs.length > 0) {
+    // Cast to a loose record because RbSetFig may carry name/img/num_parts in
+    // newer Rebrickable responses even though our minimal interface omits them.
+    const placeholderRows = missingFigs.map((f) => {
+      const r = f as unknown as Record<string, unknown>;
+      return {
+        fig_num: f.fig_num,
+        name: (r.set_name as string | undefined) ?? f.fig_num,
+        num_parts: (r.num_parts as number | undefined) ?? 0,
+        img_url: (r.set_img_url as string | undefined) ?? null,
+      };
+    });
+    await upsertBatched(db, "rebrickable_minifigs", placeholderRows, "fig_num");
+  }
+
+  // 5. Resolve / allocate the inventory_id for this set (version 1) and
+  //    replace its link rows so the relationship reflects the latest data
+  //    from Rebrickable.
+  let inventoryId: number | null = null;
+  let linksWritten = 0;
+  try {
+    const { data: invIdData, error: invErr } = await db.rpc(
+      "get_or_create_rebrickable_inventory",
+      { p_set_num: setNum, p_version: 1 },
+    );
+    if (invErr) throw invErr;
+    inventoryId = (invIdData as number | null) ?? null;
+
+    if (inventoryId !== null) {
+      // Wipe existing links for this inventory then insert fresh ones — the
+      // truth of "what's in this set" comes from the API call we just made.
+      const { error: delErr } = await db
+        .from("rebrickable_inventory_minifigs")
+        .delete()
+        .eq("inventory_id", inventoryId);
+      if (delErr) throw delErr;
+
+      // Collapse duplicates (Rebrickable can list the same fig twice with
+      // different inventory rows) by summing quantity per fig.
+      const qtyByFig = new Map<string, number>();
+      for (const f of setFigs) {
+        qtyByFig.set(
+          f.fig_num,
+          (qtyByFig.get(f.fig_num) ?? 0) + (f.quantity ?? 1),
+        );
+      }
+      const linkRows = Array.from(qtyByFig.entries()).map(
+        ([fig_num, quantity]) => ({
+          inventory_id: inventoryId,
+          fig_num,
+          quantity,
+        }),
+      );
+      if (linkRows.length > 0) {
+        const { error: insErr } = await db
+          .from("rebrickable_inventory_minifigs")
+          .insert(linkRows);
+        if (insErr) throw insErr;
+        linksWritten = linkRows.length;
+      }
+    }
+  } catch (err) {
+    // Don't fail the whole sync over a link-write problem — log and continue.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`syncSet(${setNum}): link write failed: ${msg}`);
+  }
+
   return {
     set_num: setNum,
     figs_processed: figNums.length,
     bricklink_ids_added: bricklinkAdded,
     figs_skipped: skipped,
     catalog_updated: catalogUpdated,
+    inventory_id: inventoryId,
+    inventory_links_written: linksWritten,
   };
 }
 
