@@ -411,14 +411,16 @@ async function syncSet(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: enrich — run syncSet for every stocked set in the catalogue
+// Mode: enrich — run syncSet for stocked sets that don't yet have minifig
+// inventory links. Sets already linked are skipped so resumed runs make
+// continuous progress instead of re-processing the same head of the list.
 // ---------------------------------------------------------------------------
 async function enrichMode(
   db: Supabase,
   apiKey: string,
   startMs: number,
 ): Promise<Record<string, unknown>> {
-  // Distinct MPNs that we actually hold stock for (any non-sold/non-closed unit)
+  // 1. Distinct MPNs we hold stock for
   const { data: rows, error } = await db
     .from("product")
     .select("mpn, sku!inner(stock_unit!inner(id))")
@@ -426,9 +428,29 @@ async function enrichMode(
 
   if (error) throw new Error(`stocked product select: ${error.message}`);
 
-  const setNums = Array.from(
+  const stockedMpns = Array.from(
     new Set((rows ?? []).map((r: { mpn: string }) => r.mpn).filter(Boolean)),
+  ) as string[];
+
+  // 2. Find which of those already have an inventory row in our DB. We only
+  //    skip sets that have a row AND at least one minifig link OR an
+  //    explicit "no minifigs" marker (row exists, link count = 0 after a
+  //    successful run). Simplest heuristic: skip if inventory row exists.
+  const { data: invRows, error: invErr } = await db
+    .from("rebrickable_inventories")
+    .select("set_num")
+    .in("set_num", stockedMpns)
+    .eq("version", 1);
+  if (invErr) throw new Error(`inventory lookup: ${invErr.message}`);
+  const alreadyLinked = new Set<string>(
+    (invRows ?? []).map((r: { set_num: string }) => r.set_num),
   );
+
+  // Process missing first; append already-linked at the tail so a long-running
+  // job will eventually refresh them too.
+  const missing = stockedMpns.filter((m) => !alreadyLinked.has(m));
+  const linked = stockedMpns.filter((m) => alreadyLinked.has(m));
+  const setNums = [...missing, ...linked];
 
   let setsProcessed = 0;
   let catalogUpdated = 0;
@@ -456,6 +478,8 @@ async function enrichMode(
   return {
     sets_processed: setsProcessed,
     sets_total: setNums.length,
+    sets_missing_links_before: missing.length,
+    sets_missing_links_remaining: Math.max(missing.length - setsProcessed, 0),
     catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
