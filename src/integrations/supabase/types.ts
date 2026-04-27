@@ -3017,6 +3017,13 @@ export type Database = {
             foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
             columns: ["fig_num"]
             isOneToOne: false
+            referencedRelation: "lego_set_minifigs"
+            referencedColumns: ["fig_num"]
+          },
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
+            columns: ["fig_num"]
+            isOneToOne: false
             referencedRelation: "rebrickable_minifigs"
             referencedColumns: ["fig_num"]
           },
@@ -3990,6 +3997,19 @@ export type Database = {
         }
         Relationships: []
       }
+      lego_set_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_num: string | null
+          inventory_version: number | null
+          minifig_img_url: string | null
+          minifig_name: string | null
+          minifig_num_parts: number | null
+          quantity: number | null
+          set_num: string | null
+        }
+        Relationships: []
+      }
       set_minifigs: {
         Row: {
           bricklink_id: string | null
@@ -4279,6 +4299,10 @@ export type Database = {
           sku_id: string
           unit_price: number
         }[]
+      }
+      get_or_create_rebrickable_inventory: {
+        Args: { p_set_num: string; p_version?: number }
+        Returns: number
       }
       has_role: {
         Args: {
