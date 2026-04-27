@@ -1,506 +1,430 @@
-// Redeployed: 2026-03-23
+// Rebrickable sync — modes: set | enrich | full
+// Redeployed: 2026-04-27
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
+// ---------------------------------------------------------------------------
+// CORS
+// ---------------------------------------------------------------------------
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
 const RB_BASE = "https://rebrickable.com/api/v3/lego";
+const RATE_MS = 1100; // 1.1s between API calls — under 1 req/s limit
+const PAGE_SIZE = 1000; // Rebrickable max
+const BATCH = 500; // rows per Supabase upsert
+const TIMEOUT_MS = 50_000; // bail before edge-function 60s limit
 const FETCH_TIMEOUT_MS = 30_000;
-const RATE_LIMIT_DELAY_MS = 1_100; // 1 req/s rate limit
 
-function fetchWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeoutMs = FETCH_TIMEOUT_MS,
-): Promise<Response> {
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+interface RbFig {
+  fig_num: string;
+  name: string;
+  num_parts: number;
+  img_url: string;
+  external_ids?: { BrickLink?: string[]; BrickOwl?: string[] };
+}
+
+interface RbSetFig {
+  fig_num: string;
+  quantity: number;
+}
+
+interface RbPage<T> {
+  count: number;
+  next: string | null;
+  results: T[];
+}
+
+// deno-lint-ignore no-explicit-any
+type Supabase = any;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const sleep = (ms = RATE_MS) => new Promise((r) => setTimeout(r, ms));
+
+class RbHttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "RbHttpError";
+  }
+}
+
+async function rbFetch<T>(url: string, apiKey: string): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
-    clearTimeout(timer)
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `key ${apiKey}` },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new RbHttpError(
+        res.status,
+        `Rebrickable ${res.status}: ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function upsertBatched(
+  db: Supabase,
+  table: string,
+  rows: Record<string, unknown>[],
+  onConflict: string,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const { error } = await db
+      .from(table)
+      .upsert(rows.slice(i, i + BATCH), { onConflict });
+    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mode: set — enrich a single set's minifigs
+// ---------------------------------------------------------------------------
+async function syncSet(
+  db: Supabase,
+  apiKey: string,
+  setNum: string,
+): Promise<{
+  set_num: string;
+  figs_processed: number;
+  bricklink_ids_added: number;
+  figs_skipped?: number;
+}> {
+  // 1. Fetch all minifigs for this set (paginated). Tolerate 404 (set not on Rebrickable).
+  let url: string | null =
+    `${RB_BASE}/sets/${setNum}/minifigs/?page_size=${PAGE_SIZE}`;
+  const setFigs: RbSetFig[] = [];
+
+  try {
+    while (url) {
+      const page: RbPage<RbSetFig> = await rbFetch<RbPage<RbSetFig>>(
+        url,
+        apiKey,
+      );
+      setFigs.push(...page.results);
+      url = page.next;
+      if (url) await sleep();
+    }
+  } catch (err) {
+    if (err instanceof RbHttpError && err.status === 404) {
+      return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+    }
+    throw err;
+  }
+
+  if (setFigs.length === 0) {
+    return { set_num: setNum, figs_processed: 0, bricklink_ids_added: 0 };
+  }
+
+  const figNums = setFigs.map((f) => f.fig_num);
+
+  // 2. Find which figs are missing bricklink_id (or not in DB at all)
+  const { data: existing, error } = await db
+    .from("rebrickable_minifigs")
+    .select("fig_num, bricklink_id")
+    .in("fig_num", figNums);
+  if (error) {
+    throw new Error(`rebrickable_minifigs select: ${error.message}`);
+  }
+
+  const knownWithId = new Set<string>(
+    (existing ?? [])
+      .filter((r: { bricklink_id: string | null }) => !!r.bricklink_id)
+      .map((r: { fig_num: string }) => r.fig_num),
   );
+  const toEnrich = figNums.filter((f) => !knownWithId.has(f));
+
+  // 3. Fetch detail for each fig that needs enriching. Skip individual 404s.
+  let bricklinkAdded = 0;
+  let skipped = 0;
+
+  for (const figNum of toEnrich) {
+    await sleep();
+    let fig: RbFig;
+    try {
+      fig = await rbFetch<RbFig>(`${RB_BASE}/minifigs/${figNum}/`, apiKey);
+    } catch (err) {
+      if (err instanceof RbHttpError && err.status === 404) {
+        console.warn(`syncSet: minifig ${figNum} not found on Rebrickable`);
+        skipped++;
+        continue;
+      }
+      throw err;
+    }
+    const bricklinkId = fig.external_ids?.BrickLink?.[0] ?? null;
+
+    const { error: upsertErr } = await db
+      .from("rebrickable_minifigs")
+      .upsert(
+        {
+          fig_num: fig.fig_num,
+          name: fig.name,
+          num_parts: fig.num_parts,
+          img_url: fig.img_url,
+          bricklink_id: bricklinkId,
+        },
+        { onConflict: "fig_num" },
+      );
+    if (upsertErr) throw new Error(`minifig upsert: ${upsertErr.message}`);
+    if (bricklinkId) bricklinkAdded++;
+  }
+
+  return {
+    set_num: setNum,
+    figs_processed: figNums.length,
+    bricklink_ids_added: bricklinkAdded,
+    figs_skipped: skipped,
+  };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+// ---------------------------------------------------------------------------
+// Mode: enrich — run syncSet for every stocked set in the catalogue
+// ---------------------------------------------------------------------------
+async function enrichMode(
+  db: Supabase,
+  apiKey: string,
+  startMs: number,
+): Promise<Record<string, unknown>> {
+  // Distinct MPNs that we actually hold stock for (any non-sold/non-closed unit)
+  const { data: rows, error } = await db
+    .from("product")
+    .select("mpn, sku!inner(stock_unit!inner(id))")
+    .not("mpn", "is", null);
+
+  if (error) throw new Error(`stocked product select: ${error.message}`);
+
+  const setNums = Array.from(
+    new Set((rows ?? []).map((r: { mpn: string }) => r.mpn).filter(Boolean)),
+  );
+
+  let setsProcessed = 0;
+  let figsProcessed = 0;
+  let bricklinkAdded = 0;
+
+  for (const setNum of setNums) {
+    if (Date.now() - startMs > TIMEOUT_MS) break;
+    try {
+      const result = await syncSet(db, apiKey, setNum as string);
+      figsProcessed += result.figs_processed;
+      bricklinkAdded += result.bricklink_ids_added;
+    } catch (err) {
+      // Skip sets that 404 on Rebrickable; keep going
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`enrich: skipping ${setNum}: ${msg}`);
+    }
+    setsProcessed++;
+    await sleep();
+  }
+
+  return {
+    sets_processed: setsProcessed,
+    sets_total: setNums.length,
+    figs_processed: figsProcessed,
+    bricklink_ids_added: bricklinkAdded,
+    has_more: setsProcessed < setNums.length,
+  };
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+// ---------------------------------------------------------------------------
+// Mode: full — paginated refresh of all Rebrickable minifig metadata
+// Cursor-based: saves progress to sync_state so we resume on re-trigger.
+// bricklink_id is intentionally preserved (list endpoint omits external_ids).
+// ---------------------------------------------------------------------------
+async function fullMode(
+  db: Supabase,
+  apiKey: string,
+  startMs: number,
+): Promise<Record<string, unknown>> {
+  const { data: stateRow } = await db
+    .from("sync_state")
+    .select("value")
+    .eq("key", "rebrickable_full_sync")
+    .maybeSingle();
+
+  const savedCursor =
+    (stateRow?.value as { next_url?: string } | null)?.next_url;
+  let nextUrl: string | null =
+    savedCursor ??
+    `${RB_BASE}/minifigs/?page_size=${PAGE_SIZE}&ordering=fig_num`;
+
+  let pagesProcessed = 0;
+  let figsUpserted = 0;
+  const resuming = !!savedCursor;
+
+  while (nextUrl) {
+    if (Date.now() - startMs > TIMEOUT_MS) {
+      await db.from("sync_state").upsert(
+        {
+          key: "rebrickable_full_sync",
+          value: { next_url: nextUrl },
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "key" },
+      );
+      return {
+        status: "partial — re-trigger to resume",
+        resuming,
+        pages_processed: pagesProcessed,
+        figs_upserted: figsUpserted,
+        cursor_saved: nextUrl,
+        has_more: true,
+      };
+    }
+
+    const page: RbPage<RbFig> = await rbFetch<RbPage<RbFig>>(nextUrl, apiKey);
+
+    const rows = page.results.map((f) => ({
+      fig_num: f.fig_num,
+      name: f.name,
+      num_parts: f.num_parts,
+      img_url: f.img_url,
+    }));
+
+    await upsertBatched(db, "rebrickable_minifigs", rows, "fig_num");
+    figsUpserted += rows.length;
+    pagesProcessed++;
+    nextUrl = page.next;
+
+    if (nextUrl) await sleep();
+  }
+
+  // Sync complete — clear cursor
+  await db.from("sync_state").delete().eq("key", "rebrickable_full_sync");
+
+  return {
+    status: "complete",
+    resuming,
+    pages_processed: pagesProcessed,
+    figs_upserted: figsUpserted,
+    has_more: false,
+  };
 }
 
+// ---------------------------------------------------------------------------
+// Auth: allow either (a) admin/staff JWT, or (b) service-role bearer (cron)
+// ---------------------------------------------------------------------------
+async function ensureAuthorized(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  authHeader: string | null,
+  serviceRoleKey: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (!authHeader?.startsWith("Bearer ")) {
+    return { ok: false, status: 401, error: "Unauthorized" };
+  }
+  const token = authHeader.replace("Bearer ", "");
+
+  // Service-role bypass (used by pg_cron)
+  if (token === serviceRoleKey) return { ok: true };
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await admin.auth.getUser(token);
+  if (userErr || !user) {
+    return { ok: false, status: 401, error: "Unauthorized" };
+  }
+  const { data: roles } = await admin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id);
+  const hasAccess = (roles ?? []).some(
+    (r: { role: string }) => r.role === "admin" || r.role === "staff",
+  );
+  if (!hasAccess) return { ok: false, status: 403, error: "Forbidden" };
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const admin = createClient(supabaseUrl, serviceRoleKey);
+  const startMs = Date.now();
 
   try {
-    // --- Auth guard: require admin or staff role ---
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: userErr,
-    } = await admin.auth.getUser(token);
-    if (userErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: roles } = await admin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id);
-    const hasAccess = (roles ?? []).some(
-      (r: { role: string }) => r.role === "admin" || r.role === "staff",
-    );
-    if (!hasAccess) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    // --- End auth guard ---
-
-    // --- Rebrickable API key ---
     const apiKey = Deno.env.get("REBRICKABLE_API_KEY");
     if (!apiKey) {
-      return new Response(
-        JSON.stringify({ error: "REBRICKABLE_API_KEY not configured" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+      return jsonResponse({ error: "REBRICKABLE_API_KEY not configured" }, 500);
     }
 
-    const rbHeaders = {
-      Authorization: `key ${apiKey}`,
-      Accept: "application/json",
-    };
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const db = createClient(supabaseUrl, serviceRoleKey);
+
+    // Auth guard
+    const auth = await ensureAuthorized(
+      db,
+      req.headers.get("Authorization"),
+      serviceRoleKey,
+    );
+    if (!auth.ok) {
+      return jsonResponse({ error: auth.error }, auth.status);
+    }
 
     const body = await req.json().catch(() => ({}));
-    const mode: string = body.mode || "sets";
+    const { mode, set_num } = body as { mode?: string; set_num?: string };
 
-    if (mode === "themes") {
-      return await syncThemes(admin, rbHeaders);
-    } else if (mode === "sets") {
-      return await syncSets(admin, rbHeaders, body);
+    let result: Record<string, unknown>;
+
+    switch (mode) {
+      case "set":
+        if (!set_num || typeof set_num !== "string") {
+          return jsonResponse(
+            { error: "set_num is required for mode: set" },
+            400,
+          );
+        }
+        result = await syncSet(db, apiKey, set_num.trim());
+        break;
+      case "enrich":
+        result = await enrichMode(db, apiKey, startMs);
+        break;
+      case "full":
+        result = await fullMode(db, apiKey, startMs);
+        break;
+      default:
+        return jsonResponse(
+          {
+            error:
+              `Unknown mode: ${mode}. Expected one of: set | enrich | full`,
+          },
+          400,
+        );
     }
 
-    return new Response(
-      JSON.stringify({ error: `Unknown mode: ${mode}` }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    return jsonResponse({ ok: true, mode, ...result });
   } catch (err) {
-    // Mark any pending landing rows as error
-    try {
-      await admin
-        .from("landing_raw_rebrickable")
-        .update({
-          status: "error",
-          error_message: ((err as Error).message || "Unknown error").substring(
-            0,
-            500,
-          ),
-          processed_at: new Date().toISOString(),
-        })
-        .eq("status", "pending");
-    } catch {
-      /* best effort */
-    }
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("rebrickable-sync error:", message);
+    return jsonResponse({ ok: false, error: message }, 500);
   }
 });
-
-// ─── Theme Sync ───────────────────────────────────────────────
-async function syncThemes(
-  // deno-lint-ignore no-explicit-any
-  admin: any,
-  rbHeaders: Record<string, string>,
-): Promise<Response> {
-  const correlationId = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  // Fetch all themes (paginated, typically 1-2 pages)
-  const allThemes: Array<{
-    id: number;
-    name: string;
-    parent_id: number | null;
-  }> = [];
-  let page = 1;
-
-  while (true) {
-    const url = `${RB_BASE}/themes/?page_size=1000&page=${page}`;
-    const res = await fetchWithTimeout(url, { headers: rbHeaders });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`Rebrickable themes API returned ${res.status}: ${txt}`);
-    }
-    const data = await res.json();
-
-    // Land raw response
-    await admin.from("landing_raw_rebrickable").upsert(
-      {
-        external_id: `themes_page_${page}`,
-        entity_type: "themes",
-        raw_payload: data,
-        status: "pending",
-        correlation_id: correlationId,
-        received_at: now,
-      },
-      { onConflict: "entity_type,external_id" },
-    );
-
-    const results = data.results || [];
-    allThemes.push(...results);
-
-    if (!data.next) break;
-    page++;
-    await sleep(RATE_LIMIT_DELAY_MS);
-  }
-
-  // Pass 1: Upsert all themes (without parent linkage)
-  const BATCH = 200;
-  let themesUpserted = 0;
-  for (let i = 0; i < allThemes.length; i += BATCH) {
-    const batch = allThemes.slice(i, i + BATCH).map((t) => ({
-      name: t.name,
-      slug: slugify(t.name),
-      rebrickable_theme_id: t.id,
-    }));
-    const { error } = await admin.from("theme").upsert(batch, {
-      onConflict: "slug",
-      ignoreDuplicates: false,
-    });
-    if (error) {
-      console.error(`Theme upsert batch ${i} error:`, error.message);
-    } else {
-      themesUpserted += batch.length;
-    }
-  }
-
-  // Pass 2: Update parent_theme_id linkages
-  // Build a map of rebrickable_theme_id -> app UUID
-  const { data: appThemes } = await admin
-    .from("theme")
-    .select("id, rebrickable_theme_id")
-    .not("rebrickable_theme_id", "is", null);
-  const rbIdToUuid = new Map<number, string>();
-  for (const t of appThemes || []) {
-    if (t.rebrickable_theme_id != null) {
-      rbIdToUuid.set(t.rebrickable_theme_id, t.id);
-    }
-  }
-
-  let parentLinks = 0;
-  for (const t of allThemes) {
-    if (t.parent_id == null) continue;
-    const childUuid = rbIdToUuid.get(t.id);
-    const parentUuid = rbIdToUuid.get(t.parent_id);
-    if (childUuid && parentUuid) {
-      await admin
-        .from("theme")
-        .update({ parent_theme_id: parentUuid })
-        .eq("id", childUuid);
-      parentLinks++;
-    }
-  }
-
-  // Mark landing committed
-  await admin
-    .from("landing_raw_rebrickable")
-    .update({
-      status: "committed",
-      processed_at: new Date().toISOString(),
-    })
-    .eq("correlation_id", correlationId)
-    .eq("status", "pending");
-
-  // Update sync state
-  await admin.from("rebrickable_sync_state").upsert(
-    {
-      sync_type: "themes",
-      last_synced_at: now,
-      sets_processed: themesUpserted,
-      updated_at: now,
-    },
-    { onConflict: "sync_type" },
-  );
-
-  // Audit event
-  await admin.from("audit_event").insert({
-    entity_type: "rebrickable_sync",
-    entity_id: correlationId,
-    trigger_type: "rebrickable_sync",
-    actor_type: "system",
-    source_system: "rebrickable-sync",
-    correlation_id: correlationId,
-    after_json: {
-      mode: "themes",
-      themes_synced: themesUpserted,
-      parent_links: parentLinks,
-      pages_fetched: page,
-    },
-  });
-
-  return new Response(
-    JSON.stringify({
-      mode: "themes",
-      themes_synced: themesUpserted,
-      parent_links: parentLinks,
-      pages_fetched: page,
-    }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
-}
-
-// ─── Sets Sync ────────────────────────────────────────────────
-async function syncSets(
-  // deno-lint-ignore no-explicit-any
-  admin: any,
-  rbHeaders: Record<string, string>,
-  body: Record<string, unknown>,
-): Promise<Response> {
-  const correlationId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const fullSync = body.full_sync === true;
-  const sinceParam = body.since as string | undefined;
-  const startPage = (body.page as number) || 1;
-  const pagesPerRun = (body.pages_per_run as number) || 10;
-
-  // Determine cutoff for incremental sync
-  let cutoff: Date | null = null;
-  if (sinceParam) {
-    // User-provided date cutoff
-    cutoff = new Date(sinceParam);
-    if (isNaN(cutoff.getTime())) {
-      return new Response(
-        JSON.stringify({ error: `Invalid since date: ${sinceParam}` }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-  } else if (!fullSync) {
-    // Incremental: use stored cutoff
-    const { data: state } = await admin
-      .from("rebrickable_sync_state")
-      .select("last_modified_cutoff")
-      .eq("sync_type", "sets")
-      .single();
-    if (state?.last_modified_cutoff) {
-      cutoff = new Date(state.last_modified_cutoff);
-    }
-    // If no cutoff exists (first run), this becomes a full sync
-  }
-
-  // Build theme mapping: rebrickable_theme_id -> app UUID
-  const { data: appThemes } = await admin
-    .from("theme")
-    .select("id, rebrickable_theme_id")
-    .not("rebrickable_theme_id", "is", null);
-  const themeMap = new Map<number, string>();
-  for (const t of appThemes || []) {
-    if (t.rebrickable_theme_id != null) {
-      themeMap.set(t.rebrickable_theme_id, t.id);
-    }
-  }
-
-  // Determine ordering: incremental uses -last_modified_dt, full uses set_num
-  const ordering = fullSync ? "set_num" : "-last_modified_dt";
-
-  let pagesProcessed = 0;
-  let setsUpserted = 0;
-  let hasMore = false;
-  let nextPage = startPage;
-  let totalCount = 0;
-  let newestModifiedDt: string | null = null;
-  let reachedCutoff = false;
-
-  for (let p = startPage; p < startPage + pagesPerRun; p++) {
-    const url =
-      `${RB_BASE}/sets/?page_size=1000&page=${p}&ordering=${ordering}`;
-    const res = await fetchWithTimeout(url, { headers: rbHeaders });
-
-    if (!res.ok) {
-      // 404 means we've gone past the last page
-      if (res.status === 404) {
-        hasMore = false;
-        break;
-      }
-      const txt = await res.text();
-      throw new Error(`Rebrickable sets API returned ${res.status}: ${txt}`);
-    }
-
-    const data = await res.json();
-    totalCount = data.count || totalCount;
-
-    // Land raw response
-    const landingKey = fullSync
-      ? `sets_full_page_${p}`
-      : sinceParam
-        ? `sets_since_${sinceParam}_page_${p}`
-        : `sets_incremental_page_${p}`;
-    await admin.from("landing_raw_rebrickable").upsert(
-      {
-        external_id: landingKey,
-        entity_type: "sets",
-        raw_payload: data,
-        status: "pending",
-        correlation_id: correlationId,
-        received_at: now,
-      },
-      { onConflict: "entity_type,external_id" },
-    );
-
-    const results: Array<Record<string, unknown>> = data.results || [];
-
-    // Track the newest last_modified_dt in this run
-    if (results.length > 0 && !newestModifiedDt) {
-      const first = results[0];
-      if (first.last_modified_dt) {
-        newestModifiedDt = first.last_modified_dt as string;
-      }
-    }
-
-    // Process sets → upsert into lego_catalog
-    const catalogRows = [];
-    for (const set of results) {
-      const setNum = String(set.set_num || "");
-      if (!setNum) continue;
-
-      // Check if we've reached the cutoff (incremental/since modes)
-      if (cutoff && set.last_modified_dt) {
-        const modDt = new Date(set.last_modified_dt as string);
-        if (modDt < cutoff) {
-          reachedCutoff = true;
-          break;
-        }
-      }
-
-      catalogRows.push({
-        mpn: setNum,
-        name: (set.name as string) || setNum,
-        release_year: set.year ? Number(set.year) : null,
-        piece_count: set.num_parts ? Number(set.num_parts) : null,
-        img_url: (set.set_img_url as string) || null,
-        rebrickable_id: setNum,
-        theme_id: set.theme_id ? themeMap.get(Number(set.theme_id)) || null : null,
-        product_type: "set",
-        status: "active",
-      });
-    }
-
-    // Batch upsert into lego_catalog
-    const BATCH = 500;
-    for (let i = 0; i < catalogRows.length; i += BATCH) {
-      const batch = catalogRows.slice(i, i + BATCH);
-      const { error } = await admin.from("lego_catalog").upsert(batch, {
-        onConflict: "mpn",
-        ignoreDuplicates: false,
-      });
-      if (error) {
-        console.error(`Catalog upsert batch error:`, error.message);
-      } else {
-        setsUpserted += batch.length;
-      }
-    }
-
-    pagesProcessed++;
-    hasMore = !!data.next;
-    nextPage = p + 1;
-
-    // Stop if we reached the cutoff
-    if (reachedCutoff) {
-      hasMore = false;
-      break;
-    }
-
-    // Rate limit delay before next page
-    if (data.next && p < startPage + pagesPerRun - 1) {
-      await sleep(RATE_LIMIT_DELAY_MS);
-    }
-  }
-
-  // Mark landing committed
-  await admin
-    .from("landing_raw_rebrickable")
-    .update({
-      status: "committed",
-      processed_at: new Date().toISOString(),
-    })
-    .eq("correlation_id", correlationId)
-    .eq("status", "pending");
-
-  // Update sync state with the newest modified date from this run
-  const stateUpdate: Record<string, unknown> = {
-    sync_type: "sets",
-    last_synced_at: now,
-    sets_processed: setsUpserted,
-    updated_at: now,
-  };
-  if (newestModifiedDt) {
-    stateUpdate.last_modified_cutoff = newestModifiedDt;
-  }
-  await admin.from("rebrickable_sync_state").upsert(stateUpdate, {
-    onConflict: "sync_type",
-  });
-
-  // Audit event
-  await admin.from("audit_event").insert({
-    entity_type: "rebrickable_sync",
-    entity_id: correlationId,
-    trigger_type: "rebrickable_sync",
-    actor_type: "system",
-    source_system: "rebrickable-sync",
-    correlation_id: correlationId,
-    after_json: {
-      mode: "sets",
-      full_sync: fullSync,
-      since: sinceParam || null,
-      pages_processed: pagesProcessed,
-      sets_upserted: setsUpserted,
-      total_count: totalCount,
-      has_more: hasMore,
-    },
-  });
-
-  return new Response(
-    JSON.stringify({
-      mode: "sets",
-      full_sync: fullSync,
-      since: sinceParam || null,
-      incremental: !fullSync && !sinceParam,
-      pages_processed: pagesProcessed,
-      sets_upserted: setsUpserted,
-      total_count: totalCount,
-      has_more: hasMore,
-      next_page: hasMore ? nextPage : null,
-    }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
-}
