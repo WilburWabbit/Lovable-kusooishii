@@ -77,26 +77,25 @@ Deno.serve(async (req) => {
 
     if (!effectiveSku) throw new Error("Could not determine SKU code");
 
-    // Count on-hand stock for this SKU. eBay rejects offers with
-    // quantity <= 0 (errorId 25004), so guard against publishing a SKU
-    // whose units are all sold/paid-out/written-off.
-    const { count: onHandCountRaw } = await admin
-      .from("stock_unit")
-      .select("id", { count: "exact", head: true })
-      .eq("sku_id", skuRow?.id as string)
-      .in("v2_status", ["graded", "listed"]);
-    const onHandCount = onHandCountRaw ?? 0;
+    const productId = (skuRow?.product_id ?? null) as string | null;
+
+    // Count on-hand stock using the operational stock identity, not only the
+    // channel_listing.sku_id. Some imported items have legacy/duplicate SKU rows,
+    // while the stock unit itself still carries the correct MPN.
+    const availableStockUnits = await findAvailableStockUnits(admin, skuRow, product, effectiveSku);
+    const onHandCount = availableStockUnits.length;
     if (onHandCount <= 0) {
+      const lookupMpn = uniqueStrings([skuRow?.mpn, product?.mpn, effectiveSku]).join(", ");
       throw new Error(
         `Cannot publish ${effectiveSku} to eBay: no on-hand stock ` +
-          `(0 units in 'graded' or 'listed' status). Grade or restock units first.`,
+          `(0 units in 'graded' or 'listed' status matched by SKU or MPN${lookupMpn ? `: ${lookupMpn}` : ""}). ` +
+          `Grade or restock units first.`,
       );
     }
 
     // ─── Look up product images (required by eBay) ─────────
     // eBay rejects publish with errorId 25002 ("Add at least 1 photo")
     // when no imageUrls are present on the inventory item.
-    const productId = (skuRow?.product_id ?? null) as string | null;
     const imageUrls: string[] = [];
     if (productId) {
       const { data: mediaRows } = await admin
@@ -198,7 +197,9 @@ Deno.serve(async (req) => {
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
-      condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
+      condition: mapGradeToEbayCondition(
+        (availableStockUnits[0]?.condition_grade as string | null) ?? (skuRow?.condition_grade as string),
+      ),
       availability: {
         shipToLocationAvailability: {
           quantity: onHandCount,
@@ -342,16 +343,21 @@ Deno.serve(async (req) => {
       } as never)
       .eq("id", listingId);
 
-    // Promote graded stock units to 'listed' for this SKU
-    if (skuRow?.id) {
+    // Promote the same units counted for this publish to 'listed'. Do not rely
+    // only on channel_listing.sku_id because legacy duplicate SKU rows can point
+    // the listing at a different SKU than the physical stock unit.
+    const stockUnitIdsToList = availableStockUnits
+      .filter((u) => u.v2_status === "graded")
+      .map((u) => u.id as string)
+      .filter(Boolean);
+    if (stockUnitIdsToList.length > 0) {
       await admin
         .from("stock_unit")
         .update({
           v2_status: "listed",
           listed_at: now,
         } as never)
-        .eq("sku_id", skuRow.id as string)
-        .eq("v2_status" as never, "graded");
+        .in("id", stockUnitIdsToList);
     }
 
     return jsonResponse({
@@ -393,6 +399,73 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   const text = await res.text();
   if (!text?.trim()) return null;
   return JSON.parse(text);
+}
+
+// ─── Stock availability lookup ───────────────────────────────
+
+async function findAvailableStockUnits(
+  admin: any,
+  skuRow: Record<string, unknown> | null,
+  product: Record<string, unknown> | null,
+  effectiveSku: string,
+): Promise<Array<Record<string, unknown>>> {
+  const rowsById = new Map<string, Record<string, unknown>>();
+  const statuses = ["graded", "listed"];
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade";
+
+  const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of rows ?? []) {
+      const id = row.id as string | undefined;
+      if (id) rowsById.set(id, row);
+    }
+  };
+
+  const skuId = typeof skuRow?.id === "string" ? skuRow.id : null;
+  if (skuId) {
+    const { data, error } = await admin
+      .from("stock_unit")
+      .select(selectCols)
+      .eq("sku_id", skuId)
+      .in("v2_status", statuses);
+    if (error) throw new Error(`Stock lookup by SKU failed: ${error.message}`);
+    addRows(data as Array<Record<string, unknown>> | null);
+  }
+
+  const mpnCandidates = buildMpnCandidates([skuRow?.mpn, product?.mpn, effectiveSku]);
+  if (mpnCandidates.length > 0) {
+    const { data, error } = await admin
+      .from("stock_unit")
+      .select(selectCols)
+      .in("mpn", mpnCandidates)
+      .in("v2_status", statuses);
+    if (error) throw new Error(`Stock lookup by MPN failed: ${error.message}`);
+    addRows(data as Array<Record<string, unknown>> | null);
+  }
+
+  return [...rowsById.values()];
+}
+
+function buildMpnCandidates(values: unknown[]): string[] {
+  const candidates: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const raw = value.trim();
+    if (!raw) continue;
+    candidates.push(raw, raw.replace(/\.\d+$/, ""));
+    for (const token of raw.match(/[A-Za-z0-9][A-Za-z0-9._-]{4,}/g) ?? []) {
+      if (/[A-Za-z]/.test(token) && /\d/.test(token)) {
+        candidates.push(token, token.replace(/\.\d+$/, ""));
+      }
+    }
+  }
+  return uniqueStrings(candidates);
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return [...new Set(values
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0))];
 }
 
 // ─── Grade → eBay Condition Mapping ──────────────────────────
