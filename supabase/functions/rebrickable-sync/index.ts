@@ -155,7 +155,11 @@ async function fetchAndUpsertSet(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: set — refresh a single set in lego_catalog and enrich its minifigs
+// Mode: set — refresh a single set in lego_catalog, refresh its included
+// minifigs (rebrickable_minifigs), and persist the set ↔ minifig relationship
+// in rebrickable_inventories + rebrickable_inventory_minifigs so the rest of
+// the app (product descriptions, eBay item specifics) can ask "which minifigs
+// are in set 75367-1?".
 // ---------------------------------------------------------------------------
 async function syncSet(
   db: Supabase,
@@ -167,6 +171,8 @@ async function syncSet(
   bricklink_ids_added: number;
   figs_skipped?: number;
   catalog_updated: boolean;
+  inventory_id: number | null;
+  inventory_links_written: number;
 }> {
   // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
   //    Tolerated 404 — we still try to sync minifigs below.
@@ -195,17 +201,35 @@ async function syncSet(
         figs_processed: 0,
         bricklink_ids_added: 0,
         catalog_updated: catalogUpdated,
+        inventory_id: null,
+        inventory_links_written: 0,
       };
     }
     throw err;
   }
 
   if (setFigs.length === 0) {
+    // Set has no minifigs on Rebrickable — clear any stale link rows so the
+    // app doesn't show minifigs that aren't actually included.
+    const { data: invRow } = await db
+      .from("rebrickable_inventories")
+      .select("id")
+      .eq("set_num", setNum)
+      .eq("version", 1)
+      .maybeSingle();
+    if (invRow?.id) {
+      await db
+        .from("rebrickable_inventory_minifigs")
+        .delete()
+        .eq("inventory_id", invRow.id);
+    }
     return {
       set_num: setNum,
       figs_processed: 0,
       bricklink_ids_added: 0,
       catalog_updated: catalogUpdated,
+      inventory_id: invRow?.id ?? null,
+      inventory_links_written: 0,
     };
   }
 
