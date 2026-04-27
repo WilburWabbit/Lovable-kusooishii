@@ -284,6 +284,10 @@ export function useProduct(mpn: string | undefined) {
 
       const includeCatalogImg = (rawProduct.include_catalog_img as boolean) ?? false;
       const fieldOverrides = (rawProduct.field_overrides as Record<string, FieldOverride>) ?? {};
+      const selectedMinifigFigNums = Array.isArray(rawProduct.selected_minifig_fig_nums)
+        ? (rawProduct.selected_minifig_fig_nums as unknown[])
+            .filter((v): v is string => typeof v === 'string')
+        : [];
 
       return {
         ...product,
@@ -297,6 +301,7 @@ export function useProduct(mpn: string | undefined) {
         ebayMarketplace: (rawProduct.ebay_marketplace as string) ?? null,
         gmcProductCategory: (rawProduct.gmc_product_category as string) ?? null,
         metaCategory: (rawProduct.meta_category as string) ?? null,
+        selectedMinifigFigNums,
       };
     },
   });
