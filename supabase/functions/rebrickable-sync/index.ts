@@ -166,7 +166,13 @@ async function syncSet(
   figs_processed: number;
   bricklink_ids_added: number;
   figs_skipped?: number;
+  catalog_updated: boolean;
 }> {
+  // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
+  //    Tolerated 404 — we still try to sync minifigs below.
+  const catalogUpdated = await fetchAndUpsertSet(db, apiKey, setNum);
+  await sleep();
+
   // 1. Fetch all minifigs for this set (paginated). Tolerate 404 (set not on Rebrickable).
   let url: string | null =
     `${RB_BASE}/sets/${setNum}/minifigs/?page_size=${PAGE_SIZE}`;
