@@ -77,12 +77,21 @@ Deno.serve(async (req) => {
 
     if (!effectiveSku) throw new Error("Could not determine SKU code");
 
-    // Count on-hand stock for this SKU
-    const { count: onHandCount } = await admin
+    // Count on-hand stock for this SKU. eBay rejects offers with
+    // quantity <= 0 (errorId 25004), so guard against publishing a SKU
+    // whose units are all sold/paid-out/written-off.
+    const { count: onHandCountRaw } = await admin
       .from("stock_unit")
       .select("id", { count: "exact", head: true })
       .eq("sku_id", skuRow?.id as string)
       .in("v2_status", ["graded", "listed"]);
+    const onHandCount = onHandCountRaw ?? 0;
+    if (onHandCount <= 0) {
+      throw new Error(
+        `Cannot publish ${effectiveSku} to eBay: no on-hand stock ` +
+          `(0 units in 'graded' or 'listed' status). Grade or restock units first.`,
+      );
+    }
 
     // ─── Look up product images (required by eBay) ─────────
     // eBay rejects publish with errorId 25002 ("Add at least 1 photo")
@@ -192,7 +201,7 @@ Deno.serve(async (req) => {
       condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
       availability: {
         shipToLocationAvailability: {
-          quantity: onHandCount ?? 1,
+          quantity: onHandCount,
         },
       },
     };
@@ -219,7 +228,7 @@ Deno.serve(async (req) => {
       sku: effectiveSku,
       marketplaceId: marketplace,
       format: "FIXED_PRICE",
-      availableQuantity: onHandCount ?? 1,
+      availableQuantity: onHandCount,
       categoryId: ebayCategoryId,
       listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
       pricingSummary: {
