@@ -306,7 +306,7 @@ async function syncSet(
       .from("rebrickable_minifigs")
       .upsert(
         {
-          fig_num: fig.fig_num,
+          fig_num: fig.fig_num ?? fig.set_num ?? figNum,
           name: fig.name,
           num_parts: fig.num_parts,
           img_url: fig.img_url,
