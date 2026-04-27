@@ -45,6 +45,17 @@ interface RbSetFig {
   quantity: number;
 }
 
+interface RbSet {
+  set_num: string;
+  name: string;
+  year: number | null;
+  theme_id: number | null;
+  num_parts: number | null;
+  set_img_url: string | null;
+  set_url?: string | null;
+  last_modified_dt?: string | null;
+}
+
 interface RbPage<T> {
   count: number;
   next: string | null;
