@@ -267,6 +267,7 @@ async function syncSet(
     figs_processed: figNums.length,
     bricklink_ids_added: bricklinkAdded,
     figs_skipped: skipped,
+    catalog_updated: catalogUpdated,
   };
 }
 
