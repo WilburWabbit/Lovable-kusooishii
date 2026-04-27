@@ -2387,6 +2387,7 @@ export type Database = {
           retired: string | null
           retired_date: string | null
           retired_flag: boolean
+          selected_minifig_fig_nums: Json
           seo_description: string | null
           seo_title: string | null
           set_number: string | null
@@ -2476,6 +2477,7 @@ export type Database = {
           retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
+          selected_minifig_fig_nums?: Json
           seo_description?: string | null
           seo_title?: string | null
           set_number?: string | null
@@ -2565,6 +2567,7 @@ export type Database = {
           retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
+          selected_minifig_fig_nums?: Json
           seo_description?: string | null
           seo_title?: string | null
           set_number?: string | null
