@@ -111,6 +111,40 @@ Deno.serve(async (req) => {
           imageUrls.push(url);
         }
       }
+
+      // Append selected minifig images (operator-controlled per product).
+      const { data: prodRow } = await admin
+        .from("product")
+        .select("selected_minifig_fig_nums, mpn")
+        .eq("id", productId)
+        .maybeSingle();
+      const figNums = Array.isArray((prodRow as Record<string, unknown> | null)?.selected_minifig_fig_nums)
+        ? ((prodRow as Record<string, unknown>).selected_minifig_fig_nums as unknown[])
+            .filter((v): v is string => typeof v === "string")
+        : [];
+      if (figNums.length > 0) {
+        const baseMpn = (product?.mpn as string | undefined)?.split(".")[0];
+        const candidates = baseMpn
+          ? Array.from(new Set([baseMpn, `${baseMpn.split("-")[0]}-1`]))
+          : [];
+        if (candidates.length > 0) {
+          const { data: figRows } = await admin
+            .from("lego_set_minifigs" as never)
+            .select("fig_num, minifig_img_url")
+            .in("set_num" as never, candidates as never)
+            .in("fig_num" as never, figNums as never);
+          const seenFigs = new Set<string>();
+          for (const r of (figRows ?? []) as Array<Record<string, unknown>>) {
+            const fn = r.fig_num as string;
+            if (seenFigs.has(fn)) continue;
+            seenFigs.add(fn);
+            const url = r.minifig_img_url as string | null;
+            if (typeof url === "string" && url.startsWith("https://")) {
+              imageUrls.push(url);
+            }
+          }
+        }
+      }
     }
     if (imageUrls.length === 0) {
       throw new Error(
