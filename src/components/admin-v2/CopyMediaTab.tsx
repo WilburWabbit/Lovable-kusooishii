@@ -7,6 +7,7 @@ import {
 } from "@/hooks/admin/use-products";
 import type { ProductDetail, ProductVariant, ProductImage } from "@/lib/types/admin";
 import { SurfaceCard, SectionHead, Mono, GradeBadge } from "./ui-primitives";
+import { MinifigsCard } from "./MinifigsCard";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
@@ -36,6 +37,7 @@ export function CopyMediaTab({ product }: CopyMediaTabProps) {
   return (
     <div className="grid gap-4">
       <PhotosSection product={product} />
+      <MinifigsCard product={product} />
       <CopySection product={product} />
       {product.variants.map((v) => (
         <ConditionNotesSection key={v.sku} variant={v} />

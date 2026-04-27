@@ -350,6 +350,16 @@ export interface ProductDetail extends Product {
   ebayMarketplace: string | null;
   gmcProductCategory: string | null;
   metaCategory: string | null;
+  selectedMinifigFigNums: string[];
+}
+
+/** Minifig included in a LEGO set (sourced from rebrickable inventories) */
+export interface SetMinifig {
+  figNum: string;
+  name: string | null;
+  bricklinkId: string | null;
+  imgUrl: string | null;
+  quantity: number;
 }
 
 // ─── Channel Taxonomy / Item Specifics ─────────────────────

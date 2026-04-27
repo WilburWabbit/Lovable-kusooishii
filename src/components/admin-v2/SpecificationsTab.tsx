@@ -27,6 +27,7 @@ import {
 import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
+import { MinifigsCard } from "./MinifigsCard";
 import type { ProductDetail } from "@/lib/types/admin";
 
 interface SpecificationsTabProps {
@@ -189,8 +190,11 @@ function AspectOverrideRow({
   const hasAllowed = allowed.length > 0;
   const customAllowed = row.allowsCustom !== false;
 
-  const autoDisplay =
-    typeof row.autoValue === "string" && row.autoValue.length > 0
+  const autoDisplay = Array.isArray(row.autoValue)
+    ? row.autoValue.length > 0
+      ? row.autoValue.join(", ")
+      : "—"
+    : typeof row.autoValue === "string" && row.autoValue.length > 0
       ? row.autoValue
       : "—";
   const overrideStr = Array.isArray(override)
@@ -199,9 +203,11 @@ function AspectOverrideRow({
   const hasOverride = overrideStr.trim().length > 0;
   const effective = hasOverride
     ? overrideStr
-    : typeof row.autoValue === "string"
-      ? row.autoValue
-      : "";
+    : Array.isArray(row.autoValue)
+      ? row.autoValue.join(", ")
+      : typeof row.autoValue === "string"
+        ? row.autoValue
+        : "";
 
   return (
     <div className="py-2 border-b border-zinc-100">
@@ -598,6 +604,9 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
           </div>
         </SurfaceCard>
       )}
+
+      {/* Included minifigures (selectable images for listings) */}
+      <MinifigsCard product={product} />
     </div>
   );
 }

@@ -75,7 +75,7 @@ export interface SpecRow {
   mappingScope: "category" | "marketplace" | "default" | "none";
   canonicalKey: string | null;
   constantValue: string | null;
-  autoValue: string | null;
+  autoValue: string | string[] | null;
   autoSource: CanonicalProvider | null;
   savedValue: string | string[] | null;
   isOverride: boolean;

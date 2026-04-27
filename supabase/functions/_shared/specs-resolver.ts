@@ -44,8 +44,9 @@ export interface SpecRow extends AspectRow {
   canonicalKey: string | null;
   constantValue: string | null;
 
-  // Auto-resolved value (from canonical / constant)
-  autoValue: string | null;
+  // Auto-resolved value (from canonical / constant). May be a multi-value
+  // array (e.g. eBay aspects like "LEGO Character" derived from a list).
+  autoValue: string | string[] | null;
   autoSource:
     | "product"
     | "brickeconomy"
@@ -264,7 +265,7 @@ export async function resolveSpecsForProduct(
     const mapping = mapByAspect.get(a.key) ?? null;
     const saved = savedByAspect.get(a.key) ?? null;
 
-    let autoValue: string | null = null;
+    let autoValue: string | string[] | null = null;
     let autoSource: SpecRow["autoSource"] = null;
 
     if (mapping?.constant_value != null && !mapping.canonical_key) {
@@ -294,7 +295,11 @@ export async function resolveSpecsForProduct(
     if (hasSaved) {
       effectiveValue = savedValue;
       effectiveSource = "saved";
-    } else if (autoValue != null && autoValue !== "") {
+    } else if (
+      autoValue != null &&
+      !(typeof autoValue === "string" && autoValue === "") &&
+      !(Array.isArray(autoValue) && autoValue.length === 0)
+    ) {
       effectiveValue = autoValue;
       effectiveSource = autoSource === "constant" ? "constant" : "canonical";
     }

@@ -41,7 +41,7 @@ export interface CanonicalAttributeRow {
 export interface ResolvedCanonicalValue {
   key: string;
   label: string;
-  value: string | null;
+  value: string | string[] | null;
   raw: unknown;
   source: ProviderName | "override" | "none";
   sourceField: string | null;
@@ -65,12 +65,21 @@ export interface ChannelAspectMappingRow {
   transform: string | null;
 }
 
+export interface SetMinifigRow {
+  fig_num: string;
+  minifig_name: string | null;
+  bricklink_id: string | null;
+  minifig_img_url: string | null;
+  quantity: number | null;
+}
+
 export interface ProviderBundle {
   product: Record<string, unknown> | null;
   theme: Record<string, unknown> | null;
   brickeconomy: Record<string, unknown> | null;
   catalog: Record<string, unknown> | null;
   rebrickable: Record<string, unknown> | null;
+  minifigs: SetMinifigRow[];
   fieldOverrides: Record<string, unknown>;
 }
 
@@ -93,6 +102,7 @@ export async function loadProviderBundle(
       brickeconomy: null,
       catalog: null,
       rebrickable: null,
+      minifigs: [],
       fieldOverrides: {},
     };
   }
@@ -152,12 +162,31 @@ export async function loadProviderBundle(
   // can populate later.
   const rebrickableRow: Record<string, unknown> | null = null;
 
+  // Set ↔ minifig relationship via the lego_set_minifigs view. We use the
+  // bare set number (e.g. "75367-1") which the Rebrickable sync stores as
+  // `set_num` on rebrickable_inventories. Fail-soft on errors so a missing
+  // view or no inventory doesn't break attribute resolution.
+  let minifigRows: SetMinifigRow[] = [];
+  if (setNumber) {
+    const candidates = [setNumber, `${setNumber}-1`];
+    try {
+      const { data } = await admin
+        .from("lego_set_minifigs" as never)
+        .select("fig_num, minifig_name, bricklink_id, minifig_img_url, quantity")
+        .in("set_num" as never, candidates);
+      minifigRows = ((data ?? []) as unknown) as SetMinifigRow[];
+    } catch (_e) {
+      minifigRows = [];
+    }
+  }
+
   return {
     product: productRow,
     theme: themeRow,
     brickeconomy: beRow,
     catalog: catalogRow,
     rebrickable: rebrickableRow,
+    minifigs: minifigRows,
     fieldOverrides,
   };
 }
@@ -224,6 +253,23 @@ function derive(
       if (l == null && w == null && h == null) return null;
       return [l, w, h].map((n) => (n == null ? "?" : String(n))).join("x");
     }
+    case "minifigs_lego_character": {
+      // Build "<Name> (<fig_num>)" for every minifig in the set, sorted
+      // by name for stable output. Returned as an array so multi-value
+      // eBay aspects (LEGO Character) get one entry per minifig.
+      const figs = bundle.minifigs ?? [];
+      if (figs.length === 0) return null;
+      const items = figs
+        .filter((m) => m.fig_num)
+        .map((m) => {
+          const name = (m.minifig_name ?? "").trim();
+          const fig = m.fig_num.trim();
+          return name ? `${name} (${fig})` : fig;
+        });
+      const unique = Array.from(new Set(items));
+      unique.sort((a, b) => a.localeCompare(b));
+      return unique.length > 0 ? unique : null;
+    }
     default:
       return null;
   }
@@ -273,10 +319,16 @@ export function resolveAttribute(
 
   if (isOverride) source = "override";
 
+  const value: string | string[] | null = raw == null
+    ? null
+    : Array.isArray(raw)
+      ? (raw as unknown[]).map((x) => String(x))
+      : String(raw);
+
   return {
     key: attr.key,
     label: attr.label,
-    value: raw == null ? null : String(raw),
+    value,
     raw,
     source,
     sourceField,
