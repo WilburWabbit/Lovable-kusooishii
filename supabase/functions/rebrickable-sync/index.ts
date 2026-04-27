@@ -113,8 +113,46 @@ async function upsertBatched(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Mode: set — enrich a single set's minifigs
+// Map a Rebrickable set payload onto a lego_catalog row.
+// theme_id is intentionally omitted — Rebrickable's integer theme_id can't be
+// resolved to our public.theme.id (uuid) without a separate themes import.
+function rbSetToCatalogRow(s: RbSet): Record<string, unknown> {
+  return {
+    mpn: s.set_num,
+    name: s.name,
+    product_type: "set",
+    rebrickable_id: s.set_num,
+    release_year: s.year ?? null,
+    piece_count: s.num_parts ?? null,
+    img_url: s.set_img_url ?? null,
+    status: "active",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function upsertCatalogSets(db: Supabase, sets: RbSet[]): Promise<void> {
+  if (sets.length === 0) return;
+  const rows = sets.map(rbSetToCatalogRow);
+  await upsertBatched(db, "lego_catalog", rows, "mpn");
+}
+
+async function fetchAndUpsertSet(
+  db: Supabase,
+  apiKey: string,
+  setNum: string,
+): Promise<boolean> {
+  try {
+    const set = await rbFetch<RbSet>(`${RB_BASE}/sets/${setNum}/`, apiKey);
+    await upsertCatalogSets(db, [set]);
+    return true;
+  } catch (err) {
+    if (err instanceof RbHttpError && err.status === 404) {
+      console.warn(`fetchAndUpsertSet: ${setNum} not found on Rebrickable`);
+      return false;
+    }
+    throw err;
+  }
+}
 // ---------------------------------------------------------------------------
 async function syncSet(
   db: Supabase,
