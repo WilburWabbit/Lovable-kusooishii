@@ -6,7 +6,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
-import { Download, Upload, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import {
+  Download,
+  Upload,
+  AlertTriangle,
+  Loader2,
+  Trash2,
+  Sparkles,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard, SectionHead } from "@/components/admin-v2/ui-primitives";
 import { supabase } from "@/integrations/supabase/client";
