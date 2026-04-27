@@ -102,6 +102,7 @@ export async function loadProviderBundle(
       brickeconomy: null,
       catalog: null,
       rebrickable: null,
+      minifigs: [],
       fieldOverrides: {},
     };
   }
@@ -161,12 +162,31 @@ export async function loadProviderBundle(
   // can populate later.
   const rebrickableRow: Record<string, unknown> | null = null;
 
+  // Set ↔ minifig relationship via the lego_set_minifigs view. We use the
+  // bare set number (e.g. "75367-1") which the Rebrickable sync stores as
+  // `set_num` on rebrickable_inventories. Fail-soft on errors so a missing
+  // view or no inventory doesn't break attribute resolution.
+  let minifigRows: SetMinifigRow[] = [];
+  if (setNumber) {
+    const candidates = [setNumber, `${setNumber}-1`];
+    try {
+      const { data } = await admin
+        .from("lego_set_minifigs" as never)
+        .select("fig_num, minifig_name, bricklink_id, minifig_img_url, quantity")
+        .in("set_num" as never, candidates);
+      minifigRows = ((data ?? []) as unknown) as SetMinifigRow[];
+    } catch (_e) {
+      minifigRows = [];
+    }
+  }
+
   return {
     product: productRow,
     theme: themeRow,
     brickeconomy: beRow,
     catalog: catalogRow,
     rebrickable: rebrickableRow,
+    minifigs: minifigRows,
     fieldOverrides,
   };
 }
