@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
       condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
       availability: {
         shipToLocationAvailability: {
-          quantity: onHandCount ?? 1,
+          quantity: onHandCount,
         },
       },
     };
@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
       sku: effectiveSku,
       marketplaceId: marketplace,
       format: "FIXED_PRICE",
-      availableQuantity: onHandCount ?? 1,
+      availableQuantity: onHandCount,
       categoryId: ebayCategoryId,
       listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
       pricingSummary: {
