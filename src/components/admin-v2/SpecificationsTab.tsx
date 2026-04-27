@@ -27,6 +27,7 @@ import {
 import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
+import { MinifigsCard } from "./MinifigsCard";
 import type { ProductDetail } from "@/lib/types/admin";
 
 interface SpecificationsTabProps {
@@ -603,6 +604,9 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
           </div>
         </SurfaceCard>
       )}
+
+      {/* Included minifigures (selectable images for listings) */}
+      <MinifigsCard product={product} />
     </div>
   );
 }
