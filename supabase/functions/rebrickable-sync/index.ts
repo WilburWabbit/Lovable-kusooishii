@@ -153,6 +153,9 @@ async function fetchAndUpsertSet(
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Mode: set — refresh a single set in lego_catalog and enrich its minifigs
 // ---------------------------------------------------------------------------
 async function syncSet(
   db: Supabase,
