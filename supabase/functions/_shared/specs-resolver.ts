@@ -44,8 +44,9 @@ export interface SpecRow extends AspectRow {
   canonicalKey: string | null;
   constantValue: string | null;
 
-  // Auto-resolved value (from canonical / constant)
-  autoValue: string | null;
+  // Auto-resolved value (from canonical / constant). May be a multi-value
+  // array (e.g. eBay aspects like "LEGO Character" derived from a list).
+  autoValue: string | string[] | null;
   autoSource:
     | "product"
     | "brickeconomy"
