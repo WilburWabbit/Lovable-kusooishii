@@ -77,26 +77,25 @@ Deno.serve(async (req) => {
 
     if (!effectiveSku) throw new Error("Could not determine SKU code");
 
-    // Count on-hand stock for this SKU. eBay rejects offers with
-    // quantity <= 0 (errorId 25004), so guard against publishing a SKU
-    // whose units are all sold/paid-out/written-off.
-    const { count: onHandCountRaw } = await admin
-      .from("stock_unit")
-      .select("id", { count: "exact", head: true })
-      .eq("sku_id", skuRow?.id as string)
-      .in("v2_status", ["graded", "listed"]);
-    const onHandCount = onHandCountRaw ?? 0;
+    const productId = (skuRow?.product_id ?? null) as string | null;
+
+    // Count on-hand stock using the operational stock identity, not only the
+    // channel_listing.sku_id. Some imported items have legacy/duplicate SKU rows,
+    // while the stock unit itself still carries the correct MPN.
+    const availableStockUnits = await findAvailableStockUnits(admin, skuRow, product, effectiveSku);
+    const onHandCount = availableStockUnits.length;
     if (onHandCount <= 0) {
+      const lookupMpn = uniqueStrings([skuRow?.mpn, product?.mpn, effectiveSku]).join(", ");
       throw new Error(
         `Cannot publish ${effectiveSku} to eBay: no on-hand stock ` +
-          `(0 units in 'graded' or 'listed' status). Grade or restock units first.`,
+          `(0 units in 'graded' or 'listed' status matched by SKU or MPN${lookupMpn ? `: ${lookupMpn}` : ""}). ` +
+          `Grade or restock units first.`,
       );
     }
 
     // ─── Look up product images (required by eBay) ─────────
     // eBay rejects publish with errorId 25002 ("Add at least 1 photo")
     // when no imageUrls are present on the inventory item.
-    const productId = (skuRow?.product_id ?? null) as string | null;
     const imageUrls: string[] = [];
     if (productId) {
       const { data: mediaRows } = await admin
