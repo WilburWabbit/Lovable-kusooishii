@@ -300,27 +300,34 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
       const item = entry.raw_payload;
       const qboItemId = String(item.Id);
 
-      // Parse SKU
+      // Parse SKU. Prefer the explicit Sku field; if absent, extract from
+      // the trailing "(MPN.grade)" suffix of the Name. Never feed an entire
+      // display name into parseSku — that creates orphan rows where the MPN
+      // is actually the truncated product name.
       let mpn: string | null = null;
       let conditionGrade = "1";
+      let rawSku: string | null = null;
+
       const skuField = item.Sku;
       if (skuField && String(skuField).trim()) {
-        const parsed = parseSku(String(skuField));
-        mpn = parsed.mpn;
-        conditionGrade = parsed.conditionGrade;
+        rawSku = String(skuField).trim();
       } else if (item.Name) {
-        const parsed = parseSku(String(item.Name));
+        const extracted = extractSkuFromName(String(item.Name));
+        if (extracted) rawSku = extracted;
+      }
+
+      if (rawSku) {
+        const parsed = parseSku(rawSku);
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
       }
 
-      if (!mpn) {
+      if (!mpn || !rawSku) {
         await markLanding(admin, "landing_raw_qbo_item", entry.id, "skipped", "No MPN");
         processed++;
         continue;
       }
 
-      const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
 
       // Resolve parent category
