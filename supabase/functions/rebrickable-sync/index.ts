@@ -33,16 +33,30 @@ const FETCH_TIMEOUT_MS = 30_000;
 // Types
 // ---------------------------------------------------------------------------
 interface RbFig {
-  fig_num: string;
+  fig_num?: string;
+  set_num?: string; // /lego/minifigs/{n}/ sometimes returns set_num instead
   name: string;
   num_parts: number;
   img_url: string;
   external_ids?: { BrickLink?: string[]; BrickOwl?: string[] };
 }
 
+// /lego/sets/{set_num}/minifigs/ returns inventory rows that describe a
+// minifig contained within a set. Rebrickable models minifigs as a special
+// kind of set, so the row's identifier comes back as `set_num` (the minifig's
+// fig number, e.g. "fig-001234"). Some integrations also surface it as
+// `fig_num`. We accept either and normalise downstream.
 interface RbSetFig {
-  fig_num: string;
+  fig_num?: string;
+  set_num?: string;
+  set_name?: string;
+  set_img_url?: string;
   quantity: number;
+}
+
+function readFigNum(row: RbSetFig): string | null {
+  const v = (row.fig_num ?? row.set_num ?? "").trim();
+  return v.length > 0 ? v : null;
 }
 
 interface RbSet {
@@ -155,7 +169,11 @@ async function fetchAndUpsertSet(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: set — refresh a single set in lego_catalog and enrich its minifigs
+// Mode: set — refresh a single set in lego_catalog, refresh its included
+// minifigs (rebrickable_minifigs), and persist the set ↔ minifig relationship
+// in rebrickable_inventories + rebrickable_inventory_minifigs so the rest of
+// the app (product descriptions, eBay item specifics) can ask "which minifigs
+// are in set 75367-1?".
 // ---------------------------------------------------------------------------
 async function syncSet(
   db: Supabase,
@@ -167,6 +185,8 @@ async function syncSet(
   bricklink_ids_added: number;
   figs_skipped?: number;
   catalog_updated: boolean;
+  inventory_id: number | null;
+  inventory_links_written: number;
 }> {
   // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
   //    Tolerated 404 — we still try to sync minifigs below.
@@ -195,21 +215,57 @@ async function syncSet(
         figs_processed: 0,
         bricklink_ids_added: 0,
         catalog_updated: catalogUpdated,
+        inventory_id: null,
+        inventory_links_written: 0,
       };
     }
     throw err;
   }
 
   if (setFigs.length === 0) {
+    // Set has no minifigs on Rebrickable — clear any stale link rows so the
+    // app doesn't show minifigs that aren't actually included.
+    const { data: invRow } = await db
+      .from("rebrickable_inventories")
+      .select("id")
+      .eq("set_num", setNum)
+      .eq("version", 1)
+      .maybeSingle();
+    if (invRow?.id) {
+      await db
+        .from("rebrickable_inventory_minifigs")
+        .delete()
+        .eq("inventory_id", invRow.id);
+    }
     return {
       set_num: setNum,
       figs_processed: 0,
       bricklink_ids_added: 0,
       catalog_updated: catalogUpdated,
+      inventory_id: invRow?.id ?? null,
+      inventory_links_written: 0,
     };
   }
 
-  const figNums = setFigs.map((f) => f.fig_num);
+  // Normalise: pair each row with its fig identifier and drop rows we can't
+  // identify (defensive — Rebrickable occasionally returns nulls).
+  const setFigPairs: { fig_num: string; row: RbSetFig }[] = [];
+  for (const row of setFigs) {
+    const fig = readFigNum(row);
+    if (fig) setFigPairs.push({ fig_num: fig, row });
+  }
+  const figNums = Array.from(new Set(setFigPairs.map((p) => p.fig_num)));
+
+  if (figNums.length === 0) {
+    return {
+      set_num: setNum,
+      figs_processed: 0,
+      bricklink_ids_added: 0,
+      catalog_updated: catalogUpdated,
+      inventory_id: null,
+      inventory_links_written: 0,
+    };
+  }
 
   // 2. Find which figs are missing bricklink_id (or not in DB at all)
   const { data: existing, error } = await db
@@ -250,7 +306,7 @@ async function syncSet(
       .from("rebrickable_minifigs")
       .upsert(
         {
-          fig_num: fig.fig_num,
+          fig_num: fig.fig_num ?? fig.set_num ?? figNum,
           name: fig.name,
           num_parts: fig.num_parts,
           img_url: fig.img_url,
@@ -262,12 +318,95 @@ async function syncSet(
     if (bricklinkId) bricklinkAdded++;
   }
 
+  // 4. Make sure every fig in this set exists in rebrickable_minifigs before
+  //    we write inventory_minifigs (FK constraint). For figs we already know
+  //    about we keep their bricklink_id; for unknown figs we insert a minimal
+  //    placeholder row using the data the /sets/{n}/minifigs/ endpoint gives us.
+  const { data: knownAfter } = await db
+    .from("rebrickable_minifigs")
+    .select("fig_num")
+    .in("fig_num", figNums);
+  const knownSet = new Set<string>(
+    (knownAfter ?? []).map((r: { fig_num: string }) => r.fig_num),
+  );
+  const missingPairs = setFigPairs.filter((p) => !knownSet.has(p.fig_num));
+  if (missingPairs.length > 0) {
+    // Dedupe by fig_num so the upsert isn't fed duplicate keys.
+    const seen = new Set<string>();
+    const placeholderRows: Record<string, unknown>[] = [];
+    for (const { fig_num, row } of missingPairs) {
+      if (seen.has(fig_num)) continue;
+      seen.add(fig_num);
+      placeholderRows.push({
+        fig_num,
+        name: row.set_name ?? fig_num,
+        num_parts: 0,
+        img_url: row.set_img_url ?? null,
+      });
+    }
+    await upsertBatched(db, "rebrickable_minifigs", placeholderRows, "fig_num");
+  }
+
+  // 5. Resolve / allocate the inventory_id for this set (version 1) and
+  //    replace its link rows so the relationship reflects the latest data
+  //    from Rebrickable.
+  let inventoryId: number | null = null;
+  let linksWritten = 0;
+  try {
+    const { data: invIdData, error: invErr } = await db.rpc(
+      "get_or_create_rebrickable_inventory",
+      { p_set_num: setNum, p_version: 1 },
+    );
+    if (invErr) throw invErr;
+    inventoryId = (invIdData as number | null) ?? null;
+
+    if (inventoryId !== null) {
+      // Wipe existing links for this inventory then insert fresh ones — the
+      // truth of "what's in this set" comes from the API call we just made.
+      const { error: delErr } = await db
+        .from("rebrickable_inventory_minifigs")
+        .delete()
+        .eq("inventory_id", inventoryId);
+      if (delErr) throw delErr;
+
+      // Collapse duplicates (Rebrickable can list the same fig twice with
+      // different inventory rows) by summing quantity per fig.
+      const qtyByFig = new Map<string, number>();
+      for (const { fig_num, row } of setFigPairs) {
+        qtyByFig.set(
+          fig_num,
+          (qtyByFig.get(fig_num) ?? 0) + (row.quantity ?? 1),
+        );
+      }
+      const linkRows = Array.from(qtyByFig.entries()).map(
+        ([fig_num, quantity]) => ({
+          inventory_id: inventoryId,
+          fig_num,
+          quantity,
+        }),
+      );
+      if (linkRows.length > 0) {
+        const { error: insErr } = await db
+          .from("rebrickable_inventory_minifigs")
+          .insert(linkRows);
+        if (insErr) throw insErr;
+        linksWritten = linkRows.length;
+      }
+    }
+  } catch (err) {
+    // Don't fail the whole sync over a link-write problem — log and continue.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`syncSet(${setNum}): link write failed: ${msg}`);
+  }
+
   return {
     set_num: setNum,
     figs_processed: figNums.length,
     bricklink_ids_added: bricklinkAdded,
     figs_skipped: skipped,
     catalog_updated: catalogUpdated,
+    inventory_id: inventoryId,
+    inventory_links_written: linksWritten,
   };
 }
 
@@ -295,6 +434,7 @@ async function enrichMode(
   let catalogUpdated = 0;
   let figsProcessed = 0;
   let bricklinkAdded = 0;
+  let inventoryLinksWritten = 0;
 
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
@@ -302,6 +442,7 @@ async function enrichMode(
       const result = await syncSet(db, apiKey, setNum as string);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
+      inventoryLinksWritten += result.inventory_links_written;
       if (result.catalog_updated) catalogUpdated++;
     } catch (err) {
       // Skip sets that 404 on Rebrickable; keep going
@@ -318,6 +459,7 @@ async function enrichMode(
     catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
     bricklink_ids_added: bricklinkAdded,
+    inventory_links_written: inventoryLinksWritten,
     has_more: setsProcessed < setNums.length,
   };
 }
