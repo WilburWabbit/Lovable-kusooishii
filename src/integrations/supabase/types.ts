@@ -98,6 +98,69 @@ export type Database = {
         }
         Relationships: []
       }
+      brickeconomy_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
       brickeconomy_channel_overrides: {
         Row: {
           channel: string
@@ -266,6 +329,195 @@ export type Database = {
           recorded_at?: string
           retail_price?: number | null
           source?: string
+        }
+        Relationships: []
+      }
+      bricklink_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      brickowl_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      brickset_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
         }
         Relationships: []
       }
@@ -1342,6 +1594,114 @@ export type Database = {
         ]
       }
       landing_raw_brickeconomy: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_bricklink: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_brickowl: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_brickset: {
         Row: {
           correlation_id: string | null
           entity_type: string
@@ -2614,6 +2974,8 @@ export type Database = {
           aspect_key: string | null
           category_id: string | null
           channel: string | null
+          chosen_source: string | null
+          custom_value: string | null
           id: string
           is_override: boolean
           key: string
@@ -2622,6 +2984,7 @@ export type Database = {
           product_id: string
           source: string
           source_value: string | null
+          source_values_jsonb: Json | null
           updated_at: string
           value: string | null
           value_json: Json | null
@@ -2630,6 +2993,8 @@ export type Database = {
           aspect_key?: string | null
           category_id?: string | null
           channel?: string | null
+          chosen_source?: string | null
+          custom_value?: string | null
           id?: string
           is_override?: boolean
           key: string
@@ -2638,6 +3003,7 @@ export type Database = {
           product_id: string
           source?: string
           source_value?: string | null
+          source_values_jsonb?: Json | null
           updated_at?: string
           value?: string | null
           value_json?: Json | null
@@ -2646,6 +3012,8 @@ export type Database = {
           aspect_key?: string | null
           category_id?: string | null
           channel?: string | null
+          chosen_source?: string | null
+          custom_value?: string | null
           id?: string
           is_override?: boolean
           key?: string
@@ -2654,6 +3022,7 @@ export type Database = {
           product_id?: string
           source?: string
           source_value?: string | null
+          source_values_jsonb?: Json | null
           updated_at?: string
           value?: string | null
           value_json?: Json | null
@@ -3531,6 +3900,44 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "product"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      source_field_mapping: {
+        Row: {
+          canonical_key: string
+          created_at: string
+          id: string
+          source: string
+          source_field: string
+          transform: string | null
+          updated_at: string
+        }
+        Insert: {
+          canonical_key: string
+          created_at?: string
+          id?: string
+          source: string
+          source_field: string
+          transform?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canonical_key?: string
+          created_at?: string
+          id?: string
+          source?: string
+          source_field?: string
+          transform?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_field_mapping_canonical_key_fkey"
+            columns: ["canonical_key"]
+            isOneToOne: false
+            referencedRelation: "canonical_attribute"
+            referencedColumns: ["key"]
           },
         ]
       }
