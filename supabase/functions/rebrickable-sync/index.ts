@@ -325,55 +325,70 @@ async function syncSet(
     );
   }
 
-  // Build a name → bricklink_id index from the BrickLink response. Each
-  // BrickLink minifig entry can be claimed once (handles sets that include
-  // duplicates of the same fig).
-  const blByName = new Map<string, string[]>();
+  // Build a name → BrickLink minifig index from the BrickLink response. Each
+  // BrickLink entry can be claimed once (handles sets that include duplicates
+  // of the same fig). We keep the original name + derive a deterministic
+  // catalog image URL so we can mirror BrickLink's data over the Rebrickable
+  // placeholders.
+  const blByName = new Map<string, BlMinifig[]>();
   if (blMinifigs) {
     for (const m of blMinifigs) {
       const key = normalizeMinifigName(m.name);
       const arr = blByName.get(key) ?? [];
-      arr.push(m.no);
+      arr.push(m);
       blByName.set(key, arr);
     }
   }
 
-  // Figure out which figs need a write: any fig with no bricklink_id yet, or
-  // not in the table at all. We always upsert at minimum the name + img so
-  // step 4's FK constraint is satisfied.
+  // BrickLink hosts catalog images at a deterministic path. Using the
+  // canonical CDN means we don't need an extra signed API call per minifig.
+  const brickLinkImageUrl = (no: string): string =>
+    `https://img.bricklink.com/ItemImage/MN/0/${encodeURIComponent(no)}.png`;
+
+  // Always upsert every fig — even ones that already had a bricklink_id —
+  // so a re-run of "Sync Single Set" can refresh the name and image from
+  // BrickLink (the source of truth for what the listing should show).
   for (const fig of figNums) {
     const known = existingByFig.get(fig);
-    if (known?.bricklink_id) continue; // already enriched
-
-    // Find the row from /sets/{n}/minifigs/ that gave us this fig — we can
-    // reuse its name/img to upsert without an extra Rebrickable detail call.
     const setRow = setFigPairs.find((p) => p.fig_num === fig)?.row;
-    const figName = known?.name ?? setRow?.set_name ?? fig;
-    const figImg = setRow?.set_img_url ?? null;
+    const rebrickableName = known?.name ?? setRow?.set_name ?? fig;
+    const rebrickableImg = setRow?.set_img_url ?? null;
 
-    // Try to match on normalised name against the BrickLink list.
-    let bricklinkId: string | null = null;
-    if (blByName.size > 0) {
-      const candidates = blByName.get(normalizeMinifigName(figName));
+    // Try to match on normalised name against the BrickLink list. If the
+    // fig already has a bricklink_id, prefer re-using it so we don't
+    // accidentally re-claim a different BrickLink entry.
+    let blMatch: BlMinifig | null = null;
+    if (known?.bricklink_id && blMinifigs) {
+      blMatch =
+        blMinifigs.find((m) => m.no === known.bricklink_id) ?? null;
+    }
+    if (!blMatch && blByName.size > 0) {
+      const candidates = blByName.get(normalizeMinifigName(rebrickableName));
       if (candidates && candidates.length > 0) {
-        bricklinkId = candidates.shift() ?? null;
+        blMatch = candidates.shift() ?? null;
       }
     }
+
+    // When BrickLink has the fig, prefer its name + image. Otherwise fall
+    // back to whatever Rebrickable gave us so the row is still usable.
+    const finalName = blMatch?.name ?? rebrickableName;
+    const finalImg = blMatch ? brickLinkImageUrl(blMatch.no) : rebrickableImg;
+    const finalBricklinkId = blMatch?.no ?? known?.bricklink_id ?? null;
 
     const { error: upsertErr } = await db
       .from("rebrickable_minifigs")
       .upsert(
         {
           fig_num: fig,
-          name: figName,
-          img_url: figImg,
-          bricklink_id: bricklinkId,
+          name: finalName,
+          img_url: finalImg,
+          bricklink_id: finalBricklinkId,
         },
         { onConflict: "fig_num" },
       );
     if (upsertErr) throw new Error(`minifig upsert: ${upsertErr.message}`);
-    if (bricklinkId) bricklinkAdded++;
-    else skipped++;
+    if (blMatch && !known?.bricklink_id) bricklinkAdded++;
+    else if (!blMatch) skipped++;
   }
 
   // 4. Make sure every fig in this set exists in rebrickable_minifigs before
