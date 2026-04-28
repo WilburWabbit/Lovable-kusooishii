@@ -501,15 +501,24 @@ async function findAvailableStockUnits(
     addRows(data as Array<Record<string, unknown>> | null);
   }
 
-  const mpnCandidates = buildMpnCandidates([skuRow?.mpn, product?.mpn, effectiveSku]);
-  if (mpnCandidates.length > 0) {
-    const { data, error } = await admin
-      .from("stock_unit")
-      .select(selectCols)
-      .in("mpn", mpnCandidates)
-      .in("v2_status", statuses);
-    if (error) throw new Error(`Stock lookup by MPN failed: ${error.message}`);
-    addRows(data as Array<Record<string, unknown>> | null);
+  // Only fall back to MPN lookup if the SKU lookup returned nothing.
+  // The MPN fallback MUST also filter by the SKU's condition_grade,
+  // otherwise units of other grades for the same MPN would inflate
+  // the available quantity (e.g. SKU 75418-1.1 picking up grade 2/3 units).
+  if (rowsById.size === 0) {
+    const mpnCandidates = buildMpnCandidates([skuRow?.mpn, product?.mpn, effectiveSku]);
+    const grade =
+      (skuRow?.condition_grade as string | number | null | undefined) ?? null;
+    if (mpnCandidates.length > 0 && grade != null && `${grade}`.length > 0) {
+      const { data, error } = await admin
+        .from("stock_unit")
+        .select(selectCols)
+        .in("mpn", mpnCandidates)
+        .eq("condition_grade", grade)
+        .in("v2_status", statuses);
+      if (error) throw new Error(`Stock lookup by MPN failed: ${error.message}`);
+      addRows(data as Array<Record<string, unknown>> | null);
+    }
   }
 
   return [...rowsById.values()];
