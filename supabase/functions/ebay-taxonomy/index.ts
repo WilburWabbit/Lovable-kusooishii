@@ -350,7 +350,7 @@ Deno.serve(async (req) => {
       try {
         const condData = await ebayFetch(
           token,
-          `/commerce/taxonomy/v1/category_tree/${treeId}/get_item_condition_policies?filter=categoryIds:{${encodeURIComponent(categoryId)}}`,
+          `/sell/metadata/v1/marketplace/${encodeURIComponent(marketplace)}/get_item_condition_policies?filter=${encodeURIComponent(`categoryIds:{${categoryId}}`)}`,
           marketplace,
         );
         const entry = (condData?.itemConditionPolicies ?? [])[0] ?? {};
