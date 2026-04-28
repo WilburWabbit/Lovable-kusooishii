@@ -195,6 +195,7 @@ async function syncSet(
   catalog_updated: boolean;
   inventory_id: number | null;
   inventory_links_written: number;
+  bricklink_error?: string | null;
 }> {
   // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
   //    Tolerated 404 — we still try to sync minifigs below.
