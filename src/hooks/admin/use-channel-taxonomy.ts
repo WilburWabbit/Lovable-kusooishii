@@ -263,6 +263,139 @@ export function useRefreshEbayAspects() {
   });
 }
 
+// ─── eBay condition policy (per category) ───────────────────
+
+export interface EbayConditionEntry {
+  conditionId: string;
+  conditionDescription?: string | null;
+}
+
+export interface EbayConditionPolicy {
+  itemConditionRequired: boolean;
+  itemConditionDescriptionEnabled: boolean;
+  itemConditions: EbayConditionEntry[];
+}
+
+export interface ConditionPolicyResult {
+  categoryId: string;
+  fromCache: boolean;
+  policy: EbayConditionPolicy | null;
+}
+
+export function useEbayConditionPolicy(
+  categoryId: string | null | undefined,
+  marketplace: string = "EBAY_GB",
+) {
+  return useQuery({
+    queryKey: taxonomyKeys.conditions("ebay", marketplace, categoryId ?? ""),
+    enabled: !!categoryId,
+    staleTime: 1000 * 60 * 60,
+    queryFn: async (): Promise<ConditionPolicyResult> => {
+      return await invokeWithAuth<ConditionPolicyResult>("ebay-taxonomy", {
+        action: "conditions",
+        categoryId,
+        marketplace,
+      });
+    },
+  });
+}
+
+export function useRefreshEbayConditionPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { categoryId: string; marketplace?: string }) => {
+      const marketplace = input.marketplace ?? "EBAY_GB";
+      return await invokeWithAuth<ConditionPolicyResult>("ebay-taxonomy", {
+        action: "conditions",
+        categoryId: input.categoryId,
+        marketplace,
+        force: true,
+      });
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: taxonomyKeys.conditions(
+          "ebay",
+          vars.marketplace ?? "EBAY_GB",
+          vars.categoryId,
+        ),
+      });
+    },
+  });
+}
+
+// Mirror of supabase/functions/_shared/ebay-condition-map.ts so the UI
+// can preview the same resolution the publisher will perform.
+export const EBAY_CONDITION_ENUM_LABEL: Record<string, string> = {
+  "1000": "New",
+  "1500": "New other",
+  "1750": "New with defects",
+  "2000": "Certified refurbished",
+  "2010": "Excellent refurbished",
+  "2020": "Very good refurbished",
+  "2030": "Good refurbished",
+  "2500": "Seller refurbished",
+  "2750": "Like new",
+  "3000": "Used – excellent",
+  "4000": "Used – very good",
+  "5000": "Used – good",
+  "6000": "Used – acceptable",
+  "7000": "For parts / not working",
+};
+
+const GRADE_PREFERENCES: Record<string, string[]> = {
+  "1": ["1000", "1500", "2750", "3000"],
+  "2": ["1500", "2750", "3000", "4000", "5000"],
+  "3": ["3000", "4000", "5000", "6000"],
+  "4": ["5000", "6000", "4000", "3000"],
+  "5": ["7000", "6000", "5000"],
+};
+
+export interface ResolvedGrade {
+  grade: string;
+  conditionId: string | null;
+  conditionLabel: string;
+  fallbackUsed: boolean;
+}
+
+export function resolveGradeForPolicy(
+  grade: string,
+  policy: EbayConditionPolicy | null,
+): ResolvedGrade {
+  const prefs = GRADE_PREFERENCES[grade] ?? GRADE_PREFERENCES["3"];
+  const allowed = (policy?.itemConditions ?? []).map((c) => String(c.conditionId));
+  if (allowed.length === 0) {
+    const id = prefs[0];
+    return {
+      grade,
+      conditionId: id,
+      conditionLabel: EBAY_CONDITION_ENUM_LABEL[id] ?? id,
+      fallbackUsed: false,
+    };
+  }
+  for (let i = 0; i < prefs.length; i++) {
+    if (allowed.includes(prefs[i])) {
+      return {
+        grade,
+        conditionId: prefs[i],
+        conditionLabel: EBAY_CONDITION_ENUM_LABEL[prefs[i]] ?? prefs[i],
+        fallbackUsed: i > 0,
+      };
+    }
+  }
+  const lastResort =
+    allowed.find((id) => id === "5000") ??
+    allowed.find((id) => id === "6000") ??
+    allowed[allowed.length - 1] ??
+    null;
+  return {
+    grade,
+    conditionId: lastResort,
+    conditionLabel: lastResort ? EBAY_CONDITION_ENUM_LABEL[lastResort] ?? lastResort : "—",
+    fallbackUsed: true,
+  };
+}
+
 // ─── Product channel category assignment ────────────────────
 
 export function useSetProductChannelCategory() {
