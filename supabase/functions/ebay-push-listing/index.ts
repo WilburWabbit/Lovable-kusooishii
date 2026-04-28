@@ -227,8 +227,39 @@ Deno.serve(async (req) => {
       aspects["MPN"] = [String(product.mpn)];
     }
 
+    // ─── Resolve eBay condition for this category ──────────
+    // The set of allowed conditions varies per category. We cache the
+    // policy on channel_category_schema; if it isn't there yet we fall
+    // back to the preferred grade→condition mapping (legacy behaviour).
+    const { data: schemaRow } = await admin
+      .from("channel_category_schema")
+      .select("condition_policy")
+      .eq("channel", "ebay")
+      .eq("marketplace", marketplace)
+      .eq("category_id", ebayCategoryId)
+      .maybeSingle();
+
+    const conditionPolicy =
+      (schemaRow?.condition_policy as CategoryConditionPolicy | null) ?? null;
+
+    const firstUnit = availableStockUnits[0] ?? null;
+    const grade =
+      (firstUnit?.condition_grade as string | null) ??
+      (skuRow?.condition_grade as string | null) ??
+      null;
+    const ebayCondition = resolveEbayCondition(grade, conditionPolicy);
+
+    // Pull free-text condition notes — prefer the unit's notes (most
+    // specific), fall back to SKU-level notes.
+    const conditionDescription = ebayCondition.allowsConditionDescription
+      ? sanitiseConditionDescription(
+          (firstUnit?.condition_notes as string | null) ??
+            (skuRow?.condition_notes as string | null),
+        )
+      : null;
+
     // ─── Step 1: Create/Update Inventory Item ──────────────
-    const inventoryItemPayload = {
+    const inventoryItemPayload: Record<string, unknown> = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
         description: (l.listing_description as string) ?? (product?.description as string) ?? "",
@@ -236,9 +267,9 @@ Deno.serve(async (req) => {
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
-      condition: mapGradeToEbayCondition(
-        (availableStockUnits[0]?.condition_grade as string | null) ?? (skuRow?.condition_grade as string),
-      ),
+      condition: ebayCondition.condition,
+      conditionId: ebayCondition.conditionId,
+      ...(conditionDescription ? { conditionDescription } : {}),
       availability: {
         shipToLocationAvailability: {
           quantity: onHandCount,
