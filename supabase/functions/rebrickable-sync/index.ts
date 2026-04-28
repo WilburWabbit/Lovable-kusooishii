@@ -465,6 +465,7 @@ async function syncSet(
     catalog_updated: catalogUpdated,
     inventory_id: inventoryId,
     inventory_links_written: linksWritten,
+    bricklink_error: bricklinkError,
   };
 }
 
