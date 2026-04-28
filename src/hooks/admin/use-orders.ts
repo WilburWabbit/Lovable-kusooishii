@@ -235,43 +235,14 @@ export function useAllocateOrderItems() {
   return useMutation({
     mutationFn: async ({ orderId, allocations }: AllocateInput) => {
       for (const alloc of allocations) {
-        // Consume FIFO unit via database function
-        const { data: unit, error: fifoErr } = await supabase
-          .rpc('v2_consume_fifo_unit' as never, { p_sku_code: alloc.skuCode } as never);
+        const { error } = await supabase.rpc('allocate_order_line_stock_unit' as never, {
+          p_order_id: orderId,
+          p_line_item_id: alloc.lineItemId,
+          p_sku_code: alloc.skuCode,
+        } as never);
 
-        if (fifoErr) throw fifoErr;
-        const consumed = unit as unknown as Record<string, unknown>;
-
-        // Update the order line item with the allocated unit
-        const { error: lineErr } = await supabase
-          .from('sales_order_line')
-          .update({
-            stock_unit_id: consumed.id,
-            cogs: consumed.landed_cost,
-          } as never)
-          .eq('id', alloc.lineItemId);
-
-        if (lineErr) throw lineErr;
-
-        // Link stock unit to the order
-        const { error: unitErr } = await supabase
-          .from('stock_unit')
-          .update({
-            order_id: orderId,
-          } as never)
-          .eq('id', consumed.id as string);
-
-        if (unitErr) throw unitErr;
+        if (error) throw error;
       }
-
-      // Transition order status from needs_allocation → new
-      const { error: statusErr } = await supabase
-        .from('sales_order')
-        .update({ v2_status: 'new' } as never)
-        .eq('id', orderId)
-        .eq('v2_status' as never, 'needs_allocation');
-
-      if (statusErr) throw statusErr;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.orderId) });
