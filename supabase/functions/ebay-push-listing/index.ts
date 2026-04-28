@@ -18,6 +18,11 @@ import {
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
+import {
+  resolveEbayCondition,
+  sanitiseConditionDescription,
+  type CategoryConditionPolicy,
+} from "../_shared/ebay-condition-map.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
