@@ -1,6 +1,13 @@
 // Rebrickable sync — modes: set | enrich | full
 // Redeployed: 2026-04-27
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import {
+  fetchSetMinifigs,
+  getBlCreds,
+  normalizeMinifigName,
+  type BlCreds,
+  type BlMinifig,
+} from "../_shared/bricklink-client.ts";
 
 // ---------------------------------------------------------------------------
 // CORS
