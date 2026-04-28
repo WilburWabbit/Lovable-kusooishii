@@ -345,8 +345,38 @@ Deno.serve(async (req) => {
         if (attrErr) throw attrErr;
       }
 
-      // (Bootstrap removed — mappings are managed explicitly via Settings.)
-
+      // Also refresh the condition policy at the same time — best-effort,
+      // a failure here should not block the aspects refresh.
+      try {
+        const condData = await ebayFetch(
+          token,
+          `/commerce/taxonomy/v1/category_tree/${treeId}/get_item_condition_policies?filter=categoryIds:{${encodeURIComponent(categoryId)}}`,
+          marketplace,
+        );
+        const entry = (condData?.itemConditionPolicies ?? [])[0] ?? {};
+        const policy = {
+          itemConditionRequired: entry.itemConditionRequired === true,
+          itemConditionDescriptionEnabled:
+            entry.itemConditionDescriptionEnabled !== false,
+          itemConditions: Array.isArray(entry.itemConditions)
+            ? entry.itemConditions.map((c: any) => ({
+                conditionId: String(c.conditionId),
+                conditionDescription: c.conditionDescription ?? null,
+              }))
+            : [],
+        };
+        await admin
+          .from("channel_category_schema")
+          .update({
+            condition_policy: policy,
+            condition_policy_fetched_at: new Date().toISOString(),
+          })
+          .eq("id", schemaId);
+      } catch (condErr) {
+        console.warn(
+          `eBay taxonomy: failed to fetch condition policy for ${categoryId}: ${condErr instanceof Error ? condErr.message : String(condErr)}`,
+        );
+      }
 
       return jsonResponse({
         schemaId,
