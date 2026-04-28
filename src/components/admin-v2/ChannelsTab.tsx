@@ -69,30 +69,57 @@ function VariantChannelsCard({
     }).title;
   }, [product, variant.grade]);
 
-  // Per-channel local state for title, description, price
+  // Per-channel local state for title, description, price.
+  // Tracks which fields the user has manually edited so async loads of
+  // `listings`/`feesMap` don't clobber unsaved typing — but they DO populate
+  // fields the user hasn't touched (the previous useState-only init left the
+  // form stuck on default-generated values when listings arrived after first
+  // render, causing the wrong title to be pushed to eBay).
+  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean; price: boolean }>>({});
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
-  >(() => {
-    const initial: Record<string, { title: string; description: string; price: string }> = {};
-    for (const ch of CHANNELS) {
-      const existing = listings.find((l) => l.channel === ch.key);
-      const feeInfo = feesMap?.get(ch.key);
-      const basePrice = variant.salePrice ?? 0;
-      const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
+  >({});
 
-      initial[ch.key] = {
-        title: existing?.listingTitle ?? (ch.key === "ebay" ? defaultEbayTitle : product.name),
-        description: existing?.listingDescription ?? "",
-        price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
-      };
-    }
-    return initial;
-  });
+  useEffect(() => {
+    setChannelState((prev) => {
+      const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
+      for (const ch of CHANNELS) {
+        const existing = listings.find((l) => l.channel === ch.key);
+        const feeInfo = feesMap?.get(ch.key);
+        const basePrice = variant.salePrice ?? 0;
+        const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
+        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false, price: false };
+        const current = prev[ch.key];
+
+        const defaultTitle = ch.key === "ebay" ? defaultEbayTitle : product.name;
+        next[ch.key] = {
+          title: dirty.title
+            ? current?.title ?? ""
+            : existing?.listingTitle ?? defaultTitle,
+          description: dirty.description
+            ? current?.description ?? ""
+            : existing?.listingDescription ?? "",
+          price: dirty.price
+            ? current?.price ?? ""
+            : existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+        };
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, feesMap, defaultEbayTitle, product.name, variant.salePrice, variant.floorPrice]);
 
   const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
+    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false, price: false };
+    dirtyRef.current[channel] = { ...channelDirty, [field]: true };
     setChannelState((prev) => ({
       ...prev,
-      [channel]: { ...prev[channel], [field]: value },
+      [channel]: {
+        title: prev[channel]?.title ?? "",
+        description: prev[channel]?.description ?? "",
+        price: prev[channel]?.price ?? "",
+        [field]: value,
+      },
     }));
   };
 
