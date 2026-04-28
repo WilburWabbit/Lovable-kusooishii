@@ -253,7 +253,7 @@ Deno.serve(async (req) => {
     // specific), fall back to SKU-level notes.
     const conditionDescription = ebayCondition.allowsConditionDescription
       ? sanitiseConditionDescription(
-          (firstUnit?.condition_notes as string | null) ??
+          (firstUnit?.notes as string | null) ??
             (skuRow?.condition_notes as string | null),
         )
       : null;
@@ -481,7 +481,7 @@ async function findAvailableStockUnits(
 ): Promise<Array<Record<string, unknown>>> {
   const rowsById = new Map<string, Record<string, unknown>>();
   const statuses = ["graded", "listed"];
-  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade, condition_notes";
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade, notes";
 
   const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
     for (const row of rows ?? []) {
