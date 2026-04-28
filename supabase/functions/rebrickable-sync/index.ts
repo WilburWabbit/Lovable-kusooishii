@@ -470,106 +470,163 @@ async function syncSet(
 }
 
 // ---------------------------------------------------------------------------
-// Mode: enrich — run syncSet for stocked sets that don't yet have minifig
-// inventory links. Sets already linked are skipped so resumed runs make
-// continuous progress instead of re-processing the same head of the list.
+// Mode: enrich — pure BrickLink path. For every stocked LEGO set
+// (product.ebay_category_id = '19006'), call BrickLink's subset endpoint to
+// fetch the minifig list and persist:
+//   • rebrickable_minifigs row per minifig (fig_num = bricklink_id, e.g.
+//     "sw0001"), with a constructed BrickLink thumbnail URL
+//   • rebrickable_inventories row (version 1) for the set
+//   • rebrickable_inventory_minifigs link rows (replaces existing links)
+// Rebrickable is NOT consulted in this mode. Sets whose minifig links were
+// last written more recently are deprioritised so resumed runs progress.
 // ---------------------------------------------------------------------------
+const BL_MINIFIG_IMG = (no: string) =>
+  `https://img.bricklink.com/ItemImage/MN/0/${no}.png`;
+const BL_RATE_MS = 250; // BrickLink allows ~5 req/sec; one call per set
+
 async function enrichMode(
   db: Supabase,
-  apiKey: string,
+  _apiKey: string, // unused — kept for signature parity
   startMs: number,
   blCreds: BlCreds | null,
 ): Promise<Record<string, unknown>> {
-  // 1. Distinct MPNs we hold stock for
+  if (!blCreds) {
+    return {
+      sets_processed: 0,
+      sets_total: 0,
+      figs_processed: 0,
+      bricklink_minifigs_upserted: 0,
+      inventory_links_written: 0,
+      has_more: false,
+      errors: [
+        {
+          set_num: "",
+          error: "BrickLink credentials missing — cannot enrich",
+          source: "bricklink",
+        },
+      ],
+      error_count: 1,
+    };
+  }
+
+  // 1. Stocked MPNs whose product is in eBay category 19006 (LEGO sets).
   const { data: rows, error } = await db
     .from("product")
-    .select("mpn, sku!inner(stock_unit!inner(id))")
+    .select("mpn, ebay_category_id, sku!inner(stock_unit!inner(id))")
+    .eq("ebay_category_id", "19006")
     .not("mpn", "is", null);
-
   if (error) throw new Error(`stocked product select: ${error.message}`);
 
   const stockedMpns = Array.from(
-    new Set((rows ?? []).map((r: { mpn: string }) => r.mpn).filter(Boolean)),
-  ) as string[];
+    new Set(
+      (rows ?? [])
+        .map((r: { mpn: string }) => r.mpn)
+        .filter((m: string | null): m is string => Boolean(m)),
+    ),
+  );
 
-  // 2. Find which of those already have an inventory row in our DB.
-  const { data: invRows, error: invErr } = await db
+  // 2. Order: sets without a v1 inventory row yet first, then oldest-touched.
+  const { data: invRows } = await db
     .from("rebrickable_inventories")
     .select("set_num")
     .in("set_num", stockedMpns)
     .eq("version", 1);
-  if (invErr) throw new Error(`inventory lookup: ${invErr.message}`);
   const alreadyLinked = new Set<string>(
     (invRows ?? []).map((r: { set_num: string }) => r.set_num),
   );
-
-  // 2b. Of the linked sets, find which still have at least one minifig
-  //     missing a bricklink_id (LEGO MPN). Those need re-syncing so the
-  //     per-fig /minifigs/{n}/ fetch can populate external_ids.BrickLink.
-  const linkedSets = stockedMpns.filter((m) => alreadyLinked.has(m));
-  const setsNeedingBricklink = new Set<string>();
-  if (linkedSets.length > 0) {
-    const { data: needRows } = await db
-      .from("lego_set_minifigs" as never)
-      .select("set_num")
-      .in("set_num", linkedSets)
-      .is("bricklink_id", null);
-    for (const r of (needRows ?? []) as Array<{ set_num: string }>) {
-      setsNeedingBricklink.add(r.set_num);
-    }
-  }
-
-  // Priority: missing inventory → linked-but-needs-bricklink → fully done.
   const missing = stockedMpns.filter((m) => !alreadyLinked.has(m));
-  const needsBl = linkedSets.filter((m) => setsNeedingBricklink.has(m));
-  const done = linkedSets.filter((m) => !setsNeedingBricklink.has(m));
-  const setNums = [...missing, ...needsBl, ...done];
+  const linked = stockedMpns.filter((m) => alreadyLinked.has(m));
+  const setNums = [...missing, ...linked];
 
   let setsProcessed = 0;
-  let catalogUpdated = 0;
   let figsProcessed = 0;
-  let bricklinkAdded = 0;
+  let minifigsUpserted = 0;
   let inventoryLinksWritten = 0;
   const errors: Array<{ set_num: string; error: string; source: string }> = [];
 
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
     try {
-      const result = await syncSet(db, apiKey, setNum as string, blCreds);
-      figsProcessed += result.figs_processed;
-      bricklinkAdded += result.bricklink_ids_added;
-      inventoryLinksWritten += result.inventory_links_written;
-      if (result.catalog_updated) catalogUpdated++;
-      if (result.bricklink_error) {
+      const figs = await fetchSetMinifigs(setNum, blCreds);
+      if (figs === null) {
+        // BrickLink 404 — no subset data available for this set
         errors.push({
-          set_num: setNum as string,
-          error: result.bricklink_error,
+          set_num: setNum,
+          error: "Set not found on BrickLink",
           source: "bricklink",
         });
+        setsProcessed++;
+        await sleep(BL_RATE_MS);
+        continue;
       }
+
+      // Upsert rebrickable_minifigs (one row per BrickLink minifig). Use the
+      // BrickLink MPN as fig_num so links + view stay consistent.
+      if (figs.length > 0) {
+        const figRows = figs.map((f) => ({
+          fig_num: f.no,
+          name: f.name,
+          num_parts: 0,
+          img_url: BL_MINIFIG_IMG(f.no),
+          bricklink_id: f.no,
+        }));
+        const { error: figErr } = await db
+          .from("rebrickable_minifigs")
+          .upsert(figRows, { onConflict: "fig_num" });
+        if (figErr) throw new Error(`minifig upsert: ${figErr.message}`);
+        minifigsUpserted += figRows.length;
+      }
+
+      // Resolve / create the inventory row for this set, then replace links.
+      const { data: invIdData, error: invErr } = await db.rpc(
+        "get_or_create_rebrickable_inventory",
+        { p_set_num: setNum, p_version: 1 },
+      );
+      if (invErr) throw invErr;
+      const inventoryId = (invIdData as number | null) ?? null;
+
+      if (inventoryId !== null) {
+        const { error: delErr } = await db
+          .from("rebrickable_inventory_minifigs")
+          .delete()
+          .eq("inventory_id", inventoryId);
+        if (delErr) throw delErr;
+
+        if (figs.length > 0) {
+          // Sum quantities per BrickLink no (collapse duplicates)
+          const qtyByNo = new Map<string, number>();
+          for (const f of figs) {
+            qtyByNo.set(f.no, (qtyByNo.get(f.no) ?? 0) + (f.quantity ?? 1));
+          }
+          const linkRows = Array.from(qtyByNo.entries()).map(([no, qty]) => ({
+            inventory_id: inventoryId,
+            fig_num: no,
+            quantity: qty,
+          }));
+          const { error: insErr } = await db
+            .from("rebrickable_inventory_minifigs")
+            .insert(linkRows);
+          if (insErr) throw insErr;
+          inventoryLinksWritten += linkRows.length;
+        }
+      }
+
+      figsProcessed += figs.length;
     } catch (err) {
-      // Skip sets that 404 on Rebrickable; keep going
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`enrich: skipping ${setNum}: ${msg}`);
-      errors.push({
-        set_num: setNum as string,
-        error: msg,
-        source: "rebrickable",
-      });
+      console.warn(`enrich: ${setNum}: ${msg}`);
+      errors.push({ set_num: setNum, error: msg, source: "bricklink" });
     }
     setsProcessed++;
-    await sleep();
+    await sleep(BL_RATE_MS);
   }
 
   return {
     sets_processed: setsProcessed,
     sets_total: setNums.length,
     sets_missing_links_before: missing.length,
-    sets_missing_links_remaining: Math.max(missing.length - setsProcessed, 0),
-    sets_needing_bricklink_ids_before: needsBl.length,
-    catalog_rows_updated: catalogUpdated,
     figs_processed: figsProcessed,
-    bricklink_ids_added: bricklinkAdded,
+    bricklink_minifigs_upserted: minifigsUpserted,
     inventory_links_written: inventoryLinksWritten,
     has_more: setsProcessed < setNums.length,
     errors,
