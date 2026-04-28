@@ -450,7 +450,7 @@ async function findAvailableStockUnits(
 ): Promise<Array<Record<string, unknown>>> {
   const rowsById = new Map<string, Record<string, unknown>>();
   const statuses = ["graded", "listed"];
-  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade";
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade, condition_notes";
 
   const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
     for (const row of rows ?? []) {
