@@ -581,7 +581,7 @@ function RebrickableApiSyncSection() {
         <SyncRow
           icon={<Sparkles className="h-3.5 w-3.5" />}
           label="Enrich Catalogue"
-          description="Fetches BrickLink IDs for every minifig in your stocked sets. Safe to re-run — skips figs already enriched."
+          description="Pulls minifig lists from BrickLink for every stocked set in eBay category 19006 (LEGO sets). Safe to re-run — re-invokes until complete."
           buttonLabel="Run Enrich"
           busy={busyMode === "enrich"}
           disabled={busyMode !== null}
