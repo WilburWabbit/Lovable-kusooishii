@@ -195,6 +195,7 @@ async function syncSet(
   catalog_updated: boolean;
   inventory_id: number | null;
   inventory_links_written: number;
+  bricklink_error?: string | null;
 }> {
   // 0. Refresh the set's lego_catalog row from /sets/{set_num}/.
   //    Tolerated 404 — we still try to sync minifigs below.
@@ -306,6 +307,7 @@ async function syncSet(
   let bricklinkAdded = 0;
   let skipped = 0;
   let blMinifigs: BlMinifig[] | null = null;
+  let bricklinkError: string | null = null;
 
   if (blCreds) {
     try {
@@ -313,9 +315,11 @@ async function syncSet(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`syncSet(${setNum}): BrickLink fetch failed: ${msg}`);
+      bricklinkError = msg;
       blMinifigs = null;
     }
   } else {
+    bricklinkError = "BrickLink credentials missing";
     console.warn(
       `syncSet(${setNum}): BrickLink credentials missing — bricklink_id won't be populated`,
     );
@@ -461,6 +465,7 @@ async function syncSet(
     catalog_updated: catalogUpdated,
     inventory_id: inventoryId,
     inventory_links_written: linksWritten,
+    bricklink_error: bricklinkError,
   };
 }
 
@@ -525,6 +530,7 @@ async function enrichMode(
   let figsProcessed = 0;
   let bricklinkAdded = 0;
   let inventoryLinksWritten = 0;
+  const errors: Array<{ set_num: string; error: string; source: string }> = [];
 
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
@@ -534,10 +540,22 @@ async function enrichMode(
       bricklinkAdded += result.bricklink_ids_added;
       inventoryLinksWritten += result.inventory_links_written;
       if (result.catalog_updated) catalogUpdated++;
+      if (result.bricklink_error) {
+        errors.push({
+          set_num: setNum as string,
+          error: result.bricklink_error,
+          source: "bricklink",
+        });
+      }
     } catch (err) {
       // Skip sets that 404 on Rebrickable; keep going
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`enrich: skipping ${setNum}: ${msg}`);
+      errors.push({
+        set_num: setNum as string,
+        error: msg,
+        source: "rebrickable",
+      });
     }
     setsProcessed++;
     await sleep();
@@ -554,6 +572,8 @@ async function enrichMode(
     bricklink_ids_added: bricklinkAdded,
     inventory_links_written: inventoryLinksWritten,
     has_more: setsProcessed < setNums.length,
+    errors,
+    error_count: errors.length,
   };
 }
 

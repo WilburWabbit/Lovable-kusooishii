@@ -538,7 +538,11 @@ function RebrickableApiSyncSection() {
           toast.error(`Rebrickable sync failed: ${msg}`);
           return;
         }
-        toast.success(formatSyncResult(mode, data));
+        const { summary, errorSummary } = formatSyncResult(mode, data);
+        toast.success(summary);
+        if (errorSummary) {
+          toast.error(errorSummary, { duration: 10000 });
+        }
         await refreshCursor();
       } catch (err) {
         toast.error(
@@ -745,9 +749,12 @@ function SyncRow({
   );
 }
 
-function formatSyncResult(mode: SyncMode, data: unknown): string {
+function formatSyncResult(
+  mode: SyncMode,
+  data: unknown,
+): { summary: string; errorSummary: string | null } {
   if (!data || typeof data !== "object") {
-    return `${labelForMode(mode)} complete`;
+    return { summary: `${labelForMode(mode)} complete`, errorSummary: null };
   }
   const d = data as Record<string, unknown>;
   const parts: string[] = [];
@@ -772,7 +779,24 @@ function formatSyncResult(mode: SyncMode, data: unknown): string {
   }
 
   const head = `${labelForMode(mode)} complete`;
-  return parts.length > 0 ? `${head}: ${parts.join(", ")}` : head;
+  const summary = parts.length > 0 ? `${head}: ${parts.join(", ")}` : head;
+
+  // Surface BrickLink / per-set errors
+  let errorSummary: string | null = null;
+  const errors = d.errors as
+    | Array<{ set_num?: string; error?: string; source?: string }>
+    | undefined;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const sample = errors.slice(0, 3).map(
+      (e) => `${e.set_num ?? "?"} (${e.source ?? "?"}): ${e.error ?? ""}`,
+    );
+    const more = errors.length > 3 ? ` …and ${errors.length - 3} more` : "";
+    errorSummary = `${errors.length} error${errors.length === 1 ? "" : "s"} during ${labelForMode(mode)}:\n${sample.join("\n")}${more}`;
+  } else if (mode === "set" && typeof d.bricklink_error === "string" && d.bricklink_error) {
+    errorSummary = `BrickLink error for ${d.set_num ?? "set"}: ${d.bricklink_error}`;
+  }
+
+  return { summary, errorSummary };
 }
 
 function labelForMode(mode: SyncMode): string {
