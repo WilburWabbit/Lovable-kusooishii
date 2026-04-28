@@ -434,6 +434,8 @@ export type Database = {
           category_id: string
           category_name: string
           channel: string
+          condition_policy: Json | null
+          condition_policy_fetched_at: string | null
           created_at: string
           id: string
           leaf: boolean
@@ -447,6 +449,8 @@ export type Database = {
           category_id: string
           category_name: string
           channel: string
+          condition_policy?: Json | null
+          condition_policy_fetched_at?: string | null
           created_at?: string
           id?: string
           leaf?: boolean
@@ -460,6 +464,8 @@ export type Database = {
           category_id?: string
           category_name?: string
           channel?: string
+          condition_policy?: Json | null
+          condition_policy_fetched_at?: string | null
           created_at?: string
           id?: string
           leaf?: boolean

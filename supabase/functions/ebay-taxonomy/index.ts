@@ -152,6 +152,71 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "conditions") {
+      // Fetch (and cache) the eBay item-condition policy for a category.
+      const categoryId: string = body.categoryId;
+      const force: boolean = body.force === true;
+      if (!categoryId) throw new Error("categoryId is required");
+
+      const { data: existing } = await admin
+        .from("channel_category_schema")
+        .select("id, condition_policy, condition_policy_fetched_at")
+        .eq("channel", "ebay")
+        .eq("marketplace", marketplace)
+        .eq("category_id", categoryId)
+        .maybeSingle();
+
+      const fresh =
+        !force &&
+        existing?.condition_policy_fetched_at &&
+        Date.now() - new Date(existing.condition_policy_fetched_at).getTime() <
+          ASPECT_TTL_MS;
+
+      if (fresh && existing?.condition_policy) {
+        return jsonResponse({
+          categoryId,
+          fromCache: true,
+          policy: existing.condition_policy,
+        });
+      }
+
+      const token = await getEbayAccessToken(admin);
+      const data = await ebayFetch(
+        token,
+        `/commerce/taxonomy/v1/category_tree/${treeId}/get_item_condition_policies?filter=categoryIds:{${encodeURIComponent(categoryId)}}`,
+        marketplace,
+      );
+
+      const entry = (data?.itemConditionPolicies ?? [])[0] ?? {};
+      const policy = {
+        itemConditionRequired: entry.itemConditionRequired === true,
+        itemConditionDescriptionEnabled:
+          entry.itemConditionDescriptionEnabled !== false,
+        itemConditions: Array.isArray(entry.itemConditions)
+          ? entry.itemConditions.map((c: any) => ({
+              conditionId: String(c.conditionId),
+              conditionDescription: c.conditionDescription ?? null,
+            }))
+          : [],
+      };
+
+      if (existing?.id) {
+        await admin
+          .from("channel_category_schema")
+          .update({
+            condition_policy: policy,
+            condition_policy_fetched_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      }
+
+      return jsonResponse({
+        categoryId,
+        fromCache: false,
+        policy,
+      });
+    }
+
     if (action === "aspects") {
       const categoryId: string = body.categoryId;
       const force: boolean = body.force === true;
@@ -160,7 +225,7 @@ Deno.serve(async (req) => {
       // Check existing cached schema
       const { data: existing } = await admin
         .from("channel_category_schema")
-        .select("id, category_name, schema_fetched_at, raw_payload")
+        .select("id, category_name, schema_fetched_at, raw_payload, condition_policy, condition_policy_fetched_at")
         .eq("channel", "ebay")
         .eq("marketplace", marketplace)
         .eq("category_id", categoryId)
@@ -280,8 +345,38 @@ Deno.serve(async (req) => {
         if (attrErr) throw attrErr;
       }
 
-      // (Bootstrap removed — mappings are managed explicitly via Settings.)
-
+      // Also refresh the condition policy at the same time — best-effort,
+      // a failure here should not block the aspects refresh.
+      try {
+        const condData = await ebayFetch(
+          token,
+          `/commerce/taxonomy/v1/category_tree/${treeId}/get_item_condition_policies?filter=categoryIds:{${encodeURIComponent(categoryId)}}`,
+          marketplace,
+        );
+        const entry = (condData?.itemConditionPolicies ?? [])[0] ?? {};
+        const policy = {
+          itemConditionRequired: entry.itemConditionRequired === true,
+          itemConditionDescriptionEnabled:
+            entry.itemConditionDescriptionEnabled !== false,
+          itemConditions: Array.isArray(entry.itemConditions)
+            ? entry.itemConditions.map((c: any) => ({
+                conditionId: String(c.conditionId),
+                conditionDescription: c.conditionDescription ?? null,
+              }))
+            : [],
+        };
+        await admin
+          .from("channel_category_schema")
+          .update({
+            condition_policy: policy,
+            condition_policy_fetched_at: new Date().toISOString(),
+          })
+          .eq("id", schemaId);
+      } catch (condErr) {
+        console.warn(
+          `eBay taxonomy: failed to fetch condition policy for ${categoryId}: ${condErr instanceof Error ? condErr.message : String(condErr)}`,
+        );
+      }
 
       return jsonResponse({
         schemaId,

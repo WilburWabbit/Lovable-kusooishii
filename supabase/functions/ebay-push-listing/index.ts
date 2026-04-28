@@ -18,6 +18,11 @@ import {
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
+import {
+  resolveEbayCondition,
+  sanitiseConditionDescription,
+  type CategoryConditionPolicy,
+} from "../_shared/ebay-condition-map.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
@@ -222,8 +227,39 @@ Deno.serve(async (req) => {
       aspects["MPN"] = [String(product.mpn)];
     }
 
+    // ─── Resolve eBay condition for this category ──────────
+    // The set of allowed conditions varies per category. We cache the
+    // policy on channel_category_schema; if it isn't there yet we fall
+    // back to the preferred grade→condition mapping (legacy behaviour).
+    const { data: schemaRow } = await admin
+      .from("channel_category_schema")
+      .select("condition_policy")
+      .eq("channel", "ebay")
+      .eq("marketplace", marketplace)
+      .eq("category_id", ebayCategoryId)
+      .maybeSingle();
+
+    const conditionPolicy =
+      (schemaRow?.condition_policy as CategoryConditionPolicy | null) ?? null;
+
+    const firstUnit = availableStockUnits[0] ?? null;
+    const grade =
+      (firstUnit?.condition_grade as string | null) ??
+      (skuRow?.condition_grade as string | null) ??
+      null;
+    const ebayCondition = resolveEbayCondition(grade, conditionPolicy);
+
+    // Pull free-text condition notes — prefer the unit's notes (most
+    // specific), fall back to SKU-level notes.
+    const conditionDescription = ebayCondition.allowsConditionDescription
+      ? sanitiseConditionDescription(
+          (firstUnit?.condition_notes as string | null) ??
+            (skuRow?.condition_notes as string | null),
+        )
+      : null;
+
     // ─── Step 1: Create/Update Inventory Item ──────────────
-    const inventoryItemPayload = {
+    const inventoryItemPayload: Record<string, unknown> = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
         description: (l.listing_description as string) ?? (product?.description as string) ?? "",
@@ -231,9 +267,9 @@ Deno.serve(async (req) => {
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
       },
-      condition: mapGradeToEbayCondition(
-        (availableStockUnits[0]?.condition_grade as string | null) ?? (skuRow?.condition_grade as string),
-      ),
+      condition: ebayCondition.condition,
+      conditionId: ebayCondition.conditionId,
+      ...(conditionDescription ? { conditionDescription } : {}),
       availability: {
         shipToLocationAvailability: {
           quantity: onHandCount,
@@ -445,7 +481,7 @@ async function findAvailableStockUnits(
 ): Promise<Array<Record<string, unknown>>> {
   const rowsById = new Map<string, Record<string, unknown>>();
   const statuses = ["graded", "listed"];
-  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade";
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade, condition_notes";
 
   const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
     for (const row of rows ?? []) {
@@ -502,17 +538,9 @@ function uniqueStrings(values: unknown[]): string[] {
     .filter((v) => v.length > 0))];
 }
 
-// ─── Grade → eBay Condition Mapping ──────────────────────────
-
-function mapGradeToEbayCondition(grade: string | null): string {
-  switch (grade) {
-    case "1": return "NEW";
-    case "2": return "NEW_OTHER";
-    case "3": return "USED_EXCELLENT";
-    case "4": return "USED_GOOD";
-    default: return "NEW_OTHER";
-  }
-}
+// (Grade → eBay condition mapping moved to ../_shared/ebay-condition-map.ts
+//  so it can honour the per-category condition policy returned by the
+//  eBay Taxonomy API.)
 
 // ─── Cross-channel attribute mapping ─────────────────────────
 // Maps a 'core' namespace attribute key to its eBay aspect equivalent.
