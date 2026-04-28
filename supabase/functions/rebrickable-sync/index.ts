@@ -529,7 +529,7 @@ async function enrichMode(
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
     try {
-      const result = await syncSet(db, apiKey, setNum as string);
+      const result = await syncSet(db, apiKey, setNum as string, blCreds);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
       inventoryLinksWritten += result.inventory_links_written;
