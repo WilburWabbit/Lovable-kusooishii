@@ -473,6 +473,7 @@ async function enrichMode(
   db: Supabase,
   apiKey: string,
   startMs: number,
+  blCreds: BlCreds | null,
 ): Promise<Record<string, unknown>> {
   // 1. Distinct MPNs we hold stock for
   const { data: rows, error } = await db
