@@ -320,6 +320,45 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- ADDITIVE: Mirror spec-only fields into brickeconomy_catalog_item ---
+    // This is the multi-source enrichment surface and is NEVER read by the
+    // pricing engine. Value/price fields (current_value, retail_price,
+    // growth, paid_price) are intentionally NOT written here — they remain
+    // exclusively on brickeconomy_collection / brickeconomy_price_history /
+    // brickeconomy_portfolio_snapshot, written above and untouched.
+    const specRows = allItems
+      .filter((i) => i.item_number)
+      .map((i) => {
+        const baseMpn = i.item_number.includes("-") ? i.item_number : `${i.item_number}-1`;
+        return {
+          mpn: baseMpn,
+          name: i.name,
+          theme: i.theme,
+          subtheme: i.subtheme,
+          release_year: i.year,
+          piece_count: i.pieces_count,
+          minifig_count: i.minifigs_count,
+          // raw_attributes keeps a reference snapshot of THIS source's payload
+          // for the spec fields only (no value fields).
+          raw_attributes: {
+            name: i.name,
+            theme: i.theme,
+            subtheme: i.subtheme,
+            year: i.year,
+            pieces_count: i.pieces_count,
+            minifigs_count: i.minifigs_count,
+          },
+          fetched_at: now,
+        };
+      });
+    for (let i = 0; i < specRows.length; i += 200) {
+      const batch = specRows.slice(i, i + 200);
+      const { error: specErr } = await admin
+        .from("brickeconomy_catalog_item")
+        .upsert(batch, { onConflict: "mpn" });
+      if (specErr) console.warn("brickeconomy_catalog_item upsert warn:", specErr.message);
+    }
+
     // --- Step 3: Mark landing rows as committed ---
     const landingIds = [setsLanding?.id, minifigsLanding?.id].filter(Boolean);
     if (landingIds.length > 0) {
