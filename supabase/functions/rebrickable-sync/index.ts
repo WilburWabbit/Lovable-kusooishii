@@ -307,6 +307,7 @@ async function syncSet(
   let bricklinkAdded = 0;
   let skipped = 0;
   let blMinifigs: BlMinifig[] | null = null;
+  let bricklinkError: string | null = null;
 
   if (blCreds) {
     try {
@@ -314,9 +315,11 @@ async function syncSet(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`syncSet(${setNum}): BrickLink fetch failed: ${msg}`);
+      bricklinkError = msg;
       blMinifigs = null;
     }
   } else {
+    bricklinkError = "BrickLink credentials missing";
     console.warn(
       `syncSet(${setNum}): BrickLink credentials missing — bricklink_id won't be populated`,
     );
