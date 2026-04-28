@@ -186,6 +186,7 @@ async function syncSet(
   db: Supabase,
   apiKey: string,
   setNum: string,
+  blCreds: BlCreds | null,
 ): Promise<{
   set_num: string;
   figs_processed: number;
