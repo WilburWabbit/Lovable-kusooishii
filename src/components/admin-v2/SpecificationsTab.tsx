@@ -28,6 +28,7 @@ import { productKeys } from "@/hooks/admin/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 import { MinifigsCard } from "./MinifigsCard";
+import { SourceValuesPanel } from "./SourceValuesPanel";
 import type { ProductDetail } from "@/lib/types/admin";
 
 interface SpecificationsTabProps {
@@ -604,6 +605,10 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
           </div>
         </SurfaceCard>
       )}
+
+      {/* Multi-source value snapshot (non-pricing). BrickEconomy value data
+          is intentionally excluded — it lives in the Market value panel. */}
+      <SourceValuesPanel productId={product.id} mpn={product.mpn} />
 
       {/* Included minifigures (selectable images for listings) */}
       <MinifigsCard product={product} />
