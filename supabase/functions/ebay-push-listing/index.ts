@@ -538,17 +538,9 @@ function uniqueStrings(values: unknown[]): string[] {
     .filter((v) => v.length > 0))];
 }
 
-// ─── Grade → eBay Condition Mapping ──────────────────────────
-
-function mapGradeToEbayCondition(grade: string | null): string {
-  switch (grade) {
-    case "1": return "NEW";
-    case "2": return "NEW_OTHER";
-    case "3": return "USED_EXCELLENT";
-    case "4": return "USED_GOOD";
-    default: return "NEW_OTHER";
-  }
-}
+// (Grade → eBay condition mapping moved to ../_shared/ebay-condition-map.ts
+//  so it can honour the per-category condition policy returned by the
+//  eBay Taxonomy API.)
 
 // ─── Cross-channel attribute mapping ─────────────────────────
 // Maps a 'core' namespace attribute key to its eBay aspect equivalent.
