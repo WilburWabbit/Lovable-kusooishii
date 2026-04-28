@@ -2,8 +2,9 @@ import { useState } from "react";
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { CanonicalAttributesPanel } from "@/components/admin-v2/settings/CanonicalAttributesPanel";
 import { ChannelMappingsPanel } from "@/components/admin-v2/settings/ChannelMappingsPanel";
+import { EbayConditionsPanel } from "@/components/admin-v2/settings/EbayConditionsPanel";
 
-type Tab = "attributes" | "mappings";
+type Tab = "attributes" | "mappings" | "conditions";
 
 export default function ChannelMappingsSettingsPage() {
   const [tab, setTab] = useState<Tab>("attributes");
@@ -14,9 +15,9 @@ export default function ChannelMappingsSettingsPage() {
         <div className="mb-5">
           <h1 className="text-[20px] font-bold text-zinc-900">Channel Mappings</h1>
           <p className="text-[12px] text-zinc-500 mt-1 max-w-2xl">
-            Configure the canonical attribute registry and how each attribute
-            projects onto eBay's item specifics. Changes here take effect
-            immediately on every product's Specifications tab.
+            Configure the canonical attribute registry, how each attribute
+            projects onto eBay's item specifics, and how internal condition
+            grades resolve to eBay's per-category condition values.
           </p>
         </div>
 
@@ -27,9 +28,14 @@ export default function ChannelMappingsSettingsPage() {
           <TabButton active={tab === "mappings"} onClick={() => setTab("mappings")}>
             eBay Mappings
           </TabButton>
+          <TabButton active={tab === "conditions"} onClick={() => setTab("conditions")}>
+            eBay Conditions
+          </TabButton>
         </div>
 
-        {tab === "attributes" ? <CanonicalAttributesPanel /> : <ChannelMappingsPanel />}
+        {tab === "attributes" && <CanonicalAttributesPanel />}
+        {tab === "mappings" && <ChannelMappingsPanel />}
+        {tab === "conditions" && <EbayConditionsPanel />}
       </div>
     </AdminV2Layout>
   );
