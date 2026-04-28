@@ -1,6 +1,13 @@
 // Rebrickable sync — modes: set | enrich | full
 // Redeployed: 2026-04-27
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import {
+  fetchSetMinifigs,
+  getBlCreds,
+  normalizeMinifigName,
+  type BlCreds,
+  type BlMinifig,
+} from "../_shared/bricklink-client.ts";
 
 // ---------------------------------------------------------------------------
 // CORS
@@ -179,6 +186,7 @@ async function syncSet(
   db: Supabase,
   apiKey: string,
   setNum: string,
+  blCreds: BlCreds | null,
 ): Promise<{
   set_num: string;
   figs_processed: number;
@@ -267,55 +275,101 @@ async function syncSet(
     };
   }
 
-  // 2. Find which figs are missing bricklink_id (or not in DB at all)
+  // 2. Look up what we already know in rebrickable_minifigs (names + existing
+  //    bricklink_ids). We use the names from Rebrickable (or from the set-fig
+  //    rows when not yet stored) to match BrickLink subset entries by name.
   const { data: existing, error } = await db
     .from("rebrickable_minifigs")
-    .select("fig_num, bricklink_id")
+    .select("fig_num, name, bricklink_id")
     .in("fig_num", figNums);
   if (error) {
     throw new Error(`rebrickable_minifigs select: ${error.message}`);
   }
 
-  const knownWithId = new Set<string>(
-    (existing ?? [])
-      .filter((r: { bricklink_id: string | null }) => !!r.bricklink_id)
-      .map((r: { fig_num: string }) => r.fig_num),
-  );
-  const toEnrich = figNums.filter((f) => !knownWithId.has(f));
+  const existingByFig = new Map<
+    string,
+    { name: string | null; bricklink_id: string | null }
+  >();
+  for (const r of (existing ?? []) as Array<{
+    fig_num: string;
+    name: string | null;
+    bricklink_id: string | null;
+  }>) {
+    existingByFig.set(r.fig_num, {
+      name: r.name,
+      bricklink_id: r.bricklink_id,
+    });
+  }
 
-  // 3. Fetch detail for each fig that needs enriching. Skip individual 404s.
+  // 3. Fetch this set's minifig list from BrickLink (the source of truth for
+  //    the BrickLink MPN, e.g. "sw0001"). One signed call per set.
   let bricklinkAdded = 0;
   let skipped = 0;
+  let blMinifigs: BlMinifig[] | null = null;
 
-  for (const figNum of toEnrich) {
-    await sleep();
-    let fig: RbFig;
+  if (blCreds) {
     try {
-      fig = await rbFetch<RbFig>(`${RB_BASE}/minifigs/${figNum}/`, apiKey);
+      blMinifigs = await fetchSetMinifigs(setNum, blCreds);
     } catch (err) {
-      if (err instanceof RbHttpError && err.status === 404) {
-        console.warn(`syncSet: minifig ${figNum} not found on Rebrickable`);
-        skipped++;
-        continue;
-      }
-      throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`syncSet(${setNum}): BrickLink fetch failed: ${msg}`);
+      blMinifigs = null;
     }
-    const bricklinkId = fig.external_ids?.BrickLink?.[0] ?? null;
+  } else {
+    console.warn(
+      `syncSet(${setNum}): BrickLink credentials missing — bricklink_id won't be populated`,
+    );
+  }
+
+  // Build a name → bricklink_id index from the BrickLink response. Each
+  // BrickLink minifig entry can be claimed once (handles sets that include
+  // duplicates of the same fig).
+  const blByName = new Map<string, string[]>();
+  if (blMinifigs) {
+    for (const m of blMinifigs) {
+      const key = normalizeMinifigName(m.name);
+      const arr = blByName.get(key) ?? [];
+      arr.push(m.no);
+      blByName.set(key, arr);
+    }
+  }
+
+  // Figure out which figs need a write: any fig with no bricklink_id yet, or
+  // not in the table at all. We always upsert at minimum the name + img so
+  // step 4's FK constraint is satisfied.
+  for (const fig of figNums) {
+    const known = existingByFig.get(fig);
+    if (known?.bricklink_id) continue; // already enriched
+
+    // Find the row from /sets/{n}/minifigs/ that gave us this fig — we can
+    // reuse its name/img to upsert without an extra Rebrickable detail call.
+    const setRow = setFigPairs.find((p) => p.fig_num === fig)?.row;
+    const figName = known?.name ?? setRow?.set_name ?? fig;
+    const figImg = setRow?.set_img_url ?? null;
+
+    // Try to match on normalised name against the BrickLink list.
+    let bricklinkId: string | null = null;
+    if (blByName.size > 0) {
+      const candidates = blByName.get(normalizeMinifigName(figName));
+      if (candidates && candidates.length > 0) {
+        bricklinkId = candidates.shift() ?? null;
+      }
+    }
 
     const { error: upsertErr } = await db
       .from("rebrickable_minifigs")
       .upsert(
         {
-          fig_num: fig.fig_num ?? fig.set_num ?? figNum,
-          name: fig.name,
-          num_parts: fig.num_parts,
-          img_url: fig.img_url,
+          fig_num: fig,
+          name: figName,
+          img_url: figImg,
           bricklink_id: bricklinkId,
         },
         { onConflict: "fig_num" },
       );
     if (upsertErr) throw new Error(`minifig upsert: ${upsertErr.message}`);
     if (bricklinkId) bricklinkAdded++;
+    else skipped++;
   }
 
   // 4. Make sure every fig in this set exists in rebrickable_minifigs before
@@ -419,6 +473,7 @@ async function enrichMode(
   db: Supabase,
   apiKey: string,
   startMs: number,
+  blCreds: BlCreds | null,
 ): Promise<Record<string, unknown>> {
   // 1. Distinct MPNs we hold stock for
   const { data: rows, error } = await db
@@ -474,7 +529,7 @@ async function enrichMode(
   for (const setNum of setNums) {
     if (Date.now() - startMs > TIMEOUT_MS) break;
     try {
-      const result = await syncSet(db, apiKey, setNum as string);
+      const result = await syncSet(db, apiKey, setNum as string, blCreds);
       figsProcessed += result.figs_processed;
       bricklinkAdded += result.bricklink_ids_added;
       inventoryLinksWritten += result.inventory_links_written;
@@ -890,6 +945,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { mode, set_num } = body as { mode?: string; set_num?: string };
 
+    const blCreds = getBlCreds();
+
     let result: Record<string, unknown>;
 
     switch (mode) {
@@ -900,10 +957,10 @@ Deno.serve(async (req) => {
             400,
           );
         }
-        result = await syncSet(db, apiKey, set_num.trim());
+        result = await syncSet(db, apiKey, set_num.trim(), blCreds);
         break;
       case "enrich":
-        result = await enrichMode(db, apiKey, startMs);
+        result = await enrichMode(db, apiKey, startMs, blCreds);
         break;
       case "full":
         result = await fullMode(db, apiKey, startMs);
