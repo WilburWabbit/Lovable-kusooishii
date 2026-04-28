@@ -765,9 +765,11 @@ function formatSyncResult(
 
   if (mode === "enrich") {
     pushIfNum("sets_processed", "sets");
-    pushIfNum("sets_upserted", "sets");
+    pushIfNum("sets_total", "total");
     pushIfNum("figs_processed", "figs");
-    pushIfNum("bricklink_ids_added", "BrickLink IDs added");
+    pushIfNum("bricklink_minifigs_upserted", "minifigs upserted");
+    pushIfNum("inventory_links_written", "links written");
+    if (d.has_more === true) parts.push("more sets remain — re-run to resume");
   } else if (mode === "set") {
     if (typeof d.set_num === "string") parts.push(`set ${d.set_num}`);
     pushIfNum("figs_processed", "figs");
