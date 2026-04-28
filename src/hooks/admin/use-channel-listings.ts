@@ -64,7 +64,38 @@ export function useChannelListings(skuCode: string | undefined) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map((r) => mapListing(r, skuCode!));
+
+      // Collapse duplicates: legacy data sometimes contains more than one
+      // channel_listing per (sku, channel). When that happens, prefer the row
+      // that's actually bound to an external listing/offer, then the most
+      // recently updated. Otherwise UI edits land on a stale empty row while
+      // the real live listing keeps drifting.
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const byChannel = new Map<string, Record<string, unknown>>();
+      const score = (r: Record<string, unknown>) => {
+        const hasExternal = r.external_listing_id ? 2 : 0;
+        const hasTitle =
+          typeof r.listing_title === 'string' && (r.listing_title as string).trim() ? 1 : 0;
+        return hasExternal + hasTitle;
+      };
+      for (const r of rows) {
+        const key = ((r.v2_channel as string) ?? (r.channel as string) ?? 'website');
+        const existing = byChannel.get(key);
+        if (!existing) {
+          byChannel.set(key, r);
+          continue;
+        }
+        const sNew = score(r);
+        const sOld = score(existing);
+        if (sNew > sOld) {
+          byChannel.set(key, r);
+        } else if (sNew === sOld) {
+          const tNew = new Date((r.updated_at as string) ?? (r.created_at as string) ?? 0).getTime();
+          const tOld = new Date((existing.updated_at as string) ?? (existing.created_at as string) ?? 0).getTime();
+          if (tNew > tOld) byChannel.set(key, r);
+        }
+      }
+      return [...byChannel.values()].map((r) => mapListing(r, skuCode!));
     },
   });
 }
