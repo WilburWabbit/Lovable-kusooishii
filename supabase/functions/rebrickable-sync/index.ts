@@ -945,6 +945,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { mode, set_num } = body as { mode?: string; set_num?: string };
 
+    const blCreds = getBlCreds();
+
     let result: Record<string, unknown>;
 
     switch (mode) {
@@ -955,10 +957,10 @@ Deno.serve(async (req) => {
             400,
           );
         }
-        result = await syncSet(db, apiKey, set_num.trim());
+        result = await syncSet(db, apiKey, set_num.trim(), blCreds);
         break;
       case "enrich":
-        result = await enrichMode(db, apiKey, startMs);
+        result = await enrichMode(db, apiKey, startMs, blCreds);
         break;
       case "full":
         result = await fullMode(db, apiKey, startMs);
