@@ -219,18 +219,30 @@ export function usePublishListing() {
       const v2Channel = channel === 'web' ? 'website' : channel;
 
       // There is no (sku_id, channel) unique constraint, so a true upsert
-      // can't disambiguate the row. Look it up explicitly, then update or
-      // insert.
+      // can't disambiguate the row. Look up ALL rows for this (sku, channel)
+      // pair and pick the canonical one — preferring rows already bound to
+      // an external listing/offer — so edits don't land on a stale duplicate
+      // while the live listing keeps drifting.
       const { data: existingRows, error: lookupErr } = await supabase
         .from('channel_listing')
-        .select('id')
+        .select('id, external_listing_id, listing_title, updated_at, created_at')
         .eq('sku_id', skuId)
-        .in('channel', [legacyChannel, channel] as never)
-        .limit(1);
+        .in('channel', [legacyChannel, channel] as never);
 
       if (lookupErr) throw lookupErr;
 
-      const existingId = (existingRows?.[0] as { id?: string } | undefined)?.id;
+      const candidates = (existingRows ?? []) as Array<Record<string, unknown>>;
+      const scoreRow = (r: Record<string, unknown>) =>
+        (r.external_listing_id ? 2 : 0) +
+        (typeof r.listing_title === 'string' && (r.listing_title as string).trim() ? 1 : 0);
+      candidates.sort((a, b) => {
+        const diff = scoreRow(b) - scoreRow(a);
+        if (diff !== 0) return diff;
+        const ta = new Date((a.updated_at as string) ?? (a.created_at as string) ?? 0).getTime();
+        const tb = new Date((b.updated_at as string) ?? (b.created_at as string) ?? 0).getTime();
+        return tb - ta;
+      });
+      const existingId = candidates[0]?.id as string | undefined;
 
       const payload = {
         sku_id: skuId,
