@@ -385,31 +385,16 @@ export function CompleteOrderModal({
           const lineId = (insertedLine as Record<string, unknown>).id as string;
 
           try {
-            const { data: consumedUnit, error: fifoErr } = await supabase
-              .rpc("v2_consume_fifo_unit" as never, { p_sku_code: line.skuCode } as never);
+            const { error: allocationErr } = await supabase.rpc(
+              "allocate_order_line_stock_unit" as never,
+              {
+                p_order_id: orderId,
+                p_line_item_id: lineId,
+                p_sku_code: line.skuCode,
+              } as never,
+            );
 
-            if (fifoErr || !consumedUnit) {
-              allAllocated = false;
-              continue;
-            }
-
-            const unit = consumedUnit as Record<string, unknown>;
-            const stockUnitId = unit.id as string;
-            const cogs = Number(unit.landed_cost ?? 0);
-
-            const { error: lineUpdateErr } = await supabase
-              .from("sales_order_line")
-              .update({ stock_unit_id: stockUnitId, cogs } as never)
-              .eq("id", lineId);
-
-            if (lineUpdateErr) throw lineUpdateErr;
-
-            const { error: stockErr } = await supabase
-              .from("stock_unit")
-              .update({ order_id: orderId } as never)
-              .eq("id", stockUnitId);
-
-            if (stockErr) throw stockErr;
+            if (allocationErr) throw allocationErr;
           } catch {
             allAllocated = false;
           }
