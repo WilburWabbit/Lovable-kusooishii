@@ -119,6 +119,8 @@ export const taxonomyKeys = {
     ["product-attributes", productId, namespace ?? "all"] as const,
   productCategories: (channel: string, marketplace: string) =>
     ["taxonomy", channel, marketplace, "product-categories"] as const,
+  conditions: (channel: string, marketplace: string, categoryId: string) =>
+    ["taxonomy", channel, marketplace, "conditions", categoryId] as const,
 };
 
 // ─── Categories already in use by products ─────────────────
