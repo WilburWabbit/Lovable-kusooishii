@@ -538,7 +538,11 @@ function RebrickableApiSyncSection() {
           toast.error(`Rebrickable sync failed: ${msg}`);
           return;
         }
-        toast.success(formatSyncResult(mode, data));
+        const { summary, errorSummary } = formatSyncResult(mode, data);
+        toast.success(summary);
+        if (errorSummary) {
+          toast.error(errorSummary, { duration: 10000 });
+        }
         await refreshCursor();
       } catch (err) {
         toast.error(
