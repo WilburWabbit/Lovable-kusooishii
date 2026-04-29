@@ -222,6 +222,39 @@ export async function fetchSetMinifigs(
   }
 }
 
+// ---------------------------------------------------------------------------
+// /items/MINIFIG/{no}
+// Returns the catalog metadata for a single minifig, including image_url and
+// thumbnail_url. Returns null on 404 so callers can fall back gracefully.
+// ---------------------------------------------------------------------------
+
+export interface BlMinifigItem {
+  no: string;
+  name: string;
+  type: string; // "MINIFIG"
+  image_url?: string;
+  thumbnail_url?: string;
+  category_id?: number;
+  weight?: string | number;
+}
+
+export async function fetchMinifigItem(
+  no: string,
+  creds: BlCreds,
+): Promise<BlMinifigItem | null> {
+  try {
+    const data = await blGet<BlMinifigItem>(
+      `/items/MINIFIG/${encodeURIComponent(no)}`,
+      {},
+      creds,
+    );
+    return data;
+  } catch (err) {
+    if (err instanceof BlHttpError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 // Normalise a minifig name for fuzzy matching across BrickLink and Rebrickable.
 // Both vendors use slightly different punctuation/casing/qualifiers.
 export function normalizeMinifigName(name: string): string {
