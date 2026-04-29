@@ -289,6 +289,72 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
         </button>
       </div>
 
+      {progress && (
+        <div className="mb-3 border border-zinc-200 rounded-md overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead className="bg-zinc-50 text-[10px] uppercase tracking-wider text-zinc-500">
+              <tr>
+                <th className="text-left py-1 px-2 font-medium">Source</th>
+                <th className="text-left py-1 px-2 font-medium">Status</th>
+                <th className="text-right py-1 px-2 font-medium" title="Items returned by the source">Fetched</th>
+                <th className="text-right py-1 px-2 font-medium" title="Catalog rows upserted">Upserted</th>
+                <th className="text-right py-1 px-2 font-medium" title="product_attribute snapshots written">Attr writes</th>
+                <th className="text-right py-1 px-2 font-medium">Time</th>
+                <th className="text-left py-1 px-2 font-medium">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SYNC_SOURCES.map((s) => {
+                const row = progress[s];
+                const statusBadge = (() => {
+                  switch (row.status) {
+                    case "ok":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-emerald-700 bg-emerald-50 border-emerald-200">ok</span>;
+                    case "skipped":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-zinc-600 bg-zinc-50 border-zinc-200">skipped</span>;
+                    case "failed":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-red-700 bg-red-50 border-red-200">failed</span>;
+                    case "running":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-sky-700 bg-sky-50 border-sky-200 animate-pulse">running…</span>;
+                    default:
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-zinc-500 bg-zinc-50 border-zinc-200">pending</span>;
+                  }
+                })();
+                const detail =
+                  row.status === "skipped"
+                    ? "Credentials not configured"
+                    : row.status === "failed"
+                      ? row.error ?? "Unknown error"
+                      : row.status === "ok" && (row.fetched ?? 0) === 0
+                        ? "No data returned for this MPN"
+                        : "";
+                return (
+                  <tr key={s} className="border-t border-zinc-100">
+                    <td className="py-1 px-2 font-medium text-zinc-800">{SOURCE_LABEL[s]}</td>
+                    <td className="py-1 px-2">{statusBadge}</td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.fetched ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.upserted ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.attribute_writes ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-500">
+                      {row.durationMs != null ? `${row.durationMs}ms` : "—"}
+                    </td>
+                    <td className={`py-1 px-2 text-[10px] ${row.status === "failed" ? "text-red-700" : "text-zinc-500"}`} title={detail}>
+                      {detail.length > 60 ? `${detail.slice(0, 60)}…` : detail}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {canonicalQ.isLoading || attrsQ.isLoading ? (
         <div className="text-[12px] text-zinc-500 py-4">Loading source snapshot…</div>
       ) : rows.length === 0 ? (
