@@ -82,11 +82,10 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const { data, error } = await invokeWithAuth<BlSyncResult>(
+      const data = await invokeWithAuth<BlSyncResult>(
         "bricklink-minifigs-sync",
-        { body: { mpn: product.mpn } },
+        { mpn: product.mpn },
       );
-      if (error) throw error;
       if (data?.error) {
         if (data.configured === false) {
           toast.error("BrickLink credentials not configured");
