@@ -41,7 +41,11 @@ Deno.serve(async (req) => {
     if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
     const ck = Deno.env.get("BRICKLINK_CONSUMER_KEY") ?? "";
-    const cs = Deno.env.get("BRICKLINK_CONSUMER_SECRET") ?? "";
+    // Accept both correct spelling and the typo'd existing secret name.
+    const cs =
+      Deno.env.get("BRICKLINK_CONSUMER_SECRET") ??
+      Deno.env.get("BRICKLINK_COMSUMER_SECRET") ??
+      "";
     const tk = Deno.env.get("BRICKLINK_TOKEN_VALUE") ?? "";
     const ts = Deno.env.get("BRICKLINK_TOKEN_SECRET") ?? "";
     const credsConfigured = ck && cs && tk && ts;
