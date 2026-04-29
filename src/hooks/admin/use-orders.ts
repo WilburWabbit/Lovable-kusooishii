@@ -326,14 +326,14 @@ export function useCandidateUnitsForLine(lineSkuId: string | null) {
         .in('v2_status' as never, ['listed', 'graded', 'restocked']);
       if (uErr) throw uErr;
 
-      const unitRows = (units ?? []) as Array<{
+      const unitRows = ((units ?? []) as unknown) as Array<{
         id: string;
         uid: string | null;
         mpn: string;
-        condition_grade: number | null;
+        condition_grade: string | number | null;
         v2_status: string | null;
         batch_id: string | null;
-        landed_cost: number | null;
+        landed_cost: number | string | null;
         sku_id: string | null;
       }>;
 
