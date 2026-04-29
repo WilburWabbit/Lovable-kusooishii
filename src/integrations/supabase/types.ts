@@ -458,6 +458,42 @@ export type Database = {
         }
         Relationships: []
       }
+      brickowl_mpn_alias: {
+        Row: {
+          boid: string
+          confidence: string
+          created_at: string
+          id: string
+          last_verified_at: string | null
+          mpn: string
+          notes: string | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          boid: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          mpn: string
+          notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          boid?: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          mpn?: string
+          notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brickset_catalog_item: {
         Row: {
           age_mark: string | null
