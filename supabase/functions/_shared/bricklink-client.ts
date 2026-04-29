@@ -121,7 +121,7 @@ interface BlEnvelope<T> {
   data: T;
 }
 
-async function blGet<T>(
+export async function blGet<T>(
   path: string,
   query: Record<string, string>,
   creds: BlCreds,
