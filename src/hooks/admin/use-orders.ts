@@ -355,7 +355,7 @@ export function useCandidateUnitsForLine(lineSkuId: string | null) {
         uid: u.uid,
         skuCode: u.sku_id ? skuMap.get(u.sku_id) ?? null : null,
         mpn: u.mpn,
-        conditionGrade: u.condition_grade,
+        conditionGrade: u.condition_grade == null ? null : Number(u.condition_grade),
         v2Status: u.v2_status,
         batchId: u.batch_id,
         landedCost: u.landed_cost == null ? null : Number(u.landed_cost),
