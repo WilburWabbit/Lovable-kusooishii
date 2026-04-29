@@ -42,7 +42,7 @@ export function CopyMediaTab({ product }: CopyMediaTabProps) {
       <MinifigsCard product={product} />
       <CopySection product={product} />
       {product.variants.map((v) => (
-        <ConditionNotesSection key={v.sku} variant={v} />
+        <ConditionNotesSection key={v.sku} variant={v} product={product} />
       ))}
     </div>
   );
