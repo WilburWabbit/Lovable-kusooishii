@@ -147,21 +147,68 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    try {
-      const result = await invokeWithAuth<{ sources: Record<string, { ok: boolean; error?: string; configured?: boolean }> }>(
-        "refresh-all-sources",
-        { mpn },
-      );
-      const summary = Object.entries(result.sources ?? {})
-        .map(([s, r]) => `${s}: ${r.ok ? (r.configured === false ? "skip" : "ok") : "fail"}`)
-        .join(" · ");
-      toast.success(`Sources refreshed — ${summary}`);
-      await qc.invalidateQueries({ queryKey: ["product-source-values", productId] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
-    } finally {
-      setRefreshing(false);
+    // Seed pending state for all sources
+    const initial: Record<SyncSource, SyncProgressRow> = {
+      bricklink: { status: "pending" },
+      brickowl: { status: "pending" },
+      brickset: { status: "pending" },
+    };
+    setProgress(initial);
+
+    let okCount = 0;
+    let failCount = 0;
+
+    // Run sequentially so each source's status is visible as it lands.
+    for (const source of SYNC_SOURCES) {
+      setProgress((prev) => ({
+        ...(prev ?? initial),
+        [source]: { status: "running" },
+      }));
+      const startedAt = performance.now();
+      try {
+        const body = await invokeWithAuth<{
+          requested?: number;
+          fetched?: number;
+          upserted?: number;
+          attribute_writes?: number;
+          configured?: boolean;
+          error?: string;
+        }>(`${source}-sync`, { mpn });
+        const durationMs = Math.round(performance.now() - startedAt);
+        const skipped = body.configured === false;
+        const failed = !!body.error;
+        const status: SyncStatus = failed ? "failed" : skipped ? "skipped" : "ok";
+        if (status === "ok") okCount++;
+        else if (status === "failed") failCount++;
+        setProgress((prev) => ({
+          ...(prev ?? initial),
+          [source]: {
+            status,
+            fetched: body.fetched,
+            upserted: body.upserted,
+            attribute_writes: body.attribute_writes,
+            configured: body.configured,
+            error: body.error,
+            durationMs,
+          },
+        }));
+      } catch (err) {
+        failCount++;
+        setProgress((prev) => ({
+          ...(prev ?? initial),
+          [source]: {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+            durationMs: Math.round(performance.now() - startedAt),
+          },
+        }));
+      }
     }
+
+    if (failCount === 0) toast.success(`Sources refreshed (${okCount} ok)`);
+    else toast.error(`${failCount} source${failCount === 1 ? "" : "s"} failed`);
+    await qc.invalidateQueries({ queryKey: ["product-source-values", productId] });
+    setRefreshing(false);
   };
 
   const handleSave = async (key: string) => {
