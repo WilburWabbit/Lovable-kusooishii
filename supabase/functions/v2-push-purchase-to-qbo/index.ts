@@ -446,6 +446,7 @@ Deno.serve(async (req) => {
     await setStatus(admin, batchId, "synced", {
       qbo_purchase_id: qboId,
       qbo_sync_error: null,
+      status: "recorded",
     });
 
     await audit(admin, actorId, "purchase_batch_qbo_pushed", { batch_id: batchId }, {
