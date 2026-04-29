@@ -5,12 +5,14 @@ import {
   useUploadProductImage,
   productKeys,
 } from "@/hooks/admin/use-products";
+import { useStockUnitsByVariant } from "@/hooks/admin/use-stock-units";
 import type { ProductDetail, ProductVariant, ProductImage } from "@/lib/types/admin";
 import { SurfaceCard, SectionHead, Mono, GradeBadge } from "./ui-primitives";
 import { MinifigsCard } from "./MinifigsCard";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { Sparkles, Loader2 } from "lucide-react";
 import {
   DndContext,
   closestCenter,
