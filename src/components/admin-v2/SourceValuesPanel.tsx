@@ -43,9 +43,26 @@ function valuesDiffer(values: Array<string | null | undefined>): boolean {
   return new Set(present).size > 1;
 }
 
+// Sources fanned out by "Refresh from sources". BrickEconomy intentionally
+// excluded — pricing/value data is on its own protected pipeline.
+type SyncSource = "bricklink" | "brickowl" | "brickset";
+const SYNC_SOURCES: SyncSource[] = ["bricklink", "brickowl", "brickset"];
+
+type SyncStatus = "pending" | "running" | "ok" | "skipped" | "failed";
+interface SyncProgressRow {
+  status: SyncStatus;
+  fetched?: number;
+  upserted?: number;
+  attribute_writes?: number;
+  configured?: boolean;
+  error?: string;
+  durationMs?: number;
+}
+
 export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: string }) {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [progress, setProgress] = useState<Record<SyncSource, SyncProgressRow> | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   // Local edit buffer keyed by attribute key
