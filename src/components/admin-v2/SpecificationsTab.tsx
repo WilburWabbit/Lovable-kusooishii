@@ -29,6 +29,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 import { MinifigsCard } from "./MinifigsCard";
 import { SourceValuesPanel } from "./SourceValuesPanel";
+import { ChannelValueMatrix } from "./ChannelValueMatrix";
 import type { ProductDetail } from "@/lib/types/admin";
 
 interface SpecificationsTabProps {
@@ -609,6 +610,15 @@ export function SpecificationsTab({ product }: SpecificationsTabProps) {
       {/* Multi-source value snapshot (non-pricing). BrickEconomy value data
           is intentionally excluded — it lives in the Market value panel. */}
       <SourceValuesPanel productId={product.id} mpn={product.mpn} />
+
+      {/* Per-channel value mapping matrix — project canonical values to each
+          channel and override per-channel where the channel demands a
+          different value or its allowed-values list constrains the choice. */}
+      <ChannelValueMatrix
+        productId={product.id}
+        ebayMarketplace={marketplace}
+        ebayCategoryId={effectiveCategoryId}
+      />
 
       {/* Included minifigures (selectable images for listings) */}
       <MinifigsCard product={product} />
