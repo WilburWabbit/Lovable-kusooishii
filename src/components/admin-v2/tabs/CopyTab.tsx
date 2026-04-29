@@ -10,7 +10,7 @@ export function CopyTab({ product }: CopyTabProps) {
     <div className="grid gap-4">
       <CopySection product={product} />
       {product.variants.map((v) => (
-        <ConditionNotesSection key={v.sku} variant={v} />
+        <ConditionNotesSection key={v.sku} variant={v} product={product} />
       ))}
     </div>
   );

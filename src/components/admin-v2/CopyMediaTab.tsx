@@ -5,12 +5,14 @@ import {
   useUploadProductImage,
   productKeys,
 } from "@/hooks/admin/use-products";
+import { useStockUnitsByVariant } from "@/hooks/admin/use-stock-units";
 import type { ProductDetail, ProductVariant, ProductImage } from "@/lib/types/admin";
 import { SurfaceCard, SectionHead, Mono, GradeBadge } from "./ui-primitives";
 import { MinifigsCard } from "./MinifigsCard";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { Sparkles, Loader2 } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -40,7 +42,7 @@ export function CopyMediaTab({ product }: CopyMediaTabProps) {
       <MinifigsCard product={product} />
       <CopySection product={product} />
       {product.variants.map((v) => (
-        <ConditionNotesSection key={v.sku} variant={v} />
+        <ConditionNotesSection key={v.sku} variant={v} product={product} />
       ))}
     </div>
   );
@@ -324,6 +326,7 @@ export function CopySection({ product }: { product: ProductDetail }) {
   const [cta, setCta] = useState(product.cta ?? "");
   const [seoTitle, setSeoTitle] = useState(product.seoTitle ?? "");
   const [seoDescription, setSeoDescription] = useState(product.seoDescription ?? "");
+  const [generating, setGenerating] = useState(false);
 
   const handleSave = async () => {
     try {
@@ -343,9 +346,69 @@ export function CopySection({ product }: { product: ProductDetail }) {
     }
   };
 
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      // Non-catalog images only (uploaded photos of the actual item)
+      const imageUrls = product.images.map((i) => i.storagePath).filter(Boolean);
+      const dims = product.dimensionsCm?.split(/[x×]/i).map((s) => parseFloat(s.trim())) ?? [];
+      const payload = {
+        product_id: product.id,
+        auto_save: false,
+        image_urls: imageUrls,
+        product: {
+          name: product.name,
+          mpn: product.mpn,
+          set_number: product.setNumber,
+          theme_name: product.theme,
+          subtheme_name: product.subtheme,
+          piece_count: product.pieceCount,
+          release_year: product.releaseDate ? new Date(product.releaseDate).getFullYear() : null,
+          retired_flag: !!product.retiredDate,
+          age_range: product.ageMark,
+          weight_kg: product.weightG ? product.weightG / 1000 : null,
+          length_cm: dims[0] ?? null,
+          width_cm: dims[1] ?? null,
+          height_cm: dims[2] ?? null,
+        },
+      };
+      const res = await invokeWithAuth<{ copy: {
+        hook: string; description: string; cta: string;
+        highlights: string[] | string; seo_title: string; seo_body: string;
+      } }>("generate-product-copy", payload);
+      const c = res.copy;
+      const highlightText = Array.isArray(c.highlights)
+        ? c.highlights.map((h) => `• ${h}`).join("\n")
+        : (c.highlights ?? "");
+      setHook(c.hook ?? "");
+      setDescription(c.description ?? "");
+      setHighlights(highlightText);
+      setCta(c.cta ?? "");
+      setSeoTitle(c.seo_title ?? "");
+      setSeoDescription(c.seo_body ?? "");
+      toast.success("Copy generated — review and save");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Generation failed";
+      toast.error(message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <SurfaceCard>
-      <SectionHead>Product Copy (MPN level)</SectionHead>
+      <div className="flex items-center justify-between mb-3">
+        <SectionHead>Product Copy (MPN level)</SectionHead>
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          className="flex items-center gap-1.5 bg-zinc-900 text-white border-none rounded-md px-3 py-1.5 font-semibold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors"
+          title="Regenerate copy & SEO from product attributes and uploaded photos"
+        >
+          {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+          {generating ? "Generating…" : "Generate Copy & SEO"}
+        </button>
+      </div>
       <div className="grid gap-3">
         {[
           { label: "Hook", rows: 2, value: hook, onChange: setHook },
@@ -403,9 +466,17 @@ export function CopySection({ product }: { product: ProductDetail }) {
 
 // ─── Condition Notes ────────────────────────────────────────
 
-export function ConditionNotesSection({ variant }: { variant: ProductVariant }) {
+export function ConditionNotesSection({
+  variant,
+  product,
+}: {
+  variant: ProductVariant;
+  product: ProductDetail;
+}) {
   const updateNotes = useUpdateConditionNotes();
   const [notes, setNotes] = useState(variant.conditionNotes ?? "");
+  const [generating, setGenerating] = useState(false);
+  const { data: stockUnits } = useStockUnitsByVariant(variant.sku);
 
   const handleSave = async () => {
     try {
@@ -420,18 +491,58 @@ export function ConditionNotesSection({ variant }: { variant: ProductVariant }) 
     }
   };
 
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const units = stockUnits ?? [];
+      const flagSet = new Set<string>();
+      const unitNotes: string[] = [];
+      for (const u of units) {
+        for (const f of u.conditionFlags ?? []) flagSet.add(f);
+        if (u.notes) unitNotes.push(u.notes);
+      }
+      const imageUrls = product.images.map((i) => i.storagePath).filter(Boolean);
+      const res = await invokeWithAuth<{ conditionNotes: string }>("generate-condition-notes", {
+        mpn: product.mpn,
+        productName: product.name,
+        grade: variant.grade,
+        conditionFlags: Array.from(flagSet),
+        unitNotes,
+        imageUrls,
+      });
+      setNotes(res.conditionNotes ?? "");
+      toast.success("Condition notes generated — review and save");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Generation failed";
+      toast.error(message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <SurfaceCard>
-      <div className="flex items-center gap-2 mb-2.5">
-        <SectionHead>Condition Notes</SectionHead>
-        <Mono color="amber" className="text-[11px]">{variant.sku}</Mono>
-        <GradeBadge grade={variant.grade} />
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center gap-2">
+          <SectionHead>Condition Notes</SectionHead>
+          <Mono color="amber" className="text-[11px]">{variant.sku}</Mono>
+          <GradeBadge grade={variant.grade} />
+        </div>
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          className="flex items-center gap-1.5 bg-zinc-900 text-white border-none rounded-md px-3 py-1.5 font-semibold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors"
+          title="Regenerate from grade, stock unit notes & flags, and uploaded photos"
+        >
+          {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+          {generating ? "Generating…" : "Generate"}
+        </button>
       </div>
       <textarea
         rows={3}
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="AI-drafted from grade + flags + photos"
+        placeholder="AI-drafted from grade + flags + stock unit notes + photos"
         className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 resize-y font-sans box-border mb-2"
       />
       <button
