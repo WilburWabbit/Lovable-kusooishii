@@ -40,20 +40,12 @@ Deno.serve(async (req) => {
     const auth = await requireStaff(admin, req.headers.get("Authorization"));
     if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
-    const ck = Deno.env.get("BRICKLINK_CONSUMER_KEY") ?? "";
-    // Accept both correct spelling and the typo'd existing secret name.
-    const cs =
-      Deno.env.get("BRICKLINK_CONSUMER_SECRET") ??
-      Deno.env.get("BRICKLINK_COMSUMER_SECRET") ??
-      "";
-    const tk = Deno.env.get("BRICKLINK_TOKEN_VALUE") ?? "";
-    const ts = Deno.env.get("BRICKLINK_TOKEN_SECRET") ?? "";
-    const credsConfigured = ck && cs && tk && ts;
+    const creds = getBlCreds();
 
     const body = await req.json().catch(() => ({}));
     const mpns: string[] = body.mpn ? [String(body.mpn)] : Array.isArray(body.mpns) ? body.mpns.map(String) : [];
     if (mpns.length === 0) return jsonResponse({ error: "mpn or mpns required" }, 400);
-    if (!credsConfigured) {
+    if (!creds) {
       return jsonResponse({ error: "BrickLink OAuth1 credentials not configured", configured: false, requested: mpns.length }, 200);
     }
 
@@ -64,7 +56,7 @@ Deno.serve(async (req) => {
 
     for (const mpn of mpns) {
       try {
-        const item = await fetchItem(mpn, { ck, cs, tk, ts });
+        const item = await fetchItem(mpn, creds);
         if (!item) continue;
         fetched++;
         const lid = await landRaw(admin, "bricklink", mpn, item);
