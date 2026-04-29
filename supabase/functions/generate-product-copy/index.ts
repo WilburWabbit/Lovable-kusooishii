@@ -126,8 +126,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { product, product_id, auto_save } = await req.json();
+    const { product, product_id, auto_save, image_urls } = await req.json();
     if (!product) throw new Error("product data required");
+    const imageUrls: string[] = Array.isArray(image_urls)
+      ? (image_urls as unknown[]).filter((u): u is string => typeof u === "string" && u.length > 0).slice(0, 4)
+      : [];
 
     // Build user prompt from product facts
     const facts: string[] = [];
@@ -186,7 +189,14 @@ Deno.serve(async (req) => {
       console.error("minifig fetch failed (non-fatal):", figErr);
     }
 
-    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below. When the set includes minifigures, weave at least one of their names into the Description naturally for collector flavour — do not list them as bullets.\n\n${facts.join("\n")}`;
+    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below${imageUrls.length > 0 ? ", supplemented by what you can see in the attached photos of the actual item we are selling (use them for atmosphere, display presence, and any visible distinguishing detail — do not invent defects)" : ""}. When the set includes minifigures, weave at least one of their names into the Description naturally for collector flavour — do not list them as bullets.\n\n${facts.join("\n")}`;
+
+    const userMessageContent: unknown = imageUrls.length > 0
+      ? [
+          { type: "text", text: userPrompt },
+          ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+        ]
+      : userPrompt;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -198,7 +208,7 @@ Deno.serve(async (req) => {
         model: "gpt-4o",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
+          { role: "user", content: userMessageContent },
         ],
         tools: [
           {
