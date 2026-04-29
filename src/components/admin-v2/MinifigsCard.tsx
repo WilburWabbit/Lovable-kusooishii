@@ -1,31 +1,52 @@
 // ============================================================
 // MinifigsCard
 //
-// Shows the minifigs included in a LEGO set (sourced from the
-// rebrickable inventory data) with checkboxes to control which
-// minifig images get appended to marketplace listings.
+// Shows the minifigs included in a LEGO set. BrickLink is the
+// preferred source of truth (canonical MPNs like "sw0001");
+// Rebrickable is used as a fallback only when no BrickLink
+// data has been synced for the set yet.
+//
+// Selection persists on the product row
+// (`selected_minifig_fig_nums`) and controls which minifig
+// images are appended to marketplace listings.
 //
 // Rendered in both the Specifications tab and the Copy & Media
-// tab — selection is mirrored because it's persisted on the
-// product row (`selected_minifig_fig_nums`).
+// tab.
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshCw } from "lucide-react";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 import {
+  setMinifigsKeys,
   useSetMinifigs,
   useUpdateMinifigSelection,
 } from "@/hooks/admin/use-set-minifigs";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import type { ProductDetail } from "@/lib/types/admin";
 
 interface MinifigsCardProps {
   product: ProductDetail;
 }
 
+interface BlSyncResult {
+  source?: string;
+  resolved?: string | null;
+  fetched?: number;
+  upserted?: number;
+  images_fetched?: number;
+  message?: string;
+  error?: string;
+  configured?: boolean;
+}
+
 export function MinifigsCard({ product }: MinifigsCardProps) {
+  const queryClient = useQueryClient();
   const { data: minifigs, isLoading } = useSetMinifigs(product.mpn);
   const update = useUpdateMinifigSelection();
+  const [refreshing, setRefreshing] = useState(false);
 
   // Local optimistic selection state, hydrated from the product row.
   const initial = useMemo(
@@ -57,15 +78,56 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
     }
   };
 
-  // Don't render the card at all for non-set products or when there
-  // are no minifigs linked yet.
+  const handleRefreshFromBrickLink = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const data = await invokeWithAuth<BlSyncResult>(
+        "bricklink-minifigs-sync",
+        { mpn: product.mpn },
+      );
+      if (data?.error) {
+        if (data.configured === false) {
+          toast.error("BrickLink credentials not configured");
+        } else {
+          toast.error(data.error);
+        }
+        return;
+      }
+      if (!data?.resolved) {
+        toast.warning(
+          data?.message ?? "Set not found on BrickLink — keeping Rebrickable data",
+        );
+      } else {
+        toast.success(
+          `BrickLink: ${data.fetched ?? 0} minifigs · ${data.images_fetched ?? 0} images`,
+        );
+      }
+      await queryClient.invalidateQueries({
+        queryKey: setMinifigsKeys.list(product.mpn),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Only render for set products.
   if (product.productType !== "set") return null;
-  if (!isLoading && (!minifigs || minifigs.length === 0)) return null;
 
   const allFigNums = (minifigs ?? []).map((m) => m.figNum);
   const allSelected =
     allFigNums.length > 0 && allFigNums.every((f) => selected.has(f));
   const noneSelected = allFigNums.every((f) => !selected.has(f));
+
+  // Detect overall source: if any row is bricklink, treat the card as BL-sourced.
+  const sourceLabel =
+    (minifigs ?? []).some((m) => m.source === "bricklink")
+      ? "BrickLink"
+      : (minifigs ?? []).length > 0
+        ? "Rebrickable (fallback)"
+        : null;
 
   const toggleAll = () => {
     if (allSelected) {
@@ -86,26 +148,60 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
     <SurfaceCard>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="min-w-0">
-          <SectionHead>Included Minifigures</SectionHead>
+          <div className="flex items-center gap-2">
+            <SectionHead>Included Minifigures</SectionHead>
+            {sourceLabel && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  sourceLabel === "BrickLink"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : "bg-zinc-100 text-zinc-600 border border-zinc-200"
+                }`}
+                title={
+                  sourceLabel === "BrickLink"
+                    ? "Sourced from BrickLink (canonical MPNs)"
+                    : "BrickLink data not synced — falling back to Rebrickable"
+                }
+              >
+                {sourceLabel}
+              </span>
+            )}
+          </div>
           <p className="text-[11px] text-zinc-500 mt-1">
             Tick the minifigures whose images should be added to listings
             (in addition to your uploaded photos and catalog image). They
             will also appear in the eBay <span className="font-mono">LEGO Character</span> aspect.
           </p>
         </div>
-        {allFigNums.length > 0 && (
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             type="button"
-            onClick={toggleAll}
-            className="text-[11px] px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 whitespace-nowrap flex-shrink-0"
+            onClick={handleRefreshFromBrickLink}
+            disabled={refreshing}
+            className="text-[11px] px-2 py-1 rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 whitespace-nowrap inline-flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+            title="Fetch / refresh minifigs from BrickLink (uses canonical MPNs)"
           >
-            {allSelected ? "Deselect all" : "Select all"}
+            <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing…" : "Refresh from BrickLink"}
           </button>
-        )}
+          {allFigNums.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="text-[11px] px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 whitespace-nowrap"
+            >
+              {allSelected ? "Deselect all" : "Select all"}
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
         <div className="text-[12px] text-zinc-500 py-4">Loading minifigures…</div>
+      ) : allFigNums.length === 0 ? (
+        <div className="text-[12px] text-zinc-500 py-4">
+          No minifig data yet. Click <span className="font-medium">Refresh from BrickLink</span> to fetch.
+        </div>
       ) : (
         <>
           <div className="text-[11px] text-zinc-600 mb-2">
@@ -119,6 +215,7 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
           <div className="grid grid-cols-4 gap-2">
             {(minifigs ?? []).map((m) => {
               const isOn = selected.has(m.figNum);
+              const displayId = m.bricklinkId || m.figNum;
               return (
                 <button
                   type="button"
@@ -129,7 +226,7 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
                       ? "border-amber-500 ring-1 ring-amber-300"
                       : "border-zinc-200 hover:border-zinc-300 opacity-60 hover:opacity-100"
                   }`}
-                  title={`${m.name ?? m.figNum} (${m.figNum})`}
+                  title={`${m.name ?? m.figNum} (${displayId}) — ${m.source}`}
                 >
                   {m.imgUrl ? (
                     <img
@@ -164,7 +261,7 @@ export function MinifigsCard({ product }: MinifigsCardProps) {
 
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent text-white text-[10px] px-1.5 py-1 truncate">
                     <div className="truncate font-medium">{m.name ?? "—"}</div>
-                    <div className="truncate font-mono text-[9px] opacity-80">{m.bricklinkId || m.figNum}</div>
+                    <div className="truncate font-mono text-[9px] opacity-80">{displayId}</div>
                   </div>
                 </button>
               );

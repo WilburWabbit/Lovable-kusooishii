@@ -395,6 +395,42 @@ export type Database = {
         }
         Relationships: []
       }
+      bricklink_set_minifig: {
+        Row: {
+          bl_mpn: string
+          created_at: string
+          fetched_at: string
+          id: string
+          image_url: string | null
+          name: string | null
+          quantity: number
+          set_no: string
+          updated_at: string
+        }
+        Insert: {
+          bl_mpn: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          image_url?: string | null
+          name?: string | null
+          quantity?: number
+          set_no: string
+          updated_at?: string
+        }
+        Update: {
+          bl_mpn?: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          image_url?: string | null
+          name?: string | null
+          quantity?: number
+          set_no?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brickowl_catalog_item: {
         Row: {
           age_mark: string | null
@@ -3431,13 +3467,6 @@ export type Database = {
             foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
             columns: ["fig_num"]
             isOneToOne: false
-            referencedRelation: "lego_set_minifigs"
-            referencedColumns: ["fig_num"]
-          },
-          {
-            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
-            columns: ["fig_num"]
-            isOneToOne: false
             referencedRelation: "rebrickable_minifigs"
             referencedColumns: ["fig_num"]
           },
@@ -4459,6 +4488,7 @@ export type Database = {
           minifig_num_parts: number | null
           quantity: number | null
           set_num: string | null
+          source: string | null
         }
         Relationships: []
       }
