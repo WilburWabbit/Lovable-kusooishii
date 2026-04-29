@@ -240,6 +240,7 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
                 {SOURCES.map((s) => (
                   <th key={s} className="py-1.5 px-2 font-medium">{SOURCE_LABEL[s]}</th>
                 ))}
+                <th className="py-1.5 px-2 font-medium">Custom override</th>
                 <th className="py-1.5 px-2 font-medium">Chosen</th>
                 <th className="py-1.5 pl-2 font-medium w-[1%]"></th>
               </tr>
@@ -250,6 +251,7 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
                 const dirty =
                   (edit.chosen || "") !== (r.chosen ?? "") ||
                   (edit.chosen === "custom" && (edit.custom ?? "") !== (r.custom ?? ""));
+                const isCustomChosen = edit.chosen === "custom";
                 return (
                   <tr key={r.key} className="border-b border-zinc-100 align-top">
                     <td className="py-1.5 pr-2 font-medium text-zinc-800">
@@ -288,45 +290,86 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
                         </td>
                       );
                     })}
-                    <td className="py-1.5 px-2">
-                      <div className="flex flex-col gap-1">
-                        <select
-                          value={edit.chosen}
+                    <td
+                      className={`py-1.5 px-2 ${
+                        isCustomChosen ? "bg-emerald-50 ring-1 ring-emerald-300" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-1">
+                        <input
+                          value={edit.custom}
                           onChange={(e) =>
                             setEdits((prev) => ({
                               ...prev,
                               [r.key]: {
-                                chosen: e.target.value as ChosenKey,
-                                custom: prev[r.key]?.custom ?? "",
+                                chosen: "custom",
+                                custom: e.target.value,
                               },
                             }))
                           }
-                          className="px-1.5 py-1 bg-white border border-zinc-200 rounded text-[11px]"
-                        >
-                          <option value="">— auto (priority) —</option>
-                          {SOURCES.map((s) => (
-                            <option key={s} value={s} disabled={!r.perSource[s]}>
-                              {SOURCE_LABEL[s]}
-                              {r.perSource[s] ? "" : " (no value)"}
-                            </option>
-                          ))}
-                          <option value="custom">Custom…</option>
-                          <option value="none">None (suppress)</option>
-                        </select>
-                        {edit.chosen === "custom" && (
-                          <input
-                            value={edit.custom}
-                            onChange={(e) =>
+                          onFocus={() => {
+                            if (edit.chosen !== "custom") {
                               setEdits((prev) => ({
                                 ...prev,
-                                [r.key]: { chosen: "custom", custom: e.target.value },
+                                [r.key]: { chosen: "custom", custom: prev[r.key]?.custom ?? "" },
+                              }));
+                            }
+                          }}
+                          placeholder="Type override…"
+                          className={`flex-1 min-w-[120px] px-1.5 py-1 bg-white border rounded text-[11px] font-mono ${
+                            isCustomChosen
+                              ? "border-emerald-400 text-emerald-900"
+                              : "border-zinc-200 text-zinc-700"
+                          }`}
+                        />
+                        {(edit.custom || isCustomChosen) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEdits((prev) => ({
+                                ...prev,
+                                [r.key]: { chosen: "" as ChosenKey, custom: "" },
                               }))
                             }
-                            placeholder="Custom value"
-                            className="px-1.5 py-1 bg-white border border-zinc-200 rounded text-[11px] font-mono"
-                          />
+                            title="Clear custom override (revert to auto)"
+                            className="text-[11px] text-zinc-400 hover:text-zinc-700 px-1"
+                          >
+                            ✕
+                          </button>
                         )}
                       </div>
+                      {!isCustomChosen && r.custom && (
+                        <div className="text-[10px] text-zinc-400 mt-0.5 italic">
+                          saved: {r.custom}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-1.5 px-2">
+                      <select
+                        value={edit.chosen}
+                        onChange={(e) =>
+                          setEdits((prev) => ({
+                            ...prev,
+                            [r.key]: {
+                              chosen: e.target.value as ChosenKey,
+                              custom: prev[r.key]?.custom ?? "",
+                            },
+                          }))
+                        }
+                        className="px-1.5 py-1 bg-white border border-zinc-200 rounded text-[11px]"
+                      >
+                        <option value="">— auto (priority) —</option>
+                        {SOURCES.map((s) => (
+                          <option key={s} value={s} disabled={!r.perSource[s]}>
+                            {SOURCE_LABEL[s]}
+                            {r.perSource[s] ? "" : " (no value)"}
+                          </option>
+                        ))}
+                        <option value="custom" disabled={!edit.custom.trim()}>
+                          Custom{edit.custom.trim() ? "" : " (type a value first)"}
+                        </option>
+                        <option value="none">None (suppress)</option>
+                      </select>
                     </td>
                     <td className="py-1.5 pl-2">
                       <button
