@@ -3,11 +3,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import {
   corsHeaders, requireStaff, jsonResponse, landRaw, commitLanding,
-  upsertSpec, snapshotProductAttributes, fetchWithTimeout, stripValueFields,
+  upsertSpec, snapshotProductAttributes, stripValueFields,
   type SpecCatalogRow,
 } from "../_shared/multi-source-sync.ts";
-
-const BL_BASE = "https://api.bricklink.com/api/store/v1";
+import { getBlCreds, blGet, BlHttpError } from "../_shared/bricklink-client.ts";
 
 interface BLItem {
   no?: string; name?: string; category_name?: string;
@@ -22,15 +21,16 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchItem(mpn: string, _creds: { ck: string; cs: string; tk: string; ts: string }): Promise<BLItem | null> {
-  // BrickLink uses OAuth1; for the initial implementation we surface a clear
-  // error if creds are missing — staff can wire OAuth1 signing later.
-  // Treat the network call as best-effort: a 4xx returns null (no data).
-  const url = `${BL_BASE}/items/SET/${encodeURIComponent(mpn)}`;
-  const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) return null;
-  const body = await res.json();
-  return (body?.data ?? null) as BLItem | null;
+async function fetchItem(mpn: string, creds: ReturnType<typeof getBlCreds>): Promise<BLItem | null> {
+  if (!creds) return null;
+  try {
+    const data = await blGet<BLItem>(`/items/SET/${encodeURIComponent(mpn)}`, {}, creds);
+    return data ?? null;
+  } catch (err) {
+    if (err instanceof BlHttpError && err.status === 404) return null;
+    console.warn("bricklink fetchItem error", mpn, (err as Error).message);
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -40,20 +40,12 @@ Deno.serve(async (req) => {
     const auth = await requireStaff(admin, req.headers.get("Authorization"));
     if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
-    const ck = Deno.env.get("BRICKLINK_CONSUMER_KEY") ?? "";
-    // Accept both correct spelling and the typo'd existing secret name.
-    const cs =
-      Deno.env.get("BRICKLINK_CONSUMER_SECRET") ??
-      Deno.env.get("BRICKLINK_COMSUMER_SECRET") ??
-      "";
-    const tk = Deno.env.get("BRICKLINK_TOKEN_VALUE") ?? "";
-    const ts = Deno.env.get("BRICKLINK_TOKEN_SECRET") ?? "";
-    const credsConfigured = ck && cs && tk && ts;
+    const creds = getBlCreds();
 
     const body = await req.json().catch(() => ({}));
     const mpns: string[] = body.mpn ? [String(body.mpn)] : Array.isArray(body.mpns) ? body.mpns.map(String) : [];
     if (mpns.length === 0) return jsonResponse({ error: "mpn or mpns required" }, 400);
-    if (!credsConfigured) {
+    if (!creds) {
       return jsonResponse({ error: "BrickLink OAuth1 credentials not configured", configured: false, requested: mpns.length }, 200);
     }
 
@@ -64,7 +56,7 @@ Deno.serve(async (req) => {
 
     for (const mpn of mpns) {
       try {
-        const item = await fetchItem(mpn, { ck, cs, tk, ts });
+        const item = await fetchItem(mpn, creds);
         if (!item) continue;
         fetched++;
         const lid = await landRaw(admin, "bricklink", mpn, item);
