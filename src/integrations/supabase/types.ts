@@ -4707,6 +4707,46 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      allocate_order_line_stock_unit_by_uid: {
+        Args: { p_line_item_id: string; p_order_id: string; p_unit_uid: string }
+        Returns: {
+          accumulated_impairment: number
+          batch_id: string | null
+          carrying_value: number | null
+          completed_at: string | null
+          condition_flags: Json | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"]
+          created_at: string
+          delivered_at: string | null
+          graded_at: string | null
+          id: string
+          inbound_receipt_line_id: string | null
+          landed_cost: number | null
+          line_item_id: string | null
+          listed_at: string | null
+          location_id: string | null
+          mpn: string
+          notes: string | null
+          order_id: string | null
+          payout_id: string | null
+          reservation_id: string | null
+          serial_or_internal_mark: string | null
+          shipped_at: string | null
+          sku_id: string
+          sold_at: string | null
+          status: Database["public"]["Enums"]["stock_unit_status"]
+          supplier_id: string | null
+          uid: string | null
+          updated_at: string
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "stock_unit"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       allocate_stock_units: {
         Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
         Returns: string[]
