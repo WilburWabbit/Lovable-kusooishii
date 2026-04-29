@@ -31,23 +31,28 @@ export function useSetMinifigs(mpn: string | undefined) {
 
       const { data, error } = await supabase
         .from("lego_set_minifigs" as never)
-        .select("fig_num, minifig_name, bricklink_id, minifig_img_url, quantity")
+        .select("fig_num, minifig_name, bricklink_id, minifig_img_url, quantity, source")
         .in("set_num" as never, candidates as never);
 
       if (error) throw error;
 
       // De-dupe by fig_num (different inventory versions may overlap).
+      // The view emits BrickLink rows preferentially when present.
       const seen = new Map<string, SetMinifig>();
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
         const figNum = row.fig_num as string | null;
         if (!figNum) continue;
         if (seen.has(figNum)) continue;
+        const source = (row.source as string | null) === "bricklink"
+          ? "bricklink"
+          : "rebrickable";
         seen.set(figNum, {
           figNum,
           name: (row.minifig_name as string | null) ?? null,
           bricklinkId: (row.bricklink_id as string | null) ?? null,
           imgUrl: (row.minifig_img_url as string | null) ?? null,
           quantity: (row.quantity as number) ?? 1,
+          source,
         });
       }
 

@@ -360,6 +360,7 @@ export interface SetMinifig {
   bricklinkId: string | null;
   imgUrl: string | null;
   quantity: number;
+  source: 'bricklink' | 'rebrickable';
 }
 
 // ─── Channel Taxonomy / Item Specifics ─────────────────────
