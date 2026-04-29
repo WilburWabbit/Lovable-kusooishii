@@ -43,9 +43,26 @@ function valuesDiffer(values: Array<string | null | undefined>): boolean {
   return new Set(present).size > 1;
 }
 
+// Sources fanned out by "Refresh from sources". BrickEconomy intentionally
+// excluded — pricing/value data is on its own protected pipeline.
+type SyncSource = "bricklink" | "brickowl" | "brickset";
+const SYNC_SOURCES: SyncSource[] = ["bricklink", "brickowl", "brickset"];
+
+type SyncStatus = "pending" | "running" | "ok" | "skipped" | "failed";
+interface SyncProgressRow {
+  status: SyncStatus;
+  fetched?: number;
+  upserted?: number;
+  attribute_writes?: number;
+  configured?: boolean;
+  error?: string;
+  durationMs?: number;
+}
+
 export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: string }) {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [progress, setProgress] = useState<Record<SyncSource, SyncProgressRow> | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   // Local edit buffer keyed by attribute key
@@ -130,21 +147,68 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    try {
-      const result = await invokeWithAuth<{ sources: Record<string, { ok: boolean; error?: string; configured?: boolean }> }>(
-        "refresh-all-sources",
-        { mpn },
-      );
-      const summary = Object.entries(result.sources ?? {})
-        .map(([s, r]) => `${s}: ${r.ok ? (r.configured === false ? "skip" : "ok") : "fail"}`)
-        .join(" · ");
-      toast.success(`Sources refreshed — ${summary}`);
-      await qc.invalidateQueries({ queryKey: ["product-source-values", productId] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
-    } finally {
-      setRefreshing(false);
+    // Seed pending state for all sources
+    const initial: Record<SyncSource, SyncProgressRow> = {
+      bricklink: { status: "pending" },
+      brickowl: { status: "pending" },
+      brickset: { status: "pending" },
+    };
+    setProgress(initial);
+
+    let okCount = 0;
+    let failCount = 0;
+
+    // Run sequentially so each source's status is visible as it lands.
+    for (const source of SYNC_SOURCES) {
+      setProgress((prev) => ({
+        ...(prev ?? initial),
+        [source]: { status: "running" },
+      }));
+      const startedAt = performance.now();
+      try {
+        const body = await invokeWithAuth<{
+          requested?: number;
+          fetched?: number;
+          upserted?: number;
+          attribute_writes?: number;
+          configured?: boolean;
+          error?: string;
+        }>(`${source}-sync`, { mpn });
+        const durationMs = Math.round(performance.now() - startedAt);
+        const skipped = body.configured === false;
+        const failed = !!body.error;
+        const status: SyncStatus = failed ? "failed" : skipped ? "skipped" : "ok";
+        if (status === "ok") okCount++;
+        else if (status === "failed") failCount++;
+        setProgress((prev) => ({
+          ...(prev ?? initial),
+          [source]: {
+            status,
+            fetched: body.fetched,
+            upserted: body.upserted,
+            attribute_writes: body.attribute_writes,
+            configured: body.configured,
+            error: body.error,
+            durationMs,
+          },
+        }));
+      } catch (err) {
+        failCount++;
+        setProgress((prev) => ({
+          ...(prev ?? initial),
+          [source]: {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+            durationMs: Math.round(performance.now() - startedAt),
+          },
+        }));
+      }
     }
+
+    if (failCount === 0) toast.success(`Sources refreshed (${okCount} ok)`);
+    else toast.error(`${failCount} source${failCount === 1 ? "" : "s"} failed`);
+    await qc.invalidateQueries({ queryKey: ["product-source-values", productId] });
+    setRefreshing(false);
   };
 
   const handleSave = async (key: string) => {
@@ -224,6 +288,72 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
           {refreshing ? "Refreshing…" : "Refresh from sources"}
         </button>
       </div>
+
+      {progress && (
+        <div className="mb-3 border border-zinc-200 rounded-md overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead className="bg-zinc-50 text-[10px] uppercase tracking-wider text-zinc-500">
+              <tr>
+                <th className="text-left py-1 px-2 font-medium">Source</th>
+                <th className="text-left py-1 px-2 font-medium">Status</th>
+                <th className="text-right py-1 px-2 font-medium" title="Items returned by the source">Fetched</th>
+                <th className="text-right py-1 px-2 font-medium" title="Catalog rows upserted">Upserted</th>
+                <th className="text-right py-1 px-2 font-medium" title="product_attribute snapshots written">Attr writes</th>
+                <th className="text-right py-1 px-2 font-medium">Time</th>
+                <th className="text-left py-1 px-2 font-medium">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SYNC_SOURCES.map((s) => {
+                const row = progress[s];
+                const statusBadge = (() => {
+                  switch (row.status) {
+                    case "ok":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-emerald-700 bg-emerald-50 border-emerald-200">ok</span>;
+                    case "skipped":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-zinc-600 bg-zinc-50 border-zinc-200">skipped</span>;
+                    case "failed":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-red-700 bg-red-50 border-red-200">failed</span>;
+                    case "running":
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-sky-700 bg-sky-50 border-sky-200 animate-pulse">running…</span>;
+                    default:
+                      return <span className="text-[9px] uppercase tracking-wider px-1.5 py-px border rounded text-zinc-500 bg-zinc-50 border-zinc-200">pending</span>;
+                  }
+                })();
+                const detail =
+                  row.status === "skipped"
+                    ? "Credentials not configured"
+                    : row.status === "failed"
+                      ? row.error ?? "Unknown error"
+                      : row.status === "ok" && (row.fetched ?? 0) === 0
+                        ? "No data returned for this MPN"
+                        : "";
+                return (
+                  <tr key={s} className="border-t border-zinc-100">
+                    <td className="py-1 px-2 font-medium text-zinc-800">{SOURCE_LABEL[s]}</td>
+                    <td className="py-1 px-2">{statusBadge}</td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.fetched ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.upserted ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-700">
+                      {row.attribute_writes ?? (row.status === "pending" || row.status === "running" ? "—" : 0)}
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-zinc-500">
+                      {row.durationMs != null ? `${row.durationMs}ms` : "—"}
+                    </td>
+                    <td className={`py-1 px-2 text-[10px] ${row.status === "failed" ? "text-red-700" : "text-zinc-500"}`} title={detail}>
+                      {detail.length > 60 ? `${detail.slice(0, 60)}…` : detail}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {canonicalQ.isLoading || attrsQ.isLoading ? (
         <div className="text-[12px] text-zinc-500 py-4">Loading source snapshot…</div>
