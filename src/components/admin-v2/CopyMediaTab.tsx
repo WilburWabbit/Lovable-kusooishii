@@ -48,7 +48,7 @@ export function CopyMediaTab({ product }: CopyMediaTabProps) {
 
 // ─── Photos ─────────────────────────────────────────────────
 
-function PhotosSection({ product }: { product: ProductDetail }) {
+export function PhotosSection({ product }: { product: ProductDetail }) {
   const uploadImage = useUploadProductImage();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -316,7 +316,7 @@ function SortableImageThumb({ image, productName, onSetPrimary, onDelete, isBusy
 
 // ─── Copy ───────────────────────────────────────────────────
 
-function CopySection({ product }: { product: ProductDetail }) {
+export function CopySection({ product }: { product: ProductDetail }) {
   const updateCopy = useUpdateProductCopy();
   const [hook, setHook] = useState(product.hook ?? "");
   const [description, setDescription] = useState(product.description ?? "");
@@ -403,7 +403,7 @@ function CopySection({ product }: { product: ProductDetail }) {
 
 // ─── Condition Notes ────────────────────────────────────────
 
-function ConditionNotesSection({ variant }: { variant: ProductVariant }) {
+export function ConditionNotesSection({ variant }: { variant: ProductVariant }) {
   const updateNotes = useUpdateConditionNotes();
   const [notes, setNotes] = useState(variant.conditionNotes ?? "");
 
