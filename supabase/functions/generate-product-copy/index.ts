@@ -194,7 +194,31 @@ Deno.serve(async (req) => {
       console.error("minifig fetch failed (non-fatal):", figErr);
     }
 
-    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below${imageUrls.length > 0 ? ", supplemented by what you can see in the attached photos of the actual item we are selling (use them for atmosphere, display presence, and any visible distinguishing detail — do not invent defects)" : ""}. When the set includes minifigures, weave at least one of their names into the Description naturally for collector flavour — do not list them as bullets.\n\n${facts.join("\n")}`;
+    // Pull existing condition notes across SKUs so the model can apply the
+    // "minifigs missing" exception when relevant.
+    let conditionContext = "";
+    try {
+      if (product_id) {
+        const { data: skuRows } = await admin
+          .from("sku")
+          .select("sku_code, condition_grade, condition_notes")
+          .eq("product_id", product_id);
+        const notes = ((skuRows ?? []) as Array<{
+          sku_code: string;
+          condition_grade: number | null;
+          condition_notes: string | null;
+        }>)
+          .filter((r) => r.condition_notes && r.condition_notes.trim().length > 0)
+          .map((r) => `- ${r.sku_code} (G${r.condition_grade}): ${r.condition_notes!.trim()}`);
+        if (notes.length > 0) {
+          conditionContext = `\n\nExisting condition notes (per SKU) — use these to decide whether the included minifigs should be highlighted or whether they are missing:\n${notes.join("\n")}`;
+        }
+      }
+    } catch (notesErr) {
+      console.error("condition notes fetch failed (non-fatal):", notesErr);
+    }
+
+    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below${imageUrls.length > 0 ? ", supplemented by what you can see in the attached photos of the actual item we are selling (use them for atmosphere, display presence, and any visible distinguishing detail — do not invent defects)" : ""}. When the set includes minifigures, name and detail them in the Description and include a dedicated bullet for them in Highlights — UNLESS the condition notes indicate the minifigs are missing for this item, in which case omit them.\n\n${facts.join("\n")}${conditionContext}`;
 
     const userMessageContent: unknown = imageUrls.length > 0
       ? [
