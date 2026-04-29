@@ -46,6 +46,11 @@ Description discipline:
 - No recital of facts.
 - If the Description reads like a summary of Specifications, internally revise before output.
 
+Minifigure rule (mandatory):
+- If the provided facts list "Included minifigures", you MUST name and detail them in BOTH the Description (woven naturally into the narrative) AND in the Highlights (with at least one dedicated bullet covering the included minifigs).
+- EXCEPTION: If the condition notes or grader notes state that minifigures are missing, lost, or not present for this specific item, do NOT mention the minifigs as included — instead briefly acknowledge their absence honestly if relevant.
+- Never invent minifigs that are not in the provided list.
+
 Hyperbole:
 - Allowed in Hook and Description.
 - Never distort factual information.
