@@ -34,8 +34,12 @@ export {
   useOrders,
   useOrder,
   useAllocateOrderItems,
+  useAllocateOrderLineByUnit,
+  useCandidateUnitsForLine,
   orderKeys,
 } from './use-orders';
+
+export type { CandidateUnit } from './use-orders';
 
 export {
   usePayouts,
