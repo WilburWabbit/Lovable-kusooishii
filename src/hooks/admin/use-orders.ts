@@ -251,3 +251,116 @@ export function useAllocateOrderItems() {
     },
   });
 }
+
+// ─── useAllocateOrderLineByUnit ─────────────────────────────
+// Allocates a specific stock unit (by UID) to a line. If the unit's SKU
+// differs from the line's SKU (e.g. different grade), the line is
+// re-pointed to the unit's SKU server-side. Same-MPN safety is enforced
+// in the RPC.
+
+interface AllocateByUidInput {
+  orderId: string;
+  lineItemId: string;
+  unitUid: string;
+}
+
+export function useAllocateOrderLineByUnit() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ orderId, lineItemId, unitUid }: AllocateByUidInput) => {
+      const { error } = await supabase.rpc(
+        'allocate_order_line_stock_unit_by_uid' as never,
+        {
+          p_order_id: orderId,
+          p_line_item_id: lineItemId,
+          p_unit_uid: unitUid,
+        } as never,
+      );
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.orderId) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.all });
+      queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
+    },
+  });
+}
+
+// ─── useCandidateUnitsForLine ───────────────────────────────
+// Returns all available stock units sharing the same MPN as the given
+// line, regardless of grade. Used by the allocation dialog to let staff
+// pick a specific unit when no exact-grade match exists.
+
+export interface CandidateUnit {
+  id: string;
+  uid: string | null;
+  skuCode: string | null;
+  mpn: string;
+  conditionGrade: number | null;
+  v2Status: string | null;
+  batchId: string | null;
+  landedCost: number | null;
+  exactSkuMatch: boolean;
+}
+
+export function useCandidateUnitsForLine(lineSkuId: string | null) {
+  return useQuery({
+    queryKey: ['v2', 'allocation-candidates', lineSkuId],
+    enabled: !!lineSkuId,
+    queryFn: async (): Promise<CandidateUnit[]> => {
+      // Look up the line's SKU to get the target MPN
+      const { data: skuRow, error: skuErr } = await supabase
+        .from('sku')
+        .select('id, mpn')
+        .eq('id', lineSkuId!)
+        .single();
+      if (skuErr) throw skuErr;
+      const targetMpn = (skuRow as { mpn: string }).mpn;
+
+      const { data: units, error: uErr } = await supabase
+        .from('stock_unit')
+        .select('id, uid, mpn, condition_grade, v2_status, batch_id, landed_cost, sku_id, status')
+        .eq('mpn', targetMpn)
+        .is('order_id', null)
+        .in('v2_status' as never, ['listed', 'graded', 'restocked']);
+      if (uErr) throw uErr;
+
+      const unitRows = (units ?? []) as Array<{
+        id: string;
+        uid: string | null;
+        mpn: string;
+        condition_grade: number | null;
+        v2_status: string | null;
+        batch_id: string | null;
+        landed_cost: number | null;
+        sku_id: string | null;
+      }>;
+
+      // Resolve sku_codes for the unique sku ids
+      const skuIds = [...new Set(unitRows.map((u) => u.sku_id).filter(Boolean) as string[])];
+      const skuMap = new Map<string, string>();
+      if (skuIds.length > 0) {
+        const { data: skuRows } = await supabase
+          .from('sku')
+          .select('id, sku_code')
+          .in('id', skuIds);
+        for (const r of (skuRows ?? []) as Array<{ id: string; sku_code: string }>) {
+          skuMap.set(r.id, r.sku_code);
+        }
+      }
+
+      return unitRows.map((u) => ({
+        id: u.id,
+        uid: u.uid,
+        skuCode: u.sku_id ? skuMap.get(u.sku_id) ?? null : null,
+        mpn: u.mpn,
+        conditionGrade: u.condition_grade,
+        v2Status: u.v2_status,
+        batchId: u.batch_id,
+        landedCost: u.landed_cost == null ? null : Number(u.landed_cost),
+        exactSkuMatch: u.sku_id === lineSkuId,
+      }));
+    },
+  });
+}
