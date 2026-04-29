@@ -3,11 +3,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import {
   corsHeaders, requireStaff, jsonResponse, landRaw, commitLanding,
-  upsertSpec, snapshotProductAttributes, fetchWithTimeout, stripValueFields,
+  upsertSpec, snapshotProductAttributes, stripValueFields,
   type SpecCatalogRow,
 } from "../_shared/multi-source-sync.ts";
-
-const BL_BASE = "https://api.bricklink.com/api/store/v1";
+import { getBlCreds, blGet, BlHttpError } from "../_shared/bricklink-client.ts";
 
 interface BLItem {
   no?: string; name?: string; category_name?: string;
@@ -22,15 +21,16 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchItem(mpn: string, _creds: { ck: string; cs: string; tk: string; ts: string }): Promise<BLItem | null> {
-  // BrickLink uses OAuth1; for the initial implementation we surface a clear
-  // error if creds are missing — staff can wire OAuth1 signing later.
-  // Treat the network call as best-effort: a 4xx returns null (no data).
-  const url = `${BL_BASE}/items/SET/${encodeURIComponent(mpn)}`;
-  const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) return null;
-  const body = await res.json();
-  return (body?.data ?? null) as BLItem | null;
+async function fetchItem(mpn: string, creds: ReturnType<typeof getBlCreds>): Promise<BLItem | null> {
+  if (!creds) return null;
+  try {
+    const data = await blGet<BLItem>(`/items/SET/${encodeURIComponent(mpn)}`, {}, creds);
+    return data ?? null;
+  } catch (err) {
+    if (err instanceof BlHttpError && err.status === 404) return null;
+    console.warn("bricklink fetchItem error", mpn, (err as Error).message);
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {
