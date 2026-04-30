@@ -79,18 +79,6 @@ Deno.serve(async (req) => {
     if (!clientId || !clientSecret || !realmId)
       throw new Error("QBO credentials not configured");
 
-    // Auth check - must be a logged-in user
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
-    const admin = createClient(supabaseUrl, serviceRoleKey);
-    const token = authHeader.replace("Bearer ", "");
-
-    const {
-      data: { user },
-      error: userError,
-    } = await admin.auth.getUser(token);
-    if (userError || !user) throw new Error("Unauthorized");
-
     const body = await req.json();
     const {
       customer_id,     // admin mode: push an existing customer record
@@ -102,7 +90,36 @@ Deno.serve(async (req) => {
       mobile,
       ebay_url,
       billing_address,
+      queued_by,
     } = body;
+
+    // Auth check - accepts either a logged-in user or an internal posting
+    // processor call using the service-role key.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+    const token = authHeader.replace("Bearer ", "");
+
+    let user: { id: string; email?: string | null } | null = null;
+    if (token === serviceRoleKey) {
+      if (typeof queued_by === "string" && queued_by.length > 0) {
+        const {
+          data: { user: queuedUser },
+        } = await admin.auth.admin.getUserById(queued_by);
+        user = queuedUser ? { id: queuedUser.id, email: queuedUser.email } : null;
+      }
+      if (!user && customer_id) {
+        user = { id: "service_role", email: undefined };
+      }
+      if (!user) throw new Error("Unauthorized service-role customer upsert");
+    } else {
+      const {
+        data: { user: authUser },
+        error: userError,
+      } = await admin.auth.getUser(token);
+      if (userError || !authUser) throw new Error("Unauthorized");
+      user = { id: authUser.id, email: authUser.email };
+    }
 
     let customer: any = null;
     let userEmail: string | undefined;

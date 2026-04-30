@@ -13,6 +13,26 @@ import { supabase } from "@/integrations/supabase/client";
 import { WelcomeQrLabel } from "./WelcomeQrLabel";
 import { Gift, Tag } from "lucide-react";
 
+type WelcomeCodeRow = Record<string, unknown>;
+
+async function queueAndProcessCustomerPosting(customerId: string, payload: Record<string, unknown>) {
+  const { data: intentId, error: queueError } = await supabase.rpc(
+    "queue_qbo_customer_posting_intent" as never,
+    {
+      p_customer_id: customerId,
+      p_payload: payload,
+    } as never,
+  );
+  if (queueError) throw queueError;
+
+  const { data, error } = await supabase.functions.invoke("accounting-posting-intents-process", {
+    body: intentId ? { intentId } : { batch_size: 5 },
+  });
+  if (error) throw error;
+
+  return data as Record<string, unknown> | null;
+}
+
 export function CustomerDetail() {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
@@ -25,12 +45,12 @@ export function CustomerDetail() {
     queryKey: ["welcome-codes", "customer", customerId],
     queryFn: async () => {
       if (!customerId) return [];
-      const { data } = await (supabase as any)
-        .from("welcome_code")
+      const { data } = await supabase
+        .from("welcome_code" as never)
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
-      return (data || []) as any[];
+      return (data || []) as WelcomeCodeRow[];
     },
     enabled: !!customerId,
   });
@@ -85,15 +105,15 @@ export function CustomerDetail() {
           billing_country: form.billingCountry ?? null,
           notes: form.notes ?? null,
           updated_at: new Date().toISOString(),
-        } as any)
+        } as never)
         .eq("id", customerId);
 
       if (updateErr) throw updateErr;
 
       // 2. Push to QBO if connected
       if (customer.qboCustomerId) {
-        const { data, error: fnErr } = await supabase.functions.invoke("qbo-upsert-customer", {
-          body: {
+        try {
+          const data = await queueAndProcessCustomerPosting(customerId, {
             customer_id: customerId,
             first_name: form.firstName,
             last_name: form.lastName,
@@ -108,15 +128,16 @@ export function CustomerDetail() {
               postcode: form.billingPostcode,
               country: form.billingCountry || "GB",
             },
-          },
-        });
-        if (fnErr) {
-          console.error("QBO sync error:", fnErr);
-          toast.warning("Saved locally but QBO sync failed");
-        } else if (data?.success === false) {
-          toast.warning("Saved locally. QBO: " + (data.qbo_error || "sync issue"));
-        } else {
-          toast.success("Saved & synced to QBO");
+          });
+
+          if (data?.success === false) {
+            toast.warning("Saved locally. QBO posting queued with an issue");
+          } else {
+            toast.success("Saved & queued to QBO");
+          }
+        } catch (err) {
+          console.error("QBO customer posting error:", err);
+          toast.warning("Saved locally but QBO posting failed");
         }
       } else {
         toast.success("Saved locally (no QBO link)");
@@ -124,8 +145,8 @@ export function CustomerDetail() {
 
       setEditing(false);
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-    } catch (err: any) {
-      toast.error("Save failed: " + (err.message ?? "Unknown error"));
+    } catch (err) {
+      toast.error("Save failed: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setSaving(false);
     }

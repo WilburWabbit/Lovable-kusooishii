@@ -17,6 +17,10 @@ interface Address {
   country: string;
 }
 
+type MemberAddressRow = Address & {
+  address_type: "billing" | "delivery";
+};
+
 const emptyAddress: Address = {
   line_1: "",
   line_2: "",
@@ -25,6 +29,19 @@ const emptyAddress: Address = {
   postcode: "",
   country: "GB",
 };
+
+async function queueAndProcessCustomerPosting(payload: Record<string, unknown>) {
+  const { data: intentId, error: queueError } = await supabase.rpc(
+    "queue_qbo_customer_posting_intent" as never,
+    { p_payload: payload } as never,
+  );
+  if (queueError) throw queueError;
+
+  const { error } = await supabase.functions.invoke("accounting-posting-intents-process", {
+    body: intentId ? { intentId } : { batch_size: 5 },
+  });
+  if (error) throw error;
+}
 
 interface AddressesTabProps {
   userId: string;
@@ -46,8 +63,9 @@ export default function AddressesTab({ userId }: AddressesTabProps) {
         .eq("user_id", userId);
 
       if (data) {
-        const billingAddr = data.find((a: any) => a.address_type === "billing");
-        const deliveryAddr = data.find((a: any) => a.address_type === "delivery");
+        const rows = data as MemberAddressRow[];
+        const billingAddr = rows.find((a) => a.address_type === "billing");
+        const deliveryAddr = rows.find((a) => a.address_type === "delivery");
 
         if (billingAddr) {
           setBilling({
@@ -172,23 +190,21 @@ export default function AddressesTab({ userId }: AddressesTabProps) {
       if (deliveryResult.id) setDeliveryId(deliveryResult.id);
     }
 
-    // Push billing address to QBO
+    // Queue billing address update to QBO.
     try {
-      await supabase.functions.invoke("qbo-upsert-customer", {
-        body: {
-          billing_address: {
-            line_1: billing.line_1,
-            line_2: billing.line_2,
-            city: billing.city,
-            county: billing.county,
-            postcode: billing.postcode,
-            country: billing.country,
-          },
+      await queueAndProcessCustomerPosting({
+        billing_address: {
+          line_1: billing.line_1,
+          line_2: billing.line_2,
+          city: billing.city,
+          county: billing.county,
+          postcode: billing.postcode,
+          country: billing.country,
         },
       });
-    } catch {
+    } catch (err) {
       // QBO sync failure is non-blocking
-      console.warn("QBO address sync failed (non-blocking)");
+      console.warn("QBO address posting failed (non-blocking)", err);
     }
 
     toast.success("Addresses saved.");
