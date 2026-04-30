@@ -337,10 +337,16 @@ export function useRefreshReconciliationCases() {
 
   return useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.rpc("rebuild_reconciliation_cases" as never);
+      const { data: financeData, error: financeError } = await supabase.rpc("rebuild_reconciliation_cases" as never);
 
-      if (error) throw error;
-      return Number(data ?? 0);
+      if (financeError) throw financeError;
+
+      const { data: listingData, error: listingError } = await supabase.rpc(
+        "rebuild_listing_command_reconciliation_cases" as never,
+      );
+
+      if (listingError) throw listingError;
+      return Number(financeData ?? 0) + Number(listingData ?? 0);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
