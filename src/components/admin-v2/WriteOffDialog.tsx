@@ -51,19 +51,9 @@ export function WriteOffDialog({ open, onClose, stockUnitIds }: WriteOffDialogPr
 
       if (error) throw error;
 
-      // Recalculate variant stats for affected SKUs
+      // Refresh compatibility cost rollups for affected SKUs.
       for (const skuId of skuIds) {
-        const { data: skuRow } = await supabase
-          .from("sku")
-          .select("sku_code")
-          .eq("id", skuId)
-          .single();
-
-        if (skuRow) {
-          await supabase.rpc("v2_recalculate_variant_stats" as never, {
-            p_sku_code: (skuRow as unknown as Record<string, unknown>).sku_code,
-          } as never);
-        }
+        await supabase.rpc("refresh_sku_cost_rollups" as never, { p_sku_id: skuId } as never);
       }
 
       // Audit event

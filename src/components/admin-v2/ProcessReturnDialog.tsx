@@ -74,8 +74,17 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
           .catch((err) => console.warn("eBay quantity sync failed (non-blocking):", err));
       }
 
-      for (const skuCode of affectedSkus) {
-        await supabase.rpc("v2_recalculate_variant_stats" as never, { p_sku_code: skuCode } as never);
+      if (affectedSkus.size > 0) {
+        const { data: skuRows, error: skuErr } = await supabase
+          .from("sku")
+          .select("id")
+          .in("sku_code", Array.from(affectedSkus));
+
+        if (skuErr) throw skuErr;
+
+        for (const sku of (skuRows ?? []) as Array<{ id: string }>) {
+          await supabase.rpc("refresh_sku_cost_rollups" as never, { p_sku_id: sku.id } as never);
+        }
       }
     },
     onSuccess: () => {
