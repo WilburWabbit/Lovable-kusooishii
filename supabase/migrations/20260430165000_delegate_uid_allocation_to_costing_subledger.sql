@@ -7,7 +7,7 @@ RETURNS stock_unit
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public'
-AS $function$
+AS $$
 DECLARE
   v_actor uuid := auth.uid();
   v_jwt_role text := current_setting('request.jwt.claim.role', true);
@@ -129,7 +129,7 @@ BEGIN
 
   RETURN v_unit;
 END;
-$function$;
+$$;
 
 GRANT EXECUTE ON FUNCTION public.allocate_order_line_stock_unit_by_uid(uuid, uuid, text)
   TO authenticated, service_role;
