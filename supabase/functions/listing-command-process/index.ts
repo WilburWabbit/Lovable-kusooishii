@@ -81,6 +81,10 @@ function isRetryableError(message: string): boolean {
   return true;
 }
 
+function severityForCommand(command: ListingCommand): string {
+  return ["publish", "end"].includes(command.command_type) ? "high" : "medium";
+}
+
 async function parseJsonResponse(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
   if (!text.trim()) return {};
@@ -88,6 +92,87 @@ async function parseJsonResponse(res: Response): Promise<Record<string, unknown>
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
     return { raw_response: text };
+  }
+}
+
+async function recordListingCommandFailure(
+  admin: ReturnType<typeof createAdminClient>,
+  command: ListingCommand,
+  message: string,
+  retryCount: number,
+  nextAttempt: string | null,
+) {
+  try {
+    const evidence = {
+      target_system: command.target_system,
+      command_type: command.command_type,
+      entity_type: command.entity_type,
+      entity_id: command.entity_id,
+      retry_count: retryCount,
+      last_error: message.slice(0, 1000),
+      idempotency_key: command.idempotency_key,
+      next_attempt_at: nextAttempt,
+      payload: command.payload ?? {},
+    };
+
+    const { data: existing } = await admin
+      .from("reconciliation_case")
+      .select("id")
+      .eq("case_type" as never, "listing_command_failed")
+      .eq("related_entity_type" as never, "outbound_command")
+      .eq("related_entity_id" as never, command.id)
+      .in("status" as never, ["open", "in_progress"] as never)
+      .maybeSingle();
+
+    if (existing) {
+      await admin
+        .from("reconciliation_case")
+        .update({
+          severity: severityForCommand(command),
+          suspected_root_cause: "Listing outbound command failed.",
+          recommended_action: "Review the listing command error, correct listing/channel data, then rerun the listing outbox processor.",
+          due_at: nextAttempt,
+          evidence,
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id" as never, (existing as Record<string, unknown>).id);
+      return;
+    }
+
+    await admin.from("reconciliation_case").insert({
+      case_type: "listing_command_failed",
+      severity: severityForCommand(command),
+      related_entity_type: "outbound_command",
+      related_entity_id: command.id,
+      suspected_root_cause: "Listing outbound command failed.",
+      recommended_action: "Review the listing command error, correct listing/channel data, then rerun the listing outbox processor.",
+      due_at: nextAttempt,
+      evidence,
+    } as never);
+  } catch (err) {
+    console.warn("Failed to record listing command reconciliation case", err);
+  }
+}
+
+async function resolveListingCommandFailure(
+  admin: ReturnType<typeof createAdminClient>,
+  commandId: string,
+) {
+  try {
+    await admin
+      .from("reconciliation_case")
+      .update({
+        status: "resolved",
+        close_code: "listing_command_acknowledged",
+        closed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("case_type" as never, "listing_command_failed")
+      .eq("related_entity_type" as never, "outbound_command")
+      .eq("related_entity_id" as never, commandId)
+      .in("status" as never, ["open", "in_progress"] as never);
+  } catch (err) {
+    console.warn("Failed to resolve listing command reconciliation case", err);
   }
 }
 
@@ -698,6 +783,8 @@ Deno.serve(async (req) => {
           } as never)
           .eq("id" as never, command.id);
 
+        await resolveListingCommandFailure(admin, command.id);
+
         results.push({
           command_id: command.id,
           target_system: command.target_system,
@@ -722,6 +809,8 @@ Deno.serve(async (req) => {
             updated_at: new Date().toISOString(),
           } as never)
           .eq("id" as never, command.id);
+
+        await recordListingCommandFailure(admin, command, message, retryCount, nextAttempt);
 
         results.push({
           command_id: command.id,

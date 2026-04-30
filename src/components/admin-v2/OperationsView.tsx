@@ -11,8 +11,10 @@ import {
   usePostingIntents,
   useRefreshReconciliationCases,
   useReconciliationInbox,
+  useRunListingCommandNow,
   useRetryPostingIntent,
   useRetryListingCommand,
+  useRunPostingIntentNow,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
   useUpdateReconciliationCaseStatus,
@@ -135,7 +137,9 @@ export function OperationsView() {
   const { data: blueBellAccruals = [], isLoading: blueBellAccrualsLoading } = useBlueBellOpenAccruals();
   const updateCase = useUpdateReconciliationCaseStatus();
   const runProcessor = useRunPostingIntentProcessor();
+  const runPostingIntentNow = useRunPostingIntentNow();
   const runListingProcessor = useRunListingCommandProcessor();
+  const runListingCommandNow = useRunListingCommandNow();
   const refreshReconciliation = useRefreshReconciliationCases();
   const retryListingCommand = useRetryListingCommand();
   const cancelListingCommand = useCancelListingCommand();
@@ -176,6 +180,20 @@ export function OperationsView() {
     runListingProcessor.mutate(undefined, {
       onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} listing command(s)`),
       onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command processor failed"),
+    });
+  };
+
+  const handleRunListingCommandNow = (id: string) => {
+    runListingCommandNow.mutate(id, {
+      onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} listing command(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command processor failed"),
+    });
+  };
+
+  const handleRunPostingIntentNow = (id: string) => {
+    runPostingIntentNow.mutate(id, {
+      onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} posting intent(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Posting processor failed"),
     });
   };
 
@@ -298,6 +316,16 @@ export function OperationsView() {
                     <td className="max-w-[360px] px-4 py-3 text-xs text-red-600">{command.lastError ?? "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRunListingCommandNow(command.id)}
+                          disabled={runListingCommandNow.isPending || command.status !== "pending"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Run command now"
+                          aria-label="Run command now"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleRetryListingCommand(command.id)}
@@ -539,6 +567,16 @@ export function OperationsView() {
                     <td className="max-w-[360px] px-4 py-3 text-xs text-red-600">{intent.lastError ?? "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRunPostingIntentNow(intent.id)}
+                          disabled={runPostingIntentNow.isPending || intent.status !== "pending"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Run posting now"
+                          aria-label="Run posting now"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleRetryPostingIntent(intent.id)}
