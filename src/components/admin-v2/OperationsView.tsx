@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Clock, FileText, Play, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, FileText, Play, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   useBlueBellOpenAccruals,
@@ -7,6 +7,7 @@ import {
   useCreateBlueBellSettlement,
   useListingCommands,
   usePostingIntents,
+  useRefreshReconciliationCases,
   useReconciliationInbox,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
@@ -127,6 +128,7 @@ export function OperationsView() {
   const updateCase = useUpdateReconciliationCaseStatus();
   const runProcessor = useRunPostingIntentProcessor();
   const runListingProcessor = useRunListingCommandProcessor();
+  const refreshReconciliation = useRefreshReconciliationCases();
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
@@ -165,6 +167,13 @@ export function OperationsView() {
     });
   };
 
+  const handleRefreshReconciliation = () => {
+    refreshReconciliation.mutate(undefined, {
+      onSuccess: (count) => toast.success(`Created ${count} reconciliation case(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation refresh failed"),
+    });
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -173,6 +182,15 @@ export function OperationsView() {
           <p className="text-xs text-zinc-500">Listing commands, finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleRefreshReconciliation}
+            disabled={refreshReconciliation.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" />
+            {refreshReconciliation.isPending ? "Refreshing..." : "Refresh Cases"}
+          </button>
           <button
             type="button"
             onClick={handleRunListingProcessor}
