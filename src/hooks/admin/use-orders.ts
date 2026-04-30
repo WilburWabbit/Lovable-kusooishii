@@ -294,6 +294,9 @@ export function useAllocateOrderLineByUnit() {
         } as never,
       );
       if (error) throw error;
+
+      await supabase
+        .rpc('refresh_order_line_economics' as never, { p_sales_order_id: orderId } as never);
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.orderId) });

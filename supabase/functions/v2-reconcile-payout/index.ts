@@ -188,6 +188,13 @@ Deno.serve(async (req) => {
             } as never)
             .eq("payout_id", payoutId)
             .eq("sales_order_id", soId);
+
+          const { error: economicsErr } = await admin
+            .rpc("refresh_order_line_economics", { p_sales_order_id: soId });
+
+          if (economicsErr) {
+            console.warn(`Failed to refresh order economics for ${soId}: ${economicsErr.message}`);
+          }
         }
       }
     }

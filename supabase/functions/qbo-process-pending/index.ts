@@ -991,47 +991,49 @@ async function reconcileSalesOrderLines(
     }).eq("id", existingId);
   }
 
-  // Insert new lines + allocate stock for additions
+  // Insert new lines + allocate stock for additions through the costing subledger
   let allocated = 0;
   let missing = 0;
   for (const d of unmatchedDesired) {
-    const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
-      p_sku_id: d.skuId,
-      p_quantity: 1,
-      p_order_id: orderId,
-    });
-    if (allocErr) throw allocErr;
-    const stockUnitId: string | null = (allocatedIds ?? [])[0] ?? null;
-
-    let cogs: number | null = null;
-    if (stockUnitId) {
-      const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
-      cogs = unitData?.landed_cost ?? null;
-    }
-
-    await admin.from("sales_order_line").insert({
+    const { data: insertedLine, error: lineErr } = await admin.from("sales_order_line").insert({
       sales_order_id: orderId,
       sku_id: d.skuId,
       quantity: 1,
       unit_price: d.unitPrice,
       line_total: d.unitPrice,
-      stock_unit_id: stockUnitId,
       qbo_tax_code_ref: d.taxCodeRef,
       vat_rate_id: vatRateId,
       tax_code_id: d.taxCodeId,
-      cogs,
+    }).select("id").single();
+    if (lineErr) throw lineErr;
+
+    const lineId = insertedLine.id as string;
+    const { data: allocation, error: allocErr } = await admin.rpc("allocate_stock_for_order_line", {
+      p_sales_order_line_id: lineId,
     });
 
-    if (stockUnitId) allocated++;
-    else missing++;
+    const allocationResult = allocation as Record<string, unknown> | null;
+    if (allocErr || allocationResult?.status !== "allocated") missing++;
+    else allocated++;
   }
 
-  // Count preserved/matched lines that already had stock allocated
+  // Allocate any preserved/matched lines that were imported before unit allocation existed.
   for (const { existingId } of matchedPairs) {
     const existingLine = existing.find((e) => e.id === existingId);
-    if (existingLine?.stock_unit_id) allocated++;
-    else missing++;
+    if (existingLine?.stock_unit_id) {
+      allocated++;
+      continue;
+    }
+
+    const { data: allocation, error: allocErr } = await admin.rpc("allocate_stock_for_order_line", {
+      p_sales_order_line_id: existingId,
+    });
+    const allocationResult = allocation as Record<string, unknown> | null;
+    if (allocErr || allocationResult?.status !== "allocated") missing++;
+    else allocated++;
   }
+
+  await admin.rpc("refresh_order_line_economics", { p_sales_order_id: orderId });
 
   return { allocated, missing };
 }
@@ -1259,35 +1261,24 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
             lineTaxCodeId = tc?.id ?? null;
           }
 
-          // Atomic stock allocation — now also sets v2_status, sold_at, and order_id
-          const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
-            p_sku_id: skuId,
-            p_quantity: qty,
-            p_order_id: order!.id,
-          });
-          if (allocErr) throw allocErr;
-          const unitIds: string[] = allocatedIds ?? [];
-
           for (let i = 0; i < qty; i++) {
-            const stockUnitId = unitIds[i] ?? null;
-            // Fetch landed_cost for COGS if we have a stock unit
-            let cogs: number | null = null;
-            if (stockUnitId) {
-              const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
-              cogs = unitData?.landed_cost ?? null;
-            }
-            const { error: lineErr } = await admin.from("sales_order_line").insert({
+            const { data: insertedLine, error: lineErr } = await admin.from("sales_order_line").insert({
               sales_order_id: order!.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
-              stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
+              qbo_tax_code_ref: taxCodeRef,
               vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
-              cogs,
-            });
+            }).select("id").single();
             if (lineErr) {
               throw lineErr;
             }
-            if (stockUnitId) orderStockMatched++;
-            else orderStockMissing++;
+
+            const lineId = insertedLine.id as string;
+            const { data: allocation, error: allocErr } = await admin.rpc("allocate_stock_for_order_line", {
+              p_sales_order_line_id: lineId,
+            });
+            const allocationResult = allocation as Record<string, unknown> | null;
+            if (allocErr || allocationResult?.status !== "allocated") orderStockMissing++;
+            else orderStockMatched++;
           }
         }
 
@@ -1311,6 +1302,8 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
 
       stockMatched += orderStockMatched;
       stockMissing += orderStockMissing;
+
+      await admin.rpc("refresh_order_line_economics", { p_sales_order_id: order!.id });
 
       await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
       processed++;
@@ -1487,7 +1480,8 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
     .order("received_at", { ascending: true })
     .limit(batchSize);
 
-  let processed = 0, errors = 0, ordersLinked = 0;
+  let processed = 0, errors = 0;
+  const ordersLinked = 0;
 
   for (const entry of (pending ?? [])) {
     try {

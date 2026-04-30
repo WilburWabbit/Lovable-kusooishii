@@ -401,6 +401,13 @@ Deno.serve(async (req) => {
               order_fees:     roundedFees,
               order_net:      orderNet,
             } as never, { onConflict: "payout_id,sales_order_id" as never });
+
+          const { error: economicsErr } = await admin
+            .rpc("refresh_order_line_economics", { p_sales_order_id: salesOrderId });
+
+          if (economicsErr) {
+            console.warn(`Failed to refresh order economics for ${salesOrderId}: ${economicsErr.message}`);
+          }
         }
       }
 

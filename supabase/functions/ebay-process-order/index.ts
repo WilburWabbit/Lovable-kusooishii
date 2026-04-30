@@ -938,55 +938,48 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 8: Insert sales_order_lines ──
+    // ── Step 8: Insert sales_order_lines and allocate stock through the costing subledger ──
     const affectedSkuIds = new Set<string>();
+    let unitsDepletedTotal = 0;
 
     for (const pl of processedLines) {
       affectedSkuIds.add(pl.skuId);
-      await admin.from("sales_order_line").insert({
-        sales_order_id: newOrder.id,
-        sku_id: pl.skuId,
-        quantity: pl.qty,
-        unit_price: pl.unitPrice,   // NET per unit
-        line_total: pl.lineTotal,   // NET line total
-        tax_code_id: taxCodeId,
-        vat_rate_id: vatRateId,
-        qbo_tax_code_ref: qboTaxCodeRef,
-      });
-    }
 
-    // ── Step 9: FIFO stock depletion ──
-    let unitsDepletedTotal = 0;
-    for (const pl of processedLines) {
-      const { data: availableUnits } = await admin
-        .from("stock_unit")
-        .select("id")
-        .eq("sku_id", pl.skuId)
-        .eq("status", "available")
-        .order("created_at", { ascending: true })
-        .limit(pl.qty);
+      for (let i = 0; i < pl.qty; i += 1) {
+        const { data: insertedLine, error: lineErr } = await admin
+          .from("sales_order_line")
+          .insert({
+            sales_order_id: newOrder.id,
+            sku_id: pl.skuId,
+            quantity: 1,
+            unit_price: pl.unitPrice,   // NET per unit
+            line_total: pl.unitPrice,   // NET line total
+            tax_code_id: taxCodeId,
+            vat_rate_id: vatRateId,
+            qbo_tax_code_ref: qboTaxCodeRef,
+          })
+          .select("id")
+          .single();
 
-      if (availableUnits?.length) {
-        const unitIds = availableUnits.map((u: any) => u.id);
-        const { error: depleteErr } = await admin
-          .from("stock_unit")
-          .update({ status: "closed", updated_at: new Date().toISOString() })
-          .in("id", unitIds);
+        if (lineErr) {
+          throw new Error(`Failed to create eBay order line for ${pl.skuCode}: ${lineErr.message}`);
+        }
 
-        if (depleteErr) {
-          console.error(`Failed to deplete stock for SKU ${pl.skuCode}:`, depleteErr.message);
+        const lineId = (insertedLine as Record<string, unknown>).id as string;
+        const { data: allocation, error: allocationErr } = await admin
+          .rpc("allocate_stock_for_order_line", { p_sales_order_line_id: lineId });
+
+        const allocationResult = allocation as Record<string, unknown> | null;
+        if (allocationErr || allocationResult?.status !== "allocated") {
+          console.warn(`No available stock for ${pl.skuCode} on line ${lineId}`, allocationErr);
         } else {
-          unitsDepletedTotal += unitIds.length;
-          console.log(`FIFO depleted ${unitIds.length}/${pl.qty} units for ${pl.skuCode}`);
+          unitsDepletedTotal += 1;
         }
-
-        if (availableUnits.length < pl.qty) {
-          console.warn(`Insufficient stock for ${pl.skuCode}: wanted ${pl.qty}, had ${availableUnits.length}`);
-        }
-      } else {
-        console.warn(`No available stock for ${pl.skuCode}`);
       }
     }
+
+    await admin
+      .rpc("refresh_order_line_economics", { p_sales_order_id: newOrder.id });
 
     // ── Step 10: Push updated stock counts to channels ──
     let stockPushed = 0;
@@ -1000,7 +993,7 @@ Deno.serve(async (req) => {
           .from("stock_unit")
           .select("id", { count: "exact", head: true })
           .eq("sku_id", skuId)
-          .eq("status", "available");
+          .in("v2_status", ["graded", "listed", "restocked"]);
         stockCounts.set(skuId, count || 0);
       }
 
