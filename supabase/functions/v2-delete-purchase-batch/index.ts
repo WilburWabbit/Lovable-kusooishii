@@ -12,6 +12,25 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
+type SupabaseAdminClient = ReturnType<typeof createClient>;
+type QboDeleteResult = { deleted: boolean; reason?: string };
+type QboResult = QboDeleteResult | { skipped: true };
+type RoleRow = { role?: string | null };
+type PurchaseBatchRow = {
+  id: string;
+  reference: string | null;
+  supplier_name: string | null;
+  status: string | null;
+  qbo_purchase_id: string | null;
+};
+type StockUnitGuardRow = {
+  id: string;
+  status: string | null;
+  v2_status: string | null;
+  order_id: string | null;
+};
+type IdRow = { id: string };
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -25,7 +44,7 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = FE
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-async function ensureValidToken(admin: any, realmId: string, clientId: string, clientSecret: string): Promise<string> {
+async function ensureValidToken(admin: SupabaseAdminClient, realmId: string, clientId: string, clientSecret: string): Promise<string> {
   const { data: conn, error } = await admin.from("qbo_connection").select("*").eq("realm_id", realmId).single();
   if (error || !conn) throw new Error("No QBO connection found.");
   if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
@@ -100,19 +119,26 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await admin.auth.getUser(token);
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    // Role check: admin or staff
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
-    const allowed = (roles ?? []).some((r: any) => r.role === "admin" || r.role === "staff");
-    if (!allowed) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const isServiceRole = token === serviceRoleKey;
+    let actorId: string | null = null;
+
+    if (!isServiceRole) {
+      const { data: { user }, error: userError } = await admin.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      actorId = user.id;
+
+      // Role check: admin or staff
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
+      const allowed = ((roles ?? []) as RoleRow[]).some((r) => r.role === "admin" || r.role === "staff");
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const body = await req.json().catch(() => ({}));
@@ -127,7 +153,7 @@ Deno.serve(async (req) => {
     // ── 1. Load batch ────────────────────────────────────────
     const { data: batch, error: batchErr } = await admin
       .from("purchase_batches")
-      .select("id, reference, supplier_name, status")
+      .select("id, reference, supplier_name, status, qbo_purchase_id")
       .eq("id", batchId)
       .maybeSingle();
     if (batchErr) throw new Error(`Load batch failed: ${batchErr.message}`);
@@ -136,6 +162,7 @@ Deno.serve(async (req) => {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const batchRow = batch as PurchaseBatchRow;
 
     // ── 2. Safety: refuse if any unit is sold / listed / shipped ─────
     const { data: units, error: unitsErr } = await admin
@@ -146,7 +173,8 @@ Deno.serve(async (req) => {
 
     const blockedStatuses = new Set(["sold", "shipped", "delivered", "listed", "reserved"]);
     const blockedDbStatuses = new Set(["closed", "shipped", "delivered", "reserved"]);
-    const blocking = (units ?? []).filter((u: any) =>
+    const unitRows = (units ?? []) as StockUnitGuardRow[];
+    const blocking = unitRows.filter((u) =>
       u.order_id ||
       blockedStatuses.has(String(u.v2_status ?? "")) ||
       blockedDbStatuses.has(String(u.status ?? ""))
@@ -160,29 +188,30 @@ Deno.serve(async (req) => {
 
     // ── 3. Decide if `reference` is a QBO Purchase id ────────
     // Heuristic: matches inbound_receipt.qbo_purchase_id == reference.
-    let qboPurchaseId: string | null = null;
+    let qboPurchaseId: string | null = batchRow.qbo_purchase_id ?? null;
     let inboundReceiptId: string | null = null;
     let landingId: string | null = null;
-    if (batch.reference) {
+    if (!qboPurchaseId && batchRow.reference) {
       const { data: receipt } = await admin
         .from("inbound_receipt")
         .select("id, qbo_purchase_id")
-        .eq("qbo_purchase_id", batch.reference)
+        .eq("qbo_purchase_id", batchRow.reference)
         .maybeSingle();
       if (receipt) {
-        qboPurchaseId = receipt.qbo_purchase_id as string;
-        inboundReceiptId = receipt.id as string;
+        const receiptRow = receipt as { id: string; qbo_purchase_id: string };
+        qboPurchaseId = receiptRow.qbo_purchase_id;
+        inboundReceiptId = receiptRow.id;
         const { data: landing } = await admin
           .from("landing_raw_qbo_purchase")
           .select("id")
           .eq("external_id", qboPurchaseId)
           .maybeSingle();
-        if (landing) landingId = landing.id as string;
+        if (landing) landingId = (landing as IdRow).id;
       }
     }
 
     // ── 4. Delete in QBO if linked ───────────────────────────
-    let qboResult: { deleted: boolean; reason?: string } | { skipped: true } = { skipped: true } as any;
+    let qboResult: QboResult = { skipped: true };
     if (qboPurchaseId && !skipQbo) {
       const realmId = Deno.env.get("QBO_REALM_ID");
       const clientId = Deno.env.get("QBO_CLIENT_ID");
@@ -193,17 +222,17 @@ Deno.serve(async (req) => {
           const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
           qboResult = await deleteQboPurchase(baseUrl, accessToken, qboPurchaseId);
         } catch (e) {
-          qboResult = { deleted: false, reason: `qbo_token_error: ${e instanceof Error ? e.message : String(e)}` } as any;
+          qboResult = { deleted: false, reason: `qbo_token_error: ${e instanceof Error ? e.message : String(e)}` };
         }
       } else {
-        qboResult = { deleted: false, reason: "qbo_credentials_missing" } as any;
+        qboResult = { deleted: false, reason: "qbo_credentials_missing" };
       }
     }
 
     // ── 5. Local cleanup ─────────────────────────────────────
     // Stock units first (safe to hard-delete because we already guarded out sold/shipped).
-    if ((units ?? []).length > 0) {
-      const unitIds = (units ?? []).map((u: any) => u.id);
+    if (unitRows.length > 0) {
+      const unitIds = unitRows.map((u) => u.id);
       const { error: unitsDelErr } = await admin.from("stock_unit").delete().in("id", unitIds);
       if (unitsDelErr) throw new Error(`Delete units failed: ${unitsDelErr.message}`);
     }
@@ -216,7 +245,7 @@ Deno.serve(async (req) => {
     if (inboundReceiptId) {
       // Detach any sold units from the receipt lines (none should exist since we blocked above, but be defensive).
       const { data: rLines } = await admin.from("inbound_receipt_line").select("id").eq("inbound_receipt_id", inboundReceiptId);
-      const rLineIds = (rLines ?? []).map((l: any) => l.id);
+      const rLineIds = ((rLines ?? []) as IdRow[]).map((l) => l.id);
       if (rLineIds.length > 0) {
         await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).in("inbound_receipt_line_id", rLineIds);
         await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", inboundReceiptId);
@@ -239,14 +268,14 @@ Deno.serve(async (req) => {
       entity_type: "purchase_batch",
       entity_id: crypto.randomUUID(),
       trigger_type: "purchase_batch_deleted",
-      actor_type: "user",
-      actor_id: user.id,
+      actor_type: isServiceRole ? "system" : "user",
+      actor_id: actorId,
       source_system: "admin_v2",
       input_json: { batch_id: batchId, skip_qbo: skipQbo },
       output_json: {
         batch_id: batchId,
-        supplier_name: batch.supplier_name,
-        units_deleted: (units ?? []).length,
+        supplier_name: batchRow.supplier_name,
+        units_deleted: unitRows.length,
         qbo_purchase_id: qboPurchaseId,
         qbo_result: qboResult,
         inbound_receipt_id: inboundReceiptId,
@@ -257,7 +286,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       batch_id: batchId,
-      units_deleted: (units ?? []).length,
+      units_deleted: unitRows.length,
       qbo_purchase_id: qboPurchaseId,
       qbo_result: qboResult,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

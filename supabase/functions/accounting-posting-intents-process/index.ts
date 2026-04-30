@@ -61,6 +61,12 @@ function getCustomerId(intent: PostingIntent): string | null {
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
 }
 
+function getPurchaseBatchId(intent: PostingIntent): string | null {
+  if (intent.entity_type === "purchase_batch" && intent.entity_id) return intent.entity_id;
+  const fromPayload = intent.payload?.batch_id ?? intent.payload?.purchase_batch_id;
+  return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
+}
+
 function getRefundedLineIds(intent: PostingIntent): string[] {
   const value = intent.payload?.refunded_line_ids;
   if (!Array.isArray(value)) return [];
@@ -71,6 +77,9 @@ function getEntityIdForIntent(intent: PostingIntent): string | null {
   if (intent.action === "create_payout_deposit") return getPayoutId(intent);
   if (intent.action === "upsert_item") return getSkuId(intent);
   if (intent.action === "upsert_customer") return getCustomerId(intent) ?? intent.id;
+  if (["create_purchase", "update_purchase", "delete_purchase"].includes(intent.action)) {
+    return getPurchaseBatchId(intent);
+  }
   return getSalesOrderId(intent);
 }
 
@@ -139,6 +148,39 @@ function qboActionConfig(intent: PostingIntent, entityId: string) {
     };
   }
 
+  if (intent.action === "create_purchase") {
+    return {
+      functionName: "v2-push-purchase-to-qbo",
+      requestBody: { batch_id: entityId },
+      qboEntityType: "Purchase",
+      responseIdField: "qbo_purchase_id",
+      resultIdField: "qbo_purchase_id",
+      sourceColumn: "purchase_batches.qbo_purchase_id",
+    };
+  }
+
+  if (intent.action === "update_purchase") {
+    return {
+      functionName: "v2-update-purchase-in-qbo",
+      requestBody: { batch_id: entityId },
+      qboEntityType: "Purchase",
+      responseIdField: "qbo_purchase_id",
+      resultIdField: "qbo_purchase_id",
+      sourceColumn: "purchase_batches.qbo_purchase_id",
+    };
+  }
+
+  if (intent.action === "delete_purchase") {
+    return {
+      functionName: "v2-delete-purchase-batch",
+      requestBody: { batch_id: entityId, skip_qbo: false },
+      qboEntityType: "Purchase",
+      responseIdField: "qbo_purchase_id",
+      resultIdField: "qbo_purchase_id",
+      sourceColumn: "purchase_batches.qbo_purchase_id",
+    };
+  }
+
   throw new Error(`Unsupported QBO posting intent action ${intent.action}`);
 }
 
@@ -157,7 +199,16 @@ Deno.serve(async (req) => {
       .from("posting_intent")
       .select("id, action, entity_type, entity_id, idempotency_key, retry_count, payload")
       .eq("target_system", "qbo")
-      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit", "upsert_item", "upsert_customer"] as never)
+      .in("action", [
+        "create_sales_receipt",
+        "create_refund_receipt",
+        "create_payout_deposit",
+        "upsert_item",
+        "upsert_customer",
+        "create_purchase",
+        "update_purchase",
+        "delete_purchase",
+      ] as never)
       .order("created_at", { ascending: true })
       .limit(batchSize);
 
@@ -322,6 +373,13 @@ Deno.serve(async (req) => {
               .maybeSingle();
             const customerRow = customer as Record<string, unknown> | null;
             docNumber = (customerRow?.display_name as string | null) ?? (customerRow?.email as string | null) ?? null;
+          } else if (intent.entity_type === "purchase_batch") {
+            const { data: batch } = await admin
+              .from("purchase_batches" as never)
+              .select("reference")
+              .eq("id", entityId)
+              .maybeSingle();
+            docNumber = ((batch as Record<string, unknown> | null)?.reference as string | null) ?? entityId;
           }
 
           if (intent.entity_type === "customer") {
@@ -363,6 +421,7 @@ Deno.serve(async (req) => {
           entity_type: intent.entity_type,
           entity_id: entityId,
           status: "posted",
+          response_payload: responsePayload,
           [actionConfig.resultIdField]: qboEntityId || null,
         });
       } catch (err) {
