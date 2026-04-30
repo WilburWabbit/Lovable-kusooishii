@@ -2561,7 +2561,20 @@ Deno.serve(async (req) => {
         .in("qbo_sync_status", ["failed", "needs_manual_review"])
         .select("id");
       if (resetErr) throw resetErr;
-      result = { reset: (resetRows ?? []).length };
+
+      let queued = 0;
+      const queueErrors: Array<{ order_id: string; error: string }> = [];
+      for (const row of (resetRows ?? []) as Array<{ id: string }>) {
+        const { error: queueErr } = await admin
+          .rpc("queue_qbo_posting_intents_for_order", { p_sales_order_id: row.id });
+        if (queueErr) {
+          queueErrors.push({ order_id: row.id, error: queueErr.message });
+        } else {
+          queued++;
+        }
+      }
+
+      result = { reset: (resetRows ?? []).length, queued, queue_errors: queueErrors };
 
     } else if (action === "reset_payout_sync") {
       const { payoutId: resetPayoutId, scope } = params as { payoutId: string; scope: "expenses" | "deposit" | "all" };

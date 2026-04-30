@@ -33,12 +33,14 @@ function mapLegacyStatus(status: string | null): OrderStatus {
   return 'new';
 }
 
-function mapOrder(row: Record<string, unknown>): Order {
+function mapOrder(row: Record<string, unknown>, blueBellOrderIds?: Set<string>): Order {
   const gross = (row.gross_total as number) ?? 0;
   const vat = calculateVAT(gross);
+  const orderId = row.id as string;
+  const programAttributed = blueBellOrderIds?.has(orderId) ?? false;
 
   return {
-    id: row.id as string,
+    id: orderId,
     orderNumber: row.order_number as string,
     customerId: (row.customer_id as string) ?? null,
     channel: mapChannel(row.origin_channel as string),
@@ -50,7 +52,7 @@ function mapOrder(row: Record<string, unknown>): Order {
     carrier: (row.shipped_via as string) ?? null,
     trackingNumber: (row.tracking_number as string) ?? null,
     shippingCost: (row.shipping_total as number) ?? null,
-    blueBellClub: (row.blue_bell_club as boolean) ?? false,
+    blueBellClub: programAttributed || ((row.blue_bell_club as boolean) ?? false),
     docNumber: (row.doc_number as string) ?? null,
     qboSalesReceiptId: (row.qbo_sales_receipt_id as string) ?? null,
     qboSyncStatus: (row.qbo_sync_status as QBOSyncStatus) ?? 'pending',
@@ -62,6 +64,51 @@ function mapOrder(row: Record<string, unknown>): Order {
     shippedAt: (row.shipped_date as string) ?? null,
     deliveredAt: (row.delivered_at as string) ?? null,
   };
+}
+
+async function fetchBlueBellOrderIds(orderIds: string[]) {
+  const uniqueOrderIds = [...new Set(orderIds.filter(Boolean))];
+  const blueBellOrderIds = new Set<string>();
+  if (uniqueOrderIds.length === 0) return blueBellOrderIds;
+
+  const { data: program, error: programError } = await supabase
+    .from('sales_program' as never)
+    .select('id')
+    .eq('program_code' as never, 'blue_bell')
+    .maybeSingle();
+
+  if (programError) throw programError;
+  const programId = (program as unknown as Record<string, unknown> | null)?.id as string | undefined;
+  if (!programId) return blueBellOrderIds;
+
+  const { data: attributions, error: attributionError } = await supabase
+    .from('sales_program_attribution' as never)
+    .select('sales_order_id')
+    .eq('sales_program_id' as never, programId)
+    .in('sales_order_id' as never, uniqueOrderIds);
+
+  if (attributionError) throw attributionError;
+
+  for (const row of ((attributions ?? []) as unknown as Record<string, unknown>[])) {
+    if (row.sales_order_id) blueBellOrderIds.add(row.sales_order_id as string);
+  }
+
+  const missingOrderIds = uniqueOrderIds.filter((id) => !blueBellOrderIds.has(id));
+  if (missingOrderIds.length === 0) return blueBellOrderIds;
+
+  const { data: accruals, error: accrualError } = await supabase
+    .from('sales_program_accrual' as never)
+    .select('sales_order_id')
+    .eq('sales_program_id' as never, programId)
+    .in('sales_order_id' as never, missingOrderIds);
+
+  if (accrualError) throw accrualError;
+
+  for (const row of ((accruals ?? []) as unknown as Record<string, unknown>[])) {
+    if (row.sales_order_id) blueBellOrderIds.add(row.sales_order_id as string);
+  }
+
+  return blueBellOrderIds;
 }
 
 function mapChannel(ch: string | null): Channel {
@@ -161,9 +208,13 @@ export function useOrders() {
         .map((line) => line.id as string)
         .filter(Boolean);
       const economicsByLine = await fetchLineEconomics(lineIds);
+      const orderRows = (data ?? []) as Record<string, unknown>[];
+      const blueBellOrderIds = await fetchBlueBellOrderIds(
+        orderRows.map((row) => row.id as string),
+      );
 
-      return ((data ?? []) as Record<string, unknown>[]).map((row) => {
-        const order = mapOrder(row);
+      return orderRows.map((row) => {
+        const order = mapOrder(row, blueBellOrderIds);
         const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map((line) =>
           mapLineItem(line, economicsByLine.get(line.id as string)),
         );
@@ -212,7 +263,8 @@ export function useOrder(orderId: string | undefined) {
 
       if (error) throw error;
       const row = data as Record<string, unknown>;
-      const order = mapOrder(row);
+      const blueBellOrderIds = await fetchBlueBellOrderIds([orderId!]);
+      const order = mapOrder(row, blueBellOrderIds);
       const rawLines = (row.sales_order_line as Record<string, unknown>[]) ?? [];
       const economicsByLine = await fetchLineEconomics(
         rawLines.map((line) => line.id as string).filter(Boolean),
