@@ -718,6 +718,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     }
 
     // ── Create order lines with domain stock allocation ──
+    let allAllocated = true;
     for (const pl of preparedLines) {
       const { data: insertedLine, error: lineError } = await supabase
         .from("sales_order_line")
@@ -736,6 +737,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
 
       if (lineError) {
         console.error(`Failed to create order line for SKU ${pl.skuCode}:`, lineError);
+        allAllocated = false;
         continue;
       }
 
@@ -746,11 +748,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       const allocationResult = allocation as Record<string, unknown> | null;
       if (allocationError || allocationResult?.status !== "allocated") {
         console.warn(`No available stock unit for SKU ${pl.skuCode}, order line created without stock`, allocationError);
+        allAllocated = false;
       }
     }
 
     await supabase
       .rpc("refresh_order_line_economics", { p_sales_order_id: order.id });
+
+    if (!allAllocated) {
+      await supabase
+        .from("sales_order")
+        .update({ qbo_sync_status: "needs_manual_review", v2_status: "needs_allocation" } as never)
+        .eq("id", order.id);
+    }
 
     if (preparedLines.length > 0) {
       console.log(`Created ${preparedLines.length} order line(s) for ${new Set(preparedLines.map(l => l.skuId)).size} SKU(s)`);
@@ -856,30 +866,22 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       console.warn(`Failed to create/link customer record (non-fatal):`, custErr.message);
     }
 
-    // ── Trigger QBO retry-sync (best-effort, non-blocking) ──
-    // The order has qbo_sync_status='pending'. The retry function will
-    // create the QBO Customer + SalesReceipt and store confirmation IDs.
-    // Skip for test/sandbox events — they should not sync to QBO.
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    // ── Queue QBO posting intent (best-effort, non-blocking) ──
+    // The posting worker creates the QBO Customer + SalesReceipt asynchronously.
+    // Skip for test/sandbox events — they should not sync to QBO.
     if (isTestEvent) {
-      console.log("Test event — skipping QBO sync trigger");
+      console.log("Test event — skipping QBO posting intent");
+    } else if (!allAllocated) {
+      console.log("Order needs allocation — skipping QBO posting intent until allocation is complete");
     } else {
-      try {
-        if (supabaseUrl && serviceRoleKey) {
-          const syncResp = await fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${serviceRoleKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({}),
-          });
-          const syncBody = await syncResp.text();
-          console.log(`qbo-retry-sync triggered: ${syncResp.status} — ${syncBody.substring(0, 200)}`);
-        }
-      } catch (qboErr) {
-        console.warn("qbo-retry-sync trigger failed (non-blocking):", qboErr);
+      const { error: postingIntentError } = await supabase
+        .rpc("queue_qbo_posting_intents_for_order", { p_sales_order_id: order.id });
+
+      if (postingIntentError) {
+        console.warn("Failed to queue QBO posting intent:", postingIntentError.message);
       }
     }
 

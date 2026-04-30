@@ -195,6 +195,16 @@ Deno.serve(async (req) => {
           if (economicsErr) {
             console.warn(`Failed to refresh order economics for ${soId}: ${economicsErr.message}`);
           }
+
+          const { error: accountingErr } = await admin
+            .rpc("record_order_accounting_events", {
+              p_sales_order_id: soId,
+              p_source: "v2_reconcile_payout",
+            });
+
+          if (accountingErr) {
+            console.warn(`Failed to refresh accounting events for ${soId}: ${accountingErr.message}`);
+          }
         }
       }
     }

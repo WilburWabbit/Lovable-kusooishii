@@ -151,19 +151,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 4. Trigger QBO SalesReceipt sync ───────────────────
+    // ─── 4. Queue QBO posting intent ────────────────────────
     if (processedLines > 0) {
-      const supabaseFunctionsUrl = `${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`;
-      fetch(supabaseFunctionsUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-        body: JSON.stringify({ orderId }),
-      }).catch((err) => {
-        console.warn(`QBO sales receipt sync trigger failed (non-blocking): ${err}`);
-      });
+      const { error: postingIntentErr } = await admin
+        .rpc("queue_qbo_posting_intents_for_order", { p_sales_order_id: orderId });
+
+      if (postingIntentErr) {
+        console.warn(`Failed to queue QBO posting intent for ${orderId}: ${postingIntentErr.message}`);
+      }
     }
 
     console.log(

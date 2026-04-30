@@ -623,8 +623,12 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           .eq("order_id" as never, orderId)
           .in("v2_status" as never, ["sold"]);
 
-        // QBO sync handled by qbo-retry-sync cron — nudge it now
-        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
+        const { error: postingIntentError } = await supabase
+          .rpc("queue_qbo_posting_intents_for_order" as never, { p_sales_order_id: orderId } as never);
+
+        if (postingIntentError) {
+          throw new Error(`Failed to queue QBO posting intent: ${postingIntentError.message}`);
+        }
       }
 
       return { orderId, orderNumber, allAllocated };
