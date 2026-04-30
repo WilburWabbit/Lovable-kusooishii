@@ -287,13 +287,12 @@ export function QboSettingsCard() {
       if (resetCount > 0) {
         toast.success(`Reset ${resetCount} failed order(s) — processing...`);
       }
-      const d = await invokeWithAuth<Record<string, unknown>>('qbo-retry-sync');
-      const synced = (d as Record<string, unknown>)?.synced ?? 0;
-      const pending = (d as Record<string, unknown>)?.total_pending ?? 0;
-      if (synced === 0 && pending === 0 && resetCount === 0) {
-        toast.info('No orders pending QBO sync');
+      const d = await invokeWithAuth<Record<string, unknown>>('accounting-posting-intents-process', { batchSize: 50 });
+      const processed = Number((d as Record<string, unknown>)?.processed ?? 0);
+      if (processed === 0 && resetCount === 0) {
+        toast.info('No QBO posting intents pending');
       } else {
-        toast.success(`Retry complete: ${synced}/${pending} order(s) synced`);
+        toast.success(`Retry queued: ${resetCount} order(s) reset, ${processed} posting intent(s) processed`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Retry failed push failed');
@@ -451,8 +450,8 @@ export function QboSettingsCard() {
     setCleaningGhosts(true);
     try {
       const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'cleanup-ghost-units' });
-      const deleted = (data as any)?.deleted ?? 0;
-      const resetCount = (data as any)?.resetCount ?? 0;
+      const deleted = Number(data?.deleted ?? 0);
+      const resetCount = Number(data?.resetCount ?? 0);
       toast.success(`Cleaned up ${deleted} ghost units${resetCount > 0 ? `, reset ${resetCount} errored purchases — run Process Pending next` : ''}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Cleanup failed');
@@ -484,7 +483,7 @@ export function QboSettingsCard() {
     setRecalcingCost(true);
     try {
       const data = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'recalc-avg-cost' });
-      toast.success(`Recalculated avg cost on ${(data as any)?.updated ?? 0} SKUs`);
+      toast.success(`Recalculated avg cost on ${Number(data?.updated ?? 0)} SKUs`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Recalc failed');
     } finally {

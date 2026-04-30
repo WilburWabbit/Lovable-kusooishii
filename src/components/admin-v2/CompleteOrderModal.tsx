@@ -459,7 +459,7 @@ export function CompleteOrderModal({
           throw new Error(`Failed to queue QBO posting intent: ${postingIntentError.message}`);
         }
 
-        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
+        supabase.functions.invoke("accounting-posting-intents-process", { body: { batchSize: 10 } }).catch(() => {});
       }
 
       // Dismiss admin alert for this order
