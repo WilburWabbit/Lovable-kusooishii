@@ -281,18 +281,35 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 5. Trigger QBO sync ────────────────────────────────
+    // ─── 5. Queue QBO posting intent ────────────────────────
+    let postingIntentId: string | null = null;
     if ((p.qbo_sync_status as string) !== "synced") {
-      fetch(`${supabaseUrl}/functions/v1/qbo-sync-payout`, {
+      const { data: intentId, error: intentErr } = await admin.rpc("queue_qbo_payout_posting_intent" as never, {
+        p_payout_id: payoutId,
+      } as never);
+      if (intentErr) {
+        console.warn(`Failed to queue QBO payout posting intent for ${payoutId}: ${intentErr.message}`);
+      } else {
+        postingIntentId = (intentId as string | null) ?? null;
+      }
+
+      fetch(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${serviceRoleKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ payoutId }),
-      }).catch((err) => {
-        console.warn("QBO payout sync trigger failed (non-blocking):", err);
-      });
+        body: JSON.stringify(postingIntentId ? { intentId: postingIntentId } : { batch_size: 5 }),
+      })
+        .then(async (res) => {
+          const postingProcessResult = await res.json().catch(() => ({ status: res.status }));
+          if (!res.ok) {
+            console.warn("QBO payout posting intent processor failed:", postingProcessResult);
+          }
+        })
+        .catch((err) => {
+          console.warn("QBO payout posting intent processor trigger failed (non-blocking):", err);
+        });
     }
 
     console.log(
@@ -306,6 +323,7 @@ Deno.serve(async (req) => {
         ordersLinked: orderIds.length,
         unitsLinked: totalUnitCount,
         unitsTransitioned,
+        postingIntentId,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

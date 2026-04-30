@@ -386,12 +386,19 @@ export function useTriggerPayoutQBOSync() {
 
   return useMutation({
     mutationFn: async (payoutId: string) => {
-      const { data, error } = await supabase.functions.invoke('qbo-sync-payout', {
-        body: { payoutId },
+      const { data: intentId, error: queueError } = await supabase.rpc(
+        'queue_qbo_payout_posting_intent' as never,
+        { p_payout_id: payoutId } as never,
+      );
+
+      if (queueError) throw queueError;
+
+      const { data, error } = await supabase.functions.invoke('accounting-posting-intents-process', {
+        body: intentId ? { intentId } : { batch_size: 5 },
       });
 
       if (error) throw error;
-      return data;
+      return { ...(data as Record<string, unknown>), posting_intent_id: intentId };
     },
     onSuccess: (_data, payoutId) => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.all });
