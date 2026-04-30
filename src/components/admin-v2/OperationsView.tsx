@@ -5,10 +5,12 @@ import {
   useBlueBellOpenAccruals,
   useBlueBellStatement,
   useCreateBlueBellSettlement,
+  useCancelListingCommand,
   useListingCommands,
   usePostingIntents,
   useRefreshReconciliationCases,
   useReconciliationInbox,
+  useRetryListingCommand,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
   useUpdateReconciliationCaseStatus,
@@ -129,6 +131,8 @@ export function OperationsView() {
   const runProcessor = useRunPostingIntentProcessor();
   const runListingProcessor = useRunListingCommandProcessor();
   const refreshReconciliation = useRefreshReconciliationCases();
+  const retryListingCommand = useRetryListingCommand();
+  const cancelListingCommand = useCancelListingCommand();
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
@@ -164,6 +168,20 @@ export function OperationsView() {
     runListingProcessor.mutate(undefined, {
       onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} listing command(s)`),
       onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command processor failed"),
+    });
+  };
+
+  const handleRetryListingCommand = (id: string) => {
+    retryListingCommand.mutate(id, {
+      onSuccess: () => toast.success("Listing command queued for retry"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command retry failed"),
+    });
+  };
+
+  const handleCancelListingCommand = (id: string) => {
+    cancelListingCommand.mutate(id, {
+      onSuccess: () => toast.success("Listing command cancelled"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command cancel failed"),
     });
   };
 
@@ -238,13 +256,14 @@ export function OperationsView() {
                 <th className="px-3 py-2 font-semibold">Retries</th>
                 <th className="px-3 py-2 font-semibold">Next Attempt</th>
                 <th className="px-4 py-2 font-semibold">Last Error</th>
+                <th className="px-4 py-2 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {listingCommandsLoading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Loading listing commands...</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">Loading listing commands...</td></tr>
               ) : listingCommands.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No listing commands yet.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">No listing commands yet.</td></tr>
               ) : (
                 listingCommands.map((command) => (
                   <tr key={command.id} className="align-top hover:bg-zinc-50/70">
@@ -255,6 +274,30 @@ export function OperationsView() {
                     <td className="px-3 py-3"><Mono color={command.retryCount > 0 ? "amber" : "dim"}>{command.retryCount}</Mono></td>
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(command.nextAttemptAt)}</td>
                     <td className="max-w-[360px] px-4 py-3 text-xs text-red-600">{command.lastError ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRetryListingCommand(command.id)}
+                          disabled={retryListingCommand.isPending || command.status === "processing" || command.status === "acknowledged" || command.status === "sent"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Retry command"
+                          aria-label="Retry command"
+                        >
+                          <RefreshCcw className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCancelListingCommand(command.id)}
+                          disabled={cancelListingCommand.isPending || command.status === "processing" || command.status === "acknowledged" || command.status === "sent"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Cancel command"
+                          aria-label="Cancel command"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

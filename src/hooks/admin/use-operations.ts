@@ -332,6 +332,44 @@ export function useRunListingCommandProcessor() {
   });
 }
 
+export function useRetryListingCommand() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.rpc("retry_listing_outbound_command" as never, {
+        p_outbound_command_id: id,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useCancelListingCommand() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.rpc("cancel_listing_outbound_command" as never, {
+        p_outbound_command_id: id,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
 export function useRefreshReconciliationCases() {
   const queryClient = useQueryClient();
 
