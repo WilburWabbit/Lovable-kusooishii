@@ -79,6 +79,9 @@ function VariantChannelsCard({
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
   >({});
+  const [overrideState, setOverrideState] = useState<
+    Record<string, { approved: boolean; reason: string }>
+  >({});
 
   useEffect(() => {
     setChannelState((prev) => {
@@ -106,7 +109,6 @@ function VariantChannelsCard({
       }
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listings, feesMap, defaultEbayTitle, product.name, variant.salePrice, variant.floorPrice]);
 
   const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
@@ -119,6 +121,17 @@ function VariantChannelsCard({
         description: prev[channel]?.description ?? "",
         price: prev[channel]?.price ?? "",
         [field]: value,
+      },
+    }));
+  };
+
+  const updateOverride = (channel: string, patch: Partial<{ approved: boolean; reason: string }>) => {
+    setOverrideState((prev) => ({
+      ...prev,
+      [channel]: {
+        approved: prev[channel]?.approved ?? false,
+        reason: prev[channel]?.reason ?? "",
+        ...patch,
       },
     }));
   };
@@ -138,6 +151,13 @@ function VariantChannelsCard({
 
     const feeInfo = feesMap?.get(ch.key);
     const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
+    const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
+    const override = overrideState[ch.key] ?? { approved: false, reason: "" };
+
+    if (belowFloor && (!override.approved || override.reason.trim().length < 5)) {
+      toast.error("Approve the below-floor price and enter a reason");
+      return;
+    }
 
     try {
       await publishListing.mutateAsync({
@@ -148,6 +168,9 @@ function VariantChannelsCard({
         listingPrice: price,
         estimatedFees: feeCalc.estimatedFees,
         estimatedNet: feeCalc.estimatedNet,
+        allowBelowFloor: belowFloor && override.approved,
+        overrideReasonCode: belowFloor ? "below_floor_staff_approval" : undefined,
+        overrideReasonNote: belowFloor ? override.reason.trim() : undefined,
       });
       toast.success(`Queued ${variant.sku} for ${ch.label}`);
     } catch (err: unknown) {
@@ -183,8 +206,10 @@ function VariantChannelsCard({
           const feeInfo = feesMap?.get(ch.key);
           const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
           const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
+          const override = overrideState[ch.key] ?? { approved: false, reason: "" };
           const titleEmpty = !state.title?.trim();
-          const canPublish = !titleEmpty && !belowFloor && price > 0;
+          const overrideReady = !belowFloor || (override.approved && override.reason.trim().length >= 5);
+          const canPublish = !titleEmpty && price > 0 && overrideReady;
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
@@ -272,8 +297,22 @@ function VariantChannelsCard({
 
               {/* Warnings */}
               {belowFloor && (
-                <div className="text-[11px] text-red-500 mb-2">
-                  Below floor price (£{variant.floorPrice!.toFixed(2)})
+                <div className="mb-2 space-y-2 rounded-md border border-red-200 bg-red-50 p-2">
+                  <label className="flex items-center gap-2 text-[11px] font-medium text-red-700">
+                    <input
+                      type="checkbox"
+                      checked={override.approved}
+                      onChange={(e) => updateOverride(ch.key, { approved: e.target.checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                    Approve below floor price (£{variant.floorPrice!.toFixed(2)})
+                  </label>
+                  <input
+                    value={override.reason}
+                    onChange={(e) => updateOverride(ch.key, { reason: e.target.value })}
+                    placeholder="Reason for pricing override"
+                    className="w-full rounded border border-red-200 bg-white px-2 py-1.5 text-[11px] text-zinc-900"
+                  />
                 </div>
               )}
 

@@ -179,6 +179,9 @@ interface PublishListingInput {
   estimatedNet?: number;
   externalId?: string;
   externalUrl?: string;
+  allowBelowFloor?: boolean;
+  overrideReasonCode?: string;
+  overrideReasonNote?: string;
 }
 
 export function usePublishListing() {
@@ -188,7 +191,7 @@ export function usePublishListing() {
     mutationFn: async ({
       skuCode, channel, listingTitle, listingDescription,
       listingPrice, estimatedFees, estimatedNet,
-      externalId, externalUrl,
+      externalId, externalUrl, allowBelowFloor, overrideReasonCode, overrideReasonNote,
     }: PublishListingInput) => {
       if (!listingTitle?.trim()) {
         throw new Error('Listing title is required');
@@ -282,7 +285,7 @@ export function usePublishListing() {
       const listingId = (data as Record<string, unknown>).id as string;
       const commandType = wasLive ? 'reprice' : 'publish';
 
-      const { error: snapshotError } = await supabase
+      const { data: snapshotData, error: snapshotError } = await supabase
         .rpc('create_price_decision_snapshot' as never, {
           p_sku_id: skuId,
           p_channel: channel,
@@ -291,11 +294,27 @@ export function usePublishListing() {
         } as never);
 
       if (snapshotError) throw snapshotError;
+      const snapshotId = snapshotData as unknown as string | null;
+
+      if (allowBelowFloor) {
+        if (!snapshotId) throw new Error('Cannot approve override without a price decision snapshot');
+        if (!overrideReasonCode?.trim()) throw new Error('Override reason is required');
+
+        const { error: overrideError } = await supabase
+          .rpc('record_price_override_approval' as never, {
+            p_price_decision_snapshot_id: snapshotId,
+            p_reason_code: overrideReasonCode.trim(),
+            p_reason_note: overrideReasonNote?.trim() || null,
+          } as never);
+
+        if (overrideError) throw overrideError;
+      }
 
       const { error: commandError } = await supabase
         .rpc('queue_listing_command' as never, {
           p_channel_listing_id: listingId,
           p_command_type: commandType,
+          p_allow_below_floor: !!allowBelowFloor,
         } as never);
 
       if (commandError) throw commandError;
