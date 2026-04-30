@@ -437,6 +437,15 @@ Deno.serve(async (req) => {
 
       if (postingIntentErr) {
         console.warn(`Failed to queue QBO posting intent for eBay order ${localOrderId}: ${postingIntentErr.message}`);
+      } else {
+        fetch(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ batchSize: 10 }),
+        }).catch(() => {});
       }
 
       // ─── Fire-and-forget: v2 post-order processing ────

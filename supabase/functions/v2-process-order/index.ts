@@ -158,6 +158,17 @@ Deno.serve(async (req) => {
 
       if (postingIntentErr) {
         console.warn(`Failed to queue QBO posting intent for ${orderId}: ${postingIntentErr.message}`);
+      } else {
+        fetch(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ batchSize: 10 }),
+        }).catch((err) => {
+          console.warn(`posting intent processor trigger failed (non-blocking): ${err}`);
+        });
       }
     }
 

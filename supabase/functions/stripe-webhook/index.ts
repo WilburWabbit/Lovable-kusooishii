@@ -882,6 +882,17 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
 
       if (postingIntentError) {
         console.warn("Failed to queue QBO posting intent:", postingIntentError.message);
+      } else if (supabaseUrl && serviceRoleKey) {
+        fetch(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ batchSize: 10 }),
+        }).catch((err) => {
+          console.warn("posting intent processor trigger failed (non-blocking):", err);
+        });
       }
     }
 
