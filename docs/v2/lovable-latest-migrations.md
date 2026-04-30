@@ -1,6 +1,15 @@
 # Lovable Latest Migrations
 
-Run these migrations in Lovable SQL in this exact order after pulling branch
+If the smoke query only returns `cancel_listing_outbound_command` and
+`process_order_return`, run this catch-up migration once in Lovable SQL:
+
+1. `supabase/migrations/20260430235900_lovable_subledger_function_catchup.sql`
+
+It recreates the missing functions and supporting indexes from the latest batch
+in a single idempotent SQL file.
+
+For a clean database that has not run the batch yet, run these migrations in
+Lovable SQL in this exact order after pulling branch
 `codex/commerce-subledger-cutover`.
 
 These files are already Lovable-safe: PL/pgSQL bodies use single-quoted
