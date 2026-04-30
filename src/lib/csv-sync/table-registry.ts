@@ -14,6 +14,10 @@ function isValidMpn(v: string): boolean {
   return MPN_PATTERN.test(v);
 }
 
+// Compatibility/subledger fields stay exportable for audit, but imports must
+// update them through domain services so snapshots, outbox rows, and audit
+// events are written together.
+
 // ─── Registry ───────────────────────────────────────────────
 
 export const tableRegistry: Record<string, CsvTableConfig> = {
@@ -165,7 +169,7 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
       { dbColumn: 'price', csvHeader: 'price', type: 'number', mode: 'editable', required: false },
       { dbColumn: 'name', csvHeader: 'name', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'sale_price', csvHeader: 'sale_price', type: 'number', mode: 'editable', required: false },
-      { dbColumn: 'floor_price', csvHeader: 'floor_price', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'floor_price', csvHeader: 'floor_price', type: 'number', mode: 'readonly', required: false },
       { dbColumn: 'avg_cost', csvHeader: 'avg_cost', type: 'number', mode: 'readonly', required: false },
       { dbColumn: 'cost_range', csvHeader: 'cost_range', type: 'string', mode: 'readonly', required: false },
       { dbColumn: 'condition_notes', csvHeader: 'condition_notes', type: 'string', mode: 'editable', required: false },
@@ -202,8 +206,8 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
       { dbColumn: 'price_target', csvHeader: 'price_target', type: 'number', mode: 'editable', required: false },
       { dbColumn: 'price_ceiling', csvHeader: 'price_ceiling', type: 'number', mode: 'editable', required: false },
       { dbColumn: 'fee_adjusted_price', csvHeader: 'fee_adjusted_price', type: 'number', mode: 'editable', required: false },
-      { dbColumn: 'estimated_fees', csvHeader: 'estimated_fees', type: 'number', mode: 'editable', required: false },
-      { dbColumn: 'estimated_net', csvHeader: 'estimated_net', type: 'number', mode: 'editable', required: false },
+      { dbColumn: 'estimated_fees', csvHeader: 'estimated_fees', type: 'number', mode: 'readonly', required: false },
+      { dbColumn: 'estimated_net', csvHeader: 'estimated_net', type: 'number', mode: 'readonly', required: false },
       { dbColumn: 'external_url', csvHeader: 'external_url', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'listed_at', csvHeader: 'listed_at', type: 'date', mode: 'editable', required: false },
       { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
@@ -251,11 +255,11 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
       { dbColumn: 'shipping_postcode', csvHeader: 'shipping_postcode', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'shipping_country', csvHeader: 'shipping_country', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'notes', csvHeader: 'notes', type: 'string', mode: 'editable', required: false },
-      { dbColumn: 'blue_bell_club', csvHeader: 'blue_bell_club', type: 'boolean', mode: 'editable', required: false },
+      { dbColumn: 'blue_bell_club', csvHeader: 'blue_bell_club', type: 'boolean', mode: 'readonly', required: false },
       { dbColumn: 'external_order_id', csvHeader: 'external_order_id', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'shipped_date', csvHeader: 'shipped_date', type: 'date', mode: 'editable', required: false },
       { dbColumn: 'shipped_via', csvHeader: 'shipped_via', type: 'string', mode: 'editable', required: false },
-      { dbColumn: 'qbo_sync_status', csvHeader: 'qbo_sync_status', type: 'enum', mode: 'editable', required: false, enumValues: ['pending', 'synced', 'error'] },
+      { dbColumn: 'qbo_sync_status', csvHeader: 'qbo_sync_status', type: 'enum', mode: 'readonly', required: false, enumValues: ['pending', 'synced', 'error'] },
       { dbColumn: 'created_at', csvHeader: 'created_at', type: 'date', mode: 'readonly', required: false },
       { dbColumn: 'updated_at', csvHeader: 'updated_at', type: 'date', mode: 'readonly', required: false },
     ],
@@ -343,7 +347,7 @@ export const tableRegistry: Record<string, CsvTableConfig> = {
       { dbColumn: 'unit_count', csvHeader: 'unit_count', type: 'number', mode: 'editable', required: false },
       { dbColumn: 'qbo_deposit_id', csvHeader: 'qbo_deposit_id', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'qbo_expense_id', csvHeader: 'qbo_expense_id', type: 'string', mode: 'editable', required: false },
-      { dbColumn: 'qbo_sync_status', csvHeader: 'qbo_sync_status', type: 'enum', mode: 'editable', required: false, enumValues: ['pending', 'synced', 'error'] },
+      { dbColumn: 'qbo_sync_status', csvHeader: 'qbo_sync_status', type: 'enum', mode: 'readonly', required: false, enumValues: ['pending', 'synced', 'error'] },
       { dbColumn: 'external_payout_id', csvHeader: 'external_payout_id', type: 'string', mode: 'editable', required: true },
       { dbColumn: 'notes', csvHeader: 'notes', type: 'string', mode: 'editable', required: false },
       { dbColumn: 'reconciliation_status', csvHeader: 'reconciliation_status', type: 'enum', mode: 'editable', required: false, enumValues: ['pending', 'matched', 'partial', 'unmatched'] },
