@@ -6898,6 +6898,10 @@ export type Database = {
         }
         Returns: number
       }
+      cancel_listing_outbound_command: {
+        Args: { p_outbound_command_id: string }
+        Returns: string
+      }
       catalog_filter_options: {
         Args: {
           filter_subtheme?: string
@@ -7069,9 +7073,30 @@ export type Database = {
         }
         Returns: string
       }
+      queue_qbo_customer_posting_intent: {
+        Args: { p_customer_id?: string; p_payload?: Json }
+        Returns: string
+      }
+      queue_qbo_item_posting_intent: {
+        Args: {
+          p_old_sku_code?: string
+          p_purchase_cost?: number
+          p_sku_id: string
+          p_supplier_vat_registered?: boolean
+        }
+        Returns: string
+      }
+      queue_qbo_payout_posting_intent: {
+        Args: { p_payout_id: string }
+        Returns: string
+      }
       queue_qbo_posting_intents_for_order: {
         Args: { p_sales_order_id: string }
         Returns: number
+      }
+      queue_qbo_purchase_posting_intent: {
+        Args: { p_action?: string; p_batch_id: string }
+        Returns: string
       }
       queue_qbo_refund_posting_intent_for_order: {
         Args: { p_refunded_line_ids?: string[]; p_sales_order_id: string }
@@ -7085,6 +7110,10 @@ export type Database = {
           read_ct: number
         }[]
       }
+      rebuild_listing_command_reconciliation_cases: {
+        Args: never
+        Returns: number
+      }
       rebuild_reconciliation_cases: {
         Args: { p_sales_order_id?: string }
         Returns: number
@@ -7092,6 +7121,15 @@ export type Database = {
       record_order_accounting_events: {
         Args: { p_sales_order_id: string; p_source?: string }
         Returns: number
+      }
+      record_price_override_approval: {
+        Args: {
+          p_approved_by?: string
+          p_price_decision_snapshot_id: string
+          p_reason_code: string
+          p_reason_note?: string
+        }
+        Returns: string
       }
       record_sales_program_accrual: {
         Args: {
@@ -7116,6 +7154,15 @@ export type Database = {
       refresh_order_settlement_lines: {
         Args: { p_rebuild_cases?: boolean; p_sales_order_id: string }
         Returns: number
+      }
+      refresh_sku_cost_rollups: { Args: { p_sku_id?: string }; Returns: number }
+      release_stock_allocation_for_order_line: {
+        Args: { p_reason?: string; p_sales_order_line_id: string }
+        Returns: Json
+      }
+      retry_listing_outbound_command: {
+        Args: { p_outbound_command_id: string }
+        Returns: string
       }
       search_catalog_for_wishlist: {
         Args: {
