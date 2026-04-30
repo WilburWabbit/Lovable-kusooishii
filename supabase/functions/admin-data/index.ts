@@ -8,6 +8,12 @@ class ValidationError extends Error {
 const STOCK_MATCHABLE = ["available", "received", "graded"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
 
+function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
+  const status = unit.status ?? "";
+  const v2Status = unit.v2_status ?? "";
+  return STOCK_MATCHABLE.includes(status) && !["sold", "written_off"].includes(v2Status);
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -1524,6 +1530,7 @@ Deno.serve(async (req) => {
       // First, find valid completed order IDs, then find their unlinked lines.
       let stockClosed = 0;
       const closedSkuIds = new Set<string>();
+      const refreshedOrderIds = new Set<string>();
 
       // Step A0: Reopen stock incorrectly closed by previous runs that
       // didn't filter by order status. Find stock_units closed by our
@@ -1553,21 +1560,29 @@ Deno.serve(async (req) => {
         const orderStatus = (lineOrder as any)?.sales_order?.status;
         const validStatuses = VALID_SALE_STATUSES;
         if (orderStatus && !validStatuses.includes(orderStatus)) {
-          // This stock was closed for an invalid order — reopen it
-          const { error: reopenErr } = await admin
-            .from("stock_unit")
-            .update({ status: "available", updated_at: new Date().toISOString() })
-            .eq("id", audit.entity_id)
-            .eq("status", "closed");
+          // This stock was closed for an invalid order. Release the linked
+          // line through the subledger so COGS/allocation events are reversed.
+          const { error: releaseErr } = await admin.rpc("release_stock_allocation_for_order_line" as never, {
+            p_sales_order_line_id: lineId,
+            p_reason: "reconcile_stock_invalid_order_status",
+          } as never);
 
-          if (!reopenErr) {
-            // Unlink from the order line
+          if (!releaseErr) {
+            const { error: reopenErr } = await admin
+              .from("stock_unit")
+              .update({ status: "available", updated_at: new Date().toISOString() })
+              .eq("id", audit.entity_id)
+              .eq("status", "closed");
+
+            if (!reopenErr) stockReopened++;
+          } else {
+            // Fall back to making the stock visibly available only when the
+            // subledger release fails; leave the line untouched for review.
             await admin
-              .from("sales_order_line")
-              .update({ stock_unit_id: null })
-              .eq("id", lineId)
-              .eq("stock_unit_id", audit.entity_id);
-            stockReopened++;
+              .from("stock_unit")
+              .update({ status: "available", updated_at: new Date().toISOString() })
+              .eq("id", audit.entity_id)
+              .eq("status", "closed");
           }
         }
       }
@@ -1591,57 +1606,53 @@ Deno.serve(async (req) => {
           const batchIds = validOrderIds.slice(b, b + BATCH);
           const { data: unlinkedLines } = await admin
             .from("sales_order_line")
-            .select("id, sku_id, quantity")
+            .select("id, sales_order_id, sku_id, quantity")
             .in("sales_order_id", batchIds)
             .is("stock_unit_id", null);
 
           for (const line of (unlinkedLines ?? [])) {
-            for (let i = 0; i < (line.quantity ?? 1); i++) {
-              const { data: stockUnit } = await admin
-                .from("stock_unit")
-                .select("id")
-                .eq("sku_id", line.sku_id)
-                .in("status", STOCK_MATCHABLE)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+            if ((line.quantity ?? 1) !== 1) {
+              await admin.from("reconciliation_case").insert({
+                case_type: "unallocated_order_line",
+                severity: "high",
+                sales_order_id: line.sales_order_id,
+                sales_order_line_id: line.id,
+                related_entity_type: "sales_order_line",
+                related_entity_id: line.id,
+                suspected_root_cause: "Historical order line has quantity greater than one and cannot be represented by a single stock_unit_id.",
+                recommended_action: "Split the order line into unit-level lines or record an approved manual allocation exception.",
+                evidence: {
+                  sku_id: line.sku_id,
+                  quantity: line.quantity,
+                  source: "admin-data.reconcile-stock",
+                  correlation_id: correlationId,
+                },
+              });
+              continue;
+            }
 
-              if (stockUnit) {
-                const { error: closeErr } = await admin
-                  .from("stock_unit")
-                  .update({ status: "closed", updated_at: new Date().toISOString() })
-                  .eq("id", stockUnit.id);
+            const { data: allocation, error: allocationErr } = await admin.rpc("allocate_stock_for_order_line" as never, {
+              p_sales_order_line_id: line.id,
+              p_actor_id: userId,
+            } as never);
 
-                if (!closeErr) {
-                  if ((line.quantity ?? 1) === 1) {
-                    await admin
-                      .from("sales_order_line")
-                      .update({ stock_unit_id: stockUnit.id })
-                      .eq("id", line.id);
-                  }
-                  stockClosed++;
-                  closedSkuIds.add(line.sku_id);
+            if (allocationErr) {
+              console.warn(`Subledger allocation failed for line ${line.id}:`, allocationErr.message);
+              continue;
+            }
 
-                  await admin.from("audit_event").insert({
-                    entity_type: "stock_unit",
-                    entity_id: stockUnit.id,
-                    trigger_type: "stock_reconciliation_sale",
-                    actor_type: "user",
-                    actor_id: userId,
-                    source_system: "admin-data",
-                    correlation_id: correlationId,
-                    before_json: { status: "available" },
-                    after_json: { status: "closed" },
-                    input_json: {
-                      sales_order_line_id: line.id,
-                      sku_id: line.sku_id,
-                    },
-                  });
-                }
-              }
+            const allocationResult = allocation as Record<string, unknown> | null;
+            if (allocationResult?.status === "allocated") {
+              stockClosed++;
+              closedSkuIds.add(line.sku_id);
+              refreshedOrderIds.add(line.sales_order_id);
             }
           }
         }
+      }
+
+      for (const orderId of refreshedOrderIds) {
+        await admin.rpc("refresh_order_line_economics" as never, { p_sales_order_id: orderId } as never);
       }
 
       if (stockClosed > 0) {
@@ -1650,15 +1661,15 @@ Deno.serve(async (req) => {
 
       // ── Step A2: Update channel listings for closed SKUs ──
       for (const skuId of closedSkuIds) {
-        const { count: availableCount } = await admin
+        const { data: skuUnits } = await admin
           .from("stock_unit")
-          .select("id", { count: "exact", head: true })
-          .eq("sku_id", skuId)
-          .eq("status", "available");
+          .select("id, status, v2_status")
+          .eq("sku_id", skuId);
+        const availableCount = (skuUnits ?? []).filter(isAvailableStockUnit).length;
 
         await admin
           .from("channel_listing")
-          .update({ listed_quantity: availableCount ?? 0, synced_at: new Date().toISOString() })
+          .update({ listed_quantity: availableCount, synced_at: new Date().toISOString() })
           .eq("sku_id", skuId);
       }
 
@@ -1703,13 +1714,14 @@ Deno.serve(async (req) => {
 
         const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
 
-        // Count all non-closed/non-written-off stock (available + received + graded)
-        const { count: appCount } = await admin
+        // Count units still saleable in the app. v2_status is the subledger
+        // sale marker, so sold units are excluded even if legacy status lags.
+        const { data: appUnits } = await admin
           .from("stock_unit")
-          .select("id", { count: "exact", head: true })
-          .eq("sku_id", sku.id)
-          .in("status", STOCK_MATCHABLE);
-        const available = appCount ?? 0;
+          .select("id, status, v2_status")
+          .eq("sku_id", sku.id);
+        const availableUnits = (appUnits ?? []).filter(isAvailableStockUnit);
+        const available = availableUnits.length;
         totalChecked++;
 
         if (available === qboQty) {
@@ -1724,14 +1736,12 @@ Deno.serve(async (req) => {
 
           const { data: excessUnits } = await admin
             .from("stock_unit")
-            .select("id, status, landed_cost, carrying_value")
+            .select("id, status, v2_status, landed_cost, carrying_value")
             .eq("sku_id", sku.id)
-            .in("status", STOCK_MATCHABLE)
-            .order("created_at", { ascending: true })
-            .limit(excess);
+            .order("created_at", { ascending: true });
 
           let unitWrittenOff = 0;
-          for (const unit of (excessUnits ?? [])) {
+          for (const unit of (excessUnits ?? []).filter(isAvailableStockUnit).slice(0, excess)) {
             await admin.from("stock_unit").update({
               status: "written_off",
               accumulated_impairment: unit.landed_cost ?? 0,
