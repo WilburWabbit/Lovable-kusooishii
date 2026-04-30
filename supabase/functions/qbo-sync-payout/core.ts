@@ -206,6 +206,91 @@ async function persistSyncFailure(
     .eq("id", payoutId);
 }
 
+async function processSalesReceiptPostingIntent(
+  admin: ReturnType<typeof createAdminClient>,
+  salesOrderId: string,
+): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
+  const { error: queueErr } = await admin.rpc("queue_qbo_posting_intents_for_order" as never, {
+    p_sales_order_id: salesOrderId,
+  } as never);
+
+  if (queueErr) {
+    return {
+      ok: false,
+      status: 500,
+      body: { error: queueErr.message },
+    };
+  }
+
+  const { data: intent, error: intentErr } = await admin
+    .from("posting_intent" as never)
+    .select("id, status, last_error")
+    .eq("target_system" as never, "qbo")
+    .eq("action" as never, "create_sales_receipt")
+    .eq("idempotency_key" as never, `qbo:create_sales_receipt:${salesOrderId}`)
+    .maybeSingle();
+
+  const intentRow = intent as Record<string, unknown> | null;
+  if (intentErr || !intentRow?.id) {
+    return {
+      ok: false,
+      status: 500,
+      body: { error: intentErr?.message ?? "Unable to locate SalesReceipt posting intent" },
+    };
+  }
+
+  const { data: orderRow } = await admin
+    .from("sales_order" as never)
+    .select("qbo_sales_receipt_id")
+    .eq("id" as never, salesOrderId)
+    .maybeSingle();
+  const hasReceiptLink = Boolean((orderRow as Record<string, unknown> | null)?.qbo_sales_receipt_id);
+
+  if (intentRow.status === "posted" && hasReceiptLink) {
+    return { ok: true, status: 200, body: { success: true, intent_id: intentRow.id, status: "posted" } };
+  }
+
+  if (intentRow.status === "posted" && !hasReceiptLink) {
+    const { error: resetErr } = await admin
+      .from("posting_intent" as never)
+      .update({
+        status: "pending",
+        retry_count: 0,
+        qbo_reference_id: null,
+        last_error: null,
+        next_attempt_at: null,
+        posted_at: null,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id" as never, intentRow.id as string);
+
+    if (resetErr) {
+      return {
+        ok: false,
+        status: 500,
+        body: { error: resetErr.message },
+      };
+    }
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const res = await fetchWithTimeout(
+    `${supabaseUrl}/functions/v1/accounting-posting-intents-process`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ intentId: intentRow.id, batchSize: 1 }),
+    },
+  );
+
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { ok: res.ok && body.success !== false, status: res.status, body };
+}
+
 /**
  * Fetch a QBO document's TotalAmt via the /query endpoint.
  * Used to verify cached Purchases and SalesReceipts before linking
@@ -811,9 +896,9 @@ export async function syncPayoutCore(
     const expenseTxs = transactions; // all non-TRANSFER need expenses
 
     // Build order → QBO SalesReceipt map for deposit lines
-    var orderQboMap = new Map<string, { qboId: string; channelGross: number; orderNumber: string | null; txId: string; transactionId: string; salesOrderId: string }>();
-    var orderNumberByTxId = new Map<string, string>();
-    var customerRefByTxId = new Map<string, { value: string; name?: string }>();
+    const orderQboMap = new Map<string, { qboId: string; channelGross: number; orderNumber: string | null; txId: string; transactionId: string; salesOrderId: string }>();
+    const orderNumberByTxId = new Map<string, string>();
+    const customerRefByTxId = new Map<string, { value: string; name?: string }>();
 
     if (saleTxs.length > 0) {
       // Step A: Resolve orders by matched_order_id
@@ -906,9 +991,6 @@ export async function syncPayoutCore(
       }
 
       if (unsyncedRefs.length > 0) {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
         for (const tx of saleTxs) {
           let so: Record<string, unknown> | undefined;
           if (tx.matched_order_id) {
@@ -919,20 +1001,9 @@ export async function syncPayoutCore(
 
           if (!so || so.qbo_sales_receipt_id) continue;
 
-          const recreateRes = await fetchWithTimeout(
-            `${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${serviceKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ orderId: so.id }),
-            },
-          );
-          const recreateBody = await recreateRes.json().catch(() => ({}));
-          if (!recreateRes.ok || (recreateBody && recreateBody.success === false)) {
-            const message = `Cannot create deposit: failed to sync linked order ${(so.origin_reference as string) ?? (so.id as string)}: ${JSON.stringify(recreateBody).substring(0, 300)}`;
+          const recreate = await processSalesReceiptPostingIntent(admin, so.id as string);
+          if (!recreate.ok) {
+            const message = `Cannot create deposit: failed to sync linked order ${(so.origin_reference as string) ?? (so.id as string)}: ${JSON.stringify(recreate.body).substring(0, 300)}`;
             await persistSyncFailure(admin, payoutId, message);
             return new Response(
               JSON.stringify({ success: false, error: message, payoutId }),
@@ -1327,7 +1398,7 @@ export async function syncPayoutCore(
     // SalesReceipt, recreate it from the canonical order. Then construct
     // deposit lines from the verified canonical totals. The sum is then equal
     // to payout.net_amount by construction — no fudge line, no surprises.
-    let depositLines: { Amount: number; DepositLineDetail: Record<string, unknown>; LinkedTxn: Array<Record<string, string>> }[] = [];
+    const depositLines: { Amount: number; DepositLineDetail: Record<string, unknown>; LinkedTxn: Array<Record<string, string>> }[] = [];
 
     if (typeof orderQboMap === "undefined" || orderQboMap.size === 0) {
       const msg = "Cannot create deposit: no SalesReceipt lines — all payout transactions must be linked to QBO records";
@@ -1409,28 +1480,15 @@ export async function syncPayoutCore(
         .update({ qbo_sales_receipt_id: null, qbo_sync_status: null } as never)
         .eq("id" as never, entry.salesOrderId);
 
-      // Step 4: invoke qbo-sync-sales-receipt for this order.
-      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-      const recreateRes = await fetchWithTimeout(
-        `${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${serviceKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ orderId: entry.salesOrderId }),
-        },
-      );
-      const recreateBody = await recreateRes.json().catch(() => ({}));
-      if (!recreateRes.ok || (recreateBody && recreateBody.success === false)) {
+      // Step 4: queue and immediately process the SalesReceipt posting intent.
+      const recreate = await processSalesReceiptPostingIntent(admin, entry.salesOrderId);
+      if (!recreate.ok) {
         canonicalMismatches.push({
           orderNumber: entry.orderNumber,
           transactionId: entry.transactionId,
           channelGross: entry.channelGross,
           qboTotal,
-          reason: `Recreate SalesReceipt failed: ${JSON.stringify(recreateBody).substring(0, 300)}`,
+          reason: `Recreate SalesReceipt failed: ${JSON.stringify(recreate.body).substring(0, 300)}`,
         });
         continue;
       }
@@ -1712,4 +1770,3 @@ export async function syncPayoutCore(
     );
   }
 }
-

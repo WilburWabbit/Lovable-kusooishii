@@ -24,7 +24,19 @@ export const channelListingKeys = {
 
 // ─── Row → Interface Mapper ────────────────────────────────
 
-function mapListing(row: Record<string, unknown>, skuCode: string): ChannelListing {
+interface ListingPriceSnapshot {
+  estimatedFees: number | null;
+  estimatedNet: number | null;
+}
+
+function mapListing(
+  row: Record<string, unknown>,
+  skuCode: string,
+  snapshotsById: Map<string, ListingPriceSnapshot> = new Map(),
+): ChannelListing {
+  const snapshotId = row.current_price_decision_snapshot_id as string | null;
+  const snapshot = snapshotId ? snapshotsById.get(snapshotId) : undefined;
+
   return {
     id: row.id as string,
     sku: skuCode,
@@ -37,8 +49,8 @@ function mapListing(row: Record<string, unknown>, skuCode: string): ChannelListi
     listingDescription: (row.listing_description as string) ?? null,
     listingPrice: (row.listed_price as number) ?? null,
     feeAdjustedPrice: (row.fee_adjusted_price as number) ?? null,
-    estimatedFees: (row.estimated_fees as number) ?? null,
-    estimatedNet: (row.estimated_net as number) ?? null,
+    estimatedFees: snapshot?.estimatedFees ?? (row.estimated_fees as number) ?? null,
+    estimatedNet: snapshot?.estimatedNet ?? (row.estimated_net as number) ?? null,
   };
 }
 
@@ -95,7 +107,33 @@ export function useChannelListings(skuCode: string | undefined) {
           if (tNew > tOld) byChannel.set(key, r);
         }
       }
-      return [...byChannel.values()].map((r) => mapListing(r, skuCode!));
+      const collapsedRows = [...byChannel.values()];
+      const snapshotIds = [
+        ...new Set(
+          collapsedRows
+            .map((r) => r.current_price_decision_snapshot_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+
+      const snapshotsById = new Map<string, ListingPriceSnapshot>();
+      if (snapshotIds.length > 0) {
+        const { data: snapshotRows, error: snapshotErr } = await supabase
+          .from('price_decision_snapshot' as never)
+          .select('id, estimated_fees, expected_net_before_cogs')
+          .in('id' as never, snapshotIds as never);
+
+        if (snapshotErr) throw snapshotErr;
+
+        for (const snapshot of (snapshotRows ?? []) as Record<string, unknown>[]) {
+          snapshotsById.set(snapshot.id as string, {
+            estimatedFees: (snapshot.estimated_fees as number) ?? null,
+            estimatedNet: (snapshot.expected_net_before_cogs as number) ?? null,
+          });
+        }
+      }
+
+      return collapsedRows.map((r) => mapListing(r, skuCode!, snapshotsById));
     },
   });
 }
@@ -190,7 +228,7 @@ export function usePublishListing() {
   return useMutation({
     mutationFn: async ({
       skuCode, channel, listingTitle, listingDescription,
-      listingPrice, estimatedFees, estimatedNet,
+      listingPrice,
       externalId, externalUrl, allowBelowFloor, overrideReasonCode, overrideReasonNote,
     }: PublishListingInput) => {
       if (!listingTitle?.trim()) {
@@ -255,8 +293,6 @@ export function usePublishListing() {
         listing_description: listingDescription?.trim() ?? null,
         listed_price: listingPrice,
         fee_adjusted_price: listingPrice,
-        estimated_fees: estimatedFees ?? null,
-        estimated_net: estimatedNet ?? null,
         external_listing_id: externalId ?? null,
         external_url: externalUrl ?? null,
         listed_at: wasLive ? existingListedAt ?? new Date().toISOString() : null,
