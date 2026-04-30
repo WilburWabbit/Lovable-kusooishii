@@ -205,6 +205,16 @@ Deno.serve(async (req) => {
           if (accountingErr) {
             console.warn(`Failed to refresh accounting events for ${soId}: ${accountingErr.message}`);
           }
+
+          const { error: settlementErr } = await admin
+            .rpc("refresh_order_settlement_lines", {
+              p_sales_order_id: soId,
+              p_rebuild_cases: true,
+            });
+
+          if (settlementErr) {
+            console.warn(`Failed to refresh settlement lines for ${soId}: ${settlementErr.message}`);
+          }
         }
       }
     }
@@ -258,6 +268,18 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       } as never)
       .eq("id", payoutId);
+
+    for (const orderId of orderIds) {
+      const { error: settlementErr } = await admin
+        .rpc("refresh_order_settlement_lines", {
+          p_sales_order_id: orderId,
+          p_rebuild_cases: true,
+        });
+
+      if (settlementErr) {
+        console.warn(`Failed to refresh settlement lines for ${orderId}: ${settlementErr.message}`);
+      }
+    }
 
     // ─── 5. Trigger QBO sync ────────────────────────────────
     if ((p.qbo_sync_status as string) !== "synced") {
