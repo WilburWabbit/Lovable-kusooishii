@@ -265,23 +265,46 @@ export function usePayoutSummary() {
         }
       }
 
-      // Blue Bell commission: orders with blue_bell_club = true
-      // that haven't had their commission paid yet
-      const { data: bbOrders, error: bbErr } = await supabase
-        .from('sales_order')
-        .select('id, gross_total')
-        .eq('blue_bell_club' as never, true);
+      // Blue Bell commission is now owned by the sales-program accrual
+      // ledger. Legacy sales_order.blue_bell_club remains only for
+      // compatibility during cutover.
+      const { data: blueBellProgram, error: programErr } = await supabase
+        .from('sales_program' as never)
+        .select('id')
+        .eq('program_code' as never, 'blue_bell')
+        .maybeSingle();
 
-      if (bbErr) throw bbErr;
+      if (programErr) throw programErr;
 
-      const bbTotal = ((bbOrders ?? []) as Record<string, unknown>[])
-        .reduce((sum, o) => sum + ((o.gross_total as number) ?? 0), 0);
+      const programId = (blueBellProgram as unknown as Record<string, unknown> | null)?.id as string | undefined;
+      let blueBellOutstanding = 0;
+      let blueBellOrderCount = 0;
+
+      if (programId) {
+        const { data: accruals, error: accrualErr } = await supabase
+          .from('sales_program_accrual' as never)
+          .select('sales_order_id, commission_amount, reversed_amount')
+          .eq('sales_program_id' as never, programId)
+          .in('status' as never, ['open', 'partially_settled']);
+
+        if (accrualErr) throw accrualErr;
+
+        const qualifyingOrders = new Set<string>();
+        for (const accrual of ((accruals ?? []) as unknown as Record<string, unknown>[])) {
+          blueBellOutstanding +=
+            Number(accrual.commission_amount ?? 0) - Number(accrual.reversed_amount ?? 0);
+          if (accrual.sales_order_id) qualifyingOrders.add(accrual.sales_order_id as string);
+        }
+
+        blueBellOutstanding = Math.max(0, Math.round(blueBellOutstanding * 100) / 100);
+        blueBellOrderCount = qualifyingOrders.size;
+      }
 
       return {
         pendingByChannel: channelSummary,
         blueBellCommission: {
-          owedSinceLastPayment: Math.round(bbTotal * 0.05 * 100) / 100, // 5% commission per spec Section 3.10
-          qualifyingOrderCount: (bbOrders ?? []).length,
+          owedSinceLastPayment: blueBellOutstanding,
+          qualifyingOrderCount: blueBellOrderCount,
         },
       };
     },
@@ -561,7 +584,7 @@ export function usePayoutTransactions(externalPayoutId: string | null | undefine
         .map((r) => r.matched_order_id as string | null)
         .filter(Boolean) as string[];
 
-      let orderGrossMap = new Map<string, number>();
+      const orderGrossMap = new Map<string, number>();
       if (matchedIds.length > 0) {
         const { data: orders } = await supabase
           .from('sales_order')
