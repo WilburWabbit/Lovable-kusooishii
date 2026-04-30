@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { SurfaceCard, SectionHead, Mono } from './ui-primitives';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Play, Loader2, Search } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
@@ -9,6 +10,16 @@ interface BatchResult {
   listing_id: string;
   sku_id: string;
   channel: string;
+}
+
+interface PricingCalculation {
+  sku_id: string;
+  channel: string;
+  floor_price: number | null;
+  target_price: number | null;
+  ceiling_price: number | null;
+  confidence_score: number | null;
+  breakdown?: Record<string, number>;
 }
 
 export function PricingActionsCard() {
@@ -22,7 +33,7 @@ export function PricingActionsCard() {
   const [singleSku, setSingleSku] = useState('');
   const [singleChannel, setSingleChannel] = useState('ebay');
   const [singleRunning, setSingleRunning] = useState(false);
-  const [singleResult, setSingleResult] = useState<Record<string, any> | null>(null);
+  const [singleResult, setSingleResult] = useState<PricingCalculation | null>(null);
 
   const runAll = useCallback(async () => {
     setRunning(true);
@@ -53,7 +64,7 @@ export function PricingActionsCard() {
       // 2. Process each listing: calculate → update
       for (const listing of listings) {
         try {
-          const pricing = await invokeWithAuth<Record<string, any>>(
+          const pricing = await invokeWithAuth<PricingCalculation>(
             'admin-data',
             { action: 'calculate-pricing', sku_id: listing.sku_id, channel: listing.channel }
           );
@@ -99,11 +110,9 @@ export function PricingActionsCard() {
     setSingleResult(null);
 
     try {
-      // Look up the SKU ID by code
-      const { supabase } = await import('@/integrations/supabase/client');
-      const { data: sku, error } = await (supabase as any)
+      const { data: sku, error } = await supabase
         .from('sku')
-        .select('id, sku_code')
+        .select('id, sku_code' as never)
         .eq('sku_code', singleSku.trim())
         .maybeSingle();
 
@@ -114,13 +123,14 @@ export function PricingActionsCard() {
         return;
       }
 
-      const pricing = await invokeWithAuth<Record<string, any>>(
+      const skuRow = sku as unknown as { id: string; sku_code: string };
+      const pricing = await invokeWithAuth<PricingCalculation>(
         'admin-data',
-        { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
+        { action: 'calculate-pricing', sku_id: skuRow.id, channel: singleChannel }
       );
 
       setSingleResult(pricing);
-      toast.success(`Priced ${sku.sku_code}`);
+      toast.success(`Priced ${skuRow.sku_code}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally {
@@ -232,15 +242,15 @@ export function PricingActionsCard() {
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
                 <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
-                <Mono color="red">£{Number(singleResult.floor_price).toFixed(2)}</Mono>
+                <Mono color="red">£{Number(singleResult.floor_price ?? 0).toFixed(2)}</Mono>
               </div>
               <div>
                 <span className="text-zinc-500 block text-[10px] uppercase">Target</span>
-                <Mono color="teal">£{Number(singleResult.target_price).toFixed(2)}</Mono>
+                <Mono color="teal">£{Number(singleResult.target_price ?? 0).toFixed(2)}</Mono>
               </div>
               <div>
                 <span className="text-zinc-500 block text-[10px] uppercase">Ceiling</span>
-                <Mono color="amber">£{Number(singleResult.ceiling_price).toFixed(2)}</Mono>
+                <Mono color="amber">£{Number(singleResult.ceiling_price ?? 0).toFixed(2)}</Mono>
               </div>
             </div>
 
@@ -260,8 +270,8 @@ export function PricingActionsCard() {
 
             <div className="mt-2 pt-2 border-t border-zinc-200 flex justify-between text-[11px]">
               <span className="text-zinc-500">Confidence</span>
-              <Mono color={singleResult.confidence_score >= 0.7 ? 'teal' : 'amber'}>
-                {(singleResult.confidence_score * 100).toFixed(0)}%
+              <Mono color={(singleResult.confidence_score ?? 0) >= 0.7 ? 'teal' : 'amber'}>
+                {((singleResult.confidence_score ?? 0) * 100).toFixed(0)}%
               </Mono>
             </div>
           </div>

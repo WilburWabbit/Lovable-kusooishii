@@ -1123,9 +1123,9 @@ Deno.serve(async (req) => {
       const { listing_id, price_floor, price_target, price_ceiling, confidence_score: cs, pricing_notes: pn, auto_price } = params;
       if (!listing_id) throw new ValidationError("listing_id is required");
       const updates: Record<string, any> = { priced_at: new Date().toISOString() };
-      if (price_floor !== undefined) updates.price_floor = price_floor;
-      if (price_target !== undefined) updates.price_target = price_target;
-      if (price_ceiling !== undefined) updates.price_ceiling = price_ceiling;
+      // Compatibility note: legacy price_floor/price_target/price_ceiling are
+      // intentionally no longer written here. Persisted pricing decisions now
+      // live in price_decision_snapshot, created below via the domain RPC.
       if (cs !== undefined) updates.confidence_score = cs;
       if (pn !== undefined) updates.pricing_notes = pn;
 
@@ -1197,38 +1197,45 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
 
-      // Always sync floor_price and sale_price back to the SKU
-      const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
+      // Create the authoritative immutable pricing snapshot. Only queue an
+      // outbound reprice when the listing price actually changed.
+      const { data: listingRow } = await admin
+        .from("channel_listing")
+        .select("sku_id, channel, listed_price")
+        .eq("id", listing_id)
+        .single();
+
+      let snapshotId: string | null = null;
+      let commandId: string | null = null;
       if (listingRow?.sku_id) {
-        const skuUpdates: Record<string, any> = {};
-        // Update SKU floor_price from the calculated floor
-        if (price_floor != null) skuUpdates.floor_price = price_floor;
-        // If auto-price was applied on the web channel, also update sku.price for storefront
+        const candidatePrice = updates.listed_price ?? listingRow.listed_price ?? price_target ?? price_floor ?? null;
+
+        const { data: snapshotData, error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+          p_sku_id: listingRow.sku_id,
+          p_channel: listingRow.channel,
+          p_channel_listing_id: listing_id,
+          p_candidate_price: candidatePrice,
+        });
+        if (snapshotErr) throw snapshotErr;
+        snapshotId = snapshotData ?? null;
+
+        // Keep the public web compatibility price in step with the website
+        // listing until storefront reads move fully to channel_listing/snapshots.
         if (auto_price_applied && updates.listed_price != null && listingRow.channel === "web") {
-          skuUpdates.price = updates.listed_price;
-        }
-        if (Object.keys(skuUpdates).length > 0) {
-          await admin.from("sku").update(skuUpdates).eq("id", listingRow.sku_id);
+          await admin.from("sku").update({ price: updates.listed_price }).eq("id", listingRow.sku_id);
         }
 
-        if (listingRow?.sku_id) {
-          const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
-            p_sku_id: listingRow.sku_id,
-            p_channel: listingRow.channel,
-            p_channel_listing_id: listing_id,
-            p_candidate_price: updates.listed_price,
-          });
-          if (snapshotErr) throw snapshotErr;
-
-          const { error: commandErr } = await admin.rpc("queue_listing_command", {
+        if (auto_price_applied) {
+          const { data: commandData, error: commandErr } = await admin.rpc("queue_listing_command", {
             p_channel_listing_id: listing_id,
             p_command_type: "reprice",
           });
           if (commandErr) throw commandErr;
+          commandId = commandData ?? null;
         }
       }
 
-      result = { success: true, auto_price_applied, auto_price_reason };
+      result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId };
 
     } else if (action === "list-channel-pricing-config") {
       const { data, error } = await admin.from("channel_pricing_config").select("*").order("channel");
