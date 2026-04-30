@@ -6,6 +6,7 @@ import {
   Users,
   Wallet,
   Inbox,
+  AlertTriangle,
   BarChart3,
   ArrowUpDown,
   Receipt,
@@ -172,6 +173,13 @@ export function AdminV2Sidebar({
           label="Intake"
           to="/admin/intake"
           active={isActive("/admin/intake")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={AlertTriangle}
+          label="Operations"
+          to="/admin/operations"
+          active={isActive("/admin/operations")}
           onNavigate={onClose}
         />
         <SidebarItem
