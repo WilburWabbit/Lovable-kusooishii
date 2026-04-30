@@ -433,7 +433,6 @@ async function handleInPersonPaymentIntent(
         global_tax_calculation: "TaxExcluded",
         qbo_sync_status: isTestEvent ? "skipped" : "needs_manual_review",
         v2_status: "needs_allocation",
-        blue_bell_club: false,
         notes,
         is_test: isTestEvent,
       })
