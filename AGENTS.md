@@ -60,6 +60,7 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - Do NOT process webhook payloads inline in receivers — land in staging, process asynchronously
 - Do NOT skip staging tables for any external data
 - Do NOT build monolithic receive-validate-process-write Edge Functions
+- For migrations that may be run through Lovable SQL, do NOT use dollar-quoted function bodies (`$$` or `$function$`). Use single-quoted function bodies with doubled internal quotes, because Lovable's SQL runner can misparse dollar-quoted PL/pgSQL as an unterminated string.
 
 ## Integration Architecture Patterns
 
