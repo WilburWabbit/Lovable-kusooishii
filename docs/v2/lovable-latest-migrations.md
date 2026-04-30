@@ -53,6 +53,32 @@ WHERE pg_namespace.nspname = 'public'
 ORDER BY proname;
 ```
 
+Expected function names:
+
+```text
+cancel_listing_outbound_command
+process_order_return
+queue_listing_command
+queue_qbo_customer_posting_intent
+queue_qbo_item_posting_intent
+queue_qbo_payout_posting_intent
+queue_qbo_purchase_posting_intent
+queue_qbo_refund_posting_intent_for_order
+rebuild_listing_command_reconciliation_cases
+rebuild_reconciliation_cases
+record_price_override_approval
+refresh_market_price_snapshots
+refresh_sku_cost_rollups
+release_stock_allocation_for_order_line
+retry_listing_outbound_command
+```
+
+If the smoke query only returns `cancel_listing_outbound_command` and
+`process_order_return`, the latest batch has not been applied. Run the migration
+files above in order. `cancel_listing_outbound_command` and
+`retry_listing_outbound_command` are in the same file, so seeing only one of
+them usually means a partial paste/run rather than a dependency problem.
+
 This query should return zero rows:
 
 ```sql
