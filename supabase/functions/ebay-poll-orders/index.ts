@@ -372,7 +372,7 @@ Deno.serve(async (req) => {
 
       const localOrderId = (newOrder as Record<string, unknown>).id as string;
 
-      // ─── Create line items + consume FIFO stock ────────
+      // ─── Create line items + allocate stock through the costing subledger ────────
       for (const li of lineItems) {
         const ebaySku = (li.sku as string) ?? "";
         const quantity = (li.quantity as number) ?? 1;
@@ -395,46 +395,36 @@ Deno.serve(async (req) => {
         }
 
         for (let i = 0; i < quantity; i++) {
-          let stockUnitId: string | null = null;
-          let cogs: number | null = null;
-
-          // FIFO consumption
-          if (localSkuCode) {
-            try {
-              const { data: consumed, error: fifoErr } = await admin
-                .rpc("v2_consume_fifo_unit", { p_sku_code: localSkuCode });
-
-              if (!fifoErr && consumed) {
-                const unit = consumed as Record<string, unknown>;
-                stockUnitId = unit.id as string;
-                cogs = unit.landed_cost as number;
-
-                // Link stock unit to order
-                await admin
-                  .from("stock_unit")
-                  .update({
-                    order_id: localOrderId,
-                    sold_at: new Date().toISOString(),
-                  } as never)
-                  .eq("id", stockUnitId);
-              }
-            } catch (fifoErr) {
-              console.warn(`FIFO consumption failed for ${localSkuCode}:`, fifoErr);
-            }
-          }
-
-          await admin
+          const { data: insertedLine, error: lineErr } = await admin
             .from("sales_order_line")
             .insert({
               sales_order_id: localOrderId,
               sku_id: localSkuId,
-              stock_unit_id: stockUnitId,
               unit_price: unitPrice,
               quantity: 1,
-              cogs,
-            } as never);
+            } as never)
+            .select("id")
+            .single();
+
+          if (lineErr) {
+            console.warn(`Failed to create eBay order line for ${localSkuCode ?? ebaySku}: ${lineErr.message}`);
+            continue;
+          }
+
+          if (localSkuId && insertedLine) {
+            const lineId = (insertedLine as Record<string, unknown>).id as string;
+            const { error: allocationErr } = await admin
+              .rpc("allocate_stock_for_order_line", { p_sales_order_line_id: lineId });
+
+            if (allocationErr) {
+              console.warn(`Allocation failed for eBay line ${lineId} (${localSkuCode}): ${allocationErr.message}`);
+            }
+          }
         }
       }
+
+      await admin
+        .rpc("refresh_order_line_economics", { p_sales_order_id: localOrderId });
 
       // ─── Update landing status ─────────────────────────
       await admin

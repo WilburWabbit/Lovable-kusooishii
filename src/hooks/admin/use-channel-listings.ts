@@ -194,19 +194,15 @@ export function usePublishListing() {
         throw new Error('Listing title is required');
       }
 
-      // Look up SKU + floor price for validation
+      // Look up SKU. Floor/margin validation now happens through the pricing
+      // snapshot and outbound listing command RPCs.
       const { data: skuRow, error: skuErr } = await supabase
         .from('sku')
-        .select('id, floor_price' as never)
+        .select('id' as never)
         .eq('sku_code', skuCode)
         .single();
 
       if (skuErr) throw skuErr;
-
-      const floorPrice = (skuRow as unknown as Record<string, unknown>).floor_price as number | null;
-      if (floorPrice != null && listingPrice < floorPrice) {
-        throw new Error(`Price £${listingPrice.toFixed(2)} is below floor price £${floorPrice.toFixed(2)}`);
-      }
 
       const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
 
@@ -225,7 +221,7 @@ export function usePublishListing() {
       // while the live listing keeps drifting.
       const { data: existingRows, error: lookupErr } = await supabase
         .from('channel_listing')
-        .select('id, external_listing_id, listing_title, updated_at, created_at')
+        .select('id, external_listing_id, listing_title, v2_status, listed_at, updated_at, created_at')
         .eq('sku_id', skuId)
         .in('channel', [legacyChannel, channel] as never);
 
@@ -242,13 +238,16 @@ export function usePublishListing() {
         const tb = new Date((b.updated_at as string) ?? (b.created_at as string) ?? 0).getTime();
         return tb - ta;
       });
-      const existingId = candidates[0]?.id as string | undefined;
+      const existingRow = candidates[0];
+      const existingId = existingRow?.id as string | undefined;
+      const wasLive = existingRow?.v2_status === 'live';
+      const existingListedAt = (existingRow?.listed_at as string | null) ?? null;
 
       const payload = {
         sku_id: skuId,
         channel: legacyChannel,
         v2_channel: v2Channel,
-        v2_status: 'live',
+        v2_status: wasLive ? 'live' : 'draft',
         listing_title: listingTitle.trim(),
         listing_description: listingDescription?.trim() ?? null,
         listed_price: listingPrice,
@@ -257,7 +256,7 @@ export function usePublishListing() {
         estimated_net: estimatedNet ?? null,
         external_listing_id: externalId ?? null,
         external_url: externalUrl ?? null,
-        listed_at: new Date().toISOString(),
+        listed_at: wasLive ? existingListedAt ?? new Date().toISOString() : null,
       };
 
       let data: unknown;
@@ -280,34 +279,26 @@ export function usePublishListing() {
         data = inserted;
       }
 
-      // Transition stock units from graded → listed
-      await supabase
-        .from('stock_unit')
-        .update({
-          v2_status: 'listed',
-          listed_at: new Date().toISOString(),
-        } as never)
-        .eq('sku_id' as never, (skuRow as unknown as Record<string, unknown>).id as string)
-        .eq('v2_status' as never, 'graded');
-
-      // Push to external channel.
-      // For eBay we await the result so any failure surfaces as a toast
-      // via the mutation's onError, instead of being swallowed in
-      // a fire-and-forget .catch().
       const listingId = (data as Record<string, unknown>).id as string;
-      if (channel === 'ebay') {
-        const { data: pushResult, error: pushErr } = await supabase.functions.invoke(
-          'ebay-push-listing',
-          { body: { listingId, skuCode, channel } },
-        );
-        if (pushErr) {
-          throw new Error(`eBay publish failed: ${pushErr.message}`);
-        }
-        const result = pushResult as { success?: boolean; error?: string } | null;
-        if (result && result.success === false) {
-          throw new Error(`eBay publish failed: ${result.error ?? 'unknown error'}`);
-        }
-      }
+      const commandType = wasLive ? 'reprice' : 'publish';
+
+      const { error: snapshotError } = await supabase
+        .rpc('create_price_decision_snapshot' as never, {
+          p_sku_id: skuId,
+          p_channel: channel,
+          p_channel_listing_id: listingId,
+          p_candidate_price: listingPrice,
+        } as never);
+
+      if (snapshotError) throw snapshotError;
+
+      const { error: commandError } = await supabase
+        .rpc('queue_listing_command' as never, {
+          p_channel_listing_id: listingId,
+          p_command_type: commandType,
+        } as never);
+
+      if (commandError) throw commandError;
 
       return data;
     },

@@ -89,7 +89,7 @@ function mapLineItem(row: Record<string, unknown>): OrderLineItem {
     sku: sku ? (sku.sku_code as string) : null,
     name: sku ? ((sku.name as string) ?? null) : null,
     unitPrice,
-    cogs: (row.cogs as number) ?? null,
+    cogs: ((row.cogs_amount as number) ?? (row.cogs as number)) ?? null,
     vatRate: ratePct,
     lineVat,
   };
@@ -107,7 +107,7 @@ export function useOrders() {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs,
+            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )
@@ -154,7 +154,7 @@ export function useOrder(orderId: string | undefined) {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs,
+            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )
@@ -235,14 +235,30 @@ export function useAllocateOrderItems() {
   return useMutation({
     mutationFn: async ({ orderId, allocations }: AllocateInput) => {
       for (const alloc of allocations) {
-        const { error } = await supabase.rpc('allocate_order_line_stock_unit' as never, {
-          p_order_id: orderId,
-          p_line_item_id: alloc.lineItemId,
-          p_sku_code: alloc.skuCode,
-        } as never);
+        const { data: allocation, error: allocationErr } = await supabase
+          .rpc('allocate_stock_for_order_line' as never, {
+            p_sales_order_line_id: alloc.lineItemId,
+          } as never);
 
-        if (error) throw error;
+        if (allocationErr) throw allocationErr;
+
+        const result = allocation as unknown as Record<string, unknown>;
+        if (result.status !== 'allocated') {
+          throw new Error(`No saleable stock unit was available for ${alloc.skuCode}`);
+        }
       }
+
+      await supabase
+        .rpc('refresh_order_line_economics' as never, { p_sales_order_id: orderId } as never);
+
+      // Transition order status from needs_allocation → new
+      const { error: statusErr } = await supabase
+        .from('sales_order')
+        .update({ v2_status: 'new' } as never)
+        .eq('id', orderId)
+        .eq('v2_status' as never, 'needs_allocation');
+
+      if (statusErr) throw statusErr;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.orderId) });
