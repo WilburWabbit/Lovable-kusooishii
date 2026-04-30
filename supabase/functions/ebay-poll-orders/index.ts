@@ -5,8 +5,8 @@
 // For each new order:
 //   1. Lands raw payload in staging (landing_raw_ebay_order)
 //   2. Creates local sales_order + sales_order_line records
-//   3. Maps eBay SKUs to local SKUs and consumes FIFO stock
-//   4. Triggers QBO SalesReceipt sync (fire-and-forget)
+//   3. Maps eBay SKUs to local SKUs and allocates stock via the costing subledger
+//   4. Queues QBO posting intents (fire-and-forget)
 // Also detects tracking info on existing orders.
 //
 // Can be called manually or registered as pg_cron (every 15 min).
@@ -447,17 +447,6 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ batchSize: 10 }),
         }).catch(() => {});
       }
-
-      // ─── Fire-and-forget: v2 post-order processing ────
-      // FIFO stock consumption, COGS recording, variant stats
-      fetch(`${supabaseUrl}/functions/v1/v2-process-order`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceRoleKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ orderId: localOrderId }),
-      }).catch(() => {});
 
       imported++;
     }

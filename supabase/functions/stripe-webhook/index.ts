@@ -895,25 +895,6 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       }
     }
 
-    // ── Trigger v2 order processing (FIFO, COGS, variant stats) ──
-    try {
-      if (supabaseUrl && serviceRoleKey) {
-        fetch(`${supabaseUrl}/functions/v1/v2-process-order`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${serviceRoleKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ orderId: order.id }),
-        }).catch((err) => {
-          console.warn("v2-process-order trigger failed (non-blocking):", err);
-        });
-        console.log(`v2-process-order triggered for order ${order.id}`);
-      }
-    } catch (v2Err) {
-      console.warn("v2-process-order trigger failed (non-blocking):", v2Err);
-    }
-
     // ── Send order confirmation email (best-effort, non-blocking) ──
     try {
       if (supabaseUrl && serviceRoleKey && customerEmail) {

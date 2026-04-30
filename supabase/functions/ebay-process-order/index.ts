@@ -1102,20 +1102,6 @@ Deno.serve(async (req) => {
       qbo_retry_count: 0,
     }).eq("id", newOrder.id);
 
-    // ── Step 15: Trigger v2 order processing (FIFO, COGS, variant stats) ──
-    try {
-      const v2Url = Deno.env.get("SUPABASE_URL")!;
-      fetch(`${v2Url}/functions/v1/v2-process-order`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ orderId: newOrder.id }),
-      }).catch(() => console.warn("v2-process-order trigger failed (non-blocking)"));
-      console.log(`v2-process-order triggered for eBay order ${newOrder.id}`);
-    } catch { /* best effort */ }
-
     // ── Step 16: Generate welcome code for eBay buyer (non-fatal) ──
     // Creates a QR welcome code + Stripe promo on the customer's first eBay order.
     // Repeat buyers with unredeemed codes get the existing code returned.
