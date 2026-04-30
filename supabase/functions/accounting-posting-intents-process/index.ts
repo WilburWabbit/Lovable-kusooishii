@@ -49,6 +49,12 @@ function getPayoutId(intent: PostingIntent): string | null {
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
 }
 
+function getSkuId(intent: PostingIntent): string | null {
+  if (intent.entity_type === "sku" && intent.entity_id) return intent.entity_id;
+  const fromPayload = intent.payload?.sku_id;
+  return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
+}
+
 function getRefundedLineIds(intent: PostingIntent): string[] {
   const value = intent.payload?.refunded_line_ids;
   if (!Array.isArray(value)) return [];
@@ -57,6 +63,7 @@ function getRefundedLineIds(intent: PostingIntent): string[] {
 
 function getEntityIdForIntent(intent: PostingIntent): string | null {
   if (intent.action === "create_payout_deposit") return getPayoutId(intent);
+  if (intent.action === "upsert_item") return getSkuId(intent);
   return getSalesOrderId(intent);
 }
 
@@ -95,6 +102,24 @@ function qboActionConfig(intent: PostingIntent, entityId: string) {
     };
   }
 
+  if (intent.action === "upsert_item") {
+    const purchaseCost = intent.payload?.purchase_cost;
+    const supplierVatRegistered = intent.payload?.supplier_vat_registered;
+    return {
+      functionName: "qbo-sync-item",
+      requestBody: {
+        skuCode: intent.payload?.sku_code,
+        oldSkuCode: intent.payload?.old_sku_code ?? undefined,
+        purchaseCost: typeof purchaseCost === "number" ? purchaseCost : undefined,
+        supplierVatRegistered: typeof supplierVatRegistered === "boolean" ? supplierVatRegistered : undefined,
+      },
+      qboEntityType: "Item",
+      responseIdField: "qbo_item_id",
+      resultIdField: "qbo_item_id",
+      sourceColumn: "sku.qbo_item_id",
+    };
+  }
+
   throw new Error(`Unsupported QBO posting intent action ${intent.action}`);
 }
 
@@ -113,7 +138,7 @@ Deno.serve(async (req) => {
       .from("posting_intent")
       .select("id, action, entity_type, entity_id, idempotency_key, retry_count, payload")
       .eq("target_system", "qbo")
-      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit"] as never)
+      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit", "upsert_item"] as never)
       .order("created_at", { ascending: true })
       .limit(batchSize);
 
@@ -262,6 +287,13 @@ Deno.serve(async (req) => {
               .eq("id", entityId)
               .maybeSingle();
             docNumber = ((payout as Record<string, unknown> | null)?.external_payout_id as string | null) ?? null;
+          } else if (intent.entity_type === "sku") {
+            const { data: sku } = await admin
+              .from("sku")
+              .select("sku_code")
+              .eq("id", entityId)
+              .maybeSingle();
+            docNumber = ((sku as Record<string, unknown> | null)?.sku_code as string | null) ?? null;
           }
 
           await admin
