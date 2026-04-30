@@ -1,49 +1,12 @@
 // ============================================================
-// Shared eBay Inventory Sync Helper
+// Shared eBay Inventory Sync Outbox Helper
 // ------------------------------------------------------------
-// Single point of truth for "after our local stock changed,
-// update eBay's available quantity (and end the offer if 0)".
+// Single point of truth for "after our local stock changed, queue an
+// eBay available-quantity update (and end the offer if 0)".
 //
 // Used by every code path that mutates stock_unit.v2_status,
-// so eBay never lags behind the database.
+// so external writes go through the app-side listing outbox.
 // ============================================================
-
-import { getEbayAccessToken } from "./ebay-auth.ts";
-
-const EBAY_API = "https://api.ebay.com";
-const FETCH_TIMEOUT_MS = 30_000;
-
-function ebayFetchTimeout(url: string, options: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
-}
-
-async function ebayFetch(token: string, path: string, options: RequestInit = {}): Promise<any> {
-  const res = await ebayFetchTimeout(`${EBAY_API}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Content-Language": "en-GB",
-      "Accept-Language": "en-GB",
-      "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`eBay API [${res.status}] ${path}: ${text}`);
-  }
-  if (res.status === 204) return null;
-  const text = await res.text();
-  if (!text?.trim()) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Count the available stock units for a SKU.
@@ -60,9 +23,8 @@ async function countAvailable(admin: any, skuId: string): Promise<number> {
 }
 
 /**
- * Push the current available stock count for a SKU to every live eBay
- * listing for that SKU. If the new quantity is 0, withdraw the offer
- * (which ends the listing on eBay) so it stops showing as buyable.
+ * Queue the current available stock count for every live eBay listing for
+ * this SKU. The listing-command processor performs the external eBay write.
  *
  * Non-throwing: failures are logged and audited but do not bubble up,
  * because callers (Stripe webhook, order processors) must succeed even
@@ -75,7 +37,7 @@ export async function pushEbayQuantityForSku(
 ): Promise<{ pushed: number; withdrawn: number; failed: number }> {
   const result = { pushed: 0, withdrawn: 0, failed: 0 };
 
-  // Find live eBay listings for this SKU. We only push to listings that
+  // Find live eBay listings for this SKU. We only queue listings that
   // were actually created on eBay (have an external_listing_id).
   const { data: listings, error: listErr } = await admin
     .from("channel_listing")
@@ -94,114 +56,26 @@ export async function pushEbayQuantityForSku(
 
   const qty = await countAvailable(admin, skuId);
 
-  let token: string;
-  try {
-    token = await getEbayAccessToken(admin);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[ebay-inventory-sync] could not get eBay token: ${msg}`);
-    for (const l of listings) {
-      result.failed++;
-      await auditFailure(admin, l, qty, msg, opts);
-    }
-    return result;
-  }
-
   for (const listing of listings) {
-    const sku = listing.external_sku as string;
-    const offerId = listing.external_listing_id as string;
     try {
-      // 1. Update the inventory item quantity
-      // For qty=0: skip the inventory PUT (eBay rejects quantity=0 with
-      // errorId 25004 — "must be greater than 0") and go straight to
-      // withdrawing the offer, which is what actually ends the listing.
-      let withdrew = false;
-      if (qty === 0) {
-        let withdrawErr: string | null = null;
-        try {
-          await ebayFetch(token, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, {
-            method: "POST",
-          });
-          withdrew = true;
-        } catch (wErr) {
-          withdrawErr = wErr instanceof Error ? wErr.message : String(wErr);
-        }
-
-        // Verify the actual offer state on eBay before declaring success.
-        // We never silently mark a listing "ended" without confirmation —
-        // that is how 31058-1.1 / 60438-1.1 stayed live with qty=1.
-        let confirmedEnded = false;
-        try {
-          const offer = await ebayFetch(
-            token,
-            `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
-          );
-          const offerStatus = String(offer?.status || "").toUpperCase();
-          const listingStatus = String(offer?.listing?.listingStatus || "").toUpperCase();
-          // PUBLISHED + ACTIVE = still live and buyable. Anything else
-          // (UNPUBLISHED, ENDED, OUT_OF_STOCK without PUBLISHED) is fine.
-          if (offerStatus !== "PUBLISHED" || (listingStatus && listingStatus !== "ACTIVE")) {
-            confirmedEnded = true;
-          }
-        } catch (gErr) {
-          const gMsg = gErr instanceof Error ? gErr.message : String(gErr);
-          // GET 404 = the offer no longer exists; treat as ended.
-          if (/\[404\]|25710/i.test(gMsg)) confirmedEnded = true;
-        }
-
-        if (confirmedEnded) {
-          withdrew = true;
-        } else {
-          // Listing is still live on eBay despite our withdraw attempt.
-          // Surface as a failure so it shows in the UI as a mismatch and
-          // we don't lie about local v2_status.
-          throw new Error(
-            `Withdraw did not end offer ${offerId} (sku ${sku}). ` +
-              (withdrawErr ? `Withdraw response: ${withdrawErr}. ` : "") +
-              `Offer is still PUBLISHED on eBay.`,
-          );
-        }
-      } else {
-        const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
-        if (!existing) {
-          console.log(`[ebay-inventory-sync] no inventory item on eBay for ${sku}, skipping`);
-          continue;
-        }
-        const updated = {
-          ...existing,
-          availability: {
-            ...(existing.availability || {}),
-            shipToLocationAvailability: {
-              ...(existing.availability?.shipToLocationAvailability || {}),
-              quantity: qty,
-            },
-          },
-        };
-        await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-          method: "PUT",
-          body: JSON.stringify(updated),
-        });
-      }
-
-      // Persist the new state locally
-      const patch: Record<string, unknown> = {
-        listed_quantity: qty,
-        synced_at: new Date().toISOString(),
-      };
-      if (withdrew) {
-        patch.v2_status = "ended";
-      }
-      await admin.from("channel_listing").update(patch as never).eq("id", listing.id);
-
-      if (withdrew) result.withdrawn++;
+      const { error: commandErr } = await admin.rpc("queue_listing_command", {
+        p_channel_listing_id: listing.id,
+        p_command_type: "sync_quantity",
+      });
+      if (commandErr) throw commandErr;
 
       console.log(
-        `[ebay-inventory-sync] ${sku} → qty ${qty}` + (withdrew ? " (offer withdrawn)" : ""),
+        `[ebay-inventory-sync] queued ${listing.external_sku} → qty ${qty}`,
       );
+      if (qty === 0) {
+        result.withdrawn++;
+      } else {
+        result.pushed++;
+      }
     } catch (e) {
       result.failed++;
       const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[ebay-inventory-sync] failed for ${sku} (qty ${qty}): ${msg}`);
+      console.error(`[ebay-inventory-sync] failed to queue ${listing.external_sku} (qty ${qty}): ${msg}`);
       await auditFailure(admin, listing, qty, msg, opts);
     }
   }

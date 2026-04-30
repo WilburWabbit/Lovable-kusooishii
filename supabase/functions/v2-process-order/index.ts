@@ -128,16 +128,15 @@ Deno.serve(async (req) => {
       console.warn(`Failed to refresh order economics for ${orderId}: ${economicsErr.message}`);
     }
 
-    // ─── 2b. Push updated stock counts to eBay (non-blocking) ──
+    // ─── 2b. Queue updated stock counts to eBay (non-blocking) ──
     // We just consumed units; eBay's available quantity needs to drop
-    // (and the listing should be withdrawn if we hit zero) so the same
-    // unit can't be sold twice across channels.
+    // through the listing outbox so the same unit cannot sell twice.
     if (affectedSkuIds.size > 0) {
       pushEbayQuantityForSkus(admin, affectedSkuIds, {
         source: "v2-process-order",
         orderId,
       }).catch((err) =>
-        console.warn(`eBay quantity push failed (non-blocking): ${err}`),
+        console.warn(`eBay quantity sync queue failed (non-blocking): ${err}`),
       );
     }
 

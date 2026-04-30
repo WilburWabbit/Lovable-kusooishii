@@ -170,26 +170,6 @@ async function fetchOffers(token: string, skus?: string[]): Promise<any[]> {
   return offers;
 }
 
-/* ── Update inventory quantity on eBay ── */
-async function updateInventoryQuantity(token: string, sku: string, quantity: number) {
-  const existing = await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
-  if (!existing) throw new Error(`Inventory item ${sku} not found on eBay`);
-  const updated = {
-    ...existing,
-    availability: {
-      ...(existing.availability || {}),
-      shipToLocationAvailability: {
-        ...(existing.availability?.shipToLocationAvailability || {}),
-        quantity,
-      },
-    },
-  };
-  await ebayFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-    method: "PUT",
-    body: JSON.stringify(updated),
-  });
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -675,12 +655,12 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       PUSH STOCK — uses the shared helper so logic
+       QUEUE STOCK SYNC — uses the shared helper so logic
        matches all per-order paths. v2_status is the
        source of truth — legacy `status` column drifts.
        ═══════════════════════════════════════════════ */
     if (action === "push_stock") {
-      console.log("Pushing stock levels to eBay...");
+      console.log("Queueing stock-level sync commands for eBay...");
 
       const { data: listings } = await admin
         .from("channel_listing")
@@ -699,6 +679,7 @@ Deno.serve(async (req) => {
           source: "ebay-sync:push_stock",
         });
         results.stock_pushed = r.pushed + r.withdrawn;
+        (results as Record<string, unknown>).stock_sync_queued = r.pushed;
         (results as Record<string, unknown>).stock_withdrawn = r.withdrawn;
         (results as Record<string, unknown>).stock_failed = r.failed;
       }
