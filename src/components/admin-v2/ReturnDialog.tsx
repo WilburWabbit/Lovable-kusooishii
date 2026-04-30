@@ -51,7 +51,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
       // Update order status
       const { error: orderErr } = await supabase
         .from("sales_order")
-        .update({ status: "return_pending" } as never)
+        .update({ v2_status: "return_pending" } as never)
         .eq("id", orderId);
 
       if (orderErr) throw orderErr;
