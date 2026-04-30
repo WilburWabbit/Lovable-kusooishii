@@ -302,26 +302,24 @@ export function useGradeStockUnit() {
 
       // Fire-and-forget: queue SKU item sync to QBO via the posting outbox.
       if (skuId) {
-        supabase
-          .rpc('queue_qbo_item_posting_intent' as never, {
+        void (async () => {
+          const { data: intentId, error } = await supabase.rpc('queue_qbo_item_posting_intent' as never, {
             p_sku_id: skuId,
             p_old_sku_code: oldSkuCode ?? null,
-          } as never)
-          .then(({ data: intentId, error }) => {
+          } as never);
+
             if (error) {
               console.warn(`QBO item intent for ${skuCode} failed (non-blocking):`, error);
               return;
             }
 
-            return supabase.functions.invoke('accounting-posting-intents-process', {
-              body: intentId ? { intentId } : { batch_size: 5 },
-            });
-          })
-          .then((res) => {
+          const res = await supabase.functions.invoke('accounting-posting-intents-process', {
+            body: intentId ? { intentId } : { batch_size: 5 },
+          });
+
             if (res?.error) console.warn(`QBO item posting for ${skuCode} failed (non-blocking):`, res.error);
             else console.log(`QBO item posting intent for ${skuCode}: queued`);
-          })
-          .catch((err) => console.warn(`QBO item posting intent for ${skuCode} failed (non-blocking):`, err));
+        })().catch((err) => console.warn(`QBO item posting intent for ${skuCode} failed (non-blocking):`, err));
       }
 
       // Fire-and-forget: run pricing for the SKU on all channels with live listings
