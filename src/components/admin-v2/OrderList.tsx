@@ -8,7 +8,9 @@ import type { OrderDetail } from "@/lib/types/admin";
 import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, OrderStatusBadge, Badge } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { CashSaleForm } from "./CashSaleForm";
+import { CompleteOrderModal } from "./CompleteOrderModal";
 import { Download, Search } from "lucide-react";
 
 // ─── Row type ────────────────────────────────────────────────
@@ -23,6 +25,8 @@ function getValue(row: OrderRow, key: string): unknown {
       return row.customer?.name ?? "Cash Sales";
     case "items":
       return row.lineItems.length;
+    case "ref":
+      return row.externalOrderId || row.docNumber || row.orderNumber;
     default:
       return (row as unknown as Record<string, unknown>)[key];
   }
@@ -41,11 +45,22 @@ const formatDate = (iso: string | null) => {
 
 const COLUMNS: ColumnDef<OrderRow>[] = [
   {
-    key: "orderNumber",
-    label: "Order",
+    key: "ref",
+    label: "Ref",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <Mono color="amber">{r.orderNumber}</Mono>,
+    render: (r) => {
+      const ref = r.externalOrderId || r.docNumber || r.orderNumber;
+      const isInternal = !r.externalOrderId && !r.docNumber;
+      return <Mono color={isInternal ? "dim" : "amber"}>{ref}</Mono>;
+    },
+  },
+  {
+    key: "orderNumber",
+    label: "Internal ID",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.orderNumber}</Mono>,
   },
   {
     key: "customerName",
@@ -55,11 +70,23 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     render: (r) => {
       const name = r.customer?.name ?? "Cash Sales";
       const isCash = !r.customer || name === "Cash Sales";
+      const isDraft = r.status === "needs_allocation" && r.lineItems.length === 0 && r.channel === "in_person";
       return (
         <span className="text-zinc-900">
           {name}
           {isCash && r.status === "needs_allocation" && (
-            <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            isDraft ? (
+              <button
+                type="button"
+                data-complete-order={r.id}
+                className="text-[10px] text-amber-500 ml-1.5 bg-transparent border-none cursor-pointer p-0 hover:text-amber-400 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                ⚠ Add items
+              </button>
+            ) : (
+              <span className="text-[10px] text-amber-500 ml-1.5">⚠ Allocate</span>
+            )
           )}
         </span>
       );
@@ -70,7 +97,10 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     label: "Channel",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <span className="text-zinc-600">{r.channel}</span>,
+    render: (r) => {
+      const label = r.channel === "squarespace" ? "Square Space" : r.channel;
+      return <span className="text-zinc-600">{label}</span>;
+    },
   },
   {
     key: "items",
@@ -78,7 +108,22 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     defaultVisible: true,
     sortable: true,
     align: "right",
-    render: (r) => <span className="text-zinc-600">{r.lineItems.length}</span>,
+    render: (r) => {
+      const firstName = r.lineItems[0]?.name;
+      const count = r.lineItems.length;
+      return (
+        <span className="text-zinc-600">
+          {firstName ? (
+            <span title={firstName}>
+              {firstName.length > 24 ? firstName.slice(0, 24) + "…" : firstName}
+              {count > 1 && <span className="text-zinc-400 ml-1">+{count - 1}</span>}
+            </span>
+          ) : (
+            count
+          )}
+        </span>
+      );
+    },
   },
   {
     key: "total",
@@ -109,7 +154,7 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     label: "Status",
     defaultVisible: true,
     sortable: false,
-    render: (r) => <OrderStatusBadge status={r.status} />,
+    render: (r) => <OrderStatusBadge status={r.status} itemCount={r.lineItems.length} />,
   },
   {
     key: "createdAt",
@@ -186,11 +231,11 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     },
   },
   {
-    key: "externalOrderId",
-    label: "External ID",
+    key: "docNumber",
+    label: "QBO Doc",
     defaultVisible: false,
-    sortable: false,
-    render: (r) => <Mono color="dim">{r.externalOrderId ?? "—"}</Mono>,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.docNumber ?? "—"}</Mono>,
   },
   {
     key: "shippedAt",
@@ -250,6 +295,7 @@ export function OrderList() {
   const navigate = useNavigate();
   const { data: orders = [], isLoading } = useOrders();
   const [cashSaleOpen, setCashSaleOpen] = useState(false);
+  const [completeOrderId, setCompleteOrderId] = useState<string | null>(null);
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
     "v2-orders",
     DEFAULT_VISIBLE,
@@ -276,6 +322,8 @@ export function OrderList() {
       result = result.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(term) ||
+          (r.externalOrderId ?? "").toLowerCase().includes(term) ||
+          (r.docNumber ?? "").toLowerCase().includes(term) ||
           (r.customer?.name ?? "Cash Sales").toLowerCase().includes(term),
       );
     }
@@ -343,6 +391,24 @@ export function OrderList() {
 
       <CashSaleForm open={cashSaleOpen} onClose={() => setCashSaleOpen(false)} />
 
+      {completeOrderId && (() => {
+        const cOrder = orders.find((o) => o.id === completeOrderId);
+        if (!cOrder) return null;
+        return (
+          <CompleteOrderModal
+            open={true}
+            onClose={() => setCompleteOrderId(null)}
+            orderId={cOrder.id}
+            orderNumber={cOrder.orderNumber}
+            grossTotal={cOrder.total}
+            notes={cOrder.notes ?? null}
+            customerName={cOrder.customer?.name ?? "Cash Sales"}
+            paymentMethod={cOrder.paymentMethod}
+            orderDate={cOrder.orderDate ?? cOrder.createdAt}
+          />
+        );
+      })()}
+
       <SurfaceCard noPadding className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -365,11 +431,9 @@ export function OrderList() {
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.sortable !== false ? (
-                    <input
+                    <TableFilterInput
                       value={prefs.filters[col.key] ?? ""}
-                      onChange={(e) => setFilter(col.key, e.target.value)}
-                      placeholder="Filter…"
-                      className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      onChange={(v) => setFilter(col.key, v)}
                     />
                   ) : (
                     <span />
@@ -385,7 +449,15 @@ export function OrderList() {
               return (
                 <tr
                   key={row.id}
-                  onClick={() => navigate(`/admin/orders/${row.id}`)}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    const btn = target.closest("[data-complete-order]") as HTMLElement | null;
+                    if (btn) {
+                      setCompleteOrderId(btn.dataset.completeOrder!);
+                      return;
+                    }
+                    navigate(`/admin/orders/${row.id}`);
+                  }}
                   className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
                   style={{
                     background: alert ? "rgba(245,158,11,0.025)" : "transparent",

@@ -31,6 +31,7 @@ function mapProduct(row: Record<string, unknown>): Product {
     id: row.id as string,
     mpn: row.mpn as string,
     name: (row.name as string) ?? '',
+    productType: (['minifig', 'minifigure'].includes(row.product_type as string) ? 'minifig' : 'set') as "set" | "minifig",
     theme: theme ? (theme.name as string) : null,
     subtheme: (row.subtheme_name as string) ?? null,
     setNumber: (row.set_number as string) ?? null,
@@ -47,6 +48,7 @@ function mapProduct(row: Record<string, unknown>): Product {
     cta: (row.call_to_action as string) ?? null,
     seoTitle: (row.seo_title as string) ?? null,
     seoDescription: (row.seo_description as string) ?? null,
+    ebayCategoryId: (row.ebay_category_id as string) ?? null,
     createdAt: row.created_at as string,
   };
 }
@@ -150,6 +152,7 @@ export interface ProductStockCounts {
   purchased: number;
   unlisted: number;
   unsold: number;
+  onHand: number;
   sold: number;
 }
 
@@ -174,13 +177,13 @@ export function useProductStockCounts() {
 
         let entry = counts.get(mpn);
         if (!entry) {
-          entry = { purchased: 0, unlisted: 0, unsold: 0, sold: 0 };
+          entry = { purchased: 0, unlisted: 0, unsold: 0, onHand: 0, sold: 0 };
           counts.set(mpn, entry);
         }
 
         entry.purchased += 1;
-        if (status === 'graded') entry.unlisted += 1;
-        else if (status === 'listed') entry.unsold += 1;
+        if (status === 'graded') { entry.unlisted += 1; entry.onHand += 1; }
+        else if (status === 'listed') { entry.unsold += 1; entry.onHand += 1; }
         else if (SOLD_STATUSES.includes(status)) entry.sold += 1;
       }
 
@@ -281,6 +284,10 @@ export function useProduct(mpn: string | undefined) {
 
       const includeCatalogImg = (rawProduct.include_catalog_img as boolean) ?? false;
       const fieldOverrides = (rawProduct.field_overrides as Record<string, FieldOverride>) ?? {};
+      const selectedMinifigFigNums = Array.isArray(rawProduct.selected_minifig_fig_nums)
+        ? (rawProduct.selected_minifig_fig_nums as unknown[])
+            .filter((v): v is string => typeof v === 'string')
+        : [];
 
       return {
         ...product,
@@ -290,6 +297,11 @@ export function useProduct(mpn: string | undefined) {
         catalogImageUrl,
         includeCatalogImg,
         fieldOverrides,
+        ebayCategoryId: (rawProduct.ebay_category_id as string) ?? null,
+        ebayMarketplace: (rawProduct.ebay_marketplace as string) ?? null,
+        gmcProductCategory: (rawProduct.gmc_product_category as string) ?? null,
+        metaCategory: (rawProduct.meta_category as string) ?? null,
+        selectedMinifigFigNums,
       };
     },
   });

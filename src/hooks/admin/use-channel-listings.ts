@@ -64,7 +64,38 @@ export function useChannelListings(skuCode: string | undefined) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map((r) => mapListing(r, skuCode!));
+
+      // Collapse duplicates: legacy data sometimes contains more than one
+      // channel_listing per (sku, channel). When that happens, prefer the row
+      // that's actually bound to an external listing/offer, then the most
+      // recently updated. Otherwise UI edits land on a stale empty row while
+      // the real live listing keeps drifting.
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const byChannel = new Map<string, Record<string, unknown>>();
+      const score = (r: Record<string, unknown>) => {
+        const hasExternal = r.external_listing_id ? 2 : 0;
+        const hasTitle =
+          typeof r.listing_title === 'string' && (r.listing_title as string).trim() ? 1 : 0;
+        return hasExternal + hasTitle;
+      };
+      for (const r of rows) {
+        const key = ((r.v2_channel as string) ?? (r.channel as string) ?? 'website');
+        const existing = byChannel.get(key);
+        if (!existing) {
+          byChannel.set(key, r);
+          continue;
+        }
+        const sNew = score(r);
+        const sOld = score(existing);
+        if (sNew > sOld) {
+          byChannel.set(key, r);
+        } else if (sNew === sOld) {
+          const tNew = new Date((r.updated_at as string) ?? (r.created_at as string) ?? 0).getTime();
+          const tOld = new Date((existing.updated_at as string) ?? (existing.created_at as string) ?? 0).getTime();
+          if (tNew > tOld) byChannel.set(key, r);
+        }
+      }
+      return [...byChannel.values()].map((r) => mapListing(r, skuCode!));
     },
   });
 }
@@ -177,31 +208,77 @@ export function usePublishListing() {
         throw new Error(`Price £${listingPrice.toFixed(2)} is below floor price £${floorPrice.toFixed(2)}`);
       }
 
-      // Upsert listing with all fields
-      const { data, error } = await supabase
-        .from('channel_listing')
-        .upsert(
-          {
-            sku_id: (skuRow as unknown as Record<string, unknown>).id as string,
-            channel: channel,
-            v2_channel: channel,
-            v2_status: 'live',
-            listing_title: listingTitle.trim(),
-            listing_description: listingDescription?.trim() ?? null,
-            listed_price: listingPrice,
-            fee_adjusted_price: listingPrice,
-            estimated_fees: estimatedFees ?? null,
-            estimated_net: estimatedNet ?? null,
-            external_listing_id: externalId ?? null,
-            external_url: externalUrl ?? null,
-            listed_at: new Date().toISOString(),
-          } as never,
-          { onConflict: 'sku_id,channel' as never },
-        )
-        .select()
-        .single();
+      const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
 
-      if (error) throw error;
+      // Normalize channel value: legacy `channel` column uses 'web' for the
+      // website, while v2_channel uses 'website'. The UI/Channel type sends
+      // 'website' — translate so we update the existing row instead of
+      // creating a duplicate (and tripping the (channel, external_sku) unique
+      // constraint downstream).
+      const legacyChannel = channel === 'website' ? 'web' : channel;
+      const v2Channel = channel === 'web' ? 'website' : channel;
+
+      // There is no (sku_id, channel) unique constraint, so a true upsert
+      // can't disambiguate the row. Look up ALL rows for this (sku, channel)
+      // pair and pick the canonical one — preferring rows already bound to
+      // an external listing/offer — so edits don't land on a stale duplicate
+      // while the live listing keeps drifting.
+      const { data: existingRows, error: lookupErr } = await supabase
+        .from('channel_listing')
+        .select('id, external_listing_id, listing_title, updated_at, created_at')
+        .eq('sku_id', skuId)
+        .in('channel', [legacyChannel, channel] as never);
+
+      if (lookupErr) throw lookupErr;
+
+      const candidates = (existingRows ?? []) as Array<Record<string, unknown>>;
+      const scoreRow = (r: Record<string, unknown>) =>
+        (r.external_listing_id ? 2 : 0) +
+        (typeof r.listing_title === 'string' && (r.listing_title as string).trim() ? 1 : 0);
+      candidates.sort((a, b) => {
+        const diff = scoreRow(b) - scoreRow(a);
+        if (diff !== 0) return diff;
+        const ta = new Date((a.updated_at as string) ?? (a.created_at as string) ?? 0).getTime();
+        const tb = new Date((b.updated_at as string) ?? (b.created_at as string) ?? 0).getTime();
+        return tb - ta;
+      });
+      const existingId = candidates[0]?.id as string | undefined;
+
+      const payload = {
+        sku_id: skuId,
+        channel: legacyChannel,
+        v2_channel: v2Channel,
+        v2_status: 'live',
+        listing_title: listingTitle.trim(),
+        listing_description: listingDescription?.trim() ?? null,
+        listed_price: listingPrice,
+        fee_adjusted_price: listingPrice,
+        estimated_fees: estimatedFees ?? null,
+        estimated_net: estimatedNet ?? null,
+        external_listing_id: externalId ?? null,
+        external_url: externalUrl ?? null,
+        listed_at: new Date().toISOString(),
+      };
+
+      let data: unknown;
+      if (existingId) {
+        const { data: updated, error: updErr } = await supabase
+          .from('channel_listing')
+          .update(payload as never)
+          .eq('id', existingId)
+          .select()
+          .single();
+        if (updErr) throw updErr;
+        data = updated;
+      } else {
+        const { data: inserted, error: insErr } = await supabase
+          .from('channel_listing')
+          .insert(payload as never)
+          .select()
+          .single();
+        if (insErr) throw insErr;
+        data = inserted;
+      }
 
       // Transition stock units from graded → listed
       await supabase
@@ -213,14 +290,23 @@ export function usePublishListing() {
         .eq('sku_id' as never, (skuRow as unknown as Record<string, unknown>).id as string)
         .eq('v2_status' as never, 'graded');
 
-      // Fire-and-forget: trigger external channel push
+      // Push to external channel.
+      // For eBay we await the result so any failure surfaces as a toast
+      // via the mutation's onError, instead of being swallowed in
+      // a fire-and-forget .catch().
       const listingId = (data as Record<string, unknown>).id as string;
       if (channel === 'ebay') {
-        supabase.functions
-          .invoke('ebay-push-listing', {
-            body: { listingId, skuCode, channel },
-          })
-          .catch((err) => console.warn(`eBay push for ${skuCode} failed (non-blocking):`, err));
+        const { data: pushResult, error: pushErr } = await supabase.functions.invoke(
+          'ebay-push-listing',
+          { body: { listingId, skuCode, channel } },
+        );
+        if (pushErr) {
+          throw new Error(`eBay publish failed: ${pushErr.message}`);
+        }
+        const result = pushResult as { success?: boolean; error?: string } | null;
+        if (result && result.success === false) {
+          throw new Error(`eBay publish failed: ${result.error ?? 'unknown error'}`);
+        }
       }
 
       return data;

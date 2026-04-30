@@ -9,6 +9,7 @@ import { toast } from "sonner";
 interface LineItemDraft {
   key: number;
   mpn: string;
+  name: string;
   quantity: number;
   unitCost: number;
 }
@@ -18,6 +19,10 @@ let nextKey = 1;
 export function NewPurchaseForm() {
   const navigate = useNavigate();
   const createBatch = useCreatePurchaseBatch();
+  const { data: products = [] } = useProducts();
+
+  // Persistent error banner — toasts auto-hide too quickly to read DB errors
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Batch header
   const [supplierName, setSupplierName] = useState("");
@@ -35,8 +40,17 @@ export function NewPurchaseForm() {
 
   // Line items
   const [lineItems, setLineItems] = useState<LineItemDraft[]>([
-    { key: nextKey++, mpn: "", quantity: 1, unitCost: 0 },
+    { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
   ]);
+
+  // For each line: lookup the existing product by MPN (case-insensitive)
+  const lineProductMatches = useMemo(() => {
+    return lineItems.map((li) => {
+      const mpn = li.mpn.trim().toLowerCase();
+      if (!mpn) return null;
+      return products.find((p) => p.mpn.toLowerCase() === mpn) ?? null;
+    });
+  }, [lineItems, products]);
 
   const totalSharedCosts = shipping + brokerFee + otherCost;
   const totalMerchandise = lineItems.reduce(
@@ -60,7 +74,7 @@ export function NewPurchaseForm() {
   const addLine = () => {
     setLineItems((prev) => [
       ...prev,
-      { key: nextKey++, mpn: "", quantity: 1, unitCost: 0 },
+      { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
     ]);
   };
 
@@ -80,13 +94,22 @@ export function NewPurchaseForm() {
     );
   };
 
+  // For new MPNs (not in catalog), the operator must enter a Product Name so it
+  // flows correctly into QBO. Existing MPNs reuse the stored name automatically.
   const canSubmit =
     supplierName.trim() !== "" &&
     lineItems.length > 0 &&
-    lineItems.every((li) => li.mpn.trim() !== "" && li.quantity > 0 && li.unitCost > 0);
+    lineItems.every((li, idx) => {
+      const baseValid = li.mpn.trim() !== "" && li.quantity > 0 && li.unitCost > 0;
+      if (!baseValid) return false;
+      const isNew = !lineProductMatches[idx];
+      if (isNew && li.name.trim() === "") return false;
+      return true;
+    });
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    setSubmitError(null);
 
     const sharedCosts: SharedCosts = {
       shipping,
@@ -102,8 +125,11 @@ export function NewPurchaseForm() {
         reference: reference.trim() || undefined,
         supplierVatRegistered: vatRegistered,
         sharedCosts,
-        lineItems: lineItems.map((li) => ({
+        lineItems: lineItems.map((li, idx) => ({
           mpn: li.mpn.trim(),
+          name: lineProductMatches[idx]
+            ? lineProductMatches[idx]!.name
+            : li.name.trim() || undefined,
           quantity: li.quantity,
           unitCost: li.unitCost,
         })),
@@ -112,7 +138,8 @@ export function NewPurchaseForm() {
       navigate(`/admin/purchases/${batchId}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create batch";
-      toast.error(message);
+      toast.error(message, { duration: 10000 });
+      setSubmitError(message);
     }
   };
 
@@ -242,62 +269,89 @@ export function NewPurchaseForm() {
               const lineTotal = li.unitCost * li.quantity;
               const apportPerUnit = apportionments[idx] ?? 0;
               const landedPerUnit = li.unitCost + apportPerUnit;
+              const matchedProduct = lineProductMatches[idx];
+              const isNewMpn = li.mpn.trim() !== "" && !matchedProduct;
 
               return (
-                <tr key={li.key} className="border-b border-zinc-200">
-                  <td className="px-3 py-2">
-                    <MpnAutocomplete
-                      value={li.mpn}
-                      onChange={(v) => updateLine(li.key, "mpn", v)}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min={1}
-                      value={li.quantity}
-                      onChange={(e) =>
-                        updateLine(li.key, "quantity", Math.max(1, parseInt(e.target.value) || 1))
-                      }
-                      className="w-16 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs text-center"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={li.unitCost || ""}
-                      onChange={(e) =>
-                        updateLine(li.key, "unitCost", Number(e.target.value) || 0)
-                      }
-                      className="w-20 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Mono>£{lineTotal.toFixed(2)}</Mono>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Mono color="dim">
-                      {li.unitCost > 0 ? `£${apportPerUnit.toFixed(2)}` : "—"}
-                    </Mono>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Mono color="teal">
-                      {li.unitCost > 0 ? `£${landedPerUnit.toFixed(2)}` : "—"}
-                    </Mono>
-                  </td>
-                  <td className="px-3 py-2">
-                    {lineItems.length > 1 && (
-                      <button
-                        onClick={() => removeLine(li.key)}
-                        className="text-zinc-500 hover:text-red-500 text-xs cursor-pointer bg-transparent border-none transition-colors"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <>
+                  <tr key={li.key} className="border-b border-zinc-200">
+                    <td className="px-3 py-2">
+                      <MpnAutocomplete
+                        value={li.mpn}
+                        onChange={(v) => updateLine(li.key, "mpn", v)}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={li.quantity}
+                        onChange={(e) =>
+                          updateLine(li.key, "quantity", Math.max(1, parseInt(e.target.value) || 1))
+                        }
+                        className="w-16 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs text-center"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={li.unitCost || ""}
+                        onChange={(e) =>
+                          updateLine(li.key, "unitCost", Number(e.target.value) || 0)
+                        }
+                        className="w-20 px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-xs"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Mono>£{lineTotal.toFixed(2)}</Mono>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Mono color="dim">
+                        {li.unitCost > 0 ? `£${apportPerUnit.toFixed(2)}` : "—"}
+                      </Mono>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Mono color="teal">
+                        {li.unitCost > 0 ? `£${landedPerUnit.toFixed(2)}` : "—"}
+                      </Mono>
+                    </td>
+                    <td className="px-3 py-2">
+                      {lineItems.length > 1 && (
+                        <button
+                          onClick={() => removeLine(li.key)}
+                          className="text-zinc-500 hover:text-red-500 text-xs cursor-pointer bg-transparent border-none transition-colors"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {(isNewMpn || matchedProduct) && (
+                    <tr key={`${li.key}-name`} className="border-b border-zinc-200 bg-zinc-50/40">
+                      <td colSpan={7} className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold w-32">
+                            {isNewMpn ? "Product Name *" : "Product Name"}
+                          </span>
+                          {isNewMpn ? (
+                            <input
+                              value={li.name}
+                              onChange={(e) => updateLine(li.key, "name", e.target.value)}
+                              placeholder="Required for new MPN — flows to QuickBooks"
+                              className="flex-1 px-2 py-1 bg-white border border-amber-300 rounded text-zinc-900 text-xs"
+                            />
+                          ) : (
+                            <span className="text-xs text-zinc-700">
+                              {matchedProduct!.name}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               );
             })}
           </tbody>
@@ -316,6 +370,27 @@ export function NewPurchaseForm() {
           </span>
         </div>
       </SurfaceCard>
+
+      {/* Persistent error banner — DB errors need time to read */}
+      {submitError && (
+        <div className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 flex items-start gap-3">
+          <div className="flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-red-700 mb-1">
+              Purchase batch creation failed
+            </div>
+            <div className="text-xs text-red-900 whitespace-pre-wrap break-words font-mono">
+              {submitError}
+            </div>
+          </div>
+          <button
+            onClick={() => setSubmitError(null)}
+            className="text-red-700 hover:text-red-900 text-sm bg-transparent border-none cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Submit */}
       <div className="flex gap-3">

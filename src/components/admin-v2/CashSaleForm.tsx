@@ -541,40 +541,16 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           const lineId = (insertedLine as Record<string, unknown>).id as string;
 
           try {
-            const { data: consumedUnit, error: fifoError } = await supabase
-              .rpc("v2_consume_fifo_unit" as never, { p_sku_code: line.skuCode } as never);
+            const { error: allocationError } = await supabase.rpc(
+              "allocate_order_line_stock_unit" as never,
+              {
+                p_order_id: orderId,
+                p_line_item_id: lineId,
+                p_sku_code: line.skuCode,
+              } as never,
+            );
 
-            if (fifoError || !consumedUnit) {
-              allAllocated = false;
-              continue;
-            }
-
-            const unit = consumedUnit as Record<string, unknown>;
-            const stockUnitId = unit.id as string;
-            const cogs = Number(unit.landed_cost ?? 0);
-
-            const { error: lineUpdateError } = await supabase
-              .from("sales_order_line")
-              .update({
-                stock_unit_id: stockUnitId,
-                cogs,
-              } as never)
-              .eq("id", lineId);
-
-            if (lineUpdateError) {
-              throw lineUpdateError;
-            }
-
-            const { error: stockUpdateError } = await supabase
-              .from("stock_unit")
-              .update({
-                order_id: orderId,
-              } as never)
-              .eq("id", stockUnitId);
-
-            if (stockUpdateError) {
-              throw stockUpdateError;
-            }
+            if (allocationError) throw allocationError;
           } catch {
             allAllocated = false;
           }
@@ -594,9 +570,31 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           throw new Error(`Failed to mark order for allocation: ${statusUpdateError.message}`);
         }
       } else {
-        supabase.functions
-          .invoke("qbo-sync-sales-receipt", { body: { orderId } })
-          .catch(() => {});
+        // In-person sales are immediately complete (items handed over)
+        const today = new Date().toISOString().slice(0, 10);
+        await supabase
+          .from("sales_order")
+          .update({
+            v2_status: "complete",
+            shipped_via: "In Person",
+            shipped_date: today,
+            delivered_at: new Date().toISOString(),
+          } as never)
+          .eq("id", orderId);
+
+        // Mark stock units as complete too
+        await supabase
+          .from("stock_unit")
+          .update({
+            v2_status: "complete",
+            shipped_at: new Date().toISOString(),
+            delivered_at: new Date().toISOString(),
+          } as never)
+          .eq("order_id" as never, orderId)
+          .in("v2_status" as never, ["sold"]);
+
+        // QBO sync handled by qbo-retry-sync cron — nudge it now
+        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
       }
 
       return { orderId, orderNumber, allAllocated };
@@ -607,7 +605,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
       queryClient.invalidateQueries({ queryKey: ["cash-sale", "lookups"] });
       toast.success(
         result.allAllocated
-          ? `Sale ${result.orderNumber} created and queued for QBO sync`
+          ? `Sale ${result.orderNumber} created — QBO sync will follow shortly`
           : `Sale ${result.orderNumber} created. Some units still need allocation before QBO sync.`,
       );
       resetForm();

@@ -12,6 +12,62 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/** Fully reset a QBO purchase: delete derived stock units, receipt lines, purchase batches/line items, then reset landing to pending */
+async function resetQboPurchase(admin: any, qboPurchaseId: string, landingId: string) {
+  // 1. Find the receipt
+  const { data: receipt } = await admin
+    .from("inbound_receipt")
+    .select("id")
+    .eq("qbo_purchase_id", qboPurchaseId)
+    .maybeSingle();
+
+  if (receipt) {
+    // 2. Get real receipt line IDs
+    const { data: lines } = await admin
+      .from("inbound_receipt_line")
+      .select("id")
+      .eq("inbound_receipt_id", receipt.id);
+    const lineIds = (lines ?? []).map((l: any) => l.id);
+
+    // 3. Delete stock units linked to those lines (non-sold only; nullify sold)
+    if (lineIds.length > 0) {
+      const { data: linkedUnits } = await admin
+        .from("stock_unit")
+        .select("id, status, v2_status")
+        .in("inbound_receipt_line_id", lineIds);
+      for (const unit of (linkedUnits ?? [])) {
+        if (unit.status === "closed" || unit.v2_status === "sold") {
+          await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
+        } else {
+          await admin.from("stock_unit").delete().eq("id", unit.id);
+        }
+      }
+    }
+
+    // 4. Delete receipt lines
+    await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
+
+    // 5. Reset receipt status
+    await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
+  }
+
+  // 6. Delete purchase_line_items and purchase_batches by reference
+  const { data: batches } = await admin
+    .from("purchase_batches")
+    .select("id")
+    .eq("reference", qboPurchaseId);
+  for (const b of (batches ?? [])) {
+    await admin.from("purchase_line_items").delete().eq("batch_id", b.id);
+    await admin.from("purchase_batches").delete().eq("id", b.id);
+  }
+
+  // 7. Reset landing record to pending
+  await admin
+    .from("landing_raw_qbo_purchase")
+    .update({ status: "pending", error_message: null, processed_at: null })
+    .eq("id", landingId);
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -806,32 +862,66 @@ Deno.serve(async (req) => {
         ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
         : 0;
 
-      // 4. Get shipping cost (cheapest rate that fits)
+      // 4. Get shipping cost — Evri-first strategy
       const weightKg = product.weight_kg ?? 0;
-      const { data: allRates } = await admin
-        .from("shipping_rate_table")
-        .select("*")
-        .or(`channel.eq.${channel},channel.eq.default`)
-        .eq("active", true)
-        .gte("max_weight_kg", weightKg)
-        .order("cost", { ascending: true });
-      
       const lengthCm = product.length_cm;
       const widthCm = product.width_cm;
       const heightCm = product.height_cm;
       const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
-      let matchedRate: any = null;
-      if (hasDimensions && allRates && allRates.length > 0) {
-        matchedRate = allRates.find((r: any) =>
-          (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
-          (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
-          (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
-        );
+
+      // Read Evri tier setting
+      const activeTierNum = dm["evri_active_tier"] ?? 1;
+      const activeTier = `tier_${activeTierNum}`;
+      const preferEvriThreshold = dm["shipping_prefer_evri_threshold"] ?? 1.0;
+
+      // Helper to find best-fit rate from a list
+      const findBestFit = (rates: any[]): any => {
+        if (hasDimensions && rates.length > 0) {
+          const dimMatch = rates.find((r: any) =>
+            (r.max_length_cm == null || r.max_length_cm >= lengthCm) &&
+            (r.max_width_cm == null || r.max_width_cm >= widthCm) &&
+            (r.max_depth_cm == null || r.max_depth_cm >= heightCm)
+          );
+          if (dimMatch) return dimMatch;
+        }
+        // Fallback: Evri Small Parcel or cheapest
+        const evriSmall = rates.filter((r: any) => r.carrier === "Evri" && r.size_band === "Small Parcel");
+        return evriSmall.length > 0 ? evriSmall[0] : (rates.length > 0 ? rates[0] : null);
+      };
+
+      // Query Evri direct rates (default channel, active tier)
+      const { data: evriRates } = await admin
+        .from("shipping_rate_table")
+        .select("*")
+        .eq("channel", "default")
+        .eq("tier", activeTier)
+        .eq("destination", "domestic")
+        .eq("active", true)
+        .gte("max_weight_kg", weightKg)
+        .order("cost", { ascending: true });
+
+      let matchedRate = findBestFit(evriRates ?? []);
+
+      // For eBay channel: check if eBay carrier rate offers substantial saving
+      if (channel === "ebay" && matchedRate) {
+        const { data: ebayRates } = await admin
+          .from("shipping_rate_table")
+          .select("*")
+          .eq("channel", "ebay")
+          .eq("destination", "domestic")
+          .eq("active", true)
+          .gte("max_weight_kg", weightKg)
+          .order("cost", { ascending: true });
+
+        const ebayBest = findBestFit(ebayRates ?? []);
+        if (ebayBest) {
+          const saving = Number(matchedRate.cost) - Number(ebayBest.cost);
+          if (saving > preferEvriThreshold) {
+            matchedRate = ebayBest;
+          }
+        }
       }
-      if (!matchedRate) {
-        const evriSmall = (allRates ?? []).filter((r: any) => r.carrier === "Evri" && r.size_band === "Small Parcel");
-        matchedRate = evriSmall.length > 0 ? evriSmall[0] : (allRates && allRates.length > 0 ? allRates[0] : null);
-      }
+
       const shippingCost = matchedRate ? Number(matchedRate.cost) : 0;
 
       // 5. Get channel fees
@@ -865,7 +955,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 7. Compute prices
+      // 7. Compute prices using shared VAT-aware floor calculator
       // Decompose fees into rate-based and fixed components, respecting applies_to
       let effectiveFeeRate = 0;
       let fixedFeeCosts = 0;
@@ -886,12 +976,16 @@ Deno.serve(async (req) => {
 
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
-      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
-      let floorPrice = Math.round(((costBase + minProfit + fixedFeeCosts) / denominator) * 100) / 100;
 
-      // Post-check: verify floor covers all fees with min/max clamps applied
+      // VAT-aware floor: revenue = P/1.2, net fees = gross_fees/1.2
+      // P >= 1.2 × (costBase + minProfit + fixedFees/1.2) / (1 - margin - feeRate - risk)
+      const netFixedFees = fixedFeeCosts / 1.2;
+      const denominator = Math.max(1 - effectiveMargin - effectiveFeeRate - riskRate, 0.05);
+      let floorPrice = Math.round((1.2 * (costBase + minProfit + netFixedFees) / denominator) * 100) / 100;
+
+      // Post-check: verify floor covers all fees with min/max clamps (ex-VAT basis)
       for (let i = 0; i < 5; i++) {
-        let totalFees = 0;
+        let totalFeesGross = 0;
         for (const fee of fees ?? []) {
           let base = floorPrice;
           if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
@@ -899,11 +993,12 @@ Deno.serve(async (req) => {
           let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
           if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
           if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
-          totalFees += amount;
+          totalFeesGross += amount;
         }
-        const riskReserve = floorPrice * riskRate;
-        const requiredRevenue = costBase + minProfit + totalFees + riskReserve;
-        const neededPrice = requiredRevenue / (1 - effectiveMargin);
+        const netFees = totalFeesGross / 1.2;
+        const riskReserve = (floorPrice / 1.2) * riskRate;
+        const requiredExVat = costBase + minProfit + netFees + riskReserve;
+        const neededPrice = 1.2 * requiredExVat / (1 - effectiveMargin);
         if (neededPrice <= floorPrice + 0.01) break;
         floorPrice = Math.round(neededPrice * 100) / 100;
       }
@@ -1084,11 +1179,18 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("channel_listing").update(updates).eq("id", listing_id);
       if (error) throw error;
 
-      // If auto-price was applied on the web channel, also update sku.price so the storefront picks it up
-      if (auto_price_applied && updates.listed_price != null) {
-        const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
-        if (listingRow?.channel === "web" && listingRow.sku_id) {
-          await admin.from("sku").update({ price: updates.listed_price }).eq("id", listingRow.sku_id);
+      // Always sync floor_price and sale_price back to the SKU
+      const { data: listingRow } = await admin.from("channel_listing").select("sku_id, channel").eq("id", listing_id).single();
+      if (listingRow?.sku_id) {
+        const skuUpdates: Record<string, any> = {};
+        // Update SKU floor_price from the calculated floor
+        if (price_floor != null) skuUpdates.floor_price = price_floor;
+        // If auto-price was applied on the web channel, also update sku.price for storefront
+        if (auto_price_applied && updates.listed_price != null && listingRow.channel === "web") {
+          skuUpdates.price = updates.listed_price;
+        }
+        if (Object.keys(skuUpdates).length > 0) {
+          await admin.from("sku").update(skuUpdates).eq("id", listingRow.sku_id);
         }
       }
 
@@ -1546,44 +1648,17 @@ Deno.serve(async (req) => {
             action: `wrote_off_${unitWrittenOff}`,
           });
         } else {
-          // QBO has more than app — auto-backfill balancing units
+          // QBO has more than app — report only (do NOT auto-create ghost units)
           const shortfall = qboQty - available;
           qboHigher++;
-
-          const backfillUnits = [];
-          const { data: skuRecord } = await admin.from("sku").select("id, sku_code").eq("id", sku.id).single();
-          const parsed = skuRecord ? { conditionGrade: skuRecord.sku_code.includes(".") ? skuRecord.sku_code.split(".").pop() : "1" } : { conditionGrade: "1" };
-          const mpn = sku.sku_code.includes(".") ? sku.sku_code.substring(0, sku.sku_code.lastIndexOf(".")) : sku.sku_code;
-
-          for (let i = 0; i < shortfall; i++) {
-            backfillUnits.push({
-              sku_id: sku.id,
-              mpn,
-              condition_grade: parsed.conditionGrade,
-              status: "available",
-              landed_cost: 0,
-            });
-          }
-          await admin.from("stock_unit").insert(backfillUnits);
-
-          await admin.from("audit_event").insert({
-            entity_type: "sku", entity_id: sku.id,
-            trigger_type: "stock_reconciliation_backfill", actor_type: "user",
-            actor_id: userId, source_system: "admin-data",
-            correlation_id: correlationId,
-            input_json: { sku_code: sku.sku_code, qbo_qty: qboQty, app_qty: available, units_created: shortfall, reason: "qbo_higher_auto_backfill" },
-          });
-
-          backfilled += shortfall;
           details.push({
             sku_code: sku.sku_code,
             qbo_qty: qboQty,
             app_qty: available,
             diff: shortfall,
             direction: "qbo_higher",
-            action: `backfilled_${shortfall}`,
+            action: "report_only",
           });
-
         }
       }
 
@@ -1632,75 +1707,124 @@ Deno.serve(async (req) => {
       result = { success: true, orphans_deleted: deleted };
 
     } else if (action === "rebuild-from-qbo") {
-      // Nuclear reset: delete all canonical QBO data, reset all landing tables to pending.
-      // Caller then triggers qbo-process-pending to replay from staged data.
+      // Full reset: QBO is the absolute source of truth.
+      // Phase 1: Clear ALL QBO landing tables (stale data purge)
+      // Phase 2: Delete all canonical transactional data
+      // Phase 3: UI drives re-sync from QBO live, then processes
       const rebuildCorrelationId = crypto.randomUUID();
-      let purchasesReset = 0, salesReset = 0, refundsReset = 0, itemsReset = 0, customersReset = 0;
       let receiptsDeleted = 0, ordersDeleted = 0;
-      let stockDeleted = 0, stockOrphaned = 0;
+      let stockDeleted = 0;
+      let payoutsDeleted = 0;
 
-      // Step 1: Delete all QBO-originated sales orders (NO stock reopening)
-      const { data: qboOrders } = await admin.from("sales_order")
-        .select("id").in("origin_channel", ["qbo", "qbo_refund"]);
-      for (const order of (qboOrders ?? [])) {
-        // Reopen stock units linked to order lines before deleting
-        const { data: orderLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", order.id);
-        for (const ol of (orderLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id).eq("status", "closed");
+      // ═══ Phase 1: CLEAR all QBO landing tables (fresh start) ═══
+      // This ensures deleted QBO records don't get re-created from stale landing data
+      let landingPurchasesCleared = 0, landingSalesCleared = 0, landingRefundsCleared = 0;
+      let landingItemsCleared = 0, landingCustomersCleared = 0, landingVendorsCleared = 0, landingTaxCleared = 0;
+
+      const clearTable = async (table: string) => {
+        const { data } = await admin.from(table).select("id");
+        const ids = (data ?? []).map((r: any) => r.id);
+        if (ids.length > 0) {
+          for (let i = 0; i < ids.length; i += 100) {
+            const batch = ids.slice(i, i + 100);
+            await admin.from(table).delete().in("id", batch);
           }
         }
+        return ids.length;
+      };
+
+      landingPurchasesCleared = await clearTable("landing_raw_qbo_purchase");
+      landingSalesCleared = await clearTable("landing_raw_qbo_sales_receipt");
+      landingRefundsCleared = await clearTable("landing_raw_qbo_refund_receipt");
+      landingItemsCleared = await clearTable("landing_raw_qbo_item");
+      landingCustomersCleared = await clearTable("landing_raw_qbo_customer");
+      landingVendorsCleared = await clearTable("landing_raw_qbo_vendor");
+      landingTaxCleared = await clearTable("landing_raw_qbo_tax_entity");
+      await clearTable("landing_raw_qbo_deposit");
+
+      console.log(`Phase 1 complete: cleared ${landingPurchasesCleared} purchases, ${landingSalesCleared} sales, ${landingRefundsCleared} refunds, ${landingItemsCleared} items, ${landingCustomersCleared} customers, ${landingVendorsCleared} vendors, ${landingTaxCleared} tax entities from landing tables`);
+
+      // ═══ Phase 2: Delete ALL canonical transactional data ═══
+
+      // Step 1: Delete ALL sales orders — NO stock reopening
+      const { data: allOrders } = await admin.from("sales_order").select("id");
+      for (const order of (allOrders ?? [])) {
         await admin.from("sales_order_line").delete().eq("sales_order_id", order.id);
         await admin.from("sales_order").delete().eq("id", order.id);
         ordersDeleted++;
       }
 
-      // Step 2: Delete ALL stock units (available, received, graded, written_off, closed)
-      // linked to inbound receipts. Also delete orphaned stock.
+      // Step 2: Delete ALL payout data
+      const { data: allPayouts } = await admin.from("payouts").select("id");
+      for (const payout of (allPayouts ?? [])) {
+        const { data: payoutFees } = await admin.from("payout_fee").select("id").eq("payout_id", payout.id);
+        for (const fee of (payoutFees ?? [])) {
+          await admin.from("payout_fee_line").delete().eq("payout_fee_id", fee.id);
+        }
+        await admin.from("payout_fee").delete().eq("payout_id", payout.id);
+        await admin.from("payout_orders").delete().eq("payout_id", payout.id);
+        await admin.from("payouts").delete().eq("id", payout.id);
+        payoutsDeleted++;
+      }
+
+      // Step 3: Delete ALL stock units
+      const { data: allStock } = await admin.from("stock_unit").select("id");
+      const allStockIds = (allStock ?? []).map((u: any) => u.id);
+      if (allStockIds.length > 0) {
+        for (let i = 0; i < allStockIds.length; i += 100) {
+          const batch = allStockIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", batch);
+        }
+        stockDeleted = allStockIds.length;
+      }
+
+      // Step 3b: Delete ALL purchase_line_items then purchase_batches
+      let purchaseBatchesDeleted = 0;
+      await admin.from("purchase_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const { data: allBatches } = await admin.from("purchase_batches").select("id");
+      if ((allBatches ?? []).length > 0) {
+        for (let i = 0; i < allBatches!.length; i += 100) {
+          const batch = allBatches!.slice(i, i + 100);
+          await admin.from("purchase_batches").delete().in("id", batch.map((b: any) => b.id));
+        }
+        purchaseBatchesDeleted = allBatches!.length;
+      }
+
+      // Step 4: Delete ALL inbound receipts and lines
       const { data: allReceipts } = await admin.from("inbound_receipt").select("id");
       for (const receipt of (allReceipts ?? [])) {
-        const { data: receiptLines } = await admin.from("inbound_receipt_line")
-          .select("id").eq("inbound_receipt_id", receipt.id);
-        const lineIds = (receiptLines ?? []).map((l: any) => l.id);
-
-        if (lineIds.length > 0) {
-          // Hard-delete ALL stock units linked to these lines
-          const { data: allUnits } = await admin.from("stock_unit")
-            .select("id")
-            .in("inbound_receipt_line_id", lineIds);
-          const unitIds = (allUnits ?? []).map((u: any) => u.id);
-          if (unitIds.length > 0) {
-            for (let i = 0; i < unitIds.length; i += 100) {
-              const batch = unitIds.slice(i, i + 100);
-              await admin.from("stock_unit").delete().in("id", batch);
-            }
-            stockDeleted += unitIds.length;
-          }
-        }
-
-        // Delete receipt lines and the receipt itself
         await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
         await admin.from("inbound_receipt").delete().eq("id", receipt.id);
         receiptsDeleted++;
       }
 
-      // Step 3: Clean up any remaining orphaned stock units (all statuses)
-      const { data: remainingOrphans } = await admin.from("stock_unit")
-        .select("id")
-        .is("inbound_receipt_line_id", null);
-      const orphanIds = (remainingOrphans ?? []).map((o: any) => o.id);
-      if (orphanIds.length > 0) {
-        for (let i = 0; i < orphanIds.length; i += 100) {
-          const batch = orphanIds.slice(i, i + 100);
-          await admin.from("stock_unit").delete().in("id", batch);
+      // Step 4b: Delete ALL SKUs
+      let skusDeleted = 0;
+      const { data: allSkus } = await admin.from("sku").select("id");
+      const allSkuIds = (allSkus ?? []).map((s: any) => s.id);
+      if (allSkuIds.length > 0) {
+        for (let i = 0; i < allSkuIds.length; i += 100) {
+          const batch = allSkuIds.slice(i, i + 100);
+          await admin.from("price_audit_log").delete().in("sku_id", batch);
         }
-        stockDeleted += orphanIds.length;
+        for (let i = 0; i < allSkuIds.length; i += 100) {
+          const batch = allSkuIds.slice(i, i + 100);
+          await admin.from("sku").delete().in("id", batch);
+        }
+        skusDeleted = allSkuIds.length;
       }
 
-      // Step 3b: Clean up QBO-related audit events from prior processing cycles
-      // These reference entities that were just deleted and would cause stale
-      // lookups in reconcile-stock Step A0.
+      // Step 4c: Delete ALL vendors
+      let vendorsDeleted = 0;
+      const { data: allVendors } = await admin.from("vendor").select("id");
+      if ((allVendors ?? []).length > 0) {
+        for (const v of allVendors!) {
+          await admin.from("vendor").delete().eq("id", v.id);
+        }
+        vendorsDeleted = allVendors!.length;
+      }
+
+      // Step 5: Clean up audit events
       await admin.from("audit_event").delete()
         .in("trigger_type", [
           "qbo_inventory_adjustment", "qbo_qty_backfill",
@@ -1709,56 +1833,105 @@ Deno.serve(async (req) => {
           "cleanup_orphaned_stock",
         ]);
 
-      // Step 4: Reset ALL landing tables to pending
-      const { data: pData } = await admin.from("landing_raw_qbo_purchase")
+      // Step 6: Reset non-QBO landing tables for re-matching
+      const { data: stripeData } = await admin.from("landing_raw_stripe_event")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
-      purchasesReset = pData?.length ?? 0;
+      const stripeReset = stripeData?.length ?? 0;
 
-      const { data: sData } = await admin.from("landing_raw_qbo_sales_receipt")
+      const { data: ebayOrderData } = await admin.from("landing_raw_ebay_order")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
-      salesReset = sData?.length ?? 0;
+      const ebayOrdersReset = ebayOrderData?.length ?? 0;
 
-      const { data: rData } = await admin.from("landing_raw_qbo_refund_receipt")
+      const { data: ebayPayoutData } = await admin.from("landing_raw_ebay_payout")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
-      refundsReset = rData?.length ?? 0;
+      const ebayPayoutsReset = ebayPayoutData?.length ?? 0;
 
-      const { data: iData } = await admin.from("landing_raw_qbo_item")
+      const { data: ebayListingData } = await admin.from("landing_raw_ebay_listing")
         .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
         .select("id");
-      itemsReset = iData?.length ?? 0;
+      const ebayListingsReset = ebayListingData?.length ?? 0;
 
-      const { data: cData } = await admin.from("landing_raw_qbo_customer")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      customersReset = cData?.length ?? 0;
+      // Step 7: Delete ALL customers
+      let customersDeleted = 0;
+      const { data: allCustomers } = await admin.from("customer").select("id");
+      const allCustomerIds = (allCustomers ?? []).map((c: any) => c.id);
+      if (allCustomerIds.length > 0) {
+        for (let i = 0; i < allCustomerIds.length; i += 100) {
+          const batch = allCustomerIds.slice(i, i + 100);
+          await admin.from("customer").delete().in("id", batch);
+        }
+        customersDeleted = allCustomerIds.length;
+      }
 
-      const { data: vData } = await admin.from("landing_raw_qbo_vendor")
-        .update({ status: "pending", processed_at: null, error_message: null }).neq("status", "pending")
-        .select("id");
-      const vendorsReset = vData?.length ?? 0;
+      // Step 8: Delete ALL tax_code and vat_rate
+      let taxCodesDeleted = 0, vatRatesDeleted = 0;
+      const { data: allTaxCodes } = await admin.from("tax_code").select("id");
+      if ((allTaxCodes ?? []).length > 0) {
+        for (const tc of allTaxCodes!) {
+          await admin.from("tax_code").delete().eq("id", tc.id);
+        }
+        taxCodesDeleted = allTaxCodes!.length;
+      }
+      const { data: allVatRates } = await admin.from("vat_rate").select("id");
+      if ((allVatRates ?? []).length > 0) {
+        for (const vr of allVatRates!) {
+          await admin.from("vat_rate").delete().eq("id", vr.id);
+        }
+        vatRatesDeleted = allVatRates!.length;
+      }
+
+      // Delete eBay payout transactions
+      await admin.from("ebay_payout_transactions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
       await admin.from("audit_event").insert({
         entity_type: "system", entity_id: "00000000-0000-0000-0000-000000000000",
         trigger_type: "rebuild_from_qbo", actor_type: "user", actor_id: userId,
         source_system: "admin-data", correlation_id: rebuildCorrelationId,
-        output_json: { purchases_reset: purchasesReset, sales_reset: salesReset, refunds_reset: refundsReset, items_reset: itemsReset, customers_reset: customersReset, vendors_reset: vendorsReset, receipts_deleted: receiptsDeleted, orders_deleted: ordersDeleted, stock_deleted: stockDeleted },
+        output_json: {
+          landing_cleared: {
+            purchases: landingPurchasesCleared, sales: landingSalesCleared,
+            refunds: landingRefundsCleared, items: landingItemsCleared,
+            customers: landingCustomersCleared, vendors: landingVendorsCleared,
+            tax: landingTaxCleared,
+          },
+          canonical_deleted: {
+            orders: ordersDeleted, receipts: receiptsDeleted, stock: stockDeleted,
+            payouts: payoutsDeleted, skus: skusDeleted, vendors: vendorsDeleted,
+            customers: customersDeleted, tax_codes: taxCodesDeleted, vat_rates: vatRatesDeleted,
+          },
+          non_qbo_reset: {
+            stripe: stripeReset, ebay_orders: ebayOrdersReset,
+            ebay_payouts: ebayPayoutsReset, ebay_listings: ebayListingsReset,
+          },
+        },
       });
 
       result = {
         success: true,
         correlation_id: rebuildCorrelationId,
-        purchases_reset: purchasesReset,
-        sales_reset: salesReset,
-        refunds_reset: refundsReset,
-        items_reset: itemsReset,
-        customers_reset: customersReset,
-        vendors_reset: vendorsReset,
+        phase: "landing_cleared_and_canonical_wiped",
+        landing_cleared: {
+          purchases: landingPurchasesCleared, sales: landingSalesCleared,
+          refunds: landingRefundsCleared, items: landingItemsCleared,
+          customers: landingCustomersCleared, vendors: landingVendorsCleared,
+          tax: landingTaxCleared,
+        },
         receipts_deleted: receiptsDeleted,
         orders_deleted: ordersDeleted,
         stock_deleted: stockDeleted,
+        payouts_deleted: payoutsDeleted,
+        skus_deleted: skusDeleted,
+        vendors_deleted: vendorsDeleted,
+        stripe_reset: stripeReset,
+        ebay_orders_reset: ebayOrdersReset,
+        ebay_payouts_reset: ebayPayoutsReset,
+        ebay_listings_reset: ebayListingsReset,
+        customers_deleted: customersDeleted,
+        tax_codes_deleted: taxCodesDeleted,
+        vat_rates_deleted: vatRatesDeleted,
       };
 
     } else if (action === "proxy-function") {
@@ -1767,7 +1940,7 @@ Deno.serve(async (req) => {
       const fnName = params.function;
       if (!fnName || typeof fnName !== "string") throw new ValidationError("Missing 'function' parameter");
 
-      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates", "stripe-sync-customers", "stripe-sync-products"];
+      const allowed = ["qbo-sync-sales", "qbo-sync-purchases", "qbo-sync-customers", "qbo-sync-items", "qbo-sync-vendors", "qbo-sync-tax-rates", "qbo-sync-deposits", "stripe-sync-customers", "stripe-sync-products"];
       if (!allowed.includes(fnName)) throw new ValidationError(`Function '${fnName}' not allowed for proxying`);
 
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -1885,6 +2058,824 @@ Deno.serve(async (req) => {
         cleanup: !enabled ? { orders_deleted: ordersDeleted, lines_deleted: linesDeleted, stock_reopened: stockReopened, events_deleted: eventsDeleted } : undefined,
       };
 
+    } else if (action === "list-staging-errors") {
+      // Query all landing tables for error records
+      const LANDING_TABLES = [
+        { table: "landing_raw_qbo_purchase", entity: "Purchase" },
+        { table: "landing_raw_qbo_sales_receipt", entity: "Sales Receipt" },
+        { table: "landing_raw_qbo_refund_receipt", entity: "Refund Receipt" },
+        { table: "landing_raw_qbo_item", entity: "Item" },
+        { table: "landing_raw_qbo_customer", entity: "Customer" },
+        { table: "landing_raw_qbo_vendor", entity: "Vendor" },
+        { table: "landing_raw_qbo_tax_entity", entity: "Tax Entity" },
+        { table: "landing_raw_stripe_event", entity: "Stripe Event" },
+        { table: "landing_raw_ebay_order", entity: "eBay Order" },
+        { table: "landing_raw_ebay_payout", entity: "eBay Payout" },
+        { table: "landing_raw_ebay_listing", entity: "eBay Listing" },
+      ];
+
+      const allErrors: any[] = [];
+      for (const { table, entity } of LANDING_TABLES) {
+        const { data } = await admin.from(table)
+          .select("id, external_id, status, error_message, received_at, raw_payload")
+          .eq("status", "error")
+          .order("received_at", { ascending: false })
+          .limit(50);
+        for (const row of (data ?? [])) {
+          allErrors.push({
+            ...row,
+            table_name: table,
+            entity_type: entity,
+          });
+        }
+      }
+
+      // Sort by received_at desc
+      allErrors.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime());
+      result = allErrors;
+
+    } else if (action === "retry-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "pending", processed_at: null, error_message: null })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "skip-landing-record") {
+      const { table, id: recordId } = params;
+      if (!table || !recordId) throw new ValidationError("table and id are required");
+      const ALLOWED_TABLES = [
+        "landing_raw_qbo_purchase", "landing_raw_qbo_sales_receipt", "landing_raw_qbo_refund_receipt",
+        "landing_raw_qbo_item", "landing_raw_qbo_customer", "landing_raw_qbo_vendor",
+        "landing_raw_qbo_tax_entity", "landing_raw_stripe_event",
+        "landing_raw_ebay_order", "landing_raw_ebay_payout", "landing_raw_ebay_listing",
+      ];
+      if (!ALLOWED_TABLES.includes(table)) throw new ValidationError(`Invalid table: ${table}`);
+      const { error } = await admin.from(table)
+        .update({ status: "skipped", processed_at: new Date().toISOString() })
+        .eq("id", recordId);
+      if (error) throw error;
+      result = { success: true };
+
+    } else if (action === "reconcile-purchases" || action === "reconcile-sales" ||
+               action === "reconcile-customers" || action === "reconcile-items" ||
+               action === "reconcile-vendors") {
+      // ── Generic QBO reconciliation ──
+      const clientId = Deno.env.get("QBO_CLIENT_ID");
+      const clientSecret = Deno.env.get("QBO_CLIENT_SECRET");
+      const realmId = Deno.env.get("QBO_REALM_ID");
+      if (!clientId || !clientSecret || !realmId) throw new Error("QBO credentials not configured");
+
+      const { data: conn, error: connErr } = await admin
+        .from("qbo_connection").select("*").eq("realm_id", realmId).single();
+      if (connErr || !conn) throw new Error("No QBO connection found");
+
+      let accessToken = conn.access_token;
+      if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
+        const tokenRes = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+        });
+        if (!tokenRes.ok) throw new Error(`Token refresh failed [${tokenRes.status}]`);
+        const tokens = await tokenRes.json();
+        const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+        await admin.from("qbo_connection").update({
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expires_at: expiresAt,
+        }).eq("realm_id", realmId);
+        accessToken = tokens.access_token;
+      }
+
+      const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
+      const correlationId = crypto.randomUUID();
+
+      // Helper: paginated QBO query
+      const queryQbo = async (sql: string, entityKey: string) => {
+        const all: any[] = [];
+        let startPos = 1;
+        const pageSize = 1000;
+        while (true) {
+          const q = encodeURIComponent(`${sql} STARTPOSITION ${startPos} MAXRESULTS ${pageSize}`);
+          const res = await fetch(`${baseUrl}/query?query=${q}`, {
+            headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+          });
+          if (!res.ok) throw new Error(`QBO query failed [${res.status}]: ${await res.text()}`);
+          const data = await res.json();
+          const page = data?.QueryResponse?.[entityKey] ?? [];
+          all.push(...page);
+          if (page.length < pageSize) break;
+          startPos += pageSize;
+        }
+        return all;
+      };
+
+      const details: any[] = [];
+      let totalQbo = 0, totalApp = 0, inSync = 0, missingInApp = 0, missingInQbo = 0, mismatched = 0, autoFixed = 0;
+
+      if (action === "reconcile-purchases") {
+        const qboRecords = await queryQbo("SELECT * FROM Purchase", "Purchase");
+        // Filter to inventory-only purchases (matching processor logic)
+        const inventoryPurchases = qboRecords.filter((r: any) =>
+          (r.Line ?? []).some((l: any) => l.DetailType === "ItemBasedExpenseLineDetail")
+        );
+        totalQbo = inventoryPurchases.length;
+        const qboMap = new Map(inventoryPurchases.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("inbound_receipt").select("id, qbo_purchase_id, total_amount, vendor_name, txn_date");
+        totalApp = (appRecords ?? []).length;
+        const appMap = new Map((appRecords ?? []).filter((r: any) => r.qbo_purchase_id).map((r: any) => [r.qbo_purchase_id, r]));
+
+        // QBO records missing in app
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.EntityRef?.name ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            const qboTotal = Math.round(Number(qbo.TotalAmt ?? 0) * 100) / 100;
+            const appTotal = Math.round(Number(app.total_amount ?? 0) * 100) / 100;
+            if (Math.abs(qboTotal - appTotal) > 0.01) {
+              mismatched++;
+              details.push({ entity: app.vendor_name ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // App records missing in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.vendor_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-sales") {
+        const qboRecords = await queryQbo("SELECT * FROM SalesReceipt", "SalesReceipt");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("sales_order").select("id, qbo_sales_receipt_id, gross_total, origin_channel, order_number");
+        totalApp = (appRecords ?? []).length;
+        const appMap = new Map((appRecords ?? []).filter((r: any) => r.qbo_sales_receipt_id).map((r: any) => [r.qbo_sales_receipt_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DocNumber ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            const globalTaxCalc = qbo.GlobalTaxCalculation ?? null;
+            const qboTotalAmt = Number(qbo.TotalAmt ?? 0);
+            const qboTaxAmt = Number(qbo.TxnTaxDetail?.TotalTax ?? 0);
+            const qboTotal = Math.round(
+              (globalTaxCalc === "TaxInclusive" ? qboTotalAmt : qboTotalAmt + qboTaxAmt) * 100
+            ) / 100;
+            const appTotal = Math.round(Number(app.gross_total ?? 0) * 100) / 100;
+            if (Math.abs(qboTotal - appTotal) > 0.01) {
+              mismatched++;
+              details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: `Amount mismatch: QBO £${qboTotal} vs App £${appTotal}`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.order_number ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-customers") {
+        const qboRecords = await queryQbo("SELECT * FROM Customer WHERE Active = true", "Customer");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("customer").select("id, qbo_customer_id, display_name, email");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_customer_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_customer_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DisplayName ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            if (app.display_name !== qbo.DisplayName) {
+              mismatched++;
+              details.push({ entity: qbo.DisplayName, qbo_id: qboId, issue: `Name mismatch: QBO "${qbo.DisplayName}" vs App "${app.display_name}"`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // Delete stale app customers not in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            await admin.from("customer").delete().eq("id", app.id);
+            autoFixed++;
+            details.push({ entity: app.display_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "auto_deleted" });
+          }
+        }
+
+      } else if (action === "reconcile-items") {
+        const qboRecords = await queryQbo("SELECT * FROM Item WHERE Type = 'Inventory'", "Item");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("sku").select("id, qbo_item_id, sku_code, name");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_item_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_item_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.Name ?? qboId, qbo_id: qboId, issue: "In QBO but no matching SKU in app", action: "flag" });
+          } else {
+            inSync++;
+          }
+        }
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            details.push({ entity: app.sku_code ?? qboId, qbo_id: qboId, issue: "SKU in app but item deleted from QBO", action: "flag" });
+          }
+        }
+
+      } else if (action === "reconcile-vendors") {
+        const qboRecords = await queryQbo("SELECT * FROM Vendor WHERE Active = true", "Vendor");
+        totalQbo = qboRecords.length;
+        const qboMap = new Map(qboRecords.map((r: any) => [String(r.Id), r]));
+
+        const { data: appRecords } = await admin.from("vendor").select("id, qbo_vendor_id, display_name");
+        totalApp = (appRecords ?? []).length;
+        const appWithQbo = (appRecords ?? []).filter((r: any) => r.qbo_vendor_id);
+        const appMap = new Map(appWithQbo.map((r: any) => [r.qbo_vendor_id, r]));
+
+        for (const [qboId, qbo] of qboMap) {
+          if (!appMap.has(qboId)) {
+            missingInApp++;
+            details.push({ entity: qbo.DisplayName ?? qboId, qbo_id: qboId, issue: "In QBO but missing from app", action: "flag" });
+          } else {
+            const app = appMap.get(qboId)!;
+            if (app.display_name !== qbo.DisplayName) {
+              mismatched++;
+              details.push({ entity: qbo.DisplayName, qbo_id: qboId, issue: `Name mismatch: QBO "${qbo.DisplayName}" vs App "${app.display_name}"`, action: "flag" });
+            } else {
+              inSync++;
+            }
+          }
+        }
+        // Delete stale app vendors not in QBO
+        for (const [qboId, app] of appMap) {
+          if (!qboMap.has(qboId)) {
+            missingInQbo++;
+            await admin.from("vendor").delete().eq("id", app.id);
+            autoFixed++;
+            details.push({ entity: app.display_name ?? qboId, qbo_id: qboId, issue: "In app but deleted from QBO", action: "auto_deleted" });
+          }
+        }
+      }
+
+      details.sort((a: any, b: any) => {
+        const order: Record<string, number> = { auto_deleted: 0, flag: 1 };
+        return (order[a.action] ?? 2) - (order[b.action] ?? 2);
+      });
+
+      result = {
+        success: true,
+        correlation_id: correlationId,
+        total_qbo: totalQbo,
+        total_app: totalApp,
+        in_sync: inSync,
+        missing_in_app: missingInApp,
+        missing_in_qbo: missingInQbo,
+        mismatched,
+        auto_fixed: autoFixed,
+        details,
+      };
+
+    } else if (action === "cleanup-ghost-units") {
+      // Delete stock units with no purchase provenance (ghosts)
+      const { data: ghosts, error: ghostErr } = await admin
+        .from("stock_unit")
+        .select("id")
+        .is("batch_id", null)
+        .is("line_item_id", null);
+      if (ghostErr) throw ghostErr;
+
+      const ghostIds = (ghosts ?? []).map((g: any) => g.id);
+      let deleted = 0;
+      // Delete in batches of 100
+      for (let i = 0; i < ghostIds.length; i += 100) {
+        const batch = ghostIds.slice(i, i + 100);
+        // Unlink from order lines first
+        await admin
+          .from("sales_order_line")
+          .update({ stock_unit_id: null, cogs: null } as any)
+          .in("stock_unit_id", batch);
+        const { error: delErr } = await admin
+          .from("stock_unit")
+          .delete()
+          .in("id", batch);
+        if (delErr) throw delErr;
+        deleted += batch.length;
+      }
+
+      // Reset errored purchases that failed due to UID conflicts
+      const { data: erroredPurchases } = await admin
+        .from("landing_raw_qbo_purchase")
+        .select("id, external_id")
+        .eq("status", "error")
+        .ilike("error_message", "%duplicate key%");
+
+      let resetCount = 0;
+      for (const ep of (erroredPurchases ?? [])) {
+        await resetQboPurchase(admin, ep.external_id, ep.id);
+        resetCount++;
+      }
+
+      result = { success: true, deleted, resetCount, message: `Deleted ${deleted} ghost stock units, reset ${resetCount} errored purchases to pending` };
+
+    } else if (action === "reset-qbo-purchase") {
+      // Targeted reset for specific stuck QBO purchases
+      const ids: string[] = params.ids ?? [];
+      if (ids.length === 0) throw new ValidationError("ids array required");
+      let resetCount = 0;
+      for (const qboPurchaseId of ids) {
+        const { data: landing } = await admin
+          .from("landing_raw_qbo_purchase")
+          .select("id")
+          .eq("external_id", qboPurchaseId)
+          .maybeSingle();
+        if (!landing) continue;
+        await resetQboPurchase(admin, qboPurchaseId, landing.id);
+        resetCount++;
+      }
+      result = { success: true, resetCount, message: `Reset ${resetCount} purchases to pending` };
+
+    } else if (action === "recalc-avg-cost") {
+      // Recalculate avg_cost on all SKUs from their linked stock units
+      const { data: skus, error: skuErr } = await admin
+        .from("sku")
+        .select("id, sku_code");
+      if (skuErr) throw skuErr;
+
+      let updated = 0;
+      for (const sku of (skus ?? [])) {
+        const { data: units } = await admin
+          .from("stock_unit")
+          .select("landed_cost")
+          .not("landed_cost", "is", null)
+          .gt("landed_cost", 0)
+          .eq("sku_id" as any, sku.id);
+
+        if (units && units.length > 0) {
+          const total = units.reduce((sum: number, u: any) => sum + Number(u.landed_cost ?? 0), 0);
+          const avg = Math.round((total / units.length) * 100) / 100;
+          await admin.from("sku").update({ avg_cost: avg } as any).eq("id", sku.id);
+          updated++;
+        }
+      }
+
+      result = { success: true, updated, message: `Recalculated avg_cost on ${updated} SKUs` };
+
+    } else if (action === "retry-failed-qbo-push") {
+      const { data: resetRows, error: resetErr } = await admin
+        .from("sales_order")
+        .update({ qbo_sync_status: "pending", qbo_retry_count: 0 } as any)
+        .in("qbo_sync_status", ["failed", "needs_manual_review"])
+        .select("id");
+      if (resetErr) throw resetErr;
+      result = { reset: (resetRows ?? []).length };
+
+    } else if (action === "reset_payout_sync") {
+      const { payoutId: resetPayoutId, scope } = params as { payoutId: string; scope: "expenses" | "deposit" | "all" };
+      if (!resetPayoutId) throw new ValidationError("payoutId is required");
+      if (!["expenses", "deposit", "all"].includes(scope)) throw new ValidationError("scope must be expenses, deposit, or all");
+
+      const results: Record<string, number> = {};
+
+      if (scope === "expenses" || scope === "all") {
+        const { data: updated } = await admin
+          .from("ebay_payout_transactions")
+          .update({ qbo_purchase_id: null } as never)
+          .eq("payout_id" as never, resetPayoutId)
+          .select("id");
+        results.expensesReset = (updated ?? []).length;
+      }
+
+      if (scope === "deposit" || scope === "all") {
+        // Find the payout by external_payout_id
+        const { data: payoutRow } = await admin
+          .from("payouts")
+          .select("id")
+          .eq("external_payout_id", resetPayoutId)
+          .maybeSingle();
+        if (payoutRow) {
+          await admin
+            .from("payouts")
+            .update({ qbo_deposit_id: null, qbo_expense_id: null, qbo_sync_status: "pending", qbo_sync_error: null } as never)
+            .eq("id" as never, payoutRow.id);
+          results.depositReset = 1;
+
+          // Also clear linked sales_order.qbo_sales_receipt_id so the app's view
+          // matches QBO after the user has manually deleted SalesReceipts there.
+          // Linkage is via payout_orders AND via ebay_payout_transactions (SALE rows).
+          const orderIds = new Set<string>();
+
+          const { data: linkedOrders } = await admin
+            .from("payout_orders")
+            .select("sales_order_id")
+            .eq("payout_id", payoutRow.id);
+          for (const r of (linkedOrders ?? []) as Array<{ sales_order_id: string | null }>) {
+            if (r.sales_order_id) orderIds.add(r.sales_order_id);
+          }
+
+          const { data: txnRows } = await admin
+            .from("ebay_payout_transactions")
+            .select("matched_order_id, order_id, transaction_id, transaction_type")
+            .eq("payout_id" as never, resetPayoutId);
+          const txnRefs: string[] = [];
+          for (const t of (txnRows ?? []) as Array<{ matched_order_id: string | null; order_id: string | null; transaction_id: string | null; transaction_type: string | null }>) {
+            if (t.matched_order_id) orderIds.add(t.matched_order_id);
+            if (t.order_id) txnRefs.push(t.order_id);
+            if (t.transaction_id) txnRefs.push(t.transaction_id);
+          }
+          if (txnRefs.length > 0) {
+            const { data: refOrders } = await admin
+              .from("sales_order")
+              .select("id")
+              .in("origin_reference", txnRefs);
+            for (const r of (refOrders ?? []) as Array<{ id: string }>) {
+              orderIds.add(r.id);
+            }
+          }
+
+          let salesReceiptsReset = 0;
+          if (orderIds.size > 0) {
+            const { data: clearedOrders } = await admin
+              .from("sales_order")
+              .update({ qbo_sales_receipt_id: null, qbo_sync_status: "pending", qbo_last_error: null } as never)
+              .in("id", Array.from(orderIds))
+              .select("id");
+            salesReceiptsReset = (clearedOrders ?? []).length;
+          }
+          results.salesReceiptsReset = salesReceiptsReset;
+        } else {
+          results.depositReset = 0;
+          results.salesReceiptsReset = 0;
+        }
+      }
+
+      result = { success: true, ...results };
+
+    } else if (action === "backfill-stripe-payout-fees") {
+      // One-off / repeatable backfill for Stripe payouts whose payout_fee
+      // rows were never written (e.g. payouts received before the webhook
+      // started inserting per-charge fees). Idempotent: skips existing fees
+      // by external_order_id (= Stripe payment_intent id).
+      const { payoutId: targetPayoutId } = params as { payoutId?: string };
+      if (!targetPayoutId) throw new ValidationError("payoutId is required");
+
+      // Resolve to local payout row (accept either the local UUID or the Stripe po_… id)
+      type PayoutRow = { id: string; external_payout_id: string | null; channel: string | null; net_amount: number | null };
+      let payoutRow: PayoutRow | null = null;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetPayoutId);
+      if (isUuid) {
+        const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("id", targetPayoutId).maybeSingle();
+        payoutRow = data as PayoutRow | null;
+      } else {
+        const { data } = await admin.from("payouts").select("id, external_payout_id, channel, net_amount").eq("external_payout_id", targetPayoutId).maybeSingle();
+        payoutRow = data as PayoutRow | null;
+      }
+      if (!payoutRow) throw new ValidationError(`Payout not found: ${targetPayoutId}`);
+      if (payoutRow.channel !== "stripe") throw new ValidationError(`Payout ${payoutRow.id} is not a Stripe payout`);
+      if (!payoutRow.external_payout_id) throw new ValidationError(`Payout ${payoutRow.id} has no external_payout_id`);
+
+      // Pick the right Stripe key based on app_settings.stripe_test_mode
+      const { data: settings } = await admin.from("app_settings").select("stripe_test_mode").maybeSingle();
+      const isTestMode = !!(settings as { stripe_test_mode?: boolean } | null)?.stripe_test_mode;
+      const stripeKey = isTestMode
+        ? (Deno.env.get("STRIPE_SANDBOX_SECRET_KEY") || "")
+        : (Deno.env.get("STRIPE_SECRET_KEY") || "");
+      if (!stripeKey) throw new ValidationError(`Stripe ${isTestMode ? "sandbox " : ""}secret key is not configured`);
+
+      const StripeMod = (await import("https://esm.sh/stripe@14.21.0?target=deno")).default;
+      const stripe = new StripeMod(stripeKey, { apiVersion: "2024-06-20" });
+
+      // Pull all balance transactions for this payout (paginate)
+      type BT = { id: string; fee: number; source: string | null; type: string };
+      const allBts: BT[] = [];
+      let starting_after: string | undefined = undefined;
+      // Defensive cap to avoid runaway loops
+      for (let page = 0; page < 20; page++) {
+        const resp: { data: BT[]; has_more: boolean } = await stripe.balanceTransactions.list({
+          payout: payoutRow.external_payout_id,
+          limit: 100,
+          starting_after,
+        } as Record<string, unknown>);
+        for (const bt of resp.data as BT[]) allBts.push(bt);
+        if (!resp.has_more) break;
+        starting_after = resp.data[resp.data.length - 1]?.id;
+        if (!starting_after) break;
+      }
+
+      // Resolve payment intents for each charge bt
+      const perCharge: Array<{ pi: string; chargeId: string; feeAmount: number }> = [];
+      let residualFee = 0;
+      for (const bt of allBts) {
+        if (bt.source && bt.source.startsWith("ch_")) {
+          try {
+            const charge = await stripe.charges.retrieve(bt.source);
+            const pi = (charge as { payment_intent: string | null }).payment_intent;
+            if (pi) {
+              perCharge.push({ pi, chargeId: bt.source, feeAmount: bt.fee / 100 });
+            } else {
+              residualFee += bt.fee / 100;
+            }
+          } catch {
+            residualFee += bt.fee / 100;
+          }
+        } else if (bt.fee > 0) {
+          residualFee += bt.fee / 100;
+        }
+      }
+
+      // Idempotency: skip pi's already in payout_fee for this payout
+      const { data: existingFees } = await admin
+        .from("payout_fee")
+        .select("external_order_id")
+        .eq("payout_id", payoutRow.id);
+      const haveSet = new Set(
+        ((existingFees ?? []) as Array<{ external_order_id: string | null }>)
+          .map((r) => r.external_order_id)
+          .filter((v): v is string => !!v)
+      );
+      const toInsertCharges = perCharge.filter((c) => !haveSet.has(c.pi));
+
+      // Map pi → sales_order_id
+      const piList = toInsertCharges.map((c) => c.pi);
+      const piToOrder = new Map<string, string>();
+      if (piList.length > 0) {
+        const { data: orders } = await admin
+          .from("sales_order")
+          .select("id, payment_reference")
+          .in("payment_reference", piList);
+        for (const o of (orders ?? []) as Array<{ id: string; payment_reference: string | null }>) {
+          if (o.payment_reference) piToOrder.set(o.payment_reference, o.id);
+        }
+      }
+
+      let inserted = 0;
+      if (toInsertCharges.length > 0) {
+        const rows = toInsertCharges.map((c) => ({
+          payout_id: payoutRow!.id,
+          sales_order_id: piToOrder.get(c.pi) ?? null,
+          external_order_id: c.pi,
+          channel: "stripe",
+          fee_category: "payment_processing",
+          amount: Math.round(c.feeAmount * 100) / 100,
+          description: `Stripe processing fee — charge ${c.chargeId}`,
+        }));
+        const { error: insErr, data: insData } = await admin
+          .from("payout_fee")
+          .insert(rows as never)
+          .select("id");
+        if (insErr) throw new Error(`Failed to insert payout_fee rows: ${insErr.message}`);
+        inserted = (insData ?? []).length;
+      }
+
+      // Backfill missing payout_orders join rows so reconcile sees them.
+      // Include order_gross sourced from sales_order.gross_total so that
+      // reconcile can compute order_net = gross - fees correctly.
+      let linkedOrders = 0;
+      if (piToOrder.size > 0) {
+        const orderIds = Array.from(new Set(piToOrder.values()));
+        const { data: grossRows } = await admin
+          .from("sales_order")
+          .select("id, gross_total")
+          .in("id", orderIds);
+        const grossById = new Map<string, number>();
+        for (const g of (grossRows ?? []) as Array<{ id: string; gross_total: number | null }>) {
+          grossById.set(g.id, Number(g.gross_total ?? 0));
+        }
+        const links = orderIds.map((oid) => ({
+          payout_id: payoutRow!.id,
+          sales_order_id: oid,
+          order_gross: grossById.get(oid) ?? 0,
+        }));
+        const { error: linkErr } = await admin
+          .from("payout_orders")
+          .upsert(links as never, { onConflict: "payout_id,sales_order_id" as never });
+        if (linkErr) console.warn("Failed to upsert payout_orders:", linkErr);
+        else linkedOrders = links.length;
+      }
+
+      // Re-trigger reconciliation so per-order fee/net columns are recomputed
+      let reconcileTriggered = false;
+      try {
+        const url = `${supabaseUrl}/functions/v1/v2-reconcile-payout`;
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ payoutId: payoutRow.id }),
+        });
+        reconcileTriggered = resp.ok;
+      } catch (e) {
+        console.warn("v2-reconcile-payout trigger failed:", e);
+      }
+
+      result = {
+        success: true,
+        payoutId: payoutRow.id,
+        externalPayoutId: payoutRow.external_payout_id,
+        balanceTransactions: allBts.length,
+        chargesFound: perCharge.length,
+        feesInserted: inserted,
+        feesSkipped: perCharge.length - toInsertCharges.length,
+        residualFeeUnbooked: Math.round(residualFee * 100) / 100,
+        ordersLinked: linkedOrders,
+        reconcileTriggered,
+      };
+
+    } else if (action === "get-channel-schema") {
+      // params: { channel, marketplace?, category_id }
+      const channel = params.channel;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      const categoryId = params.category_id;
+      if (!channel || !categoryId) {
+        throw new ValidationError("channel and category_id are required");
+      }
+      const { data: schema } = await admin
+        .from("channel_category_schema")
+        .select("id, channel, marketplace, category_id, category_name, schema_fetched_at")
+        .eq("channel", channel)
+        .eq("marketplace", marketplace)
+        .eq("category_id", categoryId)
+        .maybeSingle();
+      if (!schema) {
+        result = { schema: null, attributes: [] };
+      } else {
+        const { data: attrs } = await admin
+          .from("channel_category_attribute")
+          .select("*")
+          .eq("schema_id", schema.id)
+          .order("sort_order", { ascending: true });
+        result = { schema, attributes: attrs ?? [] };
+      }
+    } else if (action === "get-product-attributes") {
+      // params: { product_id, namespace? }
+      const productId = params.product_id;
+      if (!productId) throw new ValidationError("product_id is required");
+      const query = admin
+        .from("product_attribute")
+        .select("id, namespace, key, value, value_json, source, updated_at")
+        .eq("product_id", productId);
+      if (params.namespace) query.eq("namespace", params.namespace);
+      const { data, error } = await query;
+      if (error) throw error;
+      result = data ?? [];
+    } else if (action === "save-product-attributes") {
+      // params: { product_id, namespace, attributes, source?,
+      //           channel?, marketplace?, category_id? }
+      const productId = params.product_id;
+      const namespace = params.namespace;
+      const attrs = params.attributes ?? {};
+      const source = params.source ?? "manual";
+      const channel = params.channel ?? null;
+      const marketplace = params.marketplace ?? null;
+      const categoryId = params.category_id ?? null;
+      if (!productId || !namespace) {
+        throw new ValidationError("product_id and namespace are required");
+      }
+      if (!["core", "ebay", "gmc", "meta"].includes(namespace)) {
+        throw new ValidationError(`Invalid namespace: ${namespace}`);
+      }
+
+      const upserts: any[] = [];
+      const deletes: string[] = [];
+      for (const [key, raw] of Object.entries(attrs)) {
+        const isArray = Array.isArray(raw);
+        const isEmpty =
+          raw == null ||
+          (typeof raw === "string" && (raw as string).trim() === "") ||
+          (isArray && (raw as unknown[]).length === 0);
+        if (isEmpty) {
+          deletes.push(key);
+          continue;
+        }
+        upserts.push({
+          product_id: productId,
+          namespace,
+          channel,
+          marketplace,
+          category_id: categoryId,
+          aspect_key: key,
+          key,
+          value: isArray ? null : String(raw),
+          value_json: isArray ? raw : null,
+          source,
+        });
+      }
+
+      const buildScopedDelete = (keys: string[]) => {
+        let q = admin
+          .from("product_attribute")
+          .delete()
+          .eq("product_id", productId)
+          .eq("namespace", namespace)
+          .in("key", keys);
+        q = channel === null ? q.is("channel", null) : q.eq("channel", channel);
+        q = marketplace === null ? q.is("marketplace", null) : q.eq("marketplace", marketplace);
+        q = categoryId === null ? q.is("category_id", null) : q.eq("category_id", categoryId);
+        return q;
+      };
+
+      if (deletes.length > 0) {
+        await buildScopedDelete(deletes);
+      }
+      if (upserts.length > 0) {
+        // Delete-then-insert per row so the partial unique index that uses
+        // COALESCE on nullable scope cols works correctly.
+        for (const row of upserts) {
+          await buildScopedDelete([row.key]);
+          const { error } = await admin.from("product_attribute").insert(row);
+          if (error) throw error;
+        }
+      }
+      result = { success: true, upserted: upserts.length, deleted: deletes.length };
+    } else if (action === "set-product-channel-category") {
+      // params: { product_id, channel, category_id, marketplace? }
+      const productId = params.product_id;
+      const channel = params.channel;
+      const categoryId = params.category_id;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      if (!productId || !channel) {
+        throw new ValidationError("product_id and channel are required");
+      }
+      const updates: Record<string, unknown> = {};
+      if (channel === "ebay") {
+        updates.ebay_category_id = categoryId ?? null;
+        updates.ebay_marketplace = marketplace;
+      } else if (channel === "gmc") {
+        updates.gmc_product_category = categoryId ?? null;
+      } else if (channel === "meta") {
+        updates.meta_category = categoryId ?? null;
+      } else {
+        throw new ValidationError(`Unsupported channel: ${channel}`);
+      }
+      const { error } = await admin.from("product").update(updates).eq("id", productId);
+      if (error) throw error;
+      result = { success: true };
+    } else if (action === "bulk-set-product-channel-category") {
+      // params: { product_ids: string[], channel, category_id, marketplace? }
+      const productIds: string[] = Array.isArray(params.product_ids) ? params.product_ids : [];
+      const channel = params.channel;
+      const categoryId = params.category_id ?? null;
+      const marketplace = params.marketplace ?? "EBAY_GB";
+      if (productIds.length === 0 || !channel) {
+        throw new ValidationError("product_ids and channel are required");
+      }
+      if (channel === "ebay") {
+        // Caller is already authorized as admin/staff above; the bulk_set_ebay_category
+        // RPC checks auth.uid() which is NULL under the service-role client, so we
+        // perform the update directly instead.
+        const { data: updatedRows, error } = await admin
+          .from("product")
+          .update({ ebay_category_id: categoryId, ebay_marketplace: marketplace })
+          .in("id", productIds)
+          .select("id");
+        if (error) throw error;
+        result = { success: true, updated: updatedRows?.length ?? productIds.length };
+      } else {
+        const updates: Record<string, unknown> = {};
+        if (channel === "gmc") updates.gmc_product_category = categoryId;
+        else if (channel === "meta") updates.meta_category = categoryId;
+        else throw new ValidationError(`Unsupported channel: ${channel}`);
+        const { error } = await admin.from("product").update(updates).in("id", productIds);
+        if (error) throw error;
+        result = { success: true, updated: productIds.length };
+      }
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

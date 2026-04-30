@@ -1,7 +1,9 @@
-// Redeployed: 2026-03-23
 // ============================================================
 // QBO Sync Item
-// Creates or updates a QBO Item when a new SKU variant is created.
+// Creates or updates a QBO Inventory Item for a SKU. Used both
+// by the new-purchase push flow (Inventory items, configured
+// account refs, ex-VAT PurchaseCost, fixed InvStartDate) and
+// by the re-grade transfer flow.
 // ============================================================
 
 import {
@@ -22,7 +24,50 @@ const GRADE_LABELS: Record<string, string> = {
   "2": "Silver Lining",
   "3": "Bronze Age",
   "4": "Black Sheep",
+  "5": "Non-saleable",
 };
+
+const INVENTORY_START_DATE = "2023-04-14";
+
+async function loadSettings(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<{
+  asset: string;
+  income: string;
+  cogs: string;
+  salesTax: string;
+  purchaseTax: string;
+}> {
+  const { data: rows } = await admin
+    .from("qbo_account_settings" as never)
+    .select("key, account_id");
+
+  const map = new Map<string, string>();
+  for (const r of (rows ?? []) as Record<string, unknown>[]) {
+    const k = r.key as string;
+    const v = r.account_id as string;
+    if (k && v) map.set(k, v);
+  }
+  const asset = map.get("qbo_inventory_asset_account_id");
+  const income = map.get("qbo_income_account_id");
+  const cogs = map.get("qbo_cogs_account_id");
+  const salesTax = map.get("qbo_sales_tax_code_id");
+  const purchaseTax = map.get("qbo_purchase_tax_code_id");
+  if (!asset || !income || !cogs || !salesTax || !purchaseTax) {
+    const missing = [
+      !asset && "Inventory Asset",
+      !income && "Sales Income",
+      !cogs && "COGS",
+      !salesTax && "Sales Tax Code",
+      !purchaseTax && "Purchase Tax Code",
+    ].filter(Boolean).join(", ");
+    throw new Error(
+      `QBO account mapping incomplete (missing: ${missing}). ` +
+      `Open Settings → QuickBooks → Accounts and pick the right accounts.`,
+    );
+  }
+  return { asset, income, cogs, salesTax, purchaseTax };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -32,7 +77,7 @@ Deno.serve(async (req) => {
     await authenticateRequest(req, admin);
     const { clientId, clientSecret, realmId } = getQBOConfig();
 
-    const { skuCode } = await req.json();
+    const { skuCode, oldSkuCode, purchaseCost, supplierVatRegistered } = await req.json();
     if (!skuCode) throw new Error("skuCode is required");
 
     // ─── 1. Fetch SKU + product ─────────────────────────────
@@ -49,12 +94,31 @@ Deno.serve(async (req) => {
     const grade = (sku as Record<string, unknown>).condition_grade as string;
     const gradeLabel = GRADE_LABELS[grade] ?? `Grade ${grade}`;
 
-    // ─── 2. Check if QBO item already exists ────────────────
+    // ─── 2. Determine QBO item ID ───────────────────────────
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);
     const baseUrl = qboBaseUrl(realmId);
 
-    const existingQboItemId = (sku as Record<string, unknown>).qbo_item_id as string | null;
+    let existingQboItemId = (sku as Record<string, unknown>).qbo_item_id as string | null;
+    let transferFromOldSku = false;
+
+    if (!existingQboItemId && oldSkuCode) {
+      const { data: oldSku } = await admin
+        .from("sku")
+        .select("qbo_item_id")
+        .eq("sku_code", oldSkuCode)
+        .maybeSingle();
+
+      const oldQboId = (oldSku as Record<string, unknown> | null)?.qbo_item_id as string | null;
+      if (oldQboId) {
+        existingQboItemId = oldQboId;
+        transferFromOldSku = true;
+        console.log(`Transferring QBO item ${oldQboId} from ${oldSkuCode} → ${skuCode}`);
+      }
+    }
+
+    // ─── 3. Fetch existing QBO item if updating ─────────────
     let syncToken: string | null = null;
+    let existingType: string | null = null;
 
     if (existingQboItemId) {
       const getRes = await fetchWithTimeout(
@@ -70,20 +134,20 @@ Deno.serve(async (req) => {
       if (getRes.ok) {
         const getData = await getRes.json();
         syncToken = getData.Item?.SyncToken ?? null;
+        existingType = getData.Item?.Type ?? null;
       }
     }
 
-    // ─── 3. Build QBO Item payload ──────────────────────────
-    // Read price from either `price` (v1) or `sale_price` (v2) column
+    // ─── 4. Build QBO Item payload ──────────────────────────
     const skuRow = sku as Record<string, unknown>;
     const salePrice = (skuRow.price as number | null) ?? (skuRow.sale_price as number | null);
+    const description = `${productName} (${skuCode})`;
+    const itemName = `${productName} (${skuCode})`;
 
     const itemPayload: Record<string, unknown> = {
-      Name: skuCode,
-      Description: `${productName} — ${gradeLabel}`,
-      Type: "NonInventory",
-      IncomeAccountRef: { value: "1" }, // Sales income — configure via env/settings
-      ExpenseAccountRef: { value: "2" }, // COGS — configure via env/settings
+      Name: itemName.slice(0, 100), // QBO Name max 100 chars
+      Description: description,
+      PurchaseDesc: description,
       Taxable: true,
     };
 
@@ -91,14 +155,35 @@ Deno.serve(async (req) => {
       itemPayload.UnitPrice = exVAT(salePrice);
     }
 
-    // If updating, include Id and SyncToken
+    if (typeof purchaseCost === "number" && purchaseCost > 0) {
+      itemPayload.PurchaseCost = supplierVatRegistered ? purchaseCost : exVAT(purchaseCost);
+    } else if (skuRow.avg_cost && (skuRow.avg_cost as number) > 0) {
+      itemPayload.PurchaseCost = exVAT(skuRow.avg_cost as number);
+    }
+
     if (existingQboItemId && syncToken) {
+      // UPDATE — sparse, preserve existing Type / account refs
       itemPayload.Id = existingQboItemId;
       itemPayload.SyncToken = syncToken;
       itemPayload.sparse = true;
+      if (existingType) itemPayload.Type = existingType;
+    } else {
+      // CREATE — Inventory item with configured account refs
+      const settings = await loadSettings(admin);
+      itemPayload.Type = "Inventory";
+      itemPayload.TrackQtyOnHand = true;
+      itemPayload.QtyOnHand = 0;
+      itemPayload.InvStartDate = INVENTORY_START_DATE;
+      itemPayload.AssetAccountRef = { value: settings.asset };
+      itemPayload.IncomeAccountRef = { value: settings.income };
+      itemPayload.ExpenseAccountRef = { value: settings.cogs };
+      itemPayload.SalesTaxCodeRef = { value: settings.salesTax };
+      if (supplierVatRegistered) {
+        itemPayload.PurchaseTaxCodeRef = { value: settings.purchaseTax };
+      }
     }
 
-    // ─── 4. POST to QBO ─────────────────────────────────────
+    // ─── 5. POST to QBO ─────────────────────────────────────
     const qboRes = await fetchWithTimeout(`${baseUrl}/item?minorversion=65`, {
       method: "POST",
       headers: {
@@ -114,7 +199,7 @@ Deno.serve(async (req) => {
       console.error(`QBO Item sync failed [${qboRes.status}]:`, errorText);
       return jsonResponse({
         success: false,
-        qbo_error: `QBO API error [${qboRes.status}]`,
+        qbo_error: `QBO API error [${qboRes.status}]: ${errorText.substring(0, 400)}`,
         skuCode,
       });
     }
@@ -122,13 +207,22 @@ Deno.serve(async (req) => {
     const qboResult = await qboRes.json();
     const returnedId = String(qboResult.Item.Id);
 
-    // ─── 5. Update SKU with QBO item ID ─────────────────────
+    // ─── 6. Update new SKU with QBO item ID ─────────────────
     await admin
       .from("sku")
       .update({ qbo_item_id: returnedId } as never)
       .eq("sku_code", skuCode);
 
-    // ─── 6. Land raw response ───────────────────────────────
+    // ─── 7. Clear QBO item ID from old SKU if transferring ──
+    if (transferFromOldSku && oldSkuCode) {
+      await admin
+        .from("sku")
+        .update({ qbo_item_id: null } as never)
+        .eq("sku_code", oldSkuCode);
+      console.log(`Cleared qbo_item_id from old SKU ${oldSkuCode}`);
+    }
+
+    // ─── 8. Land raw response ───────────────────────────────
     await admin.from("landing_raw_qbo_item" as never).upsert(
       {
         external_id: returnedId,
@@ -143,7 +237,8 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       qbo_item_id: returnedId,
-      action: existingQboItemId ? "updated" : "created",
+      action: (existingQboItemId && syncToken) ? "updated" : "created",
+      transferred: transferFromOldSku,
       skuCode,
     });
   } catch (err) {

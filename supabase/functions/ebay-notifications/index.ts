@@ -118,7 +118,7 @@ async function verifyEbaySignature(rawBody: string, signatureHeader: string): Pr
 
   // The signature is over the digest bytes
   const verifier = createVerify("sha256");
-  verifier.update(Buffer.from(digestBase64));
+  verifier.update(new TextEncoder().encode(digestBase64));
   verifier.end();
 
   return verifier.verify(pemKey, header.signature, "base64");
@@ -282,6 +282,125 @@ Deno.serve(async (req) => {
       const ebayOrderId = typeof rawOrderId === "string" && rawOrderId.trim() ? rawOrderId.trim() : null;
 
       if (ebayOrderId) {
+        // Safety net: for shipment topics, ensure the sales_order exists before
+        // dispatching the shipment update. If the original ORDER_CONFIRMATION
+        // webhook was missed, recover the order synchronously by calling
+        // ebay-process-order (which is idempotent).
+        let recoveryTriggered = false;
+        let recoverySucceeded: boolean | null = null;
+
+        if (isShipmentTopic) {
+          const { data: existingOrder } = await supabaseAdmin
+            .from("sales_order")
+            .select("id")
+            .eq("origin_channel", "ebay")
+            .eq("origin_reference", ebayOrderId)
+            .maybeSingle();
+
+          if (!existingOrder) {
+            recoveryTriggered = true;
+            console.log(
+              `ebay-notifications: order-recovery-triggered orderId=${ebayOrderId} reason=missing-on-shipping topic=${topic}`
+            );
+            try {
+              const recRes = await fetch(
+                `${supabaseUrl}/functions/v1/ebay-process-order`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${serviceKey}`,
+                  },
+                  body: JSON.stringify({
+                    order_id: ebayOrderId,
+                    source: "shipping-notification-recovery",
+                  }),
+                  signal: AbortSignal.timeout(25000),
+                }
+              );
+              const recData = await recRes.json().catch(() => ({}));
+              console.log(
+                `ebay-notifications: recovery result for ${ebayOrderId}:`,
+                JSON.stringify(recData).substring(0, 300)
+              );
+
+              // Re-check whether the sales_order now exists
+              const { data: recoveredOrder } = await supabaseAdmin
+                .from("sales_order")
+                .select("id")
+                .eq("origin_channel", "ebay")
+                .eq("origin_reference", ebayOrderId)
+                .maybeSingle();
+
+              recoverySucceeded = !!recoveredOrder;
+
+              if (!recoveredOrder) {
+                console.error(
+                  `ebay-notifications: recovery FAILED for ${ebayOrderId}, sales_order still missing`
+                );
+                // Tag the stored notification with recovery metadata
+                await supabaseAdmin
+                  .from("ebay_notification")
+                  .update({
+                    payload: {
+                      ...payload,
+                      _recovery: {
+                        triggered: true,
+                        succeeded: false,
+                        orderId: ebayOrderId,
+                        error: recData.error || `HTTP ${recRes.status}`,
+                      },
+                    },
+                  })
+                  .eq("notification_id", notificationId);
+
+                // Return non-2xx so eBay retries delivery
+                return new Response(
+                  JSON.stringify({
+                    error: "Order recovery failed; sales_order missing",
+                    orderId: ebayOrderId,
+                  }),
+                  {
+                    status: 503,
+                    headers: { ...corsHeaders, "Content-Type": "application/json" },
+                  }
+                );
+              }
+            } catch (recErr: any) {
+              console.error(
+                `ebay-notifications: recovery EXCEPTION for ${ebayOrderId}:`,
+                recErr
+              );
+              recoverySucceeded = false;
+              await supabaseAdmin
+                .from("ebay_notification")
+                .update({
+                  payload: {
+                    ...payload,
+                    _recovery: {
+                      triggered: true,
+                      succeeded: false,
+                      orderId: ebayOrderId,
+                      error: recErr?.message || String(recErr),
+                    },
+                  },
+                })
+                .eq("notification_id", notificationId);
+
+              return new Response(
+                JSON.stringify({
+                  error: "Order recovery exception",
+                  orderId: ebayOrderId,
+                }),
+                {
+                  status: 503,
+                  headers: { ...corsHeaders, "Content-Type": "application/json" },
+                }
+              );
+            }
+          }
+        }
+
         // Route to dedicated order processing pipeline
         try {
           const processBody: any = { order_id: ebayOrderId };
@@ -306,6 +425,23 @@ Deno.serve(async (req) => {
             `Processed order ${ebayOrderId} from ${topic}:`,
             JSON.stringify(processData).substring(0, 300)
           );
+
+          // Tag stored notification with recovery metadata if recovery ran
+          if (recoveryTriggered && notificationId) {
+            await supabaseAdmin
+              .from("ebay_notification")
+              .update({
+                payload: {
+                  ...payload,
+                  _recovery: {
+                    triggered: true,
+                    succeeded: recoverySucceeded === true,
+                    orderId: ebayOrderId,
+                  },
+                },
+              })
+              .eq("notification_id", notificationId);
+          }
 
           // If ebay-process-order returned an error, ensure a landing row exists for retry
           if (!processRes.ok || processData.error) {

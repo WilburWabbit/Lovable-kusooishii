@@ -48,18 +48,18 @@ async function ensureValidToken(admin: any, realmId: string, clientId: string, c
   return conn.access_token;
 }
 
-async function queryQboAll(baseUrl: string, accessToken: string, entity: string): Promise<any[]> {
+async function queryQboActiveCustomers(baseUrl: string, accessToken: string): Promise<any[]> {
   const all: any[] = [];
   let startPos = 1;
   const pageSize = 1000;
   while (true) {
-    const query = encodeURIComponent(`SELECT * FROM ${entity} STARTPOSITION ${startPos} MAXRESULTS ${pageSize}`);
+    const query = encodeURIComponent(`SELECT * FROM Customer WHERE Active = true STARTPOSITION ${startPos} MAXRESULTS ${pageSize}`);
     const res = await fetch(`${baseUrl}/query?query=${query}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
-    if (!res.ok) throw new Error(`QBO ${entity} query failed [${res.status}]`);
+    if (!res.ok) throw new Error(`QBO Customer query failed [${res.status}]`);
     const data = await res.json();
-    const page = data?.QueryResponse?.[entity] ?? [];
+    const page = data?.QueryResponse?.Customer ?? [];
     all.push(...page);
     if (page.length < pageSize) break;
     startPos += pageSize;
@@ -92,7 +92,8 @@ Deno.serve(async (req) => {
     const baseUrl = `https://quickbooks.api.intuit.com/v3/company/${realmId}`;
     const correlationId = crypto.randomUUID();
 
-    const qboCustomers = await queryQboAll(baseUrl, accessToken, "Customer");
+    // Only sync active customers — inactive/deleted customers should not be landed
+    const qboCustomers = await queryQboActiveCustomers(baseUrl, accessToken);
     console.log(`Landing ${qboCustomers.length} QBO customers (correlation: ${correlationId})`);
 
     let landed = 0, skipped = 0;

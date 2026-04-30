@@ -46,6 +46,11 @@ Description discipline:
 - No recital of facts.
 - If the Description reads like a summary of Specifications, internally revise before output.
 
+Minifigure rule (mandatory):
+- If the provided facts list "Included minifigures", you MUST name and detail them in BOTH the Description (woven naturally into the narrative) AND in the Highlights (with at least one dedicated bullet covering the included minifigs).
+- EXCEPTION: If the condition notes or grader notes state that minifigures are missing, lost, or not present for this specific item, do NOT mention the minifigs as included — instead briefly acknowledge their absence honestly if relevant.
+- Never invent minifigs that are not in the provided list.
+
 Hyperbole:
 - Allowed in Hook and Description.
 - Never distort factual information.
@@ -126,8 +131,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { product, product_id, auto_save } = await req.json();
+    const { product, product_id, auto_save, image_urls } = await req.json();
     if (!product) throw new Error("product data required");
+    const imageUrls: string[] = Array.isArray(image_urls)
+      ? (image_urls as unknown[]).filter((u): u is string => typeof u === "string" && u.length > 0).slice(0, 4)
+      : [];
 
     // Build user prompt from product facts
     const facts: string[] = [];
@@ -144,7 +152,80 @@ Deno.serve(async (req) => {
       facts.push(`Dimensions: ${product.length_cm} × ${product.width_cm} × ${product.height_cm} cm`);
     }
 
-    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below.\n\n${facts.join("\n")}`;
+    // Pull included minifigs from the rebrickable inventory view so the
+    // narrative can name them. Match either the bare set number or the
+    // version-suffixed form (e.g. "75367" or "75367-1").
+    try {
+      const mpnRaw = String(product.mpn ?? "");
+      const setNumber = (product.set_number as string | null) ??
+        (mpnRaw.split(".")[0]?.split("-")[0] || null);
+      if (setNumber) {
+        const candidates = Array.from(new Set([setNumber, `${setNumber}-1`]));
+        const { data: figs } = await admin
+          .from("lego_set_minifigs")
+          .select("fig_num, minifig_name, bricklink_id, quantity")
+          .in("set_num", candidates);
+        const list = (figs ?? []) as Array<{
+          fig_num: string;
+          minifig_name: string | null;
+          bricklink_id: string | null;
+          quantity: number | null;
+        }>;
+        if (list.length > 0) {
+          // Sort by name, dedupe on fig_num
+          const seen = new Set<string>();
+          const lines: string[] = [];
+          for (const m of list) {
+            if (!m.fig_num || seen.has(m.fig_num)) continue;
+            seen.add(m.fig_num);
+            const name = (m.minifig_name ?? "").trim();
+            const qty = m.quantity && m.quantity > 1 ? ` ×${m.quantity}` : "";
+            // Prefer LEGO/BrickLink minifig MPN over Rebrickable's internal id.
+            const id = (m.bricklink_id ?? "").trim() || m.fig_num;
+            lines.push(name ? `${name} (${id})${qty}` : `${id}${qty}`);
+          }
+          lines.sort((a, b) => a.localeCompare(b));
+          if (lines.length > 0) {
+            facts.push(`Included minifigures (${lines.length}):\n  - ${lines.join("\n  - ")}`);
+          }
+        }
+      }
+    } catch (figErr) {
+      console.error("minifig fetch failed (non-fatal):", figErr);
+    }
+
+    // Pull existing condition notes across SKUs so the model can apply the
+    // "minifigs missing" exception when relevant.
+    let conditionContext = "";
+    try {
+      if (product_id) {
+        const { data: skuRows } = await admin
+          .from("sku")
+          .select("sku_code, condition_grade, condition_notes")
+          .eq("product_id", product_id);
+        const notes = ((skuRows ?? []) as Array<{
+          sku_code: string;
+          condition_grade: number | null;
+          condition_notes: string | null;
+        }>)
+          .filter((r) => r.condition_notes && r.condition_notes.trim().length > 0)
+          .map((r) => `- ${r.sku_code} (G${r.condition_grade}): ${r.condition_notes!.trim()}`);
+        if (notes.length > 0) {
+          conditionContext = `\n\nExisting condition notes (per SKU) — use these to decide whether the included minifigs should be highlighted or whether they are missing:\n${notes.join("\n")}`;
+        }
+      }
+    } catch (notesErr) {
+      console.error("condition notes fetch failed (non-fatal):", notesErr);
+    }
+
+    const userPrompt = `Generate product copy and SEO content for the following product. Use ONLY the facts provided below${imageUrls.length > 0 ? ", supplemented by what you can see in the attached photos of the actual item we are selling (use them for atmosphere, display presence, and any visible distinguishing detail — do not invent defects)" : ""}. When the set includes minifigures, name and detail them in the Description and include a dedicated bullet for them in Highlights — UNLESS the condition notes indicate the minifigs are missing for this item, in which case omit them.\n\n${facts.join("\n")}${conditionContext}`;
+
+    const userMessageContent: unknown = imageUrls.length > 0
+      ? [
+          { type: "text", text: userPrompt },
+          ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+        ]
+      : userPrompt;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -156,7 +237,7 @@ Deno.serve(async (req) => {
         model: "gpt-4o",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
+          { role: "user", content: userMessageContent },
         ],
         tools: [
           {

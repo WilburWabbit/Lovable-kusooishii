@@ -98,6 +98,99 @@ export type Database = {
         }
         Relationships: []
       }
+      brickeconomy_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      brickeconomy_channel_overrides: {
+        Row: {
+          channel: string
+          id: string
+          item_number: string
+          item_type: string
+          notes: string | null
+          price_override: number
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          id?: string
+          item_number: string
+          item_type: string
+          notes?: string | null
+          price_override: number
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          id?: string
+          item_number?: string
+          item_type?: string
+          notes?: string | null
+          price_override?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brickeconomy_collection: {
         Row: {
           acquired_date: string | null
@@ -200,6 +293,511 @@ export type Database = {
           synced_at?: string
           total_count?: number | null
           unique_count?: number | null
+        }
+        Relationships: []
+      }
+      brickeconomy_price_history: {
+        Row: {
+          currency: string
+          current_value: number | null
+          growth: number | null
+          id: string
+          item_number: string
+          item_type: string
+          recorded_at: string
+          retail_price: number | null
+          source: string
+        }
+        Insert: {
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number: string
+          item_type: string
+          recorded_at?: string
+          retail_price?: number | null
+          source?: string
+        }
+        Update: {
+          currency?: string
+          current_value?: number | null
+          growth?: number | null
+          id?: string
+          item_number?: string
+          item_type?: string
+          recorded_at?: string
+          retail_price?: number | null
+          source?: string
+        }
+        Relationships: []
+      }
+      bricklink_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      bricklink_set_minifig: {
+        Row: {
+          bl_mpn: string
+          created_at: string
+          fetched_at: string
+          id: string
+          image_url: string | null
+          name: string | null
+          quantity: number
+          set_no: string
+          updated_at: string
+        }
+        Insert: {
+          bl_mpn: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          image_url?: string | null
+          name?: string | null
+          quantity?: number
+          set_no: string
+          updated_at?: string
+        }
+        Update: {
+          bl_mpn?: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          image_url?: string | null
+          name?: string | null
+          quantity?: number
+          set_no?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      brickowl_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      brickowl_mpn_alias: {
+        Row: {
+          boid: string
+          confidence: string
+          created_at: string
+          id: string
+          last_verified_at: string | null
+          mpn: string
+          notes: string | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          boid: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          mpn: string
+          notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          boid?: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          mpn?: string
+          notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      brickset_catalog_item: {
+        Row: {
+          age_mark: string | null
+          created_at: string
+          fetched_at: string
+          height_cm: number | null
+          id: string
+          image_url: string | null
+          length_cm: number | null
+          minifig_count: number | null
+          mpn: string
+          name: string | null
+          piece_count: number | null
+          raw_attributes: Json
+          release_year: number | null
+          subtheme: string | null
+          theme: string | null
+          updated_at: string
+          weight_g: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          age_mark?: string | null
+          created_at?: string
+          fetched_at?: string
+          height_cm?: number | null
+          id?: string
+          image_url?: string | null
+          length_cm?: number | null
+          minifig_count?: number | null
+          mpn?: string
+          name?: string | null
+          piece_count?: number | null
+          raw_attributes?: Json
+          release_year?: number | null
+          subtheme?: string | null
+          theme?: string | null
+          updated_at?: string
+          weight_g?: number | null
+          width_cm?: number | null
+        }
+        Relationships: []
+      }
+      canonical_attribute: {
+        Row: {
+          active: boolean
+          applies_to_ebay_categories: string[] | null
+          applies_to_product_types: string[] | null
+          attribute_group: string
+          created_at: string
+          data_type: string
+          db_column: string | null
+          editable: boolean
+          editor: string
+          id: string
+          key: string
+          label: string
+          provider_chain: Json
+          sort_order: number
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          applies_to_ebay_categories?: string[] | null
+          applies_to_product_types?: string[] | null
+          attribute_group?: string
+          created_at?: string
+          data_type?: string
+          db_column?: string | null
+          editable?: boolean
+          editor?: string
+          id?: string
+          key: string
+          label: string
+          provider_chain?: Json
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          applies_to_ebay_categories?: string[] | null
+          applies_to_product_types?: string[] | null
+          attribute_group?: string
+          created_at?: string
+          data_type?: string
+          db_column?: string | null
+          editable?: boolean
+          editor?: string
+          id?: string
+          key?: string
+          label?: string
+          provider_chain?: Json
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      channel_attribute_mapping: {
+        Row: {
+          aspect_key: string
+          canonical_key: string | null
+          category_id: string | null
+          channel: string
+          constant_value: string | null
+          created_at: string
+          id: string
+          marketplace: string | null
+          notes: string | null
+          transform: string | null
+          updated_at: string
+        }
+        Insert: {
+          aspect_key: string
+          canonical_key?: string | null
+          category_id?: string | null
+          channel: string
+          constant_value?: string | null
+          created_at?: string
+          id?: string
+          marketplace?: string | null
+          notes?: string | null
+          transform?: string | null
+          updated_at?: string
+        }
+        Update: {
+          aspect_key?: string
+          canonical_key?: string | null
+          category_id?: string | null
+          channel?: string
+          constant_value?: string | null
+          created_at?: string
+          id?: string
+          marketplace?: string | null
+          notes?: string | null
+          transform?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_attribute_mapping_canonical_key_fkey"
+            columns: ["canonical_key"]
+            isOneToOne: false
+            referencedRelation: "canonical_attribute"
+            referencedColumns: ["key"]
+          },
+        ]
+      }
+      channel_category_attribute: {
+        Row: {
+          allowed_values: Json | null
+          allows_custom: boolean
+          cardinality: string
+          created_at: string
+          data_type: string
+          help_text: string | null
+          id: string
+          key: string
+          label: string | null
+          required: boolean
+          schema_id: string
+          sort_order: number
+        }
+        Insert: {
+          allowed_values?: Json | null
+          allows_custom?: boolean
+          cardinality?: string
+          created_at?: string
+          data_type?: string
+          help_text?: string | null
+          id?: string
+          key: string
+          label?: string | null
+          required?: boolean
+          schema_id: string
+          sort_order?: number
+        }
+        Update: {
+          allowed_values?: Json | null
+          allows_custom?: boolean
+          cardinality?: string
+          created_at?: string
+          data_type?: string
+          help_text?: string | null
+          id?: string
+          key?: string
+          label?: string | null
+          required?: boolean
+          schema_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_category_attribute_schema_id_fkey"
+            columns: ["schema_id"]
+            isOneToOne: false
+            referencedRelation: "channel_category_schema"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_category_schema: {
+        Row: {
+          category_id: string
+          category_name: string
+          channel: string
+          condition_policy: Json | null
+          condition_policy_fetched_at: string | null
+          created_at: string
+          id: string
+          leaf: boolean
+          marketplace: string
+          parent_id: string | null
+          raw_payload: Json | null
+          schema_fetched_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          category_name: string
+          channel: string
+          condition_policy?: Json | null
+          condition_policy_fetched_at?: string | null
+          created_at?: string
+          id?: string
+          leaf?: boolean
+          marketplace?: string
+          parent_id?: string | null
+          raw_payload?: Json | null
+          schema_fetched_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          category_name?: string
+          channel?: string
+          condition_policy?: Json | null
+          condition_policy_fetched_at?: string | null
+          created_at?: string
+          id?: string
+          leaf?: boolean
+          marketplace?: string
+          parent_id?: string | null
+          raw_payload?: Json | null
+          schema_fetched_at?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
@@ -645,6 +1243,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           qbo_customer_id: string | null
+          stripe_customer_id: string | null
           synced_at: string
           updated_at: string
           user_id: string | null
@@ -671,6 +1270,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           qbo_customer_id?: string | null
+          stripe_customer_id?: string | null
           synced_at?: string
           updated_at?: string
           user_id?: string | null
@@ -697,6 +1297,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           qbo_customer_id?: string | null
+          stripe_customer_id?: string | null
           synced_at?: string
           updated_at?: string
           user_id?: string | null
@@ -758,6 +1359,78 @@ export type Database = {
           read?: boolean
           received_at?: string
           topic?: string
+        }
+        Relationships: []
+      }
+      ebay_payout_transactions: {
+        Row: {
+          buyer_username: string | null
+          created_at: string | null
+          currency: string
+          ebay_item_id: string | null
+          fee_details: Json
+          gross_amount: number
+          id: string
+          match_method: string | null
+          matched: boolean
+          matched_order_id: string | null
+          memo: string | null
+          net_amount: number
+          order_id: string | null
+          payout_id: string
+          qbo_purchase_id: string | null
+          qbo_sales_receipt_id: string | null
+          total_fees: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Insert: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          ebay_item_id?: string | null
+          fee_details?: Json
+          gross_amount: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount: number
+          order_id?: string | null
+          payout_id: string
+          qbo_purchase_id?: string | null
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date: string
+          transaction_id: string
+          transaction_status: string
+          transaction_type: string
+        }
+        Update: {
+          buyer_username?: string | null
+          created_at?: string | null
+          currency?: string
+          ebay_item_id?: string | null
+          fee_details?: Json
+          gross_amount?: number
+          id?: string
+          match_method?: string | null
+          matched?: boolean
+          matched_order_id?: string | null
+          memo?: string | null
+          net_amount?: number
+          order_id?: string | null
+          payout_id?: string
+          qbo_purchase_id?: string | null
+          qbo_sales_receipt_id?: string | null
+          total_fees?: number
+          transaction_date?: string
+          transaction_id?: string
+          transaction_status?: string
+          transaction_type?: string
         }
         Relationships: []
       }
@@ -1028,6 +1701,114 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_raw_bricklink: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_brickowl: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_brickset: {
+        Row: {
+          correlation_id: string | null
+          entity_type: string
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
+          entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
       landing_raw_ebay_listing: {
         Row: {
           correlation_id: string | null
@@ -1129,8 +1910,10 @@ export type Database = {
       }
       landing_raw_qbo_customer: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1139,8 +1922,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1149,8 +1934,49 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_deposit: {
+        Row: {
+          cloud_event_id: string | null
+          correlation_id: string | null
+          error_message: string | null
+          event_time: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          cloud_event_id?: string | null
+          correlation_id?: string | null
+          error_message?: string | null
+          event_time?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          cloud_event_id?: string | null
+          correlation_id?: string | null
+          error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1162,8 +1988,10 @@ export type Database = {
       }
       landing_raw_qbo_item: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1172,8 +2000,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1182,8 +2012,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1195,8 +2027,10 @@ export type Database = {
       }
       landing_raw_qbo_purchase: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1205,8 +2039,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1215,8 +2051,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1228,8 +2066,10 @@ export type Database = {
       }
       landing_raw_qbo_refund_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1238,8 +2078,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1248,8 +2090,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1261,8 +2105,10 @@ export type Database = {
       }
       landing_raw_qbo_sales_receipt: {
         Row: {
+          cloud_event_id: string | null
           correlation_id: string | null
           error_message: string | null
+          event_time: string | null
           external_id: string
           id: string
           processed_at: string | null
@@ -1271,8 +2117,10 @@ export type Database = {
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id: string
           id?: string
           processed_at?: string | null
@@ -1281,8 +2129,10 @@ export type Database = {
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
+          cloud_event_id?: string | null
           correlation_id?: string | null
           error_message?: string | null
+          event_time?: string | null
           external_id?: string
           id?: string
           processed_at?: string | null
@@ -1318,6 +2168,39 @@ export type Database = {
         Update: {
           correlation_id?: string | null
           entity_type?: string
+          error_message?: string | null
+          external_id?: string
+          id?: string
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Relationships: []
+      }
+      landing_raw_qbo_vendor: {
+        Row: {
+          correlation_id: string | null
+          error_message: string | null
+          external_id: string
+          id: string
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          status: Database["public"]["Enums"]["landing_status"]
+        }
+        Insert: {
+          correlation_id?: string | null
+          error_message?: string | null
+          external_id: string
+          id?: string
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          status?: Database["public"]["Enums"]["landing_status"]
+        }
+        Update: {
+          correlation_id?: string | null
           error_message?: string | null
           external_id?: string
           id?: string
@@ -1573,6 +2456,111 @@ export type Database = {
           },
         ]
       }
+      payout_fee: {
+        Row: {
+          amount: number
+          channel: string
+          created_at: string
+          description: string | null
+          external_order_id: string | null
+          fee_category: string
+          id: string
+          payout_id: string
+          qbo_purchase_id: string | null
+          sales_order_id: string | null
+          updated_at: string
+          vendor_id: string | null
+        }
+        Insert: {
+          amount: number
+          channel?: string
+          created_at?: string
+          description?: string | null
+          external_order_id?: string | null
+          fee_category: string
+          id?: string
+          payout_id: string
+          qbo_purchase_id?: string | null
+          sales_order_id?: string | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Update: {
+          amount?: number
+          channel?: string
+          created_at?: string
+          description?: string | null
+          external_order_id?: string | null
+          fee_category?: string
+          id?: string
+          payout_id?: string
+          qbo_purchase_id?: string | null
+          sales_order_id?: string | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_fee_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_fee_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_fee_line: {
+        Row: {
+          amount: number
+          created_at: string
+          ebay_transaction_id: string | null
+          fee_category: string
+          fee_type: string
+          id: string
+          payout_fee_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          ebay_transaction_id?: string | null
+          fee_category: string
+          fee_type: string
+          id?: string
+          payout_fee_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          ebay_transaction_id?: string | null
+          fee_category?: string
+          fee_type?: string
+          id?: string
+          payout_fee_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_fee_line_payout_fee_id_fkey"
+            columns: ["payout_fee_id"]
+            isOneToOne: false
+            referencedRelation: "payout_fee"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payout_orders: {
         Row: {
           created_at: string | null
@@ -1620,60 +2608,78 @@ export type Database = {
       }
       payouts: {
         Row: {
+          bank_reference: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at: string
           external_payout_id: string | null
           fee_breakdown: Json | null
           gross_amount: number
           id: string
+          matched_order_count: number | null
           net_amount: number
           notes: string | null
           order_count: number
           payout_date: string
           qbo_deposit_id: string | null
           qbo_expense_id: string | null
+          qbo_sync_error: string | null
           qbo_sync_status: string | null
           reconciliation_status: string | null
+          sync_attempted_at: string | null
           total_fees: number
+          transaction_count: number | null
           unit_count: number
+          unmatched_transaction_count: number | null
           updated_at: string | null
         }
         Insert: {
+          bank_reference?: string | null
           channel: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount: number
           id?: string
+          matched_order_count?: number | null
           net_amount: number
           notes?: string | null
           order_count?: number
           payout_date: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Update: {
+          bank_reference?: string | null
           channel?: Database["public"]["Enums"]["payout_channel"]
           created_at?: string
           external_payout_id?: string | null
           fee_breakdown?: Json | null
           gross_amount?: number
           id?: string
+          matched_order_count?: number | null
           net_amount?: number
           notes?: string | null
           order_count?: number
           payout_date?: string
           qbo_deposit_id?: string | null
           qbo_expense_id?: string | null
+          qbo_sync_error?: string | null
           qbo_sync_status?: string | null
           reconciliation_status?: string | null
+          sync_attempted_at?: string | null
           total_fees?: number
+          transaction_count?: number | null
           unit_count?: number
+          unmatched_transaction_count?: number | null
           updated_at?: string | null
         }
         Relationships: []
@@ -1751,134 +2757,272 @@ export type Database = {
         Row: {
           age_mark: string | null
           age_range: string | null
+          appliance_capabilities: string | null
+          appliance_uses: string | null
           brand: string | null
           brickeconomy_id: string | null
           bricklink_item_no: string | null
           brickowl_boid: string | null
+          cable_length: string | null
           call_to_action: string | null
+          capacity: string | null
+          colour: string | null
+          compatible_lego_set: string | null
+          components_included: string | null
+          country_of_origin: string | null
           created_at: string
           description: string | null
           dimensions_cm: string | null
           ean: string | null
+          ebay_category_id: string | null
+          ebay_marketplace: string | null
+          ec_range: string | null
+          energy_efficiency_rating: string | null
+          eprel_registration_number: string | null
+          features: string | null
           field_overrides: Json | null
+          food_compatibility: string | null
+          gmc_product_category: string | null
           height_cm: number | null
           highlights: string | null
           id: string
           img_url: string | null
           include_catalog_img: boolean
+          interests: string | null
+          isbn: string | null
+          item_diameter: string | null
+          item_length: string | null
+          item_number: string | null
+          item_weight: string | null
+          item_width: string | null
           lego_catalog_id: string | null
+          lego_character: string | null
+          lego_set_name: string | null
+          lego_set_number: string | null
+          lego_subtheme: string | null
+          lego_theme: string | null
           length_cm: number | null
+          manufacturer_warranty: string | null
+          material: string | null
+          meta_category: string | null
           minifigs_count: number | null
+          minifigure_number: string | null
           mpn: string
           name: string | null
+          number_of_blades: string | null
+          number_of_items: string | null
+          number_of_settings_programs: string | null
+          number_of_speeds: string | null
           piece_count: number | null
+          power: string | null
+          power_source: string | null
           product_hook: string | null
           product_type: string
           rebrickable_id: string | null
           release_year: number | null
           released_date: string | null
           retail_price: number | null
+          retired: string | null
           retired_date: string | null
           retired_flag: boolean
+          selected_minifig_fig_nums: Json
           seo_description: string | null
           seo_title: string | null
           set_number: string | null
           status: string
           subtheme_name: string | null
           theme_id: string | null
+          unit_quantity: string | null
+          unit_type: string | null
+          upc: string | null
           updated_at: string
           version_descriptor: string | null
+          voltage: string | null
           weight_g: number | null
           weight_kg: number | null
           width_cm: number | null
+          year_manufactured: string | null
+          year_retired: string | null
         }
         Insert: {
           age_mark?: string | null
           age_range?: string | null
+          appliance_capabilities?: string | null
+          appliance_uses?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
+          cable_length?: string | null
           call_to_action?: string | null
+          capacity?: string | null
+          colour?: string | null
+          compatible_lego_set?: string | null
+          components_included?: string | null
+          country_of_origin?: string | null
           created_at?: string
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
+          ebay_category_id?: string | null
+          ebay_marketplace?: string | null
+          ec_range?: string | null
+          energy_efficiency_rating?: string | null
+          eprel_registration_number?: string | null
+          features?: string | null
           field_overrides?: Json | null
+          food_compatibility?: string | null
+          gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          interests?: string | null
+          isbn?: string | null
+          item_diameter?: string | null
+          item_length?: string | null
+          item_number?: string | null
+          item_weight?: string | null
+          item_width?: string | null
           lego_catalog_id?: string | null
+          lego_character?: string | null
+          lego_set_name?: string | null
+          lego_set_number?: string | null
+          lego_subtheme?: string | null
+          lego_theme?: string | null
           length_cm?: number | null
+          manufacturer_warranty?: string | null
+          material?: string | null
+          meta_category?: string | null
           minifigs_count?: number | null
+          minifigure_number?: string | null
           mpn: string
           name?: string | null
+          number_of_blades?: string | null
+          number_of_items?: string | null
+          number_of_settings_programs?: string | null
+          number_of_speeds?: string | null
           piece_count?: number | null
+          power?: string | null
+          power_source?: string | null
           product_hook?: string | null
           product_type?: string
           rebrickable_id?: string | null
           release_year?: number | null
           released_date?: string | null
           retail_price?: number | null
+          retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
+          selected_minifig_fig_nums?: Json
           seo_description?: string | null
           seo_title?: string | null
           set_number?: string | null
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          unit_quantity?: string | null
+          unit_type?: string | null
+          upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          voltage?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_manufactured?: string | null
+          year_retired?: string | null
         }
         Update: {
           age_mark?: string | null
           age_range?: string | null
+          appliance_capabilities?: string | null
+          appliance_uses?: string | null
           brand?: string | null
           brickeconomy_id?: string | null
           bricklink_item_no?: string | null
           brickowl_boid?: string | null
+          cable_length?: string | null
           call_to_action?: string | null
+          capacity?: string | null
+          colour?: string | null
+          compatible_lego_set?: string | null
+          components_included?: string | null
+          country_of_origin?: string | null
           created_at?: string
           description?: string | null
           dimensions_cm?: string | null
           ean?: string | null
+          ebay_category_id?: string | null
+          ebay_marketplace?: string | null
+          ec_range?: string | null
+          energy_efficiency_rating?: string | null
+          eprel_registration_number?: string | null
+          features?: string | null
           field_overrides?: Json | null
+          food_compatibility?: string | null
+          gmc_product_category?: string | null
           height_cm?: number | null
           highlights?: string | null
           id?: string
           img_url?: string | null
           include_catalog_img?: boolean
+          interests?: string | null
+          isbn?: string | null
+          item_diameter?: string | null
+          item_length?: string | null
+          item_number?: string | null
+          item_weight?: string | null
+          item_width?: string | null
           lego_catalog_id?: string | null
+          lego_character?: string | null
+          lego_set_name?: string | null
+          lego_set_number?: string | null
+          lego_subtheme?: string | null
+          lego_theme?: string | null
           length_cm?: number | null
+          manufacturer_warranty?: string | null
+          material?: string | null
+          meta_category?: string | null
           minifigs_count?: number | null
+          minifigure_number?: string | null
           mpn?: string
           name?: string | null
+          number_of_blades?: string | null
+          number_of_items?: string | null
+          number_of_settings_programs?: string | null
+          number_of_speeds?: string | null
           piece_count?: number | null
+          power?: string | null
+          power_source?: string | null
           product_hook?: string | null
           product_type?: string
           rebrickable_id?: string | null
           release_year?: number | null
           released_date?: string | null
           retail_price?: number | null
+          retired?: string | null
           retired_date?: string | null
           retired_flag?: boolean
+          selected_minifig_fig_nums?: Json
           seo_description?: string | null
           seo_title?: string | null
           set_number?: string | null
           status?: string
           subtheme_name?: string | null
           theme_id?: string | null
+          unit_quantity?: string | null
+          unit_type?: string | null
+          upc?: string | null
           updated_at?: string
           version_descriptor?: string | null
+          voltage?: string | null
           weight_g?: number | null
           weight_kg?: number | null
           width_cm?: number | null
+          year_manufactured?: string | null
+          year_retired?: string | null
         }
         Relationships: [
           {
@@ -1893,6 +3037,74 @@ export type Database = {
             columns: ["theme_id"]
             isOneToOne: false
             referencedRelation: "theme"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_attribute: {
+        Row: {
+          aspect_key: string | null
+          category_id: string | null
+          channel: string | null
+          chosen_source: string | null
+          custom_value: string | null
+          id: string
+          is_override: boolean
+          key: string
+          marketplace: string | null
+          namespace: string
+          product_id: string
+          source: string
+          source_value: string | null
+          source_values_jsonb: Json | null
+          updated_at: string
+          value: string | null
+          value_json: Json | null
+        }
+        Insert: {
+          aspect_key?: string | null
+          category_id?: string | null
+          channel?: string | null
+          chosen_source?: string | null
+          custom_value?: string | null
+          id?: string
+          is_override?: boolean
+          key: string
+          marketplace?: string | null
+          namespace: string
+          product_id: string
+          source?: string
+          source_value?: string | null
+          source_values_jsonb?: Json | null
+          updated_at?: string
+          value?: string | null
+          value_json?: Json | null
+        }
+        Update: {
+          aspect_key?: string | null
+          category_id?: string | null
+          channel?: string | null
+          chosen_source?: string | null
+          custom_value?: string | null
+          id?: string
+          is_override?: boolean
+          key?: string
+          marketplace?: string | null
+          namespace?: string
+          product_id?: string
+          source?: string
+          source_value?: string | null
+          source_values_jsonb?: Json | null
+          updated_at?: string
+          value?: string | null
+          value_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_attribute_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product"
             referencedColumns: ["id"]
           },
         ]
@@ -2028,9 +3240,14 @@ export type Database = {
           created_at: string
           id: string
           purchase_date: string
+          qbo_purchase_id: string | null
+          qbo_sync_attempted_at: string | null
+          qbo_sync_error: string | null
+          qbo_sync_status: string
           reference: string | null
           shared_costs: Json
           status: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id: string | null
           supplier_name: string
           supplier_vat_registered: boolean
           total_shared_costs: number
@@ -2041,9 +3258,14 @@ export type Database = {
           created_at?: string
           id?: string
           purchase_date?: string
+          qbo_purchase_id?: string | null
+          qbo_sync_attempted_at?: string | null
+          qbo_sync_error?: string | null
+          qbo_sync_status?: string
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id?: string | null
           supplier_name: string
           supplier_vat_registered?: boolean
           total_shared_costs?: number
@@ -2054,16 +3276,29 @@ export type Database = {
           created_at?: string
           id?: string
           purchase_date?: string
+          qbo_purchase_id?: string | null
+          qbo_sync_attempted_at?: string | null
+          qbo_sync_error?: string | null
+          qbo_sync_status?: string
           reference?: string | null
           shared_costs?: Json
           status?: Database["public"]["Enums"]["purchase_batch_status"]
+          supplier_id?: string | null
           supplier_name?: string
           supplier_vat_registered?: boolean
           total_shared_costs?: number
           unit_counter?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "purchase_batches_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "vendor"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       purchase_line_items: {
         Row: {
@@ -2106,6 +3341,63 @@ export type Database = {
           },
         ]
       }
+      qbo_account_mapping: {
+        Row: {
+          account_type: string
+          created_at: string | null
+          id: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          account_type: string
+          created_at?: string | null
+          id?: string
+          purpose: string
+          qbo_account_id: string
+          qbo_account_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          account_type?: string
+          created_at?: string | null
+          id?: string
+          purpose?: string
+          qbo_account_id?: string
+          qbo_account_name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      qbo_account_settings: {
+        Row: {
+          account_id: string
+          account_name: string | null
+          account_type: string | null
+          key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          account_id: string
+          account_name?: string | null
+          account_type?: string | null
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          account_id?: string
+          account_name?: string | null
+          account_type?: string | null
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       qbo_connection: {
         Row: {
           access_token: string
@@ -2136,6 +3428,88 @@ export type Database = {
         }
         Relationships: []
       }
+      rebrickable_inventories: {
+        Row: {
+          id: number
+          set_num: string
+          version: number
+        }
+        Insert: {
+          id: number
+          set_num: string
+          version?: number
+        }
+        Update: {
+          id?: number
+          set_num?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      rebrickable_inventory_minifigs: {
+        Row: {
+          fig_num: string
+          inventory_id: number
+          quantity: number
+        }
+        Insert: {
+          fig_num: string
+          inventory_id: number
+          quantity?: number
+        }
+        Update: {
+          fig_num?: string
+          inventory_id?: number
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
+            columns: ["fig_num"]
+            isOneToOne: false
+            referencedRelation: "rebrickable_minifigs"
+            referencedColumns: ["fig_num"]
+          },
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_fig_num_fkey"
+            columns: ["fig_num"]
+            isOneToOne: false
+            referencedRelation: "set_minifigs"
+            referencedColumns: ["fig_num"]
+          },
+          {
+            foreignKeyName: "rebrickable_inventory_minifigs_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "rebrickable_inventories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rebrickable_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_num: string
+          img_url: string | null
+          name: string
+          num_parts: number
+        }
+        Insert: {
+          bricklink_id?: string | null
+          fig_num: string
+          img_url?: string | null
+          name: string
+          num_parts?: number
+        }
+        Update: {
+          bricklink_id?: string | null
+          fig_num?: string
+          img_url?: string | null
+          name?: string
+          num_parts?: number
+        }
+        Relationships: []
+      }
       sales_order: {
         Row: {
           blue_bell_club: boolean
@@ -2146,6 +3520,7 @@ export type Database = {
           created_at: string
           currency: string
           customer_id: string | null
+          delivered_at: string | null
           discount_total: number
           doc_number: string | null
           external_order_id: string | null
@@ -2197,6 +3572,7 @@ export type Database = {
           created_at?: string
           currency?: string
           customer_id?: string | null
+          delivered_at?: string | null
           discount_total?: number
           doc_number?: string | null
           external_order_id?: string | null
@@ -2248,6 +3624,7 @@ export type Database = {
           created_at?: string
           currency?: string
           customer_id?: string | null
+          delivered_at?: string | null
           discount_total?: number
           doc_number?: string | null
           external_order_id?: string | null
@@ -2390,6 +3767,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
             foreignKeyName: "sales_order_line_tax_code_id_fkey"
             columns: ["tax_code_id"]
             isOneToOne: false
@@ -2433,6 +3817,7 @@ export type Database = {
           channel: string
           cost: number
           created_at: string
+          destination: string
           est_delivery: string | null
           id: string
           max_compensation: number | null
@@ -2445,6 +3830,7 @@ export type Database = {
           price_inc_vat: number
           service_name: string
           size_band: string | null
+          tier: string | null
           tracked: boolean
           updated_at: string
           vat_exempt: boolean
@@ -2455,6 +3841,7 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          destination?: string
           est_delivery?: string | null
           id?: string
           max_compensation?: number | null
@@ -2467,6 +3854,7 @@ export type Database = {
           price_inc_vat?: number
           service_name: string
           size_band?: string | null
+          tier?: string | null
           tracked?: boolean
           updated_at?: string
           vat_exempt?: boolean
@@ -2477,6 +3865,7 @@ export type Database = {
           channel?: string
           cost?: number
           created_at?: string
+          destination?: string
           est_delivery?: string | null
           id?: string
           max_compensation?: number | null
@@ -2489,6 +3878,7 @@ export type Database = {
           price_inc_vat?: number
           service_name?: string
           size_band?: string | null
+          tier?: string | null
           tracked?: boolean
           updated_at?: string
           vat_exempt?: boolean
@@ -2515,6 +3905,8 @@ export type Database = {
           sale_price: number | null
           saleable_flag: boolean
           sku_code: string
+          stripe_price_id: string | null
+          stripe_product_id: string | null
           updated_at: string
           v2_markdown_applied: string | null
         }
@@ -2537,6 +3929,8 @@ export type Database = {
           sale_price?: number | null
           saleable_flag?: boolean
           sku_code: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
           updated_at?: string
           v2_markdown_applied?: string | null
         }
@@ -2559,6 +3953,8 @@ export type Database = {
           sale_price?: number | null
           saleable_flag?: boolean
           sku_code?: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
           updated_at?: string
           v2_markdown_applied?: string | null
         }
@@ -2569,6 +3965,44 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "product"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      source_field_mapping: {
+        Row: {
+          canonical_key: string
+          created_at: string
+          id: string
+          source: string
+          source_field: string
+          transform: string | null
+          updated_at: string
+        }
+        Insert: {
+          canonical_key: string
+          created_at?: string
+          id?: string
+          source: string
+          source_field: string
+          transform?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canonical_key?: string
+          created_at?: string
+          id?: string
+          source?: string
+          source_field?: string
+          transform?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_field_mapping_canonical_key_fkey"
+            columns: ["canonical_key"]
+            isOneToOne: false
+            referencedRelation: "canonical_attribute"
+            referencedColumns: ["key"]
           },
         ]
       }
@@ -2742,6 +4176,24 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_state: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       tax_code: {
         Row: {
           active: boolean
@@ -2882,96 +4334,41 @@ export type Database = {
         }
         Relationships: []
       }
-      welcome_code: {
+      vendor: {
         Row: {
-          id: string
-          code: string
-          ebay_order_id: string
-          sales_order_id: string | null
-          customer_id: string | null
-          buyer_name: string
-          buyer_email: string | null
-          order_items: Json
-          order_postcode: string | null
-          primary_sku: string | null
-          stripe_coupon_id: string | null
-          stripe_promo_code_id: string | null
-          promo_code: string | null
-          discount_pct: number
-          scanned_at: string | null
-          scan_count: number
-          redeemed_at: string | null
-          redeemed_order_id: string | null
-          user_id: string | null
+          company_name: string | null
           created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          normalized_name: string | null
+          qbo_vendor_id: string | null
+          updated_at: string
+          vendor_type: Database["public"]["Enums"]["vendor_type"]
         }
         Insert: {
-          id?: string
-          code: string
-          ebay_order_id: string
-          sales_order_id?: string | null
-          customer_id?: string | null
-          buyer_name: string
-          buyer_email?: string | null
-          order_items?: Json
-          order_postcode?: string | null
-          primary_sku?: string | null
-          stripe_coupon_id?: string | null
-          stripe_promo_code_id?: string | null
-          promo_code?: string | null
-          discount_pct?: number
-          scanned_at?: string | null
-          scan_count?: number
-          redeemed_at?: string | null
-          redeemed_order_id?: string | null
-          user_id?: string | null
+          company_name?: string | null
           created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          normalized_name?: string | null
+          qbo_vendor_id?: string | null
+          updated_at?: string
+          vendor_type?: Database["public"]["Enums"]["vendor_type"]
         }
         Update: {
-          id?: string
-          code?: string
-          ebay_order_id?: string
-          sales_order_id?: string | null
-          customer_id?: string | null
-          buyer_name?: string
-          buyer_email?: string | null
-          order_items?: Json
-          order_postcode?: string | null
-          primary_sku?: string | null
-          stripe_coupon_id?: string | null
-          stripe_promo_code_id?: string | null
-          promo_code?: string | null
-          discount_pct?: number
-          scanned_at?: string | null
-          scan_count?: number
-          redeemed_at?: string | null
-          redeemed_order_id?: string | null
-          user_id?: string | null
+          company_name?: string | null
           created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          normalized_name?: string | null
+          qbo_vendor_id?: string | null
+          updated_at?: string
+          vendor_type?: Database["public"]["Enums"]["vendor_type"]
         }
-        Relationships: [
-          {
-            foreignKeyName: "welcome_code_sales_order_id_fkey"
-            columns: ["sales_order_id"]
-            isOneToOne: false
-            referencedRelation: "sales_order"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "welcome_code_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customer"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "welcome_code_redeemed_order_id_fkey"
-            columns: ["redeemed_order_id"]
-            isOneToOne: false
-            referencedRelation: "sales_order"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       wishlist: {
         Row: {
@@ -3081,6 +4478,33 @@ export type Database = {
         }
         Relationships: []
       }
+      lego_set_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_num: string | null
+          inventory_version: number | null
+          minifig_img_url: string | null
+          minifig_name: string | null
+          minifig_num_parts: number | null
+          quantity: number | null
+          set_num: string | null
+          source: string | null
+        }
+        Relationships: []
+      }
+      set_minifigs: {
+        Row: {
+          bricklink_id: string | null
+          fig_img_url: string | null
+          fig_name: string | null
+          fig_num: string | null
+          fig_num_parts: number | null
+          inventory_version: number | null
+          quantity: number | null
+          set_num: string | null
+        }
+        Relationships: []
+      }
       sku_public: {
         Row: {
           active_flag: boolean | null
@@ -3144,6 +4568,52 @@ export type Database = {
           },
         ]
       }
+      unit_profit_view: {
+        Row: {
+          advertising_fee: number | null
+          batch_id: string | null
+          gross_revenue: number | null
+          landed_cost: number | null
+          net_landed_cost: number | null
+          net_margin_pct: number | null
+          net_profit: number | null
+          net_revenue: number | null
+          net_total_fees: number | null
+          payout_id: string | null
+          processing_fee: number | null
+          sales_order_id: string | null
+          selling_fee: number | null
+          shipping_fee: number | null
+          sku: string | null
+          stock_unit_id: string | null
+          total_fees_per_unit: number | null
+          uid: string | null
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_stock_unit_payout"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_unit_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v2_variant_stock_summary: {
         Row: {
           avg_cost: number | null
@@ -3197,12 +4667,88 @@ export type Database = {
         }
         Returns: undefined
       }
-      allocate_stock_units: {
-        Args: {
-          p_order_line_ids?: string[]
-          p_quantity: number
-          p_sku_id: string
+      allocate_order_line_stock_unit: {
+        Args: { p_line_item_id: string; p_order_id: string; p_sku_code: string }
+        Returns: {
+          accumulated_impairment: number
+          batch_id: string | null
+          carrying_value: number | null
+          completed_at: string | null
+          condition_flags: Json | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"]
+          created_at: string
+          delivered_at: string | null
+          graded_at: string | null
+          id: string
+          inbound_receipt_line_id: string | null
+          landed_cost: number | null
+          line_item_id: string | null
+          listed_at: string | null
+          location_id: string | null
+          mpn: string
+          notes: string | null
+          order_id: string | null
+          payout_id: string | null
+          reservation_id: string | null
+          serial_or_internal_mark: string | null
+          shipped_at: string | null
+          sku_id: string
+          sold_at: string | null
+          status: Database["public"]["Enums"]["stock_unit_status"]
+          supplier_id: string | null
+          uid: string | null
+          updated_at: string
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
         }
+        SetofOptions: {
+          from: "*"
+          to: "stock_unit"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      allocate_order_line_stock_unit_by_uid: {
+        Args: { p_line_item_id: string; p_order_id: string; p_unit_uid: string }
+        Returns: {
+          accumulated_impairment: number
+          batch_id: string | null
+          carrying_value: number | null
+          completed_at: string | null
+          condition_flags: Json | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"]
+          created_at: string
+          delivered_at: string | null
+          graded_at: string | null
+          id: string
+          inbound_receipt_line_id: string | null
+          landed_cost: number | null
+          line_item_id: string | null
+          listed_at: string | null
+          location_id: string | null
+          mpn: string
+          notes: string | null
+          order_id: string | null
+          payout_id: string | null
+          reservation_id: string | null
+          serial_or_internal_mark: string | null
+          shipped_at: string | null
+          sku_id: string
+          sold_at: string | null
+          status: Database["public"]["Enums"]["stock_unit_status"]
+          supplier_id: string | null
+          uid: string | null
+          updated_at: string
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "stock_unit"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      allocate_stock_units: {
+        Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
         Returns: string[]
       }
       browse_catalog: {
@@ -3226,6 +4772,14 @@ export type Database = {
           theme_name: string
           total_stock: number
         }[]
+      }
+      bulk_set_ebay_category: {
+        Args: {
+          p_category_id: string
+          p_marketplace?: string
+          p_product_ids: string[]
+        }
+        Returns: number
       }
       catalog_filter_options: {
         Args: {
@@ -3256,16 +4810,12 @@ export type Database = {
         Args: { payload: Json; queue_name: string }
         Returns: number
       }
+      ensure_product_column: {
+        Args: { p_column_name: string; p_data_type: string }
+        Returns: Json
+      }
       ensure_product_exists:
-        | {
-            Args: {
-              p_brand?: string
-              p_item_type?: string
-              p_mpn: string
-              p_name?: string
-            }
-            Returns: string
-          }
+        | { Args: { p_mpn: string; p_name?: string }; Returns: string }
         | {
             Args: {
               p_brand?: string
@@ -3281,25 +4831,51 @@ export type Database = {
             }
             Returns: string
           }
-        | {
-            Args: {
-              p_img_url?: string
-              p_mpn: string
-              p_name?: string
-              p_piece_count?: number
-              p_release_year?: number
-              p_retired?: boolean
-              p_subtheme?: string
-              p_theme_id?: string
-            }
-            Returns: string
-          }
+      ensure_vendor: {
+        Args: {
+          p_display_name: string
+          p_vendor_type?: Database["public"]["Enums"]["vendor_type"]
+        }
+        Returns: string
+      }
+      get_ebay_category_schema: {
+        Args: { p_category_id: string; p_marketplace: string }
+        Returns: {
+          allowed_values: Json
+          allows_custom: boolean
+          aspect_key: string
+          cardinality: string
+          data_type: string
+          label: string
+          required: boolean
+          sort_order: number
+        }[]
+      }
+      get_my_order_lines: {
+        Args: { p_order_id: string }
+        Returns: {
+          id: string
+          line_total: number
+          quantity: number
+          sales_order_id: string
+          sku_id: string
+          unit_price: number
+        }[]
+      }
+      get_or_create_rebrickable_inventory: {
+        Args: { p_set_num: string; p_version?: number }
+        Returns: number
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      infer_vendor_type: {
+        Args: { p_name: string }
+        Returns: Database["public"]["Enums"]["vendor_type"]
       }
       move_to_dlq: {
         Args: {
@@ -3310,6 +4886,7 @@ export type Database = {
         }
         Returns: number
       }
+      normalize_vendor_name: { Args: { p_name: string }; Returns: string }
       parse_sku_code: {
         Args: { p_sku_code: string }
         Returns: {
@@ -3403,6 +4980,9 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      v2_create_purchase_batch: { Args: { p_input: Json }; Returns: Json }
+      v2_detect_orphan_purchase_batches: { Args: never; Returns: number }
+      v2_link_unmatched_payout_fees: { Args: never; Returns: number }
       v2_reallocate_costs_by_grade: {
         Args: { p_line_item_id: string }
         Returns: undefined
@@ -3410,6 +4990,10 @@ export type Database = {
       v2_recalculate_variant_stats: {
         Args: { p_sku_code: string }
         Returns: undefined
+      }
+      v2_reserve_stock_unit_uids: {
+        Args: { p_batch_id: string; p_count: number }
+        Returns: string[]
       }
     }
     Enums: {
@@ -3472,6 +5056,8 @@ export type Database = {
         | "delivered"
         | "complete"
         | "return_pending"
+        | "refunded"
+        | "cancelled"
       v2_unit_status:
         | "purchased"
         | "graded"
@@ -3485,6 +5071,7 @@ export type Database = {
         | "refunded"
         | "restocked"
         | "needs_allocation"
+      vendor_type: "supplier" | "marketplace" | "payment_processor" | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3674,6 +5261,8 @@ export const Constants = {
         "delivered",
         "complete",
         "return_pending",
+        "refunded",
+        "cancelled",
       ],
       v2_unit_status: [
         "purchased",
@@ -3689,6 +5278,7 @@ export const Constants = {
         "restocked",
         "needs_allocation",
       ],
+      vendor_type: ["supplier", "marketplace", "payment_processor", "other"],
     },
   },
 } as const

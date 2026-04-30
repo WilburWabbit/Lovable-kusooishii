@@ -25,7 +25,7 @@ export type PurchaseBatchStatus = 'draft' | 'recorded';
 
 export type VendorType = 'supplier' | 'marketplace' | 'payment_processor' | 'other';
 
-export type Channel = 'ebay' | 'website' | 'bricklink' | 'brickowl' | 'in_person';
+export type Channel = 'ebay' | 'website' | 'web' | 'bricklink' | 'brickowl' | 'in_person' | 'etsy' | 'squarespace';
 
 export type ChannelListingStatus = 'draft' | 'live' | 'paused' | 'ended';
 
@@ -36,11 +36,13 @@ export type OrderStatus =
   | 'shipped'
   | 'delivered'
   | 'complete'
-  | 'return_pending';
+  | 'return_pending'
+  | 'refunded'
+  | 'cancelled';
 
 export type PayoutChannel = 'ebay' | 'stripe';
 
-export type QBOSyncStatus = 'pending' | 'synced' | 'error';
+export type QBOSyncStatus = 'pending' | 'synced' | 'partial' | 'error' | 'needs_manual_review';
 
 /** Saleable condition grades only. Grade 5 (Red Card) is internal/parts-only. */
 export type ConditionGrade = 1 | 2 | 3 | 4;
@@ -57,7 +59,10 @@ export type ConditionFlag =
   | 'bags_opened'
   | 'parts_verified'
   | 'sun_yellowing'
-  | 'price_sticker_residue';
+  | 'price_sticker_residue'
+  | 'stickers_applied'
+  | 'missing_minifigs'
+  | 'missing_instructions';
 
 // ─── Shared Cost Breakdown ──────────────────────────────────
 
@@ -70,14 +75,11 @@ export interface SharedCosts {
 
 // ─── Fee Breakdown (Payouts) ────────────────────────────────
 
-export interface FeeBreakdown {
-  fvf: number;
-  promoted_listings: number;
-  international: number;
-  processing: number;
-}
+export type FeeBreakdown = Record<string, number>;
 
 // ─── 2.1 Purchase Batch ────────────────────────────────────
+
+export type QboSyncStatus = 'pending' | 'synced' | 'error' | 'skipped';
 
 export interface PurchaseBatch {
   id: string; // PO-NNN
@@ -88,7 +90,11 @@ export interface PurchaseBatch {
   supplierVatRegistered: boolean;
   sharedCosts: SharedCosts;
   totalSharedCosts: number;
+  totalUnitCosts: number;
   status: PurchaseBatchStatus;
+  qboPurchaseId: string | null;
+  qboSyncStatus: QboSyncStatus;
+  qboSyncError: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +135,7 @@ export interface StockUnit {
   shippedAt: string | null;
   deliveredAt: string | null;
   completedAt: string | null;
+  notes: string | null;
 }
 
 // ─── 2.4 Product (MPN level) ──────────────────────────────
@@ -137,6 +144,7 @@ export interface Product {
   id: string;
   mpn: string;
   name: string;
+  productType: "set" | "minifig";
   theme: string | null;
   subtheme: string | null;
   setNumber: string | null;
@@ -153,6 +161,7 @@ export interface Product {
   cta: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
+  ebayCategoryId: string | null;
   createdAt: string;
 }
 
@@ -221,9 +230,13 @@ export interface Order {
   trackingNumber: string | null;
   shippingCost: number | null;
   blueBellClub: boolean;
+  docNumber: string | null;
   qboSalesReceiptId: string | null;
   qboSyncStatus: QBOSyncStatus;
   externalOrderId: string | null;
+  notes: string | null;
+  orderDate: string;
+  paymentReference: string | null;
   createdAt: string;
   shippedAt: string | null;
   deliveredAt: string | null;
@@ -236,8 +249,11 @@ export interface OrderLineItem {
   orderId: string;
   stockUnitId: string | null; // null if unallocated
   sku: string | null; // null if unallocated
+  name: string | null; // product/SKU name
   unitPrice: number;
   cogs: number | null; // landed cost of consumed stock unit (FIFO)
+  vatRate: number; // e.g. 20
+  lineVat: number; // VAT amount for this line
 }
 
 // ─── 2.10 Customer ────────────────────────────────────────
@@ -268,6 +284,7 @@ export interface CustomerRow extends Customer {
   billingCountry: string | null;
   orderCount: number;
   totalSpend: number;
+  firstOrderAt: string | null;
 }
 
 // ─── 2.11 Payout ──────────────────────────────────────────
@@ -285,7 +302,12 @@ export interface Payout {
   qboDepositId: string | null;
   qboExpenseId: string | null;
   qboSyncStatus: QBOSyncStatus;
+  qboSyncError: string | null;
   externalPayoutId: string | null;
+  reconciliationStatus: 'pending' | 'reconciled';
+  transactionCount: number;
+  matchedOrderCount: number;
+  unmatchedTransactionCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -324,6 +346,53 @@ export interface ProductDetail extends Product {
   catalogImageUrl: string | null;
   includeCatalogImg: boolean;
   fieldOverrides: Record<string, FieldOverride>;
+  ebayCategoryId: string | null;
+  ebayMarketplace: string | null;
+  gmcProductCategory: string | null;
+  metaCategory: string | null;
+  selectedMinifigFigNums: string[];
+}
+
+/** Minifig included in a LEGO set (sourced from rebrickable inventories) */
+export interface SetMinifig {
+  figNum: string;
+  name: string | null;
+  bricklinkId: string | null;
+  imgUrl: string | null;
+  quantity: number;
+  source: 'bricklink' | 'rebrickable';
+}
+
+// ─── Channel Taxonomy / Item Specifics ─────────────────────
+
+export interface ChannelCategorySuggestion {
+  categoryId: string;
+  categoryName: string;
+  ancestors: { id: string; name: string }[];
+}
+
+export interface ChannelCategoryAttribute {
+  id: string;
+  schema_id: string;
+  key: string;
+  label: string | null;
+  required: boolean;
+  cardinality: 'single' | 'multi';
+  data_type: string;
+  allowed_values: string[] | null;
+  allows_custom: boolean;
+  help_text: string | null;
+  sort_order: number;
+}
+
+export interface ProductAttribute {
+  id?: string;
+  namespace: 'core' | 'ebay' | 'gmc' | 'meta';
+  key: string;
+  value: string | null;
+  value_json: unknown;
+  source?: string | null;
+  updated_at?: string;
 }
 
 /** Order with its line items */

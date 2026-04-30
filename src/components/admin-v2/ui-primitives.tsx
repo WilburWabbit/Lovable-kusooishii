@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import { cn } from "@/lib/utils";
 import type { StockUnitStatus, OrderStatus, ConditionGrade } from "@/lib/types/admin";
 import { UNIT_STATUSES, ORDER_STATUSES, GRADE_COLORS } from "@/lib/constants/unit-statuses";
@@ -19,13 +20,19 @@ const colorMap: Record<string, string> = {
   red: "text-red-500",
 };
 
-export function Mono({ children, className, color = "default" }: MonoProps) {
-  return (
-    <span className={cn("font-mono text-xs tracking-wide", colorMap[color], className)}>
-      {children}
-    </span>
-  );
-}
+export const Mono = forwardRef<HTMLSpanElement, MonoProps>(
+  ({ children, className, color = "default" }, ref) => {
+    return (
+      <span
+        ref={ref}
+        className={cn("font-mono text-xs tracking-wide", colorMap[color], className)}
+      >
+        {children}
+      </span>
+    );
+  }
+);
+Mono.displayName = "Mono";
 
 // ─── Badge ──────────────────────────────────────────────────
 
@@ -62,7 +69,10 @@ export function StatusBadge({ status }: { status: StockUnitStatus }) {
 
 // ─── OrderStatusBadge ───────────────────────────────────────
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({ status, itemCount = 1 }: { status: OrderStatus; itemCount?: number }) {
+  if (status === "needs_allocation" && itemCount === 0) {
+    return <Badge label="Draft" color="#F97316" small />;
+  }
   const s = ORDER_STATUSES[status] ?? { label: status, color: "#71717A" };
   return <Badge label={s.label} color={s.color} small />;
 }
@@ -139,13 +149,19 @@ export function SummaryCard({ label, value, color = "#18181B" }: SummaryCardProp
 
 // ─── SectionHead ────────────────────────────────────────────
 
-export function SectionHead({ children }: { children: React.ReactNode }) {
+export const SectionHead = forwardRef<
+  HTMLHeadingElement,
+  { children: React.ReactNode }
+>(function SectionHead({ children }, ref) {
   return (
-    <h3 className="text-[11px] text-zinc-500 font-semibold uppercase tracking-[0.06em] mb-3">
+    <h3
+      ref={ref}
+      className="text-[11px] text-zinc-500 font-semibold uppercase tracking-[0.06em] mb-3"
+    >
       {children}
     </h3>
   );
-}
+});
 
 // ─── BackButton ─────────────────────────────────────────────
 

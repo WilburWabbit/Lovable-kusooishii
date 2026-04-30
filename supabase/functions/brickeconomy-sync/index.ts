@@ -1,5 +1,5 @@
 // Redeployed: 2026-03-23
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -228,6 +228,43 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- Append price history snapshots (one row per item per sync) ---
+    // Normalise item_number to base set number (strip version suffix, e.g. "75367-1" → "75367")
+    // so it matches the format used by fetch-product-data and the UI chart query.
+    const historyRows = allItems.map((item) => ({
+      item_type: item.item_type,
+      item_number: item.item_number.split("-")[0],
+      current_value: item.current_value,
+      growth: item.growth,
+      retail_price: item.retail_price,
+      currency: item.currency,
+      source: "bulk_sync",
+      recorded_at: now,
+    }));
+
+    // Delete any existing bulk_sync rows for today so re-running the sync on the same
+    // day replaces rather than duplicates them. The unique index
+    // brickeconomy_price_history_daily_idx enforces this at the DB level too.
+    const today = now.slice(0, 10); // "YYYY-MM-DD"
+    await admin
+      .from("brickeconomy_price_history")
+      .delete()
+      .eq("source", "bulk_sync")
+      .gte("recorded_at", `${today}T00:00:00Z`)
+      .lt("recorded_at", `${today}T23:59:59.999Z`);
+
+    let historyErrors = 0;
+    let historyErrorMsg: string | null = null;
+    for (let i = 0; i < historyRows.length; i += 100) {
+      const batch = historyRows.slice(i, i + 100);
+      const { error } = await admin.from("brickeconomy_price_history").insert(batch);
+      if (error) {
+        console.error("Price history insert error:", error.message);
+        historyErrors++;
+        historyErrorMsg = historyErrorMsg ?? error.message;
+      }
+    }
+
     // --- Portfolio snapshots (upsert by snapshot_type) ---
     await admin.from("brickeconomy_portfolio_snapshot").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
@@ -283,6 +320,45 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- ADDITIVE: Mirror spec-only fields into brickeconomy_catalog_item ---
+    // This is the multi-source enrichment surface and is NEVER read by the
+    // pricing engine. Value/price fields (current_value, retail_price,
+    // growth, paid_price) are intentionally NOT written here — they remain
+    // exclusively on brickeconomy_collection / brickeconomy_price_history /
+    // brickeconomy_portfolio_snapshot, written above and untouched.
+    const specRows = allItems
+      .filter((i) => i.item_number)
+      .map((i) => {
+        const baseMpn = i.item_number.includes("-") ? i.item_number : `${i.item_number}-1`;
+        return {
+          mpn: baseMpn,
+          name: i.name,
+          theme: i.theme,
+          subtheme: i.subtheme,
+          release_year: i.year,
+          piece_count: i.pieces_count,
+          minifig_count: i.minifigs_count,
+          // raw_attributes keeps a reference snapshot of THIS source's payload
+          // for the spec fields only (no value fields).
+          raw_attributes: {
+            name: i.name,
+            theme: i.theme,
+            subtheme: i.subtheme,
+            year: i.year,
+            pieces_count: i.pieces_count,
+            minifigs_count: i.minifigs_count,
+          },
+          fetched_at: now,
+        };
+      });
+    for (let i = 0; i < specRows.length; i += 200) {
+      const batch = specRows.slice(i, i + 200);
+      const { error: specErr } = await admin
+        .from("brickeconomy_catalog_item")
+        .upsert(batch, { onConflict: "mpn" });
+      if (specErr) console.warn("brickeconomy_catalog_item upsert warn:", specErr.message);
+    }
+
     // --- Step 3: Mark landing rows as committed ---
     const landingIds = [setsLanding?.id, minifigsLanding?.id].filter(Boolean);
     if (landingIds.length > 0) {
@@ -314,6 +390,10 @@ Deno.serve(async (req) => {
         minifigs_synced: minifigItems.length,
         catalog_matches: catalogMatches,
         insert_errors: insertErrors,
+        history_errors: historyErrors,
+        // Surface the first price history error message so the UI can warn the user
+        // (most likely cause: brickeconomy_price_history migration not yet applied)
+        ...(historyErrorMsg ? { history_error_detail: historyErrorMsg } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

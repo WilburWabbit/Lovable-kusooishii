@@ -12,6 +12,7 @@
 // Can be called manually or registered as pg_cron (every 15 min).
 // ============================================================
 
+// deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 const corsHeaders = {
@@ -55,7 +56,7 @@ function extractGrade(sku: string): number | null {
 
 // ─── eBay OAuth Token Management ─────────────────────────────
 
-async function getEbayAccessToken(admin: ReturnType<typeof createClient>): Promise<string> {
+async function getEbayAccessToken(admin: any): Promise<string> {
   const { data: conn, error } = await admin
     .from("ebay_connection")
     .select("*")
@@ -131,7 +132,7 @@ async function ebayFetch(token: string, path: string) {
 
 // ─── Order Number Generator ──────────────────────────────────
 
-async function nextOrderNumber(admin: ReturnType<typeof createClient>): Promise<string> {
+async function nextOrderNumber(admin: any): Promise<string> {
   const { data } = await admin
     .from("sales_order")
     .select("order_number")
@@ -210,8 +211,9 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (existing) {
-        // Check for tracking updates on existing orders
         const existingRow = existing as Record<string, unknown>;
+
+        // Check for tracking updates on existing orders without tracking
         if (!existingRow.tracking_number) {
           const tracking = extractTracking(ebayOrder);
           if (tracking) {
@@ -221,11 +223,10 @@ Deno.serve(async (req) => {
                 tracking_number: tracking.trackingNumber,
                 shipped_via: tracking.carrier,
                 v2_status: "shipped",
-                shipped_date: new Date().toISOString(),
+                shipped_date: new Date().toISOString().slice(0, 10),
               } as never)
               .eq("id", existingRow.id as string);
 
-            // Update stock units to shipped
             await admin
               .from("stock_unit")
               .update({
@@ -238,6 +239,32 @@ Deno.serve(async (req) => {
             trackingUpdated++;
           }
         }
+
+        // Check eBay order status for delivery confirmation
+        const ebayStatus = (ebayOrder.orderFulfillmentStatus as string) ?? "";
+        const currentV2Status = existingRow.v2_status as string;
+
+        if (ebayStatus === "FULFILLED" && currentV2Status === "shipped") {
+          await admin
+            .from("sales_order")
+            .update({
+              v2_status: "delivered",
+              delivered_at: new Date().toISOString(),
+            } as never)
+            .eq("id", existingRow.id as string);
+
+          await admin
+            .from("stock_unit")
+            .update({
+              v2_status: "delivered",
+              delivered_at: new Date().toISOString(),
+            } as never)
+            .eq("order_id" as never, existingRow.id as string)
+            .eq("v2_status" as never, "shipped");
+
+          trackingUpdated++;
+        }
+
         skipped++;
         continue;
       }

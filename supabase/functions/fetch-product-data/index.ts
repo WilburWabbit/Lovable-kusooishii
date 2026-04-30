@@ -118,20 +118,85 @@ Deno.serve(async (req) => {
         : null;
     }
 
-    // Store market prices in brickeconomy_collection for later use during grading
+    // Store market prices in brickeconomy_collection for later use during grading.
+    // IMPORTANT: lookup must match how the bulk sync stores rows. The bulk sync writes
+    // sets with their version suffix (e.g. "31172-1"), but historical rows may be bare
+    // ("31172"). Match either form to avoid creating an orphan duplicate row.
     if (brickEconomy) {
-      await admin
+      const syncedAt = new Date().toISOString();
+      const mpnVariants = mpn.includes("-") ? [mpn, setNumber] : [setNumber, `${setNumber}-1`];
+      // Canonical form to write — always include the version suffix.
+      const canonicalItemNumber = mpn.includes("-") ? mpn : `${setNumber}-1`;
+
+      const { data: existingCollectionRow } = await admin
         .from("brickeconomy_collection")
-        .upsert({
+        .select("id")
+        .eq("item_type", "set")
+        .in("item_number", mpnVariants)
+        .order("synced_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingCollectionRow) {
+        await admin
+          .from("brickeconomy_collection")
+          .update({
+            item_number: canonicalItemNumber,
+            current_value: brickEconomy.current_value,
+            retail_price: brickEconomy.retail_price,
+            synced_at: syncedAt,
+          } as never)
+          .eq("id", existingCollectionRow.id);
+      } else {
+        await admin.from("brickeconomy_collection").insert({
           item_type: "set",
-          item_number: setNumber,
+          item_number: canonicalItemNumber,
           name: rebrickable?.name ?? null,
           theme: rebrickable?.theme ?? null,
           current_value: brickEconomy.current_value,
           retail_price: brickEconomy.retail_price,
-          synced_at: new Date().toISOString(),
+          synced_at: syncedAt,
           currency: "GBP",
-        } as never, { onConflict: "item_number" as never });
+        } as never);
+      }
+
+      // Upsert a price history snapshot for this individual lookup — one row per day.
+      // Note: brickeconomy_price_history intentionally stores the bare set number for
+      // chart consistency with bulk syncs, so we keep using `setNumber` here.
+      const today = syncedAt.slice(0, 10); // "YYYY-MM-DD"
+      const { data: existingHistoryRow } = await admin
+        .from("brickeconomy_price_history")
+        .select("id")
+        .eq("item_type", "set")
+        .eq("item_number", setNumber)
+        .eq("source", "individual")
+        .gte("recorded_at", `${today}T00:00:00Z`)
+        .lt("recorded_at", `${today}T23:59:59.999Z`)
+        .maybeSingle();
+
+      if (existingHistoryRow) {
+        const { error: histErr } = await admin
+          .from("brickeconomy_price_history")
+          .update({
+            current_value: brickEconomy.current_value,
+            retail_price: brickEconomy.retail_price,
+            recorded_at: syncedAt,
+          } as never)
+          .eq("id", existingHistoryRow.id);
+        if (histErr) console.error("Price history update failed:", histErr.message);
+      } else {
+        const { error: histErr } = await admin.from("brickeconomy_price_history").insert({
+          item_type: "set",
+          item_number: setNumber,
+          current_value: brickEconomy.current_value,
+          growth: null,
+          retail_price: brickEconomy.retail_price,
+          currency: "GBP",
+          source: "individual",
+          recorded_at: syncedAt,
+        } as never);
+        if (histErr) console.error("Price history insert failed:", histErr.message);
+      }
     }
 
     return jsonResponse({
@@ -411,10 +476,10 @@ function hmacSha1(key: string, data: string): string {
   // Simple HMAC-SHA1 using Deno's std library approach
   // We'll use a synchronous fallback with manual HMAC calculation
   const BLOCK_SIZE = 64;
-  let keyBytes = keyData;
+  let keyBytes: Uint8Array = new Uint8Array(keyData);
   if (keyBytes.length > BLOCK_SIZE) {
     // SHA-1 hash the key if it's too long (unlikely for OAuth)
-    keyBytes = sha1Bytes(keyBytes);
+    keyBytes = new Uint8Array(sha1Bytes(keyBytes));
   }
 
   const iPad = new Uint8Array(BLOCK_SIZE);

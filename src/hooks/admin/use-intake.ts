@@ -124,131 +124,33 @@ export function useReceiptDetail(receiptId: string | null) {
   });
 }
 
-// ─── Process receipt into v2 purchase batch ──────────────────
+// ─── Process receipt into v2 purchase batch (server-side) ────
 
 interface ProcessReceiptInput {
   receiptId: string;
-  lines: {
-    lineId: string;
-    mpn: string;
-    quantity: number;
-    unitCost: number;
-    isStockLine: boolean;
-  }[];
 }
 
 export function useProcessReceipt() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ receiptId, lines }: ProcessReceiptInput) => {
-      const stockLines = lines.filter(l => l.isStockLine && l.mpn);
-      const nonStockLines = lines.filter(l => !l.isStockLine);
+    mutationFn: async ({ receiptId }: ProcessReceiptInput) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      if (stockLines.length === 0) {
-        throw new Error('No stock lines with MPNs to process');
-      }
+      const response = await supabase.functions.invoke('process-receipt', {
+        body: { receipt_id: receiptId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
 
-      // Fetch receipt header for batch metadata
-      const { data: receipt, error: rErr } = await supabase
-        .from('inbound_receipt')
-        .select('vendor_name, txn_date, qbo_purchase_id, created_at')
-        .eq('id', receiptId)
-        .single();
+      if (response.error) throw new Error(response.error.message ?? 'Processing failed');
+      const result = response.data;
+      if (result?.error) throw new Error(result.error);
 
-      if (rErr) throw rErr;
-      const r = receipt as Record<string, unknown>;
-
-      // Calculate shared costs from non-stock lines
-      const totalNonStock = nonStockLines.reduce((sum, l) => sum + l.unitCost * l.quantity, 0);
-
-      // Create purchase batch (uses DB default for PO-NNN ID)
-      const { data: batch, error: bErr } = await supabase
-        .from('purchase_batches')
-        .insert({
-          supplier_name: (r.vendor_name as string) ?? 'Unknown Supplier',
-          purchase_date: (r.txn_date as string) ?? new Date().toISOString().split('T')[0],
-          reference: r.qbo_purchase_id as string,
-          supplier_vat_registered: false,
-          shared_costs: JSON.stringify({ shipping: 0, broker_fee: 0, other: Math.round(totalNonStock * 100) / 100 }),
-          total_shared_costs: Math.round(totalNonStock * 100) / 100,
-          status: 'recorded',
-        } as never)
-        .select('id')
-        .single();
-
-      if (bErr) throw bErr;
-      const batchId = (batch as Record<string, unknown>).id as string;
-
-      // Create line items
-      const lineInserts = stockLines.map(l => ({
-        batch_id: batchId,
-        mpn: l.mpn,
-        quantity: l.quantity,
-        unit_cost: l.unitCost,
-      }));
-
-      const { data: createdLines, error: lErr } = await supabase
-        .from('purchase_line_items')
-        .insert(lineInserts as never)
-        .select('id, mpn');
-
-      if (lErr) throw lErr;
-
-      // Ensure product records exist for each MPN
-      for (const sl of stockLines) {
-        await supabase
-          .from('product')
-          .upsert({ mpn: sl.mpn, name: sl.mpn } as never, { onConflict: 'mpn' });
-      }
-
-      // Create stock units — one per quantity per line
-      const lineMap = new Map<string, string>();
-      for (const cl of (createdLines as Record<string, unknown>[])) {
-        lineMap.set(cl.mpn as string, cl.id as string);
-      }
-
-      const unitInserts: Record<string, unknown>[] = [];
-      for (const sl of stockLines) {
-        const lineItemId = lineMap.get(sl.mpn);
-        for (let i = 0; i < sl.quantity; i++) {
-          unitInserts.push({
-            batch_id: batchId,
-            line_item_id: lineItemId,
-            mpn: sl.mpn,
-            v2_status: 'purchased',
-            inbound_receipt_line_id: sl.lineId,
-          });
-        }
-      }
-
-      if (unitInserts.length > 0) {
-        // Insert in batches of 100
-        for (let i = 0; i < unitInserts.length; i += 100) {
-          const chunk = unitInserts.slice(i, i + 100);
-          const { error: uErr } = await supabase
-            .from('stock_unit')
-            .insert(chunk as never);
-          if (uErr) throw uErr;
-        }
-      }
-
-      // Run cost apportionment
-      await supabase.rpc('v2_calculate_apportioned_costs' as never, { p_batch_id: batchId } as never);
-
-      // Update batch unit counter
-      await supabase
-        .from('purchase_batches')
-        .update({ unit_counter: unitInserts.length } as never)
-        .eq('id', batchId);
-
-      // Mark receipt as processed
-      await supabase
-        .from('inbound_receipt')
-        .update({ status: 'processed', processed_at: new Date().toISOString() } as never)
-        .eq('id', receiptId);
-
-      return { batchId, unitCount: unitInserts.length, lineCount: stockLines.length };
+      return {
+        unitsCreated: result.units_created ?? 0,
+        totalOverhead: result.total_overhead_apportioned ?? 0,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: intakeKeys.all });

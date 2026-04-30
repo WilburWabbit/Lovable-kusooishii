@@ -1,4 +1,4 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-06
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 /**
@@ -33,6 +33,21 @@ function parseSku(sku: string): { mpn: string; conditionGrade: string } {
   }
   if (!["1", "2", "3", "4", "5"].includes(conditionGrade)) conditionGrade = "1";
   return { mpn, conditionGrade };
+}
+
+/**
+ * Extract a SKU-shaped token from a QBO item Name when the Sku field is empty.
+ * QBO names follow the convention "Display Name (MPN[.grade])", so we look at
+ * the LAST parenthesised group and accept it only if it has no spaces. This
+ * prevents the entire display name being treated as the MPN (which previously
+ * created orphan product/sku rows like "KitchenAid ... (5KFC3516BER").
+ */
+function extractSkuFromName(name: string): string | null {
+  const matches = [...name.matchAll(/\(([^()]+)\)/g)];
+  if (matches.length === 0) return null;
+  const candidate = matches[matches.length - 1][1].trim();
+  if (!candidate || /\s/.test(candidate)) return null;
+  return candidate;
 }
 
 function cleanQboName(raw: string): string {
@@ -102,9 +117,15 @@ async function ensureProductExists(
 
   const { data: ensuredProductId, error: ensureErr } = await admin.rpc("ensure_product_exists", {
     p_mpn: mpn,
+    p_name: productName,
     p_brand: brand,
     p_item_type: itemType,
-    p_name: productName,
+    p_theme_id: null,
+    p_subtheme: null,
+    p_piece_count: null,
+    p_release_year: null,
+    p_retired: null,
+    p_img_url: null,
   });
 
   if (!ensureErr && ensuredProductId) {
@@ -199,14 +220,65 @@ async function cleanupSalesOrder(admin: any, orderId: string): Promise<void> {
     if (createdLine.stock_unit_id) {
       await admin
         .from("stock_unit")
-        .update({ status: "available" })
+        .update({ status: "available", v2_status: "graded", order_id: null, sold_at: null })
         .eq("id", createdLine.stock_unit_id)
-        .eq("status", "closed");
+        .in("status", ["closed", "sold"]);
     }
   }
 
   await admin.from("sales_order_line").delete().eq("sales_order_id", orderId);
   await admin.from("sales_order").delete().eq("id", orderId);
+}
+
+// ════════════════════════════════════════════════════════════
+// CHANNEL DETECTION — detect origin channel from QBO SalesReceipt
+// ════════════════════════════════════════════════════════════
+
+function detectOriginChannel(receipt: any): string {
+  // Primary: QBO Location/Store (DepartmentRef) — canonical source
+  const deptName = receipt.DepartmentRef?.name ?? null;
+  if (deptName) {
+    if (/ebay/i.test(deptName)) return "ebay";
+    if (/square\s*space/i.test(deptName)) return "squarespace";
+    if (/kusooishii/i.test(deptName)) return "web";
+    if (/in\s*person/i.test(deptName)) return "in_person";
+    if (/etsy/i.test(deptName)) return "etsy";
+  }
+
+  // Secondary fallback: DocNumber pattern (preserved for legacy/edge cases)
+  const doc = receipt.DocNumber ?? "";
+  if (/^\d{2}-\d{5}-\d{5}$/.test(doc)) return "ebay";
+  if (doc.startsWith("KO-")) return "web";
+  if (doc.startsWith("SQR-")) return "in_person";
+  if (doc.startsWith("ETSY-")) return "etsy";
+  if (doc.startsWith("R-SQR-") || doc.startsWith("R-ETSY-") || doc.startsWith("R-KO-")) return "qbo_refund";
+
+  // Tertiary: PaymentMethodRef
+  const pmtName = receipt.PaymentMethodRef?.name ?? "";
+  if (/stripe/i.test(pmtName)) return "web";
+  if (/ebay/i.test(pmtName)) return "ebay";
+  if (/square/i.test(pmtName) || /cash/i.test(pmtName)) return "in_person";
+  if (/etsy/i.test(pmtName)) return "etsy";
+
+  // Default: NULL DepartmentRef = eBay
+  return "ebay";
+}
+
+// Derive the external reference for an order — prefer the channel-native ID
+function deriveOriginReference(receipt: any, originChannel: string): string {
+  const doc = receipt.DocNumber ?? "";
+  const qboId = String(receipt.Id);
+
+  // For eBay, the DocNumber IS the eBay order ID
+  if (originChannel === "ebay" && doc) return doc;
+  // For web, the DocNumber IS the KO- order number
+  if (originChannel === "web" && doc.startsWith("KO-")) return doc;
+  // For in_person with SQR- prefix, use that
+  if (originChannel === "in_person" && doc.startsWith("SQR-")) return doc;
+  // For etsy with ETSY- prefix
+  if (originChannel === "etsy" && doc.startsWith("ETSY-")) return doc;
+  // Fallback: use QBO receipt ID
+  return qboId;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -228,27 +300,34 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
       const item = entry.raw_payload;
       const qboItemId = String(item.Id);
 
-      // Parse SKU
+      // Parse SKU. Prefer the explicit Sku field; if absent, extract from
+      // the trailing "(MPN.grade)" suffix of the Name. Never feed an entire
+      // display name into parseSku — that creates orphan rows where the MPN
+      // is actually the truncated product name.
       let mpn: string | null = null;
       let conditionGrade = "1";
+      let rawSku: string | null = null;
+
       const skuField = item.Sku;
       if (skuField && String(skuField).trim()) {
-        const parsed = parseSku(String(skuField));
-        mpn = parsed.mpn;
-        conditionGrade = parsed.conditionGrade;
+        rawSku = String(skuField).trim();
       } else if (item.Name) {
-        const parsed = parseSku(String(item.Name));
+        const extracted = extractSkuFromName(String(item.Name));
+        if (extracted) rawSku = extracted;
+      }
+
+      if (rawSku) {
+        const parsed = parseSku(rawSku);
         mpn = parsed.mpn;
         conditionGrade = parsed.conditionGrade;
       }
 
-      if (!mpn) {
+      if (!mpn || !rawSku) {
         await markLanding(admin, "landing_raw_qbo_item", entry.id, "skipped", "No MPN");
         processed++;
         continue;
       }
 
-      const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : String(item.Name).trim();
       const skuCode = rawSku;
 
       // Resolve parent category
@@ -257,7 +336,6 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
       let itemType: string | null = null;
       if (item.ParentRef?.value) {
         parentItemId = String(item.ParentRef.value);
-        // Look up parent from already-landed items
         const { data: parentLanding } = await admin
           .from("landing_raw_qbo_item")
           .select("raw_payload")
@@ -283,7 +361,6 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
           await admin.from("product").update(updates).eq("id", productId);
         }
       } else {
-        // Auto-create from catalog
         const { data: catalog } = await admin
           .from("lego_catalog")
           .select("id, mpn, name, theme_id, piece_count, release_year, retired_flag, img_url, subtheme_name, product_type")
@@ -328,7 +405,6 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
         }
         if (error) { errors++; await markLanding(admin, "landing_raw_qbo_item", entry.id, "error", error.message); continue; }
       } else {
-        // Upsert SKU
         const upsertPayload: Record<string, any> = {
           qbo_item_id: qboItemId, qbo_parent_item_id: parentItemId,
           sku_code: skuCode, name: cleanQboName(item.Name ?? mpn),
@@ -343,11 +419,6 @@ async function processItems(admin: any, batchSize: number): Promise<{ processed:
         }
         if (error) { errors++; await markLanding(admin, "landing_raw_qbo_item", entry.id, "error", error.message); continue; }
       }
-
-      // QtyOnHand reconciliation is handled exclusively by the dedicated
-      // reconcile-stock action (admin-data) AFTER all tiers have been processed.
-      // It must NOT run here in processItems (Tier 1) because purchases and sales
-      // have not yet been processed, leading to incorrect backfill/write-off.
 
       await markLanding(admin, "landing_raw_qbo_item", entry.id, "committed");
       processed++;
@@ -370,12 +441,18 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     .from("landing_raw_qbo_purchase")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockCreated = 0;
 
   for (const entry of (pending ?? [])) {
+    // Track IDs created in this iteration for rollback
+    const createdStockUnitIds: string[] = [];
+    let receiptId: string | null = null;
+    let insertedLineIds: string[] = [];
+    let batchId: string | null = null;
+
     try {
       const purchase = entry.raw_payload;
       const qboPurchaseId = String(purchase.Id);
@@ -407,84 +484,58 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         .select("id, status").single();
 
       if (receiptErr) { errors++; await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", receiptErr.message); continue; }
+      receiptId = receipt.id;
 
-      // If already processed, handle existing stock before recreating lines
-      if (receipt.status === "processed") {
-        const { data: oldLines } = await admin.from("inbound_receipt_line").select("id, mpn, condition_grade").eq("inbound_receipt_id", receipt.id);
+      // ── IDEMPOTENCY GUARD ──
+      // Count expected QBO lines vs existing receipt lines.
+      // If the receipt is already processed and line counts match, skip entirely.
+      const expectedLines = (purchase.Line ?? []).filter(
+        (l: any) => l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
+      );
+      const expectedLineCount = expectedLines.length;
+
+      const { count: existingLineCount } = await admin.from("inbound_receipt_line")
+        .select("id", { count: "exact", head: true })
+        .eq("inbound_receipt_id", receipt.id);
+
+      if (receipt.status === "processed" && (existingLineCount ?? 0) === expectedLineCount) {
+        // Already fully processed with correct line count — skip
+        await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "committed");
+        processed++;
+        continue;
+      }
+
+      // If receipt has existing lines (reprocessing), clean them up properly
+      if ((existingLineCount ?? 0) > 0) {
+        const { data: oldLines } = await admin.from("inbound_receipt_line").select("id").eq("inbound_receipt_id", receipt.id);
         const oldLineIds = (oldLines ?? []).map((l: any) => l.id);
 
         if (oldLineIds.length > 0) {
+          // Delete non-sold stock units linked to these lines
           const { data: linkedUnits } = await admin.from("stock_unit")
-            .select("id, status, sku_id, landed_cost, carrying_value, mpn, condition_grade, inbound_receipt_line_id")
+            .select("id, status, v2_status")
             .in("inbound_receipt_line_id", oldLineIds);
 
           for (const unit of (linkedUnits ?? [])) {
-            if (unit.status === "closed") {
-              // Sold unit — attempt reallocation by MPN
-              const newLines = (purchase.Line ?? []).filter((l: any) => l.DetailType === "ItemBasedExpenseLineDetail");
-              let reallocated = false;
-
-              for (const nl of newLines) {
-                const itemRef = nl.ItemBasedExpenseLineDetail?.ItemRef;
-                if (!itemRef?.value) continue;
-                // Look up item from landing table
-                const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
-                  .select("raw_payload").eq("external_id", itemRef.value).maybeSingle();
-                const qboItem = itemLanding?.raw_payload;
-                const skuField = qboItem?.Sku;
-                const rawSku = (skuField && String(skuField).trim()) ? String(skuField).trim() : (itemRef.name ?? "").trim();
-                if (!rawSku) continue;
-                const parsed = parseSku(rawSku);
-
-                if (parsed.mpn === unit.mpn) {
-                  const newUnitCost = nl.ItemBasedExpenseLineDetail?.UnitPrice ?? 0;
-                  const updates: Record<string, any> = { landed_cost: newUnitCost };
-                  if (parsed.conditionGrade !== unit.condition_grade) {
-                    const newSkuCode = parsed.conditionGrade !== "1" ? `${parsed.mpn}.${parsed.conditionGrade}` : parsed.mpn;
-                    const { data: newSku } = await admin.from("sku").select("id").eq("sku_code", newSkuCode).maybeSingle();
-                    if (newSku) { updates.sku_id = newSku.id; updates.condition_grade = parsed.conditionGrade; }
-                  }
-                  await admin.from("stock_unit").update(updates).eq("id", unit.id);
-                  await admin.from("audit_event").insert({
-                    entity_type: "stock_unit", entity_id: unit.id,
-                    trigger_type: "purchase_reprocessing", actor_type: "system",
-                    source_system: "qbo-process-pending",
-                    before_json: { landed_cost: unit.landed_cost, carrying_value: unit.carrying_value },
-                    after_json: updates,
-                    input_json: { qbo_purchase_id: qboPurchaseId, reason: "sold_unit_reallocated" },
-                  });
-                  reallocated = true;
-                  break;
-                }
-              }
-
-              if (!reallocated) {
-                await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
-              }
+            if (unit.status === "closed" || unit.v2_status === "sold") {
+              // Sold unit — nullify the link but preserve the unit
+              await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).eq("id", unit.id);
             } else {
-              // Available/received/graded — delete and recreate
+              // Available/graded/purchased — delete entirely to prevent duplication
               await admin.from("stock_unit").delete().eq("id", unit.id);
             }
           }
-        }
 
-        // Delete old lines, reset receipt
-        await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
-        await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
-      } else {
-        // For pending receipts, still clear any stale lines
-        const { data: oldLines } = await admin.from("inbound_receipt_line").select("id").eq("inbound_receipt_id", receipt.id);
-        if (oldLines && oldLines.length > 0) {
-          const oldLineIds = oldLines.map((l: any) => l.id);
-          await admin.from("stock_unit").update({ inbound_receipt_line_id: null }).in("inbound_receipt_line_id", oldLineIds);
+          // Delete old receipt lines
           await admin.from("inbound_receipt_line").delete().eq("inbound_receipt_id", receipt.id);
         }
       }
 
+      // Reset receipt status
+      await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receipt.id);
+
       // Create new lines from raw payload
-      const lines = (purchase.Line ?? []).filter((l: any) =>
-        l.DetailType === "ItemBasedExpenseLineDetail" || l.DetailType === "AccountBasedExpenseLineDetail"
-      );
+      const lines = expectedLines;
 
       const lineRows: any[] = [];
       for (const line of lines) {
@@ -495,10 +546,33 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         let rawSkuCode: string | null = null;
 
         if (isStockLine && detail.ItemRef?.value) {
-          // Look up item from landing table (no QBO API call!)
           const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
             .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
           const qboItem = itemLanding?.raw_payload;
+
+          // Skip non-stock QBO items (Service, NonInventory, shipping lines)
+          const qboItemType = qboItem?.Type ?? "";
+          if (["Service", "NonInventory"].includes(qboItemType)) {
+            const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+            const lineDescription = [
+              line.Description,
+              detail.ItemRef?.name,
+            ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" - ") || "No description";
+            lineRows.push({
+              inbound_receipt_id: receipt.id,
+              description: lineDescription,
+              quantity: detail.Qty ?? 1,
+              unit_cost: detail.UnitPrice ?? line.Amount ?? 0,
+              line_total: line.Amount ?? 0,
+              qbo_item_id: detail.ItemRef?.value ?? null,
+              is_stock_line: false,
+              mpn: null, condition_grade: null,
+              qbo_tax_code_ref: taxCodeRef,
+              sku_code: null,
+            });
+            continue;
+          }
+
           const skuField = qboItem?.Sku;
           if (skuField && String(skuField).trim()) {
             rawSkuCode = String(skuField).trim();
@@ -542,6 +616,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       const { data: insertedLines, error: insertErr } = await admin
         .from("inbound_receipt_line").insert(lineRows).select("id, mpn, condition_grade, is_stock_line, qbo_tax_code_ref");
       if (insertErr) { errors++; await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", insertErr.message); continue; }
+      insertedLineIds = (insertedLines ?? []).map((l: any) => l.id);
 
       // Resolve tax codes
       for (const il of (insertedLines ?? [])) {
@@ -551,7 +626,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         }
       }
 
-      // Auto-process: create SKUs + stock units
+      // Auto-process: create SKUs + stock units + purchase batch + purchase line items
       const stockLines = lineRows.filter(l => l.is_stock_line && l.mpn && l.condition_grade);
       const overheadLines = lineRows.filter(l => !l.is_stock_line && isAllocableFeeLine(l.description));
 
@@ -571,6 +646,48 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
       const totalOverhead = overheadLines.reduce((s, l) => s + Number(l.line_total), 0);
       const totalStockCost = stockLines.reduce((s, l) => s + Number(l.line_total), 0);
       const validGrades = ["1", "2", "3", "4", "5"];
+
+      // ── Cleanup existing purchase batches for this QBO purchase (prevents duplicates on reprocessing) ──
+      const { data: existingBatches } = await admin.from("purchase_batches")
+        .select("id").eq("reference", qboPurchaseId);
+      if (existingBatches && existingBatches.length > 0) {
+        const oldBatchIds = existingBatches.map((b: any) => b.id);
+        console.log(`Cleaning up ${oldBatchIds.length} existing batch(es) for QBO purchase ${qboPurchaseId}: ${oldBatchIds.join(", ")}`);
+
+        // Find stock units linked to these batches
+        const { data: batchUnits } = await admin.from("stock_unit")
+          .select("id, status, v2_status").in("batch_id", oldBatchIds);
+        for (const unit of (batchUnits ?? [])) {
+          if (unit.status === "closed" || unit.v2_status === "sold") {
+            // Sold — nullify batch link but preserve unit
+            await admin.from("stock_unit").update({ batch_id: null, line_item_id: null }).eq("id", unit.id);
+          } else {
+            await admin.from("stock_unit").delete().eq("id", unit.id);
+          }
+        }
+
+        // Delete purchase line items then batches
+        await admin.from("purchase_line_items").delete().in("batch_id", oldBatchIds);
+        await admin.from("purchase_batches").delete().in("id", oldBatchIds);
+      }
+
+      // ── Create purchase batch (v2 purchase model) ──
+      const sharedCosts = JSON.stringify({ shipping: 0, broker_fee: 0, other: Math.round(totalOverhead * 100) / 100 });
+      const { data: batch, error: batchErr } = await admin.from("purchase_batches").insert({
+        supplier_name: vendorName ?? "Unknown Supplier",
+        purchase_date: txnDate ?? new Date().toISOString().split("T")[0],
+        reference: qboPurchaseId,
+        supplier_vat_registered: false,
+        shared_costs: sharedCosts,
+        total_shared_costs: Math.round(totalOverhead * 100) / 100,
+        status: "recorded",
+      }).select("id").single();
+
+      if (batchErr) {
+        console.error("Purchase batch create error:", batchErr);
+        throw new Error(`Purchase batch create failed: ${batchErr.message}`);
+      }
+      batchId = batch.id;
 
       for (let i = 0; i < stockLines.length; i++) {
         const line = stockLines[i];
@@ -597,7 +714,7 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
             price: landedCost, active_flag: true, saleable_flag: true,
             qbo_item_id: qboItemId,
           }).select("id").single();
-          if (skuErr) { console.error("SKU create error:", skuErr); continue; }
+          if (skuErr) { console.error("SKU create error:", skuErr); throw new Error(`SKU create failed: ${skuErr.message}`); }
           sku = newSku;
         } else {
           const skuUpdate: Record<string, any> = { product_id: productId, saleable_flag: true };
@@ -605,9 +722,24 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
           await admin.from("sku").update(skuUpdate).eq("id", sku.id);
         }
 
+        // Create purchase line item
+        const { data: pli, error: pliErr } = await admin.from("purchase_line_items").insert({
+          batch_id: batchId,
+          mpn: line.mpn,
+          quantity: line.quantity,
+          unit_cost: Number(line.unit_cost),
+          apportioned_cost: Math.round((lineOverhead / Math.max(line.quantity, 1)) * 100) / 100,
+          landed_cost_per_unit: landedCost,
+        }).select("id").single();
+
+        if (pliErr) {
+          console.error("Purchase line item create error:", pliErr);
+          throw new Error(`Purchase line item create failed: ${pliErr.message}`);
+        }
+
         const receiptLineId = insertedLines?.[lineRows.indexOf(line)]?.id ?? null;
 
-        // Shortfall guard
+        // Shortfall guard — count stock for THIS receipt line
         let shortfall = line.quantity;
         if (receiptLineId) {
           const { count } = await admin.from("stock_unit").select("id", { count: "exact", head: true }).eq("inbound_receipt_line_id", receiptLineId);
@@ -615,18 +747,44 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
         }
         if (shortfall <= 0) continue;
 
+        // Reserve UIDs atomically BEFORE inserting stock units
+        const { data: reservedUids, error: reserveErr } = await admin.rpc("v2_reserve_stock_unit_uids", {
+          p_batch_id: batchId,
+          p_count: shortfall,
+        });
+        if (reserveErr || !reservedUids || reservedUids.length !== shortfall) {
+          console.error(`UID reservation failed for purchase ${entry.external_id}, batch ${batchId}, count ${shortfall}:`, reserveErr);
+          throw new Error(`UID reservation failed: ${reserveErr?.message ?? "unexpected count"}`);
+        }
+
+        const now = new Date().toISOString();
         const stockUnits = [];
         for (let j = 0; j < shortfall; j++) {
           stockUnits.push({
+            uid: reservedUids[j],
             sku_id: sku!.id, mpn: line.mpn, condition_grade: cg,
-            status: "available", landed_cost: landedCost,
+            status: "available",
+            v2_status: "graded",
+            graded_at: now,
+            landed_cost: landedCost,
             supplier_id: vendorName, inbound_receipt_line_id: receiptLineId,
+            batch_id: batchId,
+            line_item_id: pli.id,
           });
         }
-        const { error: suErr } = await admin.from("stock_unit").insert(stockUnits);
-        if (suErr) { console.error("Stock unit insert error:", suErr); continue; }
-        stockCreated += stockUnits.length;
+        const { data: createdUnits, error: suErr } = await admin.from("stock_unit").insert(stockUnits).select("id");
+        if (suErr) {
+          console.error(`Stock unit insert error for purchase ${entry.external_id}, batch ${batchId}, receiptLine ${receiptLineId}, attempted ${stockUnits.length} units, reserved UIDs ${reservedUids[0]}..${reservedUids[reservedUids.length-1]}:`, suErr);
+          throw new Error(`Stock unit insert failed: ${suErr.message}`);
+        }
+        for (const cu of (createdUnits ?? [])) createdStockUnitIds.push(cu.id);
+        stockCreated += (createdUnits ?? []).length;
       }
+
+      // unit_counter is already correct from the atomic reservation — no manual overwrite needed
+
+      // Run cost apportionment
+      await admin.rpc("v2_calculate_apportioned_costs", { p_batch_id: batchId });
 
       await admin.from("inbound_receipt").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", receipt.id);
       await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "committed");
@@ -634,6 +792,33 @@ async function processPurchases(admin: any, batchSize: number): Promise<{ proces
     } catch (err: any) {
       errors++;
       console.error(`Process purchase ${entry.external_id}:`, err.message);
+
+      // ROLLBACK: Delete any stock units created in this iteration
+      if (createdStockUnitIds.length > 0) {
+        console.warn(`Rolling back ${createdStockUnitIds.length} stock units for purchase ${entry.external_id}`);
+        for (let i = 0; i < createdStockUnitIds.length; i += 100) {
+          const rollbackBatch = createdStockUnitIds.slice(i, i + 100);
+          await admin.from("stock_unit").delete().in("id", rollbackBatch);
+        }
+        stockCreated -= createdStockUnitIds.length;
+      }
+
+      // ROLLBACK: Delete purchase line items and batch created in this iteration
+      if (batchId) {
+        await admin.from("purchase_line_items").delete().eq("batch_id", batchId);
+        await admin.from("purchase_batches").delete().eq("id", batchId);
+      }
+
+      // ROLLBACK: Delete inserted receipt lines
+      if (insertedLineIds.length > 0) {
+        await admin.from("inbound_receipt_line").delete().in("id", insertedLineIds);
+      }
+
+      // Reset receipt status to pending so it can be retried
+      if (receiptId) {
+        await admin.from("inbound_receipt").update({ status: "pending" }).eq("id", receiptId);
+      }
+
       await markLanding(admin, "landing_raw_qbo_purchase", entry.id, "error", err.message);
     }
   }
@@ -659,7 +844,6 @@ async function resolveSkuFromItem(
   itemRefValue: string,
   itemRefName: string | null,
 ): Promise<{ skuId: string | null; skuCode: string | null }> {
-  // First try the strongest key: the QBO item id itself.
   const { data: skuByItemId } = await admin
     .from("sku")
     .select("id, sku_code")
@@ -670,7 +854,6 @@ async function resolveSkuFromItem(
     return { skuId: skuByItemId.id, skuCode: skuByItemId.sku_code ?? null };
   }
 
-  // Fall back to the landed QBO item payload to recover the raw SKU code.
   const { data: itemLanding } = await admin
     .from("landing_raw_qbo_item")
     .select("raw_payload")
@@ -699,12 +882,166 @@ async function resolveSkuFromItem(
   return { skuId: skuByCode?.id ?? null, skuCode };
 }
 
+// Release a single allocated stock unit back to available/graded
+async function releaseStockUnit(admin: any, stockUnitId: string): Promise<void> {
+  await admin
+    .from("stock_unit")
+    .update({ status: "available", v2_status: "graded", order_id: null, sold_at: null })
+    .eq("id", stockUnitId)
+    .in("status", ["closed", "sold"]);
+}
+
+/**
+ * Reconcile sales_order_line rows against a QBO SalesReceipt payload.
+ * - Builds desired multiset of (skuId, unitPrice) from QBO item lines
+ * - Matches against existing lines; keeps preserved ones (with stock_unit_id intact)
+ * - Releases stock for removed/changed lines, then deletes them
+ * - Inserts new lines and allocates stock for additions
+ */
+async function reconcileSalesOrderLines(
+  admin: any,
+  orderId: string,
+  receipt: any,
+  itemLines: any[],
+): Promise<{ allocated: number; missing: number }> {
+  const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+
+  type DesiredLine = { skuId: string; unitPrice: number; taxCodeRef: string | null; taxCodeId: string | null };
+  const desired: DesiredLine[] = [];
+
+  for (const line of itemLines) {
+    const detail = line.SalesItemLineDetail;
+    const qty = detail.Qty ?? 1;
+    const unitPrice = Number(detail.UnitPrice ?? 0);
+    const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+    const { data: itemLanding } = await admin
+      .from("landing_raw_qbo_item")
+      .select("raw_payload")
+      .eq("external_id", detail.ItemRef.value)
+      .maybeSingle();
+    const qboItemType = itemLanding?.raw_payload?.Type ?? "";
+    if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+      continue;
+    }
+
+    const { skuId } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
+    if (!skuId) continue;
+
+    let taxCodeId: string | null = null;
+    if (taxCodeRef) {
+      const { data: tc } = await admin.from("tax_code").select("id").eq("qbo_tax_code_id", String(taxCodeRef)).maybeSingle();
+      taxCodeId = tc?.id ?? null;
+    }
+
+    for (let i = 0; i < qty; i++) {
+      desired.push({ skuId, unitPrice, taxCodeRef, taxCodeId });
+    }
+  }
+
+  const { data: existingLines } = await admin
+    .from("sales_order_line")
+    .select("id, sku_id, unit_price, stock_unit_id")
+    .eq("sales_order_id", orderId);
+
+  const existing = (existingLines ?? []) as Array<{
+    id: string; sku_id: string; unit_price: number | null; stock_unit_id: string | null;
+  }>;
+
+  // Greedy match: pair each desired with an existing on (sku, price); fall back to sku-only
+  const usedExistingIds = new Set<string>();
+  const matchedPairs: Array<{ existingId: string; desired: DesiredLine }> = [];
+  const unmatchedDesired: DesiredLine[] = [];
+
+  for (const d of desired) {
+    const exact = existing.find(
+      (e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId && Number(e.unit_price) === d.unitPrice,
+    );
+    if (exact) {
+      usedExistingIds.add(exact.id);
+      matchedPairs.push({ existingId: exact.id, desired: d });
+      continue;
+    }
+    const skuOnly = existing.find((e) => !usedExistingIds.has(e.id) && e.sku_id === d.skuId);
+    if (skuOnly) {
+      usedExistingIds.add(skuOnly.id);
+      matchedPairs.push({ existingId: skuOnly.id, desired: d });
+      continue;
+    }
+    unmatchedDesired.push(d);
+  }
+
+  // Existing lines not matched → release stock + delete
+  const toRemove = existing.filter((e) => !usedExistingIds.has(e.id));
+  for (const e of toRemove) {
+    if (e.stock_unit_id) await releaseStockUnit(admin, e.stock_unit_id);
+  }
+  if (toRemove.length > 0) {
+    await admin.from("sales_order_line").delete().in("id", toRemove.map((e) => e.id));
+  }
+
+  // Update matched pairs (refresh price + tax refs; keep stock_unit_id + cogs)
+  for (const { existingId, desired: d } of matchedPairs) {
+    await admin.from("sales_order_line").update({
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+    }).eq("id", existingId);
+  }
+
+  // Insert new lines + allocate stock for additions
+  let allocated = 0;
+  let missing = 0;
+  for (const d of unmatchedDesired) {
+    const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
+      p_sku_id: d.skuId,
+      p_quantity: 1,
+      p_order_id: orderId,
+    });
+    if (allocErr) throw allocErr;
+    const stockUnitId: string | null = (allocatedIds ?? [])[0] ?? null;
+
+    let cogs: number | null = null;
+    if (stockUnitId) {
+      const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+      cogs = unitData?.landed_cost ?? null;
+    }
+
+    await admin.from("sales_order_line").insert({
+      sales_order_id: orderId,
+      sku_id: d.skuId,
+      quantity: 1,
+      unit_price: d.unitPrice,
+      line_total: d.unitPrice,
+      stock_unit_id: stockUnitId,
+      qbo_tax_code_ref: d.taxCodeRef,
+      vat_rate_id: vatRateId,
+      tax_code_id: d.taxCodeId,
+      cogs,
+    });
+
+    if (stockUnitId) allocated++;
+    else missing++;
+  }
+
+  // Count preserved/matched lines that already had stock allocated
+  for (const { existingId } of matchedPairs) {
+    const existingLine = existing.find((e) => e.id === existingId);
+    if (existingLine?.stock_unit_id) allocated++;
+    else missing++;
+  }
+
+  return { allocated, missing };
+}
+
 async function processSalesReceipts(admin: any, batchSize: number): Promise<{ processed: number; errors: number; stock_matched: number; stock_missing: number }> {
   const { data: pending } = await admin
     .from("landing_raw_qbo_sales_receipt")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, stockMatched = 0, stockMissing = 0;
@@ -712,8 +1049,25 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
   for (const entry of (pending ?? [])) {
     try {
       const receipt = entry.raw_payload;
-      const qboId = String(receipt.Id);
-      const originChannel = "qbo";
+      const qboId = String(receipt.Id ?? receipt._entity_id ?? entry.external_id);
+      const originChannel = detectOriginChannel(receipt);
+      const originRef = deriveOriginReference(receipt, originChannel);
+
+      // Handle deletion tombstones — reset stock and remove order
+      if (receipt?._deleted === true) {
+        // Search by qbo_sales_receipt_id OR origin_reference
+        const { data: existingOrder } = await admin.from("sales_order")
+          .select("id")
+          .or(`qbo_sales_receipt_id.eq.${qboId},and(origin_reference.eq.${originRef},origin_channel.eq.${originChannel})`)
+          .maybeSingle();
+        if (existingOrder) {
+          await cleanupSalesOrder(admin, existingOrder.id);
+          console.log(`Deleted sales order for QBO SalesReceipt ${qboId} — stock reset`);
+        }
+        await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed", "Deleted in QBO — stock reset");
+        processed++;
+        continue;
+      }
 
       const itemLines = (receipt.Line ?? []).filter(
         (l: any) => l.DetailType === "SalesItemLineDetail" && l.SalesItemLineDetail?.ItemRef?.value
@@ -724,63 +1078,40 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         continue;
       }
 
-      // Cross-channel dedup
+      // ── Match-first: try to find an existing order to enrich/update ──
       const docNumber = receipt.DocNumber ?? null;
-      if (docNumber) {
-        // Check eBay by origin_reference
-        const { data: ebayByRef } = await admin.from("sales_order")
-          .select("id").eq("origin_channel", "ebay").eq("origin_reference", docNumber).maybeSingle();
-        if (ebayByRef) {
-          const enrichFields: Record<string, any> = {
-            doc_number: docNumber, qbo_sales_receipt_id: qboId,
-            qbo_sync_status: "synced",
-          };
-          await admin.from("sales_order").update(enrichFields).eq("id", ebayByRef.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
-        }
+      let matchedOrderId: string | null = null;
 
-        // Check by doc_number
+      // Priority 1: by qbo_sales_receipt_id (most reliable for updates)
+      const { data: byQboId } = await admin.from("sales_order")
+        .select("id").eq("qbo_sales_receipt_id", qboId).maybeSingle();
+      if (byQboId) matchedOrderId = byQboId.id;
+
+      // Priority 2: by origin_channel + origin_reference
+      if (!matchedOrderId) {
+        const { data: byOriginRef } = await admin.from("sales_order")
+          .select("id").eq("origin_channel", originChannel).eq("origin_reference", originRef).maybeSingle();
+        if (byOriginRef) matchedOrderId = byOriginRef.id;
+      }
+
+      // Priority 3: by doc_number / order_number (legacy data)
+      if (!matchedOrderId && docNumber) {
+        const { data: byRef } = await admin.from("sales_order")
+          .select("id").eq("origin_reference", docNumber).maybeSingle();
+        if (byRef) matchedOrderId = byRef.id;
+      }
+      if (!matchedOrderId && docNumber) {
         const { data: byDocNumber } = await admin.from("sales_order")
-          .select("id").eq("doc_number", docNumber).neq("origin_channel", "qbo").maybeSingle();
-        if (byDocNumber) {
-          await admin.from("sales_order").update({
-            qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-          }).eq("id", byDocNumber.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
-        }
-
-        // Check by order_number
+          .select("id").eq("doc_number", docNumber).maybeSingle();
+        if (byDocNumber) matchedOrderId = byDocNumber.id;
+      }
+      if (!matchedOrderId && docNumber) {
         const { data: byOrderNumber } = await admin.from("sales_order")
-          .select("id").eq("order_number", docNumber).neq("origin_channel", "qbo").maybeSingle();
-        if (byOrderNumber) {
-          await admin.from("sales_order").update({
-            qbo_sales_receipt_id: qboId, qbo_sync_status: "synced",
-          }).eq("id", byOrderNumber.id);
-          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
-          processed++;
-          continue;
-        }
+          .select("id").eq("order_number", docNumber).maybeSingle();
+        if (byOrderNumber) matchedOrderId = byOrderNumber.id;
       }
 
-      // Same-channel dedup: delete existing QBO order for re-creation
-      const { data: existing } = await admin.from("sales_order")
-        .select("id").eq("origin_channel", originChannel).eq("origin_reference", qboId).maybeSingle();
-      if (existing) {
-        const { data: oldLines } = await admin.from("sales_order_line")
-          .select("stock_unit_id").eq("sales_order_id", existing.id);
-        for (const ol of (oldLines ?? [])) {
-          if (ol.stock_unit_id) {
-            await admin.from("stock_unit").update({ status: "available" }).eq("id", ol.stock_unit_id);
-          }
-        }
-        await admin.from("sales_order_line").delete().eq("sales_order_id", existing.id);
-        await admin.from("sales_order").delete().eq("id", existing.id);
-      }
-
+      // ── Compute canonical header values from QBO payload ──
       const customerName = receipt.CustomerRef?.name ?? "QBO Customer";
       const customerRefValue = receipt.CustomerRef?.value ? String(receipt.CustomerRef.value) : null;
       const txnDate = receipt.TxnDate ?? null;
@@ -804,30 +1135,96 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         customerId = cust?.id ?? null;
       }
 
-      const vatRateId = await resolveVatRateId(admin, receipt.TxnTaxDetail);
+      const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
 
-      const orderPayload: Record<string, any> = {
-        origin_channel: originChannel, origin_reference: qboId,
-        status: "complete", guest_name: customerName,
-        guest_email: `qbo-sale-${qboId}@imported.local`,
-        shipping_name: customerName,
-        merchandise_subtotal: merchandiseSubtotal, tax_total: taxTotal,
-        gross_total: grossTotal, global_tax_calculation: globalTaxCalc,
-        currency, customer_id: customerId, txn_date: txnDate,
+      const headerPayload: Record<string, any> = {
+        merchandise_subtotal: merchandiseSubtotal,
+        tax_total: taxTotal,
+        gross_total: grossTotal,
+        net_amount: netAmount,
+        global_tax_calculation: globalTaxCalc,
+        currency,
+        customer_id: customerId,
+        txn_date: txnDate,
         doc_number: docNumber,
-        notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
-        qbo_sync_status: "synced", qbo_sales_receipt_id: qboId,
+        qbo_sync_status: "synced",
+        qbo_sales_receipt_id: qboId,
         qbo_customer_id: customerRefValue,
       };
 
-      let { data: order, error: orderErr } = await admin.from("sales_order").insert(orderPayload).select("id").single();
-      if (orderErr && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderErr.message ?? "")) {
+      let order: { id: string } | null = null;
+
+      if (matchedOrderId) {
+        // ── UPDATE: smart-merge into existing order ──
+        let updateRes = await admin.from("sales_order").update(headerPayload).eq("id", matchedOrderId);
+        if (updateRes.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(updateRes.error.message ?? "")) {
+          const trimmed = { ...headerPayload };
+          delete trimmed.qbo_sync_status;
+          delete trimmed.qbo_sales_receipt_id;
+          delete trimmed.qbo_customer_id;
+          updateRes = await admin.from("sales_order").update(trimmed).eq("id", matchedOrderId);
+        }
+        if (updateRes.error) {
+          errors++;
+          await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", updateRes.error.message);
+          continue;
+        }
+        order = { id: matchedOrderId };
+
+        // Reconcile line items: release stock on removed/changed, keep matching, allocate new
+        const reconcileResult = await reconcileSalesOrderLines(admin, matchedOrderId, receipt, itemLines);
+
+        // Auto-clear needs_allocation when all lines are now allocated.
+        // Only flag needs_allocation if allocation actually failed (missing stock).
+        if (reconcileResult.missing === 0 && reconcileResult.allocated > 0) {
+          await admin
+            .from("sales_order")
+            .update({ v2_status: "new" } as never)
+            .eq("id", matchedOrderId)
+            .eq("v2_status", "needs_allocation");
+        } else if (reconcileResult.missing > 0) {
+          await admin
+            .from("sales_order")
+            .update({
+              v2_status: "needs_allocation",
+              qbo_sync_status: "needs_manual_review",
+            } as never)
+            .eq("id", matchedOrderId);
+        }
+
+        await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "committed");
+        processed++;
+        continue;
+      }
+
+      // ── INSERT: brand-new order ──
+      const orderCreatedAt = txnDate ? new Date(txnDate).toISOString() : new Date().toISOString();
+
+      const orderPayload: Record<string, any> = {
+        ...headerPayload,
+        origin_channel: originChannel,
+        origin_reference: originRef,
+        status: "complete",
+        guest_name: customerName,
+        guest_email: `qbo-sale-${qboId}@imported.local`,
+        shipping_name: customerName,
+        created_at: orderCreatedAt,
+        notes: `Imported from QBO SalesReceipt #${docNumber ?? qboId}`,
+      };
+
+      let orderResult: { data: any; error: any };
+      orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
+      if (orderResult.error && /qbo_sync_status|qbo_sales_receipt_id|qbo_customer_id|PGRST204/.test(orderResult.error.message ?? "")) {
         delete orderPayload.qbo_sync_status;
         delete orderPayload.qbo_sales_receipt_id;
         delete orderPayload.qbo_customer_id;
-        ({ data: order, error: orderErr } = await admin.from("sales_order").insert(orderPayload).select("id").single());
+        orderResult = await admin.from("sales_order").insert(orderPayload).select("id").single();
       }
-      if (orderErr) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderErr.message); continue; }
+      if (orderResult.error) { errors++; await markLanding(admin, "landing_raw_qbo_sales_receipt", entry.id, "error", orderResult.error.message); continue; }
+      order = orderResult.data;
+
+      // Resolve vatRateId for line items (needed for both new and matched orders)
+      const vatRateIdForLines = await resolveVatRateId(admin, receipt.TxnTaxDetail);
 
       let orderStockMatched = 0;
       let orderStockMissing = 0;
@@ -839,6 +1236,16 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           const qty = detail.Qty ?? 1;
           const unitPrice = detail.UnitPrice ?? 0;
           const taxCodeRef = detail.TaxCodeRef?.value ?? null;
+
+          // Check if this is a non-stock item (Service/NonInventory/shipping/literal IDs)
+          const { data: itemLanding } = await admin.from("landing_raw_qbo_item")
+            .select("raw_payload").eq("external_id", detail.ItemRef.value).maybeSingle();
+          const qboItemPayload = itemLanding?.raw_payload;
+          const qboItemType = qboItemPayload?.Type ?? "";
+          if (!itemLanding || isNaN(Number(detail.ItemRef.value)) || ["Service", "NonInventory"].includes(qboItemType)) {
+            console.log(`Skipping non-stock line: ${detail.ItemRef?.name ?? detail.ItemRef.value} (Type: ${qboItemType}, landing: ${!!itemLanding})`);
+            continue;
+          }
 
           const { skuId, skuCode } = await resolveSkuFromItem(admin, detail.ItemRef.value, detail.ItemRef?.name ?? null);
           if (!skuId) {
@@ -852,18 +1259,29 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
             lineTaxCodeId = tc?.id ?? null;
           }
 
-          // Atomic stock allocation
-          const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", { p_sku_id: skuId, p_quantity: qty });
+          // Atomic stock allocation — now also sets v2_status, sold_at, and order_id
+          const { data: allocatedIds, error: allocErr } = await admin.rpc("allocate_stock_units", {
+            p_sku_id: skuId,
+            p_quantity: qty,
+            p_order_id: order!.id,
+          });
           if (allocErr) throw allocErr;
           const unitIds: string[] = allocatedIds ?? [];
 
           for (let i = 0; i < qty; i++) {
             const stockUnitId = unitIds[i] ?? null;
+            // Fetch landed_cost for COGS if we have a stock unit
+            let cogs: number | null = null;
+            if (stockUnitId) {
+              const { data: unitData } = await admin.from("stock_unit").select("landed_cost").eq("id", stockUnitId).maybeSingle();
+              cogs = unitData?.landed_cost ?? null;
+            }
             const { error: lineErr } = await admin.from("sales_order_line").insert({
-              sales_order_id: order.id, sku_id: skuId, quantity: 1,
+              sales_order_id: order!.id, sku_id: skuId, quantity: 1,
               unit_price: unitPrice, line_total: unitPrice,
               stock_unit_id: stockUnitId, qbo_tax_code_ref: taxCodeRef,
-              vat_rate_id: vatRateId, tax_code_id: lineTaxCodeId,
+              vat_rate_id: vatRateIdForLines, tax_code_id: lineTaxCodeId,
+              cogs,
             });
             if (lineErr) {
               throw lineErr;
@@ -874,7 +1292,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         }
 
         if (unresolvedLines.length > 0) {
-          await cleanupSalesOrder(admin, order.id);
+          await cleanupSalesOrder(admin, order!.id);
 
           errors++;
           await markLanding(
@@ -887,7 +1305,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
           continue;
         }
       } catch (lineErr: any) {
-        await cleanupSalesOrder(admin, order.id);
+        await cleanupSalesOrder(admin, order!.id);
         throw lineErr;
       }
 
@@ -918,7 +1336,7 @@ async function processRefundReceipts(
     .from("landing_raw_qbo_refund_receipt")
     .select("id, external_id, raw_payload")
     .eq("status", "pending")
-    .order("received_at", { ascending: true })
+    .order("raw_payload->>'TxnDate'", { ascending: true })
     .limit(batchSize);
 
   let processed = 0, errors = 0, refundOrdersRemoved = 0;
@@ -1061,7 +1479,7 @@ async function processVendors(admin: any, batchSize: number): Promise<{ processe
 // 6. PROCESS CUSTOMERS
 // ════════════════════════════════════════════════════════════
 
-async function processCustomers(admin: any, batchSize: number): Promise<{ processed: number; errors: number; orders_linked: number }> {
+async function processCustomers(admin: any, batchSize: number): Promise<{ processed: number; errors: number; orders_linked: number; orphans_deleted: number }> {
   const { data: pending } = await admin
     .from("landing_raw_qbo_customer")
     .select("id, external_id, raw_payload")
@@ -1102,9 +1520,6 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
         continue;
       }
 
-      // Customers are processed before sales, so customer_id is resolved at sale insert time.
-      // No backlinking needed.
-
       await markLanding(admin, "landing_raw_qbo_customer", entry.id, "committed");
       processed++;
     } catch (err: any) {
@@ -1114,7 +1529,232 @@ async function processCustomers(admin: any, batchSize: number): Promise<{ proces
     }
   }
 
-  return { processed, errors, orders_linked: ordersLinked };
+
+  // ── Customer orphan cleanup: delete canonical customers with no matching landing record ──
+  const { data: qboCustomers } = await admin
+    .from("customer")
+    .select("id, qbo_customer_id")
+    .not("qbo_customer_id", "is", null);
+
+  let customersOrphaned = 0;
+  for (const cust of (qboCustomers ?? [])) {
+    const { data: landingMatch } = await admin
+      .from("landing_raw_qbo_customer")
+      .select("id")
+      .eq("external_id", cust.qbo_customer_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (!landingMatch) {
+      // No landing record means this customer was deleted/deactivated in QBO
+      await admin.from("customer").delete().eq("id", cust.id);
+      customersOrphaned++;
+    }
+  }
+  if (customersOrphaned > 0) {
+    console.log(`Customer orphan cleanup: deleted ${customersOrphaned} customers with no landing record`);
+  }
+
+  return { processed, errors, orders_linked: ordersLinked, orphans_deleted: customersOrphaned };
+}
+
+// ════════════════════════════════════════════════════════════
+// 7. PROCESS DEPOSITS → Payouts
+// ════════════════════════════════════════════════════════════
+
+async function processDeposits(admin: any, batchSize: number): Promise<{ processed: number; errors: number; payouts_created: number }> {
+  const { data: pending } = await admin
+    .from("landing_raw_qbo_deposit")
+    .select("id, external_id, raw_payload")
+    .eq("status", "pending")
+    .order("raw_payload->>'TxnDate'", { ascending: true })
+    .limit(batchSize);
+
+  let processed = 0, errors = 0, payoutsCreated = 0;
+
+  for (const entry of (pending ?? [])) {
+    try {
+      const deposit = entry.raw_payload;
+      const qboDepositId = String(deposit.Id);
+      const txnDate = deposit.TxnDate ?? null;
+      const totalAmt = deposit.TotalAmt ?? 0;
+      const memo = deposit.PrivateNote ?? null;
+
+      // Extract external payout ID from memo (e.g., "ebay payout 7388684270 — ...")
+      // or from DocNumber on the deposit
+      let externalPayoutId: string | null = deposit.DocNumber ? String(deposit.DocNumber) : null;
+      if (!externalPayoutId && memo) {
+        const extMatch = memo.match(/payout\s+(\S+)/i);
+        if (extMatch) externalPayoutId = extMatch[1];
+      }
+
+      // Detect channel from memo or deposit lines
+      let channel: "ebay" | "stripe" = "stripe";
+      const memoLower = (memo ?? "").toLowerCase();
+      if (/ebay/i.test(memoLower)) channel = "ebay";
+
+      // Scan deposit lines — separate SalesReceipt (gross) from Purchase (fees)
+      const lines = deposit.Line ?? [];
+      let grossTotal = 0;
+      let feesTotal = 0;
+      const salesLines: { linkedTxnId: string; amount: number }[] = [];
+      const purchaseLines: { linkedTxnId: string; amount: number }[] = [];
+
+      for (const line of lines) {
+        const linkedTxnId = line.LinkedTxn?.[0]?.TxnId;
+        const linkedTxnType = line.LinkedTxn?.[0]?.TxnType;
+        const lineAmt = line.Amount ?? 0;
+
+        if (linkedTxnType === "SalesReceipt" && linkedTxnId) {
+          grossTotal += lineAmt;
+          salesLines.push({ linkedTxnId: String(linkedTxnId), amount: lineAmt });
+        } else if (linkedTxnType === "Purchase" && linkedTxnId) {
+          // Purchase lines are negative in the deposit (fees/expenses)
+          feesTotal += Math.abs(lineAmt);
+          purchaseLines.push({ linkedTxnId: String(linkedTxnId), amount: lineAmt });
+        }
+      }
+
+      // If no SalesReceipt lines found, use TotalAmt as gross (cash-only deposit)
+      if (salesLines.length === 0) {
+        grossTotal = totalAmt;
+      }
+
+      const netAmount = Math.round((grossTotal - feesTotal) * 100) / 100;
+
+      // Detect channel from linked orders if still default
+      if (channel === "stripe" && salesLines.length > 0) {
+        const { data: linkedOrder } = await admin.from("sales_order")
+          .select("origin_channel").eq("qbo_sales_receipt_id", salesLines[0].linkedTxnId).maybeSingle();
+        if (linkedOrder?.origin_channel === "ebay") channel = "ebay";
+      }
+
+      // Check for existing payout by qbo_deposit_id
+      const { data: existingPayout } = await admin.from("payouts")
+        .select("id").eq("qbo_deposit_id", qboDepositId).maybeSingle();
+
+      let payoutId: string;
+      if (existingPayout) {
+        payoutId = existingPayout.id;
+        // Check if this payout was sourced from eBay — don't overwrite amounts
+        const { data: currentPayout } = await admin.from("payouts")
+          .select("external_payout_id").eq("id", payoutId).single();
+
+        const updatePayload: Record<string, unknown> = {
+          qbo_deposit_id: qboDepositId,
+          qbo_sync_status: "synced",
+          qbo_sync_error: null,
+          reconciliation_status: "reconciled",
+          notes: memo,
+          updated_at: new Date().toISOString(),
+        };
+
+        // Only overwrite amounts if NOT eBay-sourced
+        if (!currentPayout?.external_payout_id) {
+          updatePayload.payout_date = txnDate;
+          updatePayload.gross_amount = grossTotal;
+          updatePayload.total_fees = Math.round(feesTotal * 100) / 100;
+          updatePayload.net_amount = netAmount;
+          updatePayload.channel = channel;
+          if (externalPayoutId) updatePayload.external_payout_id = externalPayoutId;
+        }
+
+        await admin.from("payouts").update(updatePayload).eq("id", payoutId);
+      } else {
+        const { data: newPayout, error: payoutErr } = await admin.from("payouts").insert({
+          qbo_deposit_id: qboDepositId, payout_date: txnDate,
+          gross_amount: grossTotal,
+          total_fees: Math.round(feesTotal * 100) / 100,
+          net_amount: netAmount, channel, notes: memo,
+          reconciliation_status: "reconciled",
+          qbo_sync_status: "synced",
+          qbo_sync_error: null,
+          ...(externalPayoutId ? { external_payout_id: externalPayoutId } : {}),
+        }).select("id").single();
+        if (payoutErr) throw payoutErr;
+        payoutId = newPayout.id;
+        payoutsCreated++;
+      }
+
+      // Link SalesReceipt lines to sales orders
+      const salesOrderIds: string[] = [];
+      const orderGrossMap: Record<string, number> = {};
+
+      for (const sl of salesLines) {
+        const { data: linkedOrder } = await admin.from("sales_order")
+          .select("id").eq("qbo_sales_receipt_id", sl.linkedTxnId).maybeSingle();
+        if (!linkedOrder) continue;
+
+        salesOrderIds.push(linkedOrder.id);
+        orderGrossMap[linkedOrder.id] = sl.amount;
+
+        // Upsert payout_orders link
+        const { data: existingLink } = await admin.from("payout_orders")
+          .select("id").eq("payout_id", payoutId).eq("sales_order_id", linkedOrder.id).maybeSingle();
+        if (existingLink) {
+          await admin.from("payout_orders").update({
+            order_gross: sl.amount,
+          }).eq("id", existingLink.id);
+        } else {
+          await admin.from("payout_orders").insert({
+            payout_id: payoutId, sales_order_id: linkedOrder.id,
+            order_gross: sl.amount,
+          });
+        }
+      }
+
+      // Distribute fees proportionally across orders and update payout_orders
+      if (salesOrderIds.length > 0 && feesTotal > 0) {
+        for (const orderId of salesOrderIds) {
+          const orderGross = orderGrossMap[orderId] ?? 0;
+          const feeShare = grossTotal > 0
+            ? Math.round((orderGross / grossTotal) * feesTotal * 100) / 100
+            : Math.round((feesTotal / salesOrderIds.length) * 100) / 100;
+          const orderNet = Math.round((orderGross - feeShare) * 100) / 100;
+
+          await admin.from("payout_orders").update({
+            order_fees: feeShare, order_net: orderNet,
+          }).eq("payout_id", payoutId).eq("sales_order_id", orderId);
+        }
+      }
+
+      // Update order_count and unit_count on the payout
+      let unitCount = 0;
+      if (salesOrderIds.length > 0) {
+        const { count } = await admin.from("stock_unit")
+          .select("id", { count: "exact", head: true })
+          .in("order_id", salesOrderIds);
+        unitCount = count ?? 0;
+
+        // Link stock units to this payout
+        await admin.from("stock_unit")
+          .update({ payout_id: payoutId })
+          .in("order_id", salesOrderIds)
+          .is("payout_id", null);
+
+        // Transition eligible units to payout_received
+        await admin.from("stock_unit")
+          .update({ v2_status: "payout_received", payout_id: payoutId })
+          .in("order_id", salesOrderIds)
+          .in("v2_status", ["sold", "shipped", "delivered"]);
+      }
+
+      await admin.from("payouts").update({
+        order_count: salesOrderIds.length,
+        unit_count: unitCount,
+        updated_at: new Date().toISOString(),
+      }).eq("id", payoutId);
+
+      await markLanding(admin, "landing_raw_qbo_deposit", entry.id, "committed");
+      processed++;
+    } catch (err: any) {
+      errors++;
+      console.error(`Process deposit ${entry.external_id}:`, err.message);
+      await markLanding(admin, "landing_raw_qbo_deposit", entry.id, "error", err.message);
+    }
+  }
+
+  return { processed, errors, payouts_created: payoutsCreated };
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1158,16 +1798,15 @@ Deno.serve(async (req) => {
     const results: Record<string, any> = {};
 
     if (entityType) {
-      // Single entity type requested — process just that
       if (entityType === "vendors") results.vendors = await processVendors(admin, batchSize);
       else if (entityType === "customers") results.customers = await processCustomers(admin, batchSize);
       else if (entityType === "items") results.items = await processItems(admin, batchSize);
       else if (entityType === "purchases") results.purchases = await processPurchases(admin, batchSize);
       else if (entityType === "sales") results.sales = await processSalesReceipts(admin, batchSize);
       else if (entityType === "refunds") results.refunds = await processRefundReceipts(admin, batchSize);
+      else if (entityType === "deposits") results.deposits = await processDeposits(admin, batchSize);
     } else {
       // Tiered processing: respect dependency order
-      // Tier 1: Vendors + Customers + Items (reference data)
       const [pendingVendors, pendingCust, pendingItems] = await Promise.all([
         admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
         admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
@@ -1176,22 +1815,28 @@ Deno.serve(async (req) => {
       const tier1Remaining = (pendingVendors.count ?? 0) + (pendingCust.count ?? 0) + (pendingItems.count ?? 0);
 
       if (tier1Remaining > 0) {
-        // Process Tier 1 only
         results.vendors = await processVendors(admin, batchSize);
         results.customers = await processCustomers(admin, batchSize);
         results.items = await processItems(admin, batchSize);
       } else {
-        // Tier 1 complete — check Tier 2: Purchases
         const { count: pendingPurch } = await admin.from("landing_raw_qbo_purchase")
           .select("id", { count: "exact", head: true }).eq("status", "pending");
 
         if ((pendingPurch ?? 0) > 0) {
-          // Process Tier 2 only
           results.purchases = await processPurchases(admin, batchSize);
         } else {
-          // Tier 2 complete — process Tier 3: Sales + Refunds
-          results.sales = await processSalesReceipts(admin, batchSize);
-          results.refunds = await processRefundReceipts(admin, batchSize);
+          const { count: pendingSalesCount } = await admin.from("landing_raw_qbo_sales_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+          const { count: pendingRefundsCount } = await admin.from("landing_raw_qbo_refund_receipt")
+            .select("id", { count: "exact", head: true }).eq("status", "pending");
+
+          if (((pendingSalesCount ?? 0) + (pendingRefundsCount ?? 0)) > 0) {
+            results.sales = await processSalesReceipts(admin, batchSize);
+            results.refunds = await processRefundReceipts(admin, batchSize);
+          } else {
+            // Tier 4: Deposits (after all sales are processed)
+            results.deposits = await processDeposits(admin, batchSize);
+          }
         }
       }
     }
@@ -1204,6 +1849,7 @@ Deno.serve(async (req) => {
       { count: pendingRefunds },
       { count: pendingCustomers },
       { count: pendingVendors },
+      { count: pendingDeposits },
     ] = await Promise.all([
       admin.from("landing_raw_qbo_item").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_purchase").select("id", { count: "exact", head: true }).eq("status", "pending"),
@@ -1211,6 +1857,7 @@ Deno.serve(async (req) => {
       admin.from("landing_raw_qbo_refund_receipt").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_customer").select("id", { count: "exact", head: true }).eq("status", "pending"),
       admin.from("landing_raw_qbo_vendor").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      admin.from("landing_raw_qbo_deposit").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
 
     const remaining = {
@@ -1220,6 +1867,7 @@ Deno.serve(async (req) => {
       refunds: pendingRefunds ?? 0,
       customers: pendingCustomers ?? 0,
       vendors: pendingVendors ?? 0,
+      deposits: pendingDeposits ?? 0,
     };
     const totalRemaining = Object.values(remaining).reduce((a, b) => a + b, 0);
 

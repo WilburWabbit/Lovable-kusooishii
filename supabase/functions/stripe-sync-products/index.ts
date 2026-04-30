@@ -14,7 +14,7 @@ function cleanText(value: string | null | undefined): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-async function authenticateAdmin(req: Request, admin: ReturnType<typeof createClient>) {
+async function authenticateAdmin(req: Request, admin: any) {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
   const token = authHeader.replace("Bearer ", "");
@@ -25,7 +25,7 @@ async function authenticateAdmin(req: Request, admin: ReturnType<typeof createCl
   if (!hasAccess) throw new Error("Forbidden");
 }
 
-async function getStripeClient(admin: ReturnType<typeof createClient>) {
+async function getStripeClient(admin: any) {
   const { data: appSettings } = await admin
     .from("app_settings")
     .select("stripe_test_mode")

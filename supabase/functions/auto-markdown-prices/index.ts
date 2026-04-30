@@ -1,14 +1,17 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-04-07
 // ============================================================
 // Auto-Markdown Prices
 // Cron job: Applies automated price reductions to stale listings.
 // Day 30: First markdown (default 10%)
 // Day 45: Clearance markdown (default 20%)
-// Never breaches floor price (highestLandedCost * 1.25).
+// Never breaches VAT-aware floor price (accounts for fees,
+// shipping, packaging, and output VAT).
 // Called by pg_cron daily — no user auth required.
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { calculateFloorPrice, decomposeFees } from "../_shared/pricing.ts";
+import type { FeeScheduleRow } from "../_shared/pricing.ts";
 
 // Defaults — overridden by pricing_settings table if rows exist
 const DEFAULTS = {
@@ -17,6 +20,8 @@ const DEFAULTS = {
   clearance_markdown_days: 45,
   clearance_markdown_pct: 0.20,
   minimum_margin_target: 0.25,
+  min_profit: 0.75,
+  risk_reserve_rate: 1.5,
 };
 
 Deno.serve(async (req) => {
@@ -38,7 +43,6 @@ Deno.serve(async (req) => {
         if (error || !user) {
           return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
         }
-        // Enforce admin/staff role
         const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", user.id);
         const hasAccess = (roles ?? []).some((r: { role: string }) => r.role === "admin" || r.role === "staff");
         if (!hasAccess) {
@@ -67,9 +71,61 @@ Deno.serve(async (req) => {
     const FIRST_MARKDOWN_PCT = cfg.first_markdown_pct;
     const CLEARANCE_MARKDOWN_DAYS = cfg.clearance_markdown_days;
     const CLEARANCE_MARKDOWN_PCT = cfg.clearance_markdown_pct;
-    const MARGIN_TARGET = cfg.minimum_margin_target;
+    const MIN_MARGIN = cfg.minimum_margin_target;
+    const MIN_PROFIT = cfg.min_profit;
+    const RISK_RATE = cfg.risk_reserve_rate / 100;
 
-    console.log(`auto-markdown config: first=${FIRST_MARKDOWN_PCT*100}% at ${FIRST_MARKDOWN_DAYS}d, clearance=${CLEARANCE_MARKDOWN_PCT*100}% at ${CLEARANCE_MARKDOWN_DAYS}d, margin=${MARGIN_TARGET*100}%`);
+    console.log(`auto-markdown config: first=${FIRST_MARKDOWN_PCT*100}% at ${FIRST_MARKDOWN_DAYS}d, clearance=${CLEARANCE_MARKDOWN_PCT*100}% at ${CLEARANCE_MARKDOWN_DAYS}d, margin=${MIN_MARGIN*100}%`);
+
+    // Load channel fee schedules (keyed by channel)
+    const { data: feeScheduleRows } = await admin
+      .from("channel_fee_schedule")
+      .select("channel, fee_name, rate_percent, fixed_amount, applies_to, min_amount, max_amount")
+      .eq("active", true);
+
+    const feesByChannel = new Map<string, FeeScheduleRow[]>();
+    for (const row of ((feeScheduleRows ?? []) as unknown as Array<FeeScheduleRow & { channel: string }>)) {
+      const ch = row.channel?.toLowerCase() ?? "ebay";
+      if (!feesByChannel.has(ch)) feesByChannel.set(ch, []);
+      feesByChannel.get(ch)!.push(row);
+    }
+
+    // Load selling cost defaults (packaging + shipping settings)
+    const { data: sellingDefaults } = await admin
+      .from("selling_cost_defaults")
+      .select("key, value")
+      .limit(20);
+
+    const settingsMap: Record<string, number> = {};
+    for (const d of (sellingDefaults ?? []) as { key: string; value: number }[]) {
+      settingsMap[d.key] = d.value;
+    }
+    const packagingCost = settingsMap["packaging_cost"] ?? 0.50;
+    const activeTierNum = settingsMap["evri_active_tier"] ?? 1;
+    const activeTier = `tier_${activeTierNum}`;
+    const preferEvriThreshold = settingsMap["shipping_prefer_evri_threshold"] ?? 1.0;
+
+    // Load Evri direct rates for active tier (default channel)
+    const { data: evriDirectRates } = await admin
+      .from("shipping_rate_table")
+      .select("cost, max_weight_kg, max_length_cm, max_width_cm, max_depth_cm, carrier, size_band")
+      .eq("channel", "default")
+      .eq("tier", activeTier)
+      .eq("destination", "domestic")
+      .eq("active", true)
+      .order("cost", { ascending: true });
+
+    // Load eBay carrier rates
+    const { data: ebayCarrierRates } = await admin
+      .from("shipping_rate_table")
+      .select("cost, max_weight_kg, max_length_cm, max_width_cm, max_depth_cm, carrier, size_band")
+      .eq("channel", "ebay")
+      .eq("destination", "domestic")
+      .eq("active", true)
+      .order("cost", { ascending: true });
+
+    // Default shipping cost: cheapest Evri direct rate
+    const defaultShippingCost = (evriDirectRates?.[0] as { cost: number } | undefined)?.cost ?? 2.59;
 
     // Find listed stock units with their SKU and landed cost
     const { data: listedUnits, error: queryErr } = await admin
@@ -98,6 +154,21 @@ Deno.serve(async (req) => {
       const cost = (unit.landed_cost as number) ?? 0;
       if (cost > group.highestCost) group.highestCost = cost;
       unitsBySku.set(skuId, group);
+    }
+
+    // Determine channel for each SKU (from live listings)
+    const skuIds = [...unitsBySku.keys()];
+    const { data: liveListingsForChannel } = await admin
+      .from("channel_listing")
+      .select("sku_id, channel")
+      .in("sku_id", skuIds)
+      .eq("v2_status" as never, "live");
+
+    const skuChannel = new Map<string, string>();
+    for (const listing of (liveListingsForChannel ?? []) as { sku_id: string; channel: string }[]) {
+      if (!skuChannel.has(listing.sku_id)) {
+        skuChannel.set(listing.sku_id, listing.channel?.toLowerCase() ?? "ebay");
+      }
     }
 
     // Track markdowns applied
@@ -139,12 +210,38 @@ Deno.serve(async (req) => {
 
       // Skip if this markdown level already applied
       if (alreadyApplied === markdownType) continue;
-      if (alreadyApplied === "clearance") continue; // Already at deepest markdown
+      if (alreadyApplied === "clearance") continue;
 
       if (!currentPrice || currentPrice <= 0) continue;
 
-      // Calculate floor price
-      const floorPrice = Math.round(group.highestCost * (1 + MARGIN_TARGET) * 100) / 100;
+      // Calculate VAT-aware floor price using Evri-first shipping strategy
+      const channel = skuChannel.get(skuId) ?? "ebay";
+      const fees = feesByChannel.get(channel) ?? [];
+
+      // Find best shipping cost using Evri-first logic
+      // (simplified: use default Evri rate, check eBay saving)
+      let shippingCost = defaultShippingCost;
+      if (channel === "ebay" && ebayCarrierRates && ebayCarrierRates.length > 0) {
+        const cheapestEbay = Number((ebayCarrierRates[0] as { cost: number }).cost);
+        const saving = shippingCost - cheapestEbay;
+        if (saving > preferEvriThreshold) {
+          shippingCost = cheapestEbay;
+        }
+      }
+      const costBase = group.highestCost + packagingCost + shippingCost;
+
+      const { effectiveFeeRate, fixedFeeCosts } = decomposeFees(fees, shippingCost);
+
+      const floorPrice = calculateFloorPrice({
+        costBase,
+        minProfit: MIN_PROFIT,
+        effectiveFeeRate,
+        fixedFeeCosts,
+        riskRate: RISK_RATE,
+        minMargin: MIN_MARGIN,
+        fees,
+        shippingCost,
+      });
 
       // Calculate new price
       const reduction = Math.round(currentPrice * markdownPct * 100) / 100;

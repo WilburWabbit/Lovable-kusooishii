@@ -1,18 +1,11 @@
 import { useState, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   usePayouts,
   usePayoutSummary,
   useCreatePayout,
-  useReconcilePayout,
-  useTriggerPayoutQBOSync,
   useImportEbayPayouts,
 } from "@/hooks/admin/use-payouts";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -26,29 +19,17 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import type { Payout } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
+import { TableFilterInput } from "./TableFilterInput";
 import { toast } from "sonner";
 import { Download, Search } from "lucide-react";
 
-// ─── Row type & accessor ─────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────
 
 type PayoutRow = Payout;
 
 function getValue(row: PayoutRow, key: string): unknown {
-  switch (key) {
-    case "fvf":
-      return row.feeBreakdown.fvf;
-    case "promotedListings":
-      return row.feeBreakdown.promoted_listings;
-    case "internationalFee":
-      return row.feeBreakdown.international;
-    case "processingFee":
-      return row.feeBreakdown.processing;
-    default:
-      return (row as unknown as Record<string, unknown>)[key];
-  }
+  return (row as unknown as Record<string, unknown>)[key];
 }
-
-// ─── Column definitions ──────────────────────────────────────
 
 const formatDate = (iso: string | null) => {
   if (!iso) return "—";
@@ -58,6 +39,8 @@ const formatDate = (iso: string | null) => {
     year: "numeric",
   });
 };
+
+// ─── Column definitions ──────────────────────────────────────
 
 const COLUMNS: ColumnDef<PayoutRow>[] = [
   {
@@ -107,12 +90,20 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     render: (r) => <span className="text-zinc-600">{r.orderCount}</span>,
   },
   {
-    key: "unitCount",
-    label: "Units",
+    key: "reconciliationStatus",
+    label: "Status",
     defaultVisible: true,
     sortable: true,
-    align: "right",
-    render: (r) => <span className="text-zinc-600">{r.unitCount}</span>,
+    render: (r) => {
+      const isReconciled = r.reconciliationStatus === "reconciled";
+      return (
+        <Badge
+          label={isReconciled ? "Reconciled" : "Pending"}
+          color={isReconciled ? "#22C55E" : "#F59E0B"}
+          small
+        />
+      );
+    },
   },
   {
     key: "qboSyncStatus",
@@ -136,36 +127,12 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     },
   },
   {
-    key: "fvf",
-    label: "FVF",
+    key: "unitCount",
+    label: "Units",
     defaultVisible: false,
     sortable: true,
     align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.fvf.toFixed(2)}</Mono>,
-  },
-  {
-    key: "promotedListings",
-    label: "Promoted",
-    defaultVisible: false,
-    sortable: true,
-    align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.promoted_listings.toFixed(2)}</Mono>,
-  },
-  {
-    key: "internationalFee",
-    label: "International",
-    defaultVisible: false,
-    sortable: true,
-    align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.international.toFixed(2)}</Mono>,
-  },
-  {
-    key: "processingFee",
-    label: "Processing",
-    defaultVisible: false,
-    sortable: true,
-    align: "right",
-    render: (r) => <Mono color="red">£{r.feeBreakdown.processing.toFixed(2)}</Mono>,
+    render: (r) => <span className="text-zinc-600">{r.unitCount}</span>,
   },
   {
     key: "externalPayoutId",
@@ -217,12 +184,10 @@ function downloadCsv(rows: PayoutRow[], visibleColumns: string[]) {
 // ─── Component ───────────────────────────────────────────────
 
 export function PayoutView() {
+  const navigate = useNavigate();
   const { data: summary, isLoading: summaryLoading } = usePayoutSummary();
-  const [selectedPayout, setSelectedPayout] = useState<Payout | null>(null);
   const [showCreatePayout, setShowCreatePayout] = useState(false);
   const importEbay = useImportEbayPayouts();
-  const reconcilePayout = useReconcilePayout();
-  const triggerQBOSync = useTriggerPayoutQBOSync();
   const { data: payouts = [], isLoading: payoutsLoading } = usePayouts();
 
   const { prefs, toggleSort, setFilter, toggleColumn, moveColumn } = useTablePreferences(
@@ -291,7 +256,7 @@ export function PayoutView() {
         </div>
       </div>
       <p className="text-zinc-500 text-[13px] mb-5">
-        Channel payouts, fee breakdowns, QBO sync.
+        Channel payouts, fee breakdowns, reconciliation &amp; QBO sync.
       </p>
 
       {/* Summary cards */}
@@ -351,7 +316,7 @@ export function PayoutView() {
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search channel or ID…"
+              placeholder="Search ref or channel…"
               className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-48 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>
@@ -396,11 +361,9 @@ export function PayoutView() {
                 {visibleCols.map((col) => (
                   <th key={col.key} className="px-3 py-1">
                     {col.sortable !== false ? (
-                      <input
+                      <TableFilterInput
                         value={prefs.filters[col.key] ?? ""}
-                        onChange={(e) => setFilter(col.key, e.target.value)}
-                        placeholder="Filter…"
-                        className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        onChange={(v) => setFilter(col.key, v)}
                       />
                     ) : (
                       <span />
@@ -413,7 +376,7 @@ export function PayoutView() {
               {processedRows.map((row) => (
                 <tr
                   key={row.id}
-                  onClick={() => setSelectedPayout(row)}
+                  onClick={() => navigate(`/admin/payouts/${row.id}`)}
                   className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
                 >
                   {visibleCols.map((col) => (
@@ -441,107 +404,6 @@ export function PayoutView() {
         )}
       </SurfaceCard>
 
-      {/* Payout detail slide-out */}
-      <Sheet open={!!selectedPayout} onOpenChange={(o) => !o && setSelectedPayout(null)}>
-        <SheetContent side="right" className="w-[480px] bg-white border-zinc-200 p-0 flex flex-col">
-          <SheetHeader className="px-5 py-4 border-b border-zinc-200">
-            <SheetTitle className="text-zinc-900 text-base font-bold">
-              Payout Detail
-            </SheetTitle>
-          </SheetHeader>
-          {selectedPayout && (
-            <div className="flex-1 overflow-auto p-5 grid gap-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Channel</div>
-                  <div className="text-zinc-900 text-sm font-medium">{selectedPayout.channel}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Date</div>
-                  <div className="text-zinc-900 text-sm">
-                    {new Date(selectedPayout.payoutDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Gross</div>
-                  <Mono className="text-sm">£{selectedPayout.grossAmount.toFixed(2)}</Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Net</div>
-                  <Mono color="teal" className="text-sm">£{selectedPayout.netAmount.toFixed(2)}</Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Orders</div>
-                  <div className="text-zinc-900 text-sm">{selectedPayout.orderCount}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
-                  <div className="text-zinc-900 text-sm">{selectedPayout.unitCount}</div>
-                </div>
-              </div>
-
-              <div>
-                <SectionHead>Fee Breakdown</SectionHead>
-                <div className="grid gap-1.5">
-                  {[
-                    { label: "Final Value Fee", amount: selectedPayout.feeBreakdown.fvf },
-                    { label: "Promoted Listings", amount: selectedPayout.feeBreakdown.promoted_listings },
-                    { label: "International", amount: selectedPayout.feeBreakdown.international },
-                    { label: "Processing", amount: selectedPayout.feeBreakdown.processing },
-                  ].map((fee) => (
-                    <div key={fee.label} className="flex justify-between py-1 border-b border-zinc-200">
-                      <span className="text-zinc-600 text-xs">{fee.label}</span>
-                      <Mono color="red" className="text-xs">£{fee.amount.toFixed(2)}</Mono>
-                    </div>
-                  ))}
-                  <div className="flex justify-between py-1 font-semibold">
-                    <span className="text-zinc-700 text-xs">Total Fees</span>
-                    <Mono color="red" className="text-xs">£{selectedPayout.totalFees.toFixed(2)}</Mono>
-                  </div>
-                </div>
-              </div>
-
-              {selectedPayout.externalPayoutId && (
-                <div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External ID</div>
-                  <Mono color="dim" className="text-xs">{selectedPayout.externalPayoutId}</Mono>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex gap-2 pt-3 border-t border-zinc-200">
-                <button
-                  onClick={() => {
-                    reconcilePayout.mutate(selectedPayout.id, {
-                      onSuccess: () => toast.success("Payout reconciled"),
-                      onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation failed"),
-                    });
-                  }}
-                  disabled={reconcilePayout.isPending}
-                  className="flex-1 bg-amber-500 text-zinc-900 border-none rounded-md py-2 font-bold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-amber-400 transition-colors"
-                >
-                  {reconcilePayout.isPending ? "Reconciling…" : "Reconcile Orders"}
-                </button>
-                {selectedPayout.qboSyncStatus !== "synced" && (
-                  <button
-                    onClick={() => {
-                      triggerQBOSync.mutate(selectedPayout.id, {
-                        onSuccess: () => toast.success("QBO sync triggered"),
-                        onError: (err) => toast.error(err instanceof Error ? err.message : "QBO sync failed"),
-                      });
-                    }}
-                    disabled={triggerQBOSync.isPending}
-                    className="flex-1 bg-zinc-100 text-zinc-500 border border-zinc-200 rounded-md py-2 text-[12px] cursor-pointer disabled:opacity-50 hover:text-zinc-700 transition-colors"
-                  >
-                    {triggerQBOSync.isPending ? "Syncing…" : "Sync to QBO"}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
-
       {/* Create Payout Dialog */}
       <CreatePayoutDialog
         open={showCreatePayout}
@@ -558,18 +420,16 @@ function CreatePayoutDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [channel, setChannel] = useState<"ebay" | "stripe">("ebay");
   const [payoutDate, setPayoutDate] = useState(new Date().toISOString().slice(0, 10));
   const [grossAmount, setGrossAmount] = useState("");
-  const [fvf, setFvf] = useState("");
-  const [promotedListings, setPromotedListings] = useState("");
-  const [international, setInternational] = useState("");
-  const [processing, setProcessing] = useState("");
+  const [sellingFees, setSellingFees] = useState("");
+  const [shippingFees, setShippingFees] = useState("");
+  const [otherFees, setOtherFees] = useState("");
   const [externalId, setExternalId] = useState("");
   const [notes, setNotes] = useState("");
 
   const totalFees =
-    (parseFloat(fvf) || 0) +
-    (parseFloat(promotedListings) || 0) +
-    (parseFloat(international) || 0) +
-    (parseFloat(processing) || 0);
+    (parseFloat(sellingFees) || 0) +
+    (parseFloat(shippingFees) || 0) +
+    (parseFloat(otherFees) || 0);
   const netAmount = (parseFloat(grossAmount) || 0) - totalFees;
 
   const handleCreate = async () => {
@@ -586,10 +446,9 @@ function CreatePayoutDialog({ open, onClose }: { open: boolean; onClose: () => v
         totalFees: Math.round(totalFees * 100) / 100,
         netAmount: Math.round(netAmount * 100) / 100,
         feeBreakdown: {
-          fvf: parseFloat(fvf) || 0,
-          promoted_listings: parseFloat(promotedListings) || 0,
-          international: parseFloat(international) || 0,
-          processing: parseFloat(processing) || 0,
+          ebay_selling_fees: parseFloat(sellingFees) || 0,
+          ebay_shipping: parseFloat(shippingFees) || 0,
+          ebay_other_fees: parseFloat(otherFees) || 0,
         },
         externalPayoutId: externalId.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -643,12 +502,11 @@ function CreatePayoutDialog({ open, onClose }: { open: boolean; onClose: () => v
           </div>
 
           <SectionHead>Fee Breakdown (£)</SectionHead>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {[
-              { label: "FVF", value: fvf, onChange: setFvf },
-              { label: "Promoted Listings", value: promotedListings, onChange: setPromotedListings },
-              { label: "International", value: international, onChange: setInternational },
-              { label: "Processing", value: processing, onChange: setProcessing },
+              { label: "Selling Fees", value: sellingFees, onChange: setSellingFees },
+              { label: "Shipping", value: shippingFees, onChange: setShippingFees },
+              { label: "Other Fees", value: otherFees, onChange: setOtherFees },
             ].map((f) => (
               <div key={f.label}>
                 <label className="text-[10px] text-zinc-500 block mb-0.5">{f.label}</label>

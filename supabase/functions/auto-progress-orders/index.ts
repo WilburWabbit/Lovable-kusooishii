@@ -44,15 +44,16 @@ Deno.serve(async (req) => {
 
     const now = new Date();
     const cutoff = new Date(now.getTime() - MAX_SHIPPING_DAYS * 24 * 60 * 60 * 1000);
-    const cutoffISO = cutoff.toISOString();
+    const cutoffDate = cutoff.toISOString().slice(0, 10); // shipped_date is a date column
     const nowISO = now.toISOString();
 
     // Find orders shipped more than MAX_SHIPPING_DAYS ago
+    // shipped_date is a 'date' column, compare as date string
     const { data: orders, error: queryErr } = await admin
       .from("sales_order")
       .select("id")
-      .eq("status", "shipped")
-      .lt("shipped_at", cutoffISO);
+      .eq("v2_status" as never, "shipped")
+      .lt("shipped_date" as never, cutoffDate);
 
     if (queryErr) throw new Error(`Query failed: ${queryErr.message}`);
 
@@ -70,9 +71,9 @@ Deno.serve(async (req) => {
     const { error: orderUpdateErr } = await admin
       .from("sales_order")
       .update({
-        status: "delivered",
+        v2_status: "delivered",
         delivered_at: nowISO,
-      })
+      } as never)
       .in("id", orderIds);
 
     if (orderUpdateErr) {

@@ -16,6 +16,13 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
+import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
+import {
+  resolveEbayCondition,
+  sanitiseConditionDescription,
+  type CategoryConditionPolicy,
+} from "../_shared/ebay-condition-map.ts";
 
 const EBAY_API = "https://api.ebay.com";
 
@@ -25,6 +32,25 @@ Deno.serve(async (req) => {
   try {
     const admin = createAdminClient();
     await authenticateRequest(req, admin);
+
+    // Validate required eBay marketplace policy env vars up front so the
+    // user gets a clear message rather than an opaque 400 from eBay later.
+    const fulfillmentPolicyId = Deno.env.get("EBAY_FULFILLMENT_POLICY_ID");
+    const paymentPolicyId = Deno.env.get("EBAY_PAYMENT_POLICY_ID");
+    const returnPolicyId = Deno.env.get("EBAY_RETURN_POLICY_ID");
+    const merchantLocationKey = Deno.env.get("EBAY_LOCATION_KEY");
+    const missingEnv = [
+      ["EBAY_FULFILLMENT_POLICY_ID", fulfillmentPolicyId],
+      ["EBAY_PAYMENT_POLICY_ID", paymentPolicyId],
+      ["EBAY_RETURN_POLICY_ID", returnPolicyId],
+      ["EBAY_LOCATION_KEY", merchantLocationKey],
+    ].filter(([, v]) => !v).map(([k]) => k);
+    if (missingEnv.length > 0) {
+      throw new Error(
+        `eBay listing policies are not configured. Missing secrets: ${missingEnv.join(", ")}. ` +
+          `Add them in Settings before publishing.`,
+      );
+    }
 
     const { listingId, skuCode } = await req.json();
     if (!listingId) throw new Error("listingId is required");
@@ -40,12 +66,15 @@ Deno.serve(async (req) => {
 
     const l = listing as Record<string, unknown>;
 
-    // Fetch SKU for pricing
-    const { data: sku } = await admin
+    // Fetch SKU + product for pricing/aspects.
+    // NOTE: product table has columns mpn / name / description / ean / product_hook only.
+    // There is no `upc` column, and the hook column is `product_hook` (not `hook`).
+    const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name, description, ean, upc, hook)")
+      .select("*, product:product_id(mpn, name, description, ean, product_hook)")
       .eq("id", l.sku_id)
       .single();
+    if (skuErr) throw new Error(`SKU lookup failed: ${skuErr.message}`);
 
     const skuRow = sku as Record<string, unknown> | null;
     const product = skuRow?.product as Record<string, unknown> | null;
@@ -53,32 +82,197 @@ Deno.serve(async (req) => {
 
     if (!effectiveSku) throw new Error("Could not determine SKU code");
 
-    // Count on-hand stock for this SKU
-    const { count: onHandCount } = await admin
-      .from("stock_unit")
-      .select("id", { count: "exact", head: true })
-      .eq("sku_id", skuRow?.id as string)
-      .in("v2_status", ["graded", "listed"]);
+    const productId = (skuRow?.product_id ?? null) as string | null;
+
+    // Count on-hand stock using the operational stock identity, not only the
+    // channel_listing.sku_id. Some imported items have legacy/duplicate SKU rows,
+    // while the stock unit itself still carries the correct MPN.
+    const availableStockUnits = await findAvailableStockUnits(admin, skuRow, product, effectiveSku);
+    const onHandCount = availableStockUnits.length;
+    if (onHandCount <= 0) {
+      const lookupMpn = uniqueStrings([skuRow?.mpn, product?.mpn, effectiveSku]).join(", ");
+      throw new Error(
+        `Cannot publish ${effectiveSku} to eBay: no on-hand stock ` +
+          `(0 units in 'graded' or 'listed' status matched by SKU or MPN${lookupMpn ? `: ${lookupMpn}` : ""}). ` +
+          `Grade or restock units first.`,
+      );
+    }
+
+    // ─── Look up product images (required by eBay) ─────────
+    // eBay rejects publish with errorId 25002 ("Add at least 1 photo")
+    // when no imageUrls are present on the inventory item.
+    const imageUrls: string[] = [];
+    if (productId) {
+      const { data: mediaRows } = await admin
+        .from("product_media")
+        .select("sort_order, is_primary, media_asset:media_asset_id(original_url)")
+        .eq("product_id", productId)
+        .order("is_primary", { ascending: false })
+        .order("sort_order", { ascending: true });
+      for (const row of (mediaRows ?? []) as Array<Record<string, unknown>>) {
+        const asset = row.media_asset as { original_url?: string } | null;
+        const url = asset?.original_url;
+        if (typeof url === "string" && url.startsWith("https://")) {
+          imageUrls.push(url);
+        }
+      }
+
+      // Append selected minifig images (operator-controlled per product).
+      const { data: prodRow } = await admin
+        .from("product")
+        .select("selected_minifig_fig_nums, mpn")
+        .eq("id", productId)
+        .maybeSingle();
+      const figNums = Array.isArray((prodRow as Record<string, unknown> | null)?.selected_minifig_fig_nums)
+        ? ((prodRow as Record<string, unknown>).selected_minifig_fig_nums as unknown[])
+            .filter((v): v is string => typeof v === "string")
+        : [];
+      if (figNums.length > 0) {
+        const baseMpn = (product?.mpn as string | undefined)?.split(".")[0];
+        const candidates = baseMpn
+          ? Array.from(new Set([baseMpn, `${baseMpn.split("-")[0]}-1`]))
+          : [];
+        if (candidates.length > 0) {
+          const { data: figRows } = await admin
+            .from("lego_set_minifigs" as never)
+            .select("fig_num, minifig_img_url")
+            .in("set_num" as never, candidates as never)
+            .in("fig_num" as never, figNums as never);
+          const seenFigs = new Set<string>();
+          for (const r of (figRows ?? []) as Array<Record<string, unknown>>) {
+            const fn = r.fig_num as string;
+            if (seenFigs.has(fn)) continue;
+            seenFigs.add(fn);
+            const url = r.minifig_img_url as string | null;
+            if (typeof url === "string" && url.startsWith("https://")) {
+              imageUrls.push(url);
+            }
+          }
+        }
+      }
+    }
+    if (imageUrls.length === 0) {
+      throw new Error(
+        `Cannot publish ${effectiveSku} to eBay: no product images uploaded. ` +
+          `Add at least one image in the Copy & Media tab before listing.`,
+      );
+    }
+    // eBay caps imageUrls at 24 per inventory item.
+    const cappedImages = imageUrls.slice(0, 24);
 
     // ─── Get eBay access token ─────────────────────────────
     const accessToken = await getEbayAccessToken(admin);
 
+    // ─── Resolve eBay category + aspects from DB ───────────
+    // Read product's selected category. Without one, fall back to the legacy
+    // hardcoded LEGO Building Toys category so existing flows don't break,
+    // but warn so we know to migrate older products.
+    const { data: productRow } = await admin
+      .from("product")
+      .select("id, ebay_category_id, ebay_marketplace")
+      .eq("id", productId as string)
+      .maybeSingle();
+
+    const ebayCategoryId =
+      (productRow?.ebay_category_id as string | null) ?? "19006";
+    const marketplace =
+      (productRow?.ebay_marketplace as string | null) ?? "EBAY_GB";
+
+    // Build aspects via the same canonical specs resolver the
+    // Specifications tab uses, so the mapping table (channel_attribute_mapping)
+    // is the single source of truth and the publisher cannot disagree with
+    // the UI about which aspects are populated.
+    const aspects: Record<string, string[]> = {};
+    let resolved: Awaited<ReturnType<typeof resolveSpecsForProduct>> | null = null;
+    if (productId) {
+      resolved = await resolveSpecsForProduct(admin, {
+        productId,
+        channel: "ebay",
+        marketplace,
+        categoryId: ebayCategoryId,
+      });
+
+      for (const row of resolved.rows) {
+        const v = row.effectiveValue;
+        if (v == null) continue;
+        if (Array.isArray(v)) {
+          const arr = v
+            .map((x) => String(x).trim())
+            .filter((x) => x.length > 0);
+          if (arr.length > 0) aspects[row.key] = arr;
+        } else {
+          const s = String(v).trim();
+          if (s) aspects[row.key] = [s];
+        }
+      }
+
+      // Surface required-but-empty aspects with the same labels the UI shows.
+      if (resolved.schemaLoaded) {
+        const missing = resolved.rows
+          .filter((r) => r.required && (r.effectiveValue == null ||
+            (Array.isArray(r.effectiveValue) && r.effectiveValue.length === 0) ||
+            (typeof r.effectiveValue === "string" && r.effectiveValue.trim() === "")))
+          .map((r) => r.label ?? r.key);
+        if (missing.length > 0) {
+          throw new Error(
+            `Cannot publish ${effectiveSku} to eBay: missing required aspects — ${missing.join(", ")}. ` +
+              `Set them in the Specifications tab.`,
+          );
+        }
+      }
+    }
+
+    // Safety net: ensure MPN is present even if no mapping exists yet.
+    if (!aspects["MPN"] && product?.mpn) {
+      aspects["MPN"] = [String(product.mpn)];
+    }
+
+    // ─── Resolve eBay condition for this category ──────────
+    // The set of allowed conditions varies per category. We cache the
+    // policy on channel_category_schema; if it isn't there yet we fall
+    // back to the preferred grade→condition mapping (legacy behaviour).
+    const { data: schemaRow } = await admin
+      .from("channel_category_schema")
+      .select("condition_policy")
+      .eq("channel", "ebay")
+      .eq("marketplace", marketplace)
+      .eq("category_id", ebayCategoryId)
+      .maybeSingle();
+
+    const conditionPolicy =
+      (schemaRow?.condition_policy as CategoryConditionPolicy | null) ?? null;
+
+    const firstUnit = availableStockUnits[0] ?? null;
+    const grade =
+      (firstUnit?.condition_grade as string | null) ??
+      (skuRow?.condition_grade as string | null) ??
+      null;
+    const ebayCondition = resolveEbayCondition(grade, conditionPolicy);
+
+    // Pull free-text condition notes — prefer the unit's notes (most
+    // specific), fall back to SKU-level notes.
+    const conditionDescription = ebayCondition.allowsConditionDescription
+      ? sanitiseConditionDescription(
+          (firstUnit?.notes as string | null) ??
+            (skuRow?.condition_notes as string | null),
+        )
+      : null;
+
     // ─── Step 1: Create/Update Inventory Item ──────────────
-    const inventoryItemPayload = {
+    const inventoryItemPayload: Record<string, unknown> = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
         description: (l.listing_description as string) ?? (product?.description as string) ?? "",
-        aspects: {
-          "Brand": ["LEGO"],
-          "MPN": [product?.mpn ?? ""],
-        },
+        aspects,
+        imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
-        ...(product?.upc ? { upc: [product.upc] } : {}),
       },
-      condition: mapGradeToEbayCondition(skuRow?.condition_grade as string),
+      condition: ebayCondition.condition,
+      conditionId: ebayCondition.conditionId,
+      ...(conditionDescription ? { conditionDescription } : {}),
       availability: {
         shipToLocationAvailability: {
-          quantity: onHandCount ?? 1,
+          quantity: onHandCount,
         },
       },
     };
@@ -95,15 +289,18 @@ Deno.serve(async (req) => {
     console.log(`eBay inventory item PUT for ${effectiveSku}: ${inventoryRes ? "updated" : "created"}`);
 
     // ─── Step 2: Create or Update Offer ────────────────────
-    const existingExternalId = l.external_id as string | null;
+    // The offer ID lives in `external_listing_id` on channel_listing.
+    // (There is no `external_id` column — older code referenced a
+    // non-existent column and silently no-op'd both reads and writes.)
+    const existingExternalId = l.external_listing_id as string | null;
     let offerId: string;
 
     const offerPayload = {
       sku: effectiveSku,
-      marketplaceId: "EBAY_GB",
+      marketplaceId: marketplace,
       format: "FIXED_PRICE",
-      availableQuantity: onHandCount ?? 1,
-      categoryId: "19006", // LEGO Building Toys category
+      availableQuantity: onHandCount,
+      categoryId: ebayCategoryId,
       listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
       pricingSummary: {
         price: {
@@ -112,11 +309,11 @@ Deno.serve(async (req) => {
         },
       },
       listingPolicies: {
-        fulfillmentPolicyId: Deno.env.get("EBAY_FULFILLMENT_POLICY_ID") ?? "",
-        paymentPolicyId: Deno.env.get("EBAY_PAYMENT_POLICY_ID") ?? "",
-        returnPolicyId: Deno.env.get("EBAY_RETURN_POLICY_ID") ?? "",
+        fulfillmentPolicyId,
+        paymentPolicyId,
+        returnPolicyId,
       },
-      merchantLocationKey: Deno.env.get("EBAY_LOCATION_KEY") ?? "default",
+      merchantLocationKey,
     };
 
     if (existingExternalId) {
@@ -133,17 +330,41 @@ Deno.serve(async (req) => {
       console.log(`eBay offer updated: ${offerId}`);
     } else {
       // Create new offer
-      const offerRes = await ebayFetch(
-        accessToken,
-        `/sell/inventory/v1/offer`,
-        {
-          method: "POST",
-          body: JSON.stringify(offerPayload),
-        },
-      );
-      offerId = offerRes?.offerId;
-      if (!offerId) throw new Error("eBay offer creation did not return offerId");
-      console.log(`eBay offer created: ${offerId}`);
+      try {
+        const offerRes = await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer`,
+          {
+            method: "POST",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = offerRes?.offerId;
+        if (!offerId) throw new Error("eBay offer creation did not return offerId");
+        console.log(`eBay offer created: ${offerId}`);
+      } catch (createErr) {
+        // Recovery: eBay already has an offer for this SKU but our local
+        // channel_listing.external_listing_id was cleared (or never saved
+        // because a previous publish failed before step 4). eBay returns
+        // errorId 25002 with message "Offer entity already exists" and
+        // includes the existing offerId in the parameters array. Adopt
+        // that offerId and PUT to update the existing offer instead.
+        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+        const recoveredOfferId = extractExistingOfferId(errMsg);
+        if (!recoveredOfferId) throw createErr;
+        console.log(
+          `eBay offer already exists for ${effectiveSku} — adopting existing offerId ${recoveredOfferId} and updating`,
+        );
+        await ebayFetch(
+          accessToken,
+          `/sell/inventory/v1/offer/${recoveredOfferId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(offerPayload),
+          },
+        );
+        offerId = recoveredOfferId;
+      }
     }
 
     // ─── Step 3: Publish the offer ─────────────────────────
@@ -157,9 +378,17 @@ Deno.serve(async (req) => {
       listingItemId = publishRes?.listingId ?? null;
       console.log(`eBay offer published: listing ${listingItemId}`);
     } catch (pubErr) {
-      // Offer may already be published — 409 Conflict is acceptable
+      // Only swallow the actual "already published" condition. eBay's
+      // errorId 25002 is a generic user-input bucket that ALSO covers
+      // missing photos, missing aspects, invalid price, etc — matching
+      // the bare code previously caused real validation failures to be
+      // reported as success.
       const errMsg = pubErr instanceof Error ? pubErr.message : String(pubErr);
-      if (errMsg.includes("409") || errMsg.includes("already published") || errMsg.includes("25002")) {
+      const isAlreadyPublished =
+        errMsg.includes("[409]") ||
+        /already\s+published/i.test(errMsg) ||
+        /offer.*already.*active/i.test(errMsg);
+      if (isAlreadyPublished) {
         console.log(`eBay offer ${offerId} already published — continuing`);
       } else {
         throw pubErr;
@@ -169,11 +398,13 @@ Deno.serve(async (req) => {
     // ─── Step 4: Update local records ──────────────────────
     const now = new Date().toISOString();
 
-    // Update channel_listing with eBay IDs and status
+    // Persist the eBay offer ID + item URL on channel_listing.
+    // Use the actual `external_listing_id` column (matches the rest of the
+    // codebase: ebay-sync, ebay-import-payouts, qbo-sync-payout, etc.)
     await admin
       .from("channel_listing")
       .update({
-        external_id: offerId,
+        external_listing_id: offerId,
         external_url: listingItemId
           ? `https://www.ebay.co.uk/itm/${listingItemId}`
           : (l.external_url as string) ?? null,
@@ -182,16 +413,21 @@ Deno.serve(async (req) => {
       } as never)
       .eq("id", listingId);
 
-    // Promote graded stock units to 'listed' for this SKU
-    if (skuRow?.id) {
+    // Promote the same units counted for this publish to 'listed'. Do not rely
+    // only on channel_listing.sku_id because legacy duplicate SKU rows can point
+    // the listing at a different SKU than the physical stock unit.
+    const stockUnitIdsToList = availableStockUnits
+      .filter((u) => u.v2_status === "graded")
+      .map((u) => u.id as string)
+      .filter(Boolean);
+    if (stockUnitIdsToList.length > 0) {
       await admin
         .from("stock_unit")
         .update({
           v2_status: "listed",
           listed_at: now,
         } as never)
-        .eq("sku_id", skuRow.id as string)
-        .eq("v2_status" as never, "graded");
+        .in("id", stockUnitIdsToList);
     }
 
     return jsonResponse({
@@ -202,65 +438,10 @@ Deno.serve(async (req) => {
       listingItemId,
     });
   } catch (err) {
+    console.error("ebay-push-listing failed:", err);
     return errorResponse(err);
   }
 });
-
-// ─── eBay OAuth Token Management ─────────────────────────────
-
-async function getEbayAccessToken(admin: ReturnType<typeof createAdminClient>): Promise<string> {
-  const { data: conn, error } = await admin
-    .from("ebay_connection")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !conn) throw new Error("eBay not connected. Connect eBay in Settings first.");
-
-  const c = conn as Record<string, unknown>;
-
-  // Return current token if still valid (with 60s buffer)
-  if (new Date(c.token_expires_at as string).getTime() > Date.now() + 60_000) {
-    return c.access_token as string;
-  }
-
-  // Refresh the token
-  const clientId = Deno.env.get("EBAY_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET")!;
-
-  const res = await fetchWithTimeout(`${EBAY_API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: c.refresh_token as string,
-      scope: [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-      ].join(" "),
-    }),
-  });
-
-  if (!res.ok) throw new Error(`eBay token refresh failed [${res.status}]`);
-  const data = await res.json();
-  const newExpiresAt = new Date(Date.now() + (data.expires_in || 7200) * 1000).toISOString();
-
-  await admin
-    .from("ebay_connection")
-    .update({
-      access_token: data.access_token,
-      ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
-      token_expires_at: newExpiresAt,
-    } as never)
-    .eq("id", c.id as string);
-
-  return data.access_token;
-}
 
 // ─── eBay API Fetch Helper ───────────────────────────────────
 
@@ -290,14 +471,138 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   return JSON.parse(text);
 }
 
-// ─── Grade → eBay Condition Mapping ──────────────────────────
+// ─── Stock availability lookup ───────────────────────────────
 
-function mapGradeToEbayCondition(grade: string | null): string {
-  switch (grade) {
-    case "1": return "NEW";
-    case "2": return "NEW_OTHER";
-    case "3": return "USED_EXCELLENT";
-    case "4": return "USED_GOOD";
-    default: return "NEW_OTHER";
+async function findAvailableStockUnits(
+  admin: any,
+  skuRow: Record<string, unknown> | null,
+  product: Record<string, unknown> | null,
+  effectiveSku: string,
+): Promise<Array<Record<string, unknown>>> {
+  const rowsById = new Map<string, Record<string, unknown>>();
+  const statuses = ["graded", "listed"];
+  const selectCols = "id, uid, sku_id, mpn, v2_status, condition_grade, notes";
+
+  const addRows = (rows: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of rows ?? []) {
+      const id = row.id as string | undefined;
+      if (id) rowsById.set(id, row);
+    }
+  };
+
+  const skuId = typeof skuRow?.id === "string" ? skuRow.id : null;
+  if (skuId) {
+    const { data, error } = await admin
+      .from("stock_unit")
+      .select(selectCols)
+      .eq("sku_id", skuId)
+      .in("v2_status", statuses);
+    if (error) throw new Error(`Stock lookup by SKU failed: ${error.message}`);
+    addRows(data as Array<Record<string, unknown>> | null);
   }
+
+  // Only fall back to MPN lookup if the SKU lookup returned nothing.
+  // The MPN fallback MUST also filter by the SKU's condition_grade,
+  // otherwise units of other grades for the same MPN would inflate
+  // the available quantity (e.g. SKU 75418-1.1 picking up grade 2/3 units).
+  if (rowsById.size === 0) {
+    const mpnCandidates = buildMpnCandidates([skuRow?.mpn, product?.mpn, effectiveSku]);
+    const grade =
+      (skuRow?.condition_grade as string | number | null | undefined) ?? null;
+    if (mpnCandidates.length > 0 && grade != null && `${grade}`.length > 0) {
+      const { data, error } = await admin
+        .from("stock_unit")
+        .select(selectCols)
+        .in("mpn", mpnCandidates)
+        .eq("condition_grade", grade)
+        .in("v2_status", statuses);
+      if (error) throw new Error(`Stock lookup by MPN failed: ${error.message}`);
+      addRows(data as Array<Record<string, unknown>> | null);
+    }
+  }
+
+  return [...rowsById.values()];
+}
+
+function buildMpnCandidates(values: unknown[]): string[] {
+  const candidates: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const raw = value.trim();
+    if (!raw) continue;
+    candidates.push(raw, raw.replace(/\.\d+$/, ""));
+    for (const token of raw.match(/[A-Za-z0-9][A-Za-z0-9._-]{4,}/g) ?? []) {
+      if (/[A-Za-z]/.test(token) && /\d/.test(token)) {
+        candidates.push(token, token.replace(/\.\d+$/, ""));
+      }
+    }
+  }
+  return uniqueStrings(candidates);
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return [...new Set(values
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0))];
+}
+
+// (Grade → eBay condition mapping moved to ../_shared/ebay-condition-map.ts
+//  so it can honour the per-category condition policy returned by the
+//  eBay Taxonomy API.)
+
+// ─── Cross-channel attribute mapping ─────────────────────────
+// Maps a 'core' namespace attribute key to its eBay aspect equivalent.
+// Returning null means the core key is not relevant to eBay.
+function mapCoreToEbayAspect(coreKey: string): string | null {
+  const map: Record<string, string> = {
+    brand: "Brand",
+    mpn: "MPN",
+    ean: "EAN",
+    upc: "UPC",
+    gtin: "GTIN",
+    isbn: "ISBN",
+    color: "Colour",
+    colour: "Colour",
+    material: "Material",
+    theme: "Theme",
+    character_family: "Character Family",
+    character: "Character",
+    age_level: "Age Level",
+    piece_count: "Number of Pieces",
+    year_manufactured: "Year Manufactured",
+    type: "Type",
+  };
+  return map[coreKey.toLowerCase()] ?? null;
+}
+
+// ─── Recover existing offerId from eBay 25002 error ──────────
+// eBay returns an error body like:
+//   {"errors":[{"errorId":25002,"message":"...Offer entity already exists.",
+//     "parameters":[{"name":"offerId","value":"155956152011"}]}]}
+// Pull the existing offerId out so we can switch to PUT.
+function extractExistingOfferId(errMsg: string): string | null {
+  if (!/25002/.test(errMsg) || !/already exists/i.test(errMsg)) return null;
+  // Find the JSON body in the error message and parse it
+  const jsonStart = errMsg.indexOf("{");
+  if (jsonStart < 0) return null;
+  try {
+    const body = JSON.parse(errMsg.slice(jsonStart));
+    const errors = body?.errors;
+    if (!Array.isArray(errors)) return null;
+    for (const e of errors) {
+      const params = e?.parameters;
+      if (!Array.isArray(params)) continue;
+      for (const p of params) {
+        if (p?.name === "offerId" && typeof p?.value === "string") {
+          return p.value;
+        }
+      }
+    }
+  } catch {
+    // Fall through to regex fallback
+  }
+  // Regex fallback in case the JSON shape changes
+  const m = errMsg.match(/"name"\s*:\s*"offerId"\s*,\s*"value"\s*:\s*"(\d+)"/);
+  return m ? m[1] : null;
 }

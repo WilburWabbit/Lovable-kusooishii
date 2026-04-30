@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { pushEbayQuantityForSkus } from "../_shared/ebay-inventory-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -674,41 +675,72 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       PUSH STOCK — count available stock_units → eBay
+       PUSH STOCK — uses the shared helper so logic
+       matches all per-order paths. v2_status is the
+       source of truth — legacy `status` column drifts.
        ═══════════════════════════════════════════════ */
     if (action === "push_stock") {
       console.log("Pushing stock levels to eBay...");
 
       const { data: listings } = await admin
         .from("channel_listing")
-        .select("id, external_sku, sku_id")
+        .select("sku_id")
         .eq("channel", "ebay")
+        .eq("v2_status", "live")
+        .not("external_listing_id", "is", null)
         .not("sku_id", "is", null);
 
-      if (listings?.length) {
-        // Count available stock per sku_id
-        const skuIds = [...new Set(listings.map((l: any) => l.sku_id))];
-        const stockCounts = new Map<string, number>();
+      const uniqueSkuIds = new Set<string>(
+        ((listings ?? []) as { sku_id: string }[]).map((l) => l.sku_id),
+      );
 
-        for (const skuId of skuIds) {
-          const { count } = await admin
-            .from("stock_unit")
-            .select("id", { count: "exact", head: true })
-            .eq("sku_id", skuId)
-            .eq("status", "available");
-          stockCounts.set(skuId, count || 0);
+      if (uniqueSkuIds.size > 0) {
+        const r = await pushEbayQuantityForSkus(admin, uniqueSkuIds, {
+          source: "ebay-sync:push_stock",
+        });
+        results.stock_pushed = r.pushed + r.withdrawn;
+        (results as Record<string, unknown>).stock_withdrawn = r.withdrawn;
+        (results as Record<string, unknown>).stock_failed = r.failed;
+      }
+
+      // Re-evaluate after push: count any listings still drifted, so the
+      // UI can flag them as errors instead of silently saying "1 mismatch
+      // remaining" alongside a success toast.
+      const { data: liveAfter } = await admin
+        .from("channel_listing")
+        .select("id, sku_id, listed_quantity, external_sku")
+        .eq("channel", "ebay")
+        .eq("v2_status", "live")
+        .not("external_listing_id", "is", null)
+        .not("sku_id", "is", null);
+
+      const skuIdsForCount = Array.from(
+        new Set(((liveAfter ?? []) as { sku_id: string }[]).map((l) => l.sku_id)),
+      );
+      const mismatches: Array<{ external_sku: string; listed_quantity: number; local_available: number }> = [];
+      if (skuIdsForCount.length > 0) {
+        const { data: counts } = await admin
+          .from("stock_unit")
+          .select("sku_id")
+          .in("sku_id", skuIdsForCount)
+          .in("v2_status", ["graded", "listed"]);
+        const tally = new Map<string, number>();
+        for (const row of (counts ?? []) as { sku_id: string }[]) {
+          tally.set(row.sku_id, (tally.get(row.sku_id) ?? 0) + 1);
         }
-
-        for (const listing of listings) {
-          const qty = stockCounts.get(listing.sku_id) || 0;
-          try {
-            await updateInventoryQuantity(accessToken, listing.external_sku, qty);
-            results.stock_pushed++;
-          } catch (e: any) {
-            console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
+        for (const l of (liveAfter ?? []) as { sku_id: string; listed_quantity: number; external_sku: string }[]) {
+          const local = tally.get(l.sku_id) ?? 0;
+          if (local !== (l.listed_quantity ?? 0)) {
+            mismatches.push({
+              external_sku: l.external_sku,
+              listed_quantity: l.listed_quantity ?? 0,
+              local_available: local,
+            });
           }
         }
       }
+      (results as Record<string, unknown>).mismatches_remaining = mismatches.length;
+      (results as Record<string, unknown>).mismatches = mismatches.slice(0, 20);
     }
 
     /* ═══════════════════════════════════════════════
@@ -1062,6 +1094,43 @@ Deno.serve(async (req) => {
       );
     }
 
+
+    /* ═══════════════════════════════════════════════
+       CHECK OFFER — diagnostic: report eBay's current view of an offer/listing
+       ═══════════════════════════════════════════════ */
+    if (action === "check_offer") {
+      const offerIds: string[] = Array.isArray(body.offerIds) ? body.offerIds : [];
+      const skus: string[] = Array.isArray(body.skus) ? body.skus : [];
+      const results: any[] = [];
+      for (const offerId of offerIds) {
+        try {
+          const offer = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`);
+          results.push({
+            offerId,
+            status: offer?.status,
+            listingId: offer?.listing?.listingId,
+            listingStatus: offer?.listing?.listingStatus,
+            sku: offer?.sku,
+            availableQuantity: offer?.availableQuantity,
+            format: offer?.format,
+          });
+        } catch (e: any) {
+          results.push({ offerId, error: e.message });
+        }
+      }
+      for (const sku of skus) {
+        try {
+          const offersResp = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+          results.push({ sku, offers: offersResp?.offers || [] });
+        } catch (e: any) {
+          results.push({ sku, error: e.message });
+        }
+      }
+      return new Response(
+        JSON.stringify({ success: true, results }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (action === "get_subscriptions") {
       const NOTIF_API = `${EBAY_API}/commerce/notification/v1`;

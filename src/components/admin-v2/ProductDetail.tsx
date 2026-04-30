@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useProduct, useUpdateSKUPrice } from "@/hooks/admin/use-products";
 import { SurfaceCard, Mono, GradeBadge, BackButton } from "./ui-primitives";
 import { StockUnitsTab } from "./StockUnitsTab";
-import { CopyMediaTab } from "./CopyMediaTab";
+import { PhotosTab } from "./tabs/PhotosTab";
+import { CopyTab } from "./tabs/CopyTab";
+import { MinifigsTab } from "./tabs/MinifigsTab";
 import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
+import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
 import { toast } from "sonner";
 import type { ProductVariant } from "@/lib/types/admin";
 
@@ -13,7 +16,7 @@ interface ProductDetailProps {
   mpn: string;
 }
 
-type TabKey = "stock" | "copy" | "channels" | "specs";
+type TabKey = "stock" | "photos" | "copy" | "minifigs" | "channels" | "specs" | "market";
 
 // ─── Inline editable price cell ──────────────────────────────
 
@@ -136,9 +139,12 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
 
   const tabs: { key: TabKey; label: string; count?: number }[] = [
     { key: "stock", label: "Stock Units", count: totalUnits },
-    { key: "copy", label: "Copy & Media" },
+    { key: "photos", label: "Photos" },
+    { key: "copy", label: "Copy & SEO" },
+    { key: "minifigs", label: "Minifigs" },
     { key: "channels", label: "Channels" },
     { key: "specs", label: "Specifications" },
+    { key: "market", label: "Market Data" },
   ];
 
   return (
@@ -231,9 +237,12 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
 
       {/* Tab content */}
       {activeTab === "stock" && <StockUnitsTab mpn={mpn} />}
-      {activeTab === "copy" && <CopyMediaTab product={product} />}
-      {activeTab === "channels" && <ChannelsTab variants={product.variants} />}
+      {activeTab === "photos" && <PhotosTab product={product} />}
+      {activeTab === "copy" && <CopyTab product={product} />}
+      {activeTab === "minifigs" && <MinifigsTab product={product} />}
+      {activeTab === "channels" && <ChannelsTab variants={product.variants} product={product} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
+      {activeTab === "market" && <BrickEconomyPriceChart mpn={mpn} itemType={product.productType === "minifig" ? "minifig" : "set"} />}
     </div>
   );
 }

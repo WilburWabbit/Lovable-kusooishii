@@ -28,15 +28,16 @@ export function ShipOrderDialog({ open, onClose, orderId }: ShipOrderDialogProps
   const shipOrder = useMutation({
     mutationFn: async () => {
       const now = new Date().toISOString();
+      const shippedDate = now.slice(0, 10); // date column, not timestamptz
 
       // Update order
       const { error: orderErr } = await supabase
         .from("sales_order")
         .update({
-          status: "shipped",
-          carrier,
+          v2_status: "shipped",
+          shipped_via: carrier,
           tracking_number: trackingNumber.trim() || null,
-          shipped_at: now,
+          shipped_date: shippedDate,
         } as never)
         .eq("id", orderId);
 

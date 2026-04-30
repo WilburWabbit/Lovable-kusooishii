@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   useChannelListings,
   useChannelFees,
@@ -6,12 +6,14 @@ import {
   calculateChannelPrice,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
-import type { ProductVariant, Channel, ChannelListing } from "@/lib/types/admin";
+import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
+import { generateEbayTitle } from "@/lib/utils/generate-ebay-title";
 
 interface ChannelsTabProps {
   variants: ProductVariant[];
+  product: Product;
 }
 
 const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
@@ -21,13 +23,13 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
-export function ChannelsTab({ variants }: ChannelsTabProps) {
+export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
   return (
     <div className="grid gap-4">
       {variants.map((v) => (
-        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} />
+        <VariantChannelsCard key={v.sku} variant={v} feesMap={feesMap} product={product} />
       ))}
     </div>
   );
@@ -36,9 +38,11 @@ export function ChannelsTab({ variants }: ChannelsTabProps) {
 function VariantChannelsCard({
   variant,
   feesMap,
+  product,
 }: {
   variant: ProductVariant;
   feesMap: Map<string, { totalFeeRate: number; fees: { name: string; rate: number; fixed: number }[] }> | undefined;
+  product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
@@ -49,30 +53,73 @@ function VariantChannelsCard({
     return map;
   }, [listings]);
 
-  // Per-channel local state for title, description, price
+  // Generate Cassini-optimised eBay title from product metadata
+  const defaultEbayTitle = useMemo(() => {
+    const retiredYear = product.retiredDate
+      ? new Date(product.retiredDate).getFullYear()
+      : null;
+    return generateEbayTitle({
+      name: product.name,
+      mpn: product.mpn,
+      theme: product.theme,
+      grade: variant.grade,
+      retired: !!product.retiredDate,
+      retiredYear,
+      pieceCount: product.pieceCount,
+    }).title;
+  }, [product, variant.grade]);
+
+  // Per-channel local state for title, description, price.
+  // Tracks which fields the user has manually edited so async loads of
+  // `listings`/`feesMap` don't clobber unsaved typing — but they DO populate
+  // fields the user hasn't touched (the previous useState-only init left the
+  // form stuck on default-generated values when listings arrived after first
+  // render, causing the wrong title to be pushed to eBay).
+  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean; price: boolean }>>({});
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
-  >(() => {
-    const initial: Record<string, { title: string; description: string; price: string }> = {};
-    for (const ch of CHANNELS) {
-      const existing = listings.find((l) => l.channel === ch.key);
-      const feeInfo = feesMap?.get(ch.key);
-      const basePrice = variant.salePrice ?? 0;
-      const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
+  >({});
 
-      initial[ch.key] = {
-        title: existing?.listingTitle ?? "",
-        description: existing?.listingDescription ?? "",
-        price: existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
-      };
-    }
-    return initial;
-  });
+  useEffect(() => {
+    setChannelState((prev) => {
+      const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
+      for (const ch of CHANNELS) {
+        const existing = listings.find((l) => l.channel === ch.key);
+        const feeInfo = feesMap?.get(ch.key);
+        const basePrice = variant.salePrice ?? 0;
+        const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
+        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false, price: false };
+        const current = prev[ch.key];
+
+        const defaultTitle = ch.key === "ebay" ? defaultEbayTitle : product.name;
+        next[ch.key] = {
+          title: dirty.title
+            ? current?.title ?? ""
+            : existing?.listingTitle ?? defaultTitle,
+          description: dirty.description
+            ? current?.description ?? ""
+            : existing?.listingDescription ?? "",
+          price: dirty.price
+            ? current?.price ?? ""
+            : existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+        };
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, feesMap, defaultEbayTitle, product.name, variant.salePrice, variant.floorPrice]);
 
   const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
+    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false, price: false };
+    dirtyRef.current[channel] = { ...channelDirty, [field]: true };
     setChannelState((prev) => ({
       ...prev,
-      [channel]: { ...prev[channel], [field]: value },
+      [channel]: {
+        title: prev[channel]?.title ?? "",
+        description: prev[channel]?.description ?? "",
+        price: prev[channel]?.price ?? "",
+        [field]: value,
+      },
     }));
   };
 

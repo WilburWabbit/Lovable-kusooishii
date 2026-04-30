@@ -15,6 +15,17 @@ export interface TablePrefs {
   visibleColumns: string[];
 }
 
+/**
+ * Returns true if a value is considered "null/empty" for filtering purposes:
+ * null, undefined, empty string, empty array.
+ */
+function isNullish(val: unknown): boolean {
+  if (val == null) return true;
+  if (typeof val === "string" && val.trim() === "") return true;
+  if (Array.isArray(val) && val.length === 0) return true;
+  return false;
+}
+
 export function filterRows<T>(
   rows: T[],
   filters: Record<string, string>,
@@ -25,8 +36,16 @@ export function filterRows<T>(
   return rows.filter((row) =>
     active.every(([key, term]) => {
       const val = accessor ? accessor(row, key) : (row as any)[key];
-      if (val == null) return false;
-      return String(val).toLowerCase().includes(term.toLowerCase());
+      const trimmed = term.trim();
+      const upper = trimmed.toUpperCase();
+
+      // Sentinel: NULL → field must be null/empty
+      if (upper === "NULL") return isNullish(val);
+      // Sentinel: NOT NULL or !NULL → field must have a value
+      if (upper === "NOT NULL" || upper === "!NULL") return !isNullish(val);
+
+      if (isNullish(val)) return false;
+      return String(val).toLowerCase().includes(trimmed.toLowerCase());
     }),
   );
 }
