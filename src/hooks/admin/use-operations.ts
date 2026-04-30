@@ -5,6 +5,7 @@ export const operationsKeys = {
   all: ["v2", "operations"] as const,
   reconciliation: ["v2", "operations", "reconciliation"] as const,
   postingIntents: ["v2", "operations", "posting-intents"] as const,
+  listingCommands: ["v2", "operations", "listing-commands"] as const,
   blueBellStatement: ["v2", "operations", "blue-bell-statement"] as const,
   blueBellAccruals: ["v2", "operations", "blue-bell-accruals"] as const,
 };
@@ -44,6 +45,21 @@ export interface PostingIntentRow {
   createdAt: string;
   updatedAt: string;
   postedAt: string | null;
+}
+
+export interface ListingCommandRow {
+  id: string;
+  targetSystem: string;
+  commandType: string;
+  entityType: string;
+  entityId: string | null;
+  status: string;
+  retryCount: number;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BlueBellStatementRow {
@@ -108,6 +124,21 @@ const mapPostingIntent = (row: Record<string, unknown>): PostingIntentRow => ({
   postedAt: (row.posted_at as string | null) ?? null,
 });
 
+const mapListingCommand = (row: Record<string, unknown>): ListingCommandRow => ({
+  id: row.id as string,
+  targetSystem: row.target_system as string,
+  commandType: row.command_type as string,
+  entityType: row.entity_type as string,
+  entityId: (row.entity_id as string | null) ?? null,
+  status: row.status as string,
+  retryCount: Number(row.retry_count ?? 0),
+  lastError: (row.last_error as string | null) ?? null,
+  nextAttemptAt: (row.next_attempt_at as string | null) ?? null,
+  sentAt: (row.sent_at as string | null) ?? null,
+  createdAt: row.created_at as string,
+  updatedAt: row.updated_at as string,
+});
+
 const mapBlueBellStatement = (row: Record<string, unknown>): BlueBellStatementRow => ({
   periodStart: row.period_start as string,
   periodEnd: row.period_end as string,
@@ -165,6 +196,23 @@ export function usePostingIntents() {
 
       if (error) throw error;
       return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapPostingIntent);
+    },
+  });
+}
+
+export function useListingCommands() {
+  return useQuery({
+    queryKey: operationsKeys.listingCommands,
+    queryFn: async (): Promise<ListingCommandRow[]> => {
+      const { data, error } = await supabase
+        .from("outbound_command" as never)
+        .select("id,target_system,command_type,entity_type,entity_id,status,retry_count,last_error,next_attempt_at,sent_at,created_at,updated_at")
+        .eq("entity_type" as never, "channel_listing")
+        .order("created_at" as never, { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapListingCommand);
     },
   });
 }
@@ -260,6 +308,25 @@ export function useRunPostingIntentProcessor() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useRunListingCommandProcessor() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("listing-command-process", {
+        body: { batchSize: 25 },
+      });
+
+      if (error) throw error;
+      return data as { processed?: number; results?: unknown[] };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
     },
   });

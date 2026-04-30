@@ -5,11 +5,14 @@ import {
   useBlueBellOpenAccruals,
   useBlueBellStatement,
   useCreateBlueBellSettlement,
+  useListingCommands,
   usePostingIntents,
   useReconciliationInbox,
+  useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
   useUpdateReconciliationCaseStatus,
   type BlueBellStatementRow,
+  type ListingCommandRow,
   type PostingIntentRow,
   type ReconciliationInboxCase,
 } from "@/hooks/admin/use-operations";
@@ -25,6 +28,8 @@ const severityColors: Record<string, string> = {
 const statusColors: Record<string, string> = {
   pending: "#D97706",
   processing: "#2563EB",
+  sent: "#2563EB",
+  acknowledged: "#16A34A",
   posted: "#16A34A",
   failed: "#DC2626",
   skipped: "#71717A",
@@ -80,6 +85,13 @@ function PostingIntentTarget({ intent }: { intent: PostingIntentRow }) {
   return <Mono color="dim">{shortId(intent.entityId)}</Mono>;
 }
 
+function ListingCommandTarget({ command }: { command: ListingCommandRow }) {
+  if (command.entityType === "channel_listing" && command.entityId) {
+    return <Mono color="dim">{shortId(command.entityId)}</Mono>;
+  }
+  return <Mono color="dim">{shortId(command.entityId)}</Mono>;
+}
+
 function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRow; canCreate: boolean }) {
   const createSettlement = useCreateBlueBellSettlement();
 
@@ -109,15 +121,19 @@ function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRo
 export function OperationsView() {
   const { data: cases = [], isLoading: casesLoading } = useReconciliationInbox();
   const { data: intents = [], isLoading: intentsLoading } = usePostingIntents();
+  const { data: listingCommands = [], isLoading: listingCommandsLoading } = useListingCommands();
   const { data: blueBellStatement = [], isLoading: blueBellStatementLoading } = useBlueBellStatement();
   const { data: blueBellAccruals = [], isLoading: blueBellAccrualsLoading } = useBlueBellOpenAccruals();
   const updateCase = useUpdateReconciliationCaseStatus();
   const runProcessor = useRunPostingIntentProcessor();
+  const runListingProcessor = useRunListingCommandProcessor();
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
   const pendingIntents = intents.filter((i) => i.status === "pending").length;
   const failedIntents = intents.filter((i) => i.status === "failed").length;
+  const pendingListingCommands = listingCommands.filter((c) => c.status === "pending").length;
+  const failedListingCommands = listingCommands.filter((c) => c.status === "failed").length;
   const blueBellOutstanding = blueBellStatement.reduce((sum, row) => sum + row.commissionOutstanding, 0);
   const unsettledBlueBellPeriods = new Set(
     blueBellAccruals
@@ -142,31 +158,92 @@ export function OperationsView() {
     });
   };
 
+  const handleRunListingProcessor = () => {
+    runListingProcessor.mutate(undefined, {
+      onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} listing command(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command processor failed"),
+    });
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-[22px] font-bold text-zinc-900">Operations</h1>
-          <p className="text-xs text-zinc-500">Finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
+          <p className="text-xs text-zinc-500">Listing commands, finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
         </div>
-        <button
-          type="button"
-          onClick={handleRunProcessor}
-          disabled={runProcessor.isPending}
-          className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-        >
-          <Play className="h-3.5 w-3.5" />
-          {runProcessor.isPending ? "Running..." : "Run QBO Outbox"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleRunListingProcessor}
+            disabled={runListingProcessor.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Play className="h-3.5 w-3.5" />
+            {runListingProcessor.isPending ? "Running..." : "Run Listing Outbox"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRunProcessor}
+            disabled={runProcessor.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Play className="h-3.5 w-3.5" />
+            {runProcessor.isPending ? "Running..." : "Run QBO Outbox"}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
         <SummaryCard label="Open Cases" value={openCases} color={openCases > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="High Severity" value={criticalCases} color={criticalCases > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="Pending Listings" value={pendingListingCommands} color={pendingListingCommands > 0 ? "#D97706" : "#16A34A"} />
+        <SummaryCard label="Failed Listings" value={failedListingCommands} color={failedListingCommands > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Pending QBO Posts" value={pendingIntents} color={pendingIntents > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed QBO Posts" value={failedIntents} color={failedIntents > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Blue Bell Owed" value={formatMoney(blueBellOutstanding)} color={blueBellOutstanding > 0 ? "#D97706" : "#16A34A"} />
       </div>
+
+      <SurfaceCard noPadding>
+        <div className="border-b border-zinc-200 px-4 py-3">
+          <SectionHead>Listing Command Outbox</SectionHead>
+          <p className="text-xs text-zinc-500">Publish, reprice, pause, and end commands queued by listing workflows.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Target</th>
+                <th className="px-3 py-2 font-semibold">Command</th>
+                <th className="px-3 py-2 font-semibold">Listing</th>
+                <th className="px-3 py-2 font-semibold">Retries</th>
+                <th className="px-3 py-2 font-semibold">Next Attempt</th>
+                <th className="px-4 py-2 font-semibold">Last Error</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {listingCommandsLoading ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Loading listing commands...</td></tr>
+              ) : listingCommands.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No listing commands yet.</td></tr>
+              ) : (
+                listingCommands.map((command) => (
+                  <tr key={command.id} className="align-top hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><Badge label={command.status} color={statusColors[command.status] ?? "#71717A"} small /></td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{command.targetSystem}</td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{command.commandType.replaceAll("_", " ")}</td>
+                    <td className="px-3 py-3 text-xs"><ListingCommandTarget command={command} /></td>
+                    <td className="px-3 py-3"><Mono color={command.retryCount > 0 ? "amber" : "dim"}>{command.retryCount}</Mono></td>
+                    <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(command.nextAttemptAt)}</td>
+                    <td className="max-w-[360px] px-4 py-3 text-xs text-red-600">{command.lastError ?? "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
 
       <SurfaceCard noPadding>
         <div className="border-b border-zinc-200 px-4 py-3">
