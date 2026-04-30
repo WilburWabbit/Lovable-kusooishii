@@ -46,6 +46,9 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
       const lineActions = returnableLines
         .map((li) => ({ line_item_id: li.id, action: actions[li.id] }))
         .filter((entry) => entry.action === "refund" || entry.action === "restock");
+      const refundedLineIds = lineActions
+        .filter((entry) => entry.action === "refund")
+        .map((entry) => entry.line_item_id);
 
       const { error } = await supabase.rpc("process_order_return" as never, {
         p_sales_order_id: orderId,
@@ -53,6 +56,14 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
         p_reason: "Admin return processing",
       } as never);
       if (error) throw error;
+
+      if (refundedLineIds.length > 0) {
+        const { error: postingErr } = await supabase.rpc("queue_qbo_refund_posting_intent_for_order" as never, {
+          p_sales_order_id: orderId,
+          p_refunded_line_ids: refundedLineIds,
+        } as never);
+        if (postingErr) throw postingErr;
+      }
 
       // Push updated stock counts to eBay (non-blocking). Restocked
       // units re-enter availability; pushing for every affected SKU is

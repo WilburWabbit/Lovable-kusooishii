@@ -1,7 +1,7 @@
 // ============================================================
 // Accounting Posting Intent Processor
 // Processes app-side posting_intent outbox rows and delegates the
-// concrete QBO SalesReceipt payload build/post to qbo-sync-sales-receipt.
+// concrete QBO payload build/post to the existing QBO sync functions.
 // ============================================================
 
 import {
@@ -43,6 +43,39 @@ function getSalesOrderId(intent: PostingIntent): string | null {
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
 }
 
+function getRefundedLineIds(intent: PostingIntent): string[] {
+  const value = intent.payload?.refunded_line_ids;
+  if (!Array.isArray(value)) return [];
+  return value.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+function qboActionConfig(intent: PostingIntent, orderId: string) {
+  if (intent.action === "create_sales_receipt") {
+    return {
+      functionName: "qbo-sync-sales-receipt",
+      requestBody: { orderId },
+      qboEntityType: "SalesReceipt",
+      responseIdField: "qbo_sales_receipt_id",
+      resultIdField: "qbo_sales_receipt_id",
+      sourceColumn: "sales_order.qbo_sales_receipt_id",
+    };
+  }
+
+  if (intent.action === "create_refund_receipt") {
+    const refundedLineIds = getRefundedLineIds(intent);
+    return {
+      functionName: "qbo-sync-refund-receipt",
+      requestBody: { orderId, refundedLineIds },
+      qboEntityType: "RefundReceipt",
+      responseIdField: "qbo_refund_receipt_id",
+      resultIdField: "qbo_refund_receipt_id",
+      sourceColumn: "posting_intent.payload.refunded_line_ids",
+    };
+  }
+
+  throw new Error(`Unsupported QBO posting intent action ${intent.action}`);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -58,7 +91,7 @@ Deno.serve(async (req) => {
       .from("posting_intent")
       .select("id, action, entity_type, entity_id, idempotency_key, retry_count, payload")
       .eq("target_system", "qbo")
-      .eq("action", "create_sales_receipt")
+      .in("action", ["create_sales_receipt", "create_refund_receipt"] as never)
       .order("created_at", { ascending: true })
       .limit(batchSize);
 
@@ -124,13 +157,14 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const syncRes = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`, {
+        const actionConfig = qboActionConfig(intent, orderId);
+        const syncRes = await fetchWithTimeout(`${supabaseUrl}/functions/v1/${actionConfig.functionName}`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${serviceRoleKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ orderId }),
+          body: JSON.stringify(actionConfig.requestBody),
         }, 60_000);
 
         const responseText = await syncRes.text();
@@ -145,7 +179,7 @@ Deno.serve(async (req) => {
           const message = String(
             responsePayload.qbo_error
               ?? responsePayload.error
-              ?? `qbo-sync-sales-receipt failed [${syncRes.status}]`,
+              ?? `${actionConfig.functionName} failed [${syncRes.status}]`,
           ).slice(0, 1000);
           const exhausted = retryCount >= MAX_RETRY_COUNT;
           const nextAttempt = exhausted
@@ -173,14 +207,14 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const qboSalesReceiptId = String(responsePayload.qbo_sales_receipt_id ?? "");
+        const qboEntityId = String(responsePayload[actionConfig.responseIdField] ?? "");
 
         await admin
           .from("posting_intent")
           .update({
             status: "posted",
             response_payload: responsePayload,
-            qbo_reference_id: qboSalesReceiptId || null,
+            qbo_reference_id: qboEntityId || null,
             last_error: null,
             next_attempt_at: null,
             posted_at: new Date().toISOString(),
@@ -188,7 +222,7 @@ Deno.serve(async (req) => {
           } as never)
           .eq("id", intent.id);
 
-        if (qboSalesReceiptId) {
+        if (qboEntityId) {
           const { data: order } = await admin
             .from("sales_order")
             .select("order_number, doc_number")
@@ -200,15 +234,17 @@ Deno.serve(async (req) => {
             .upsert({
               local_entity_type: "sales_order",
               local_entity_id: orderId,
-              qbo_entity_type: "SalesReceipt",
-              qbo_entity_id: qboSalesReceiptId,
+              qbo_entity_type: actionConfig.qboEntityType,
+              qbo_entity_id: qboEntityId,
               qbo_doc_number: order?.doc_number ?? order?.order_number ?? null,
-              source_column: "sales_order.qbo_sales_receipt_id",
+              source_column: actionConfig.sourceColumn,
               posting_intent_id: intent.id,
               synced_at: new Date().toISOString(),
               metadata: {
                 processor: "accounting-posting-intents-process",
                 idempotency_key: intent.idempotency_key,
+                action: intent.action,
+                refunded_line_ids: getRefundedLineIds(intent),
               },
             } as never, { onConflict: "local_entity_type,local_entity_id,qbo_entity_type,qbo_entity_id" as never });
         }
@@ -217,7 +253,7 @@ Deno.serve(async (req) => {
           intent_id: intent.id,
           sales_order_id: orderId,
           status: "posted",
-          qbo_sales_receipt_id: qboSalesReceiptId || null,
+          [actionConfig.resultIdField]: qboEntityId || null,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown posting processor error";
