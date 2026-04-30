@@ -129,6 +129,48 @@ async function postQboItemViaIntent(input: {
   return { success: true };
 }
 
+async function postQboPurchaseViaIntent(
+  batchId: string,
+  action: 'create_purchase' | 'update_purchase' | 'delete_purchase',
+): Promise<Record<string, unknown>> {
+  const { data: intentId, error: queueErr } = await supabase.rpc(
+    'queue_qbo_purchase_posting_intent' as never,
+    {
+      p_batch_id: batchId,
+      p_action: action,
+    } as never,
+  );
+  if (queueErr) throw new Error(queueErr.message);
+
+  if (!intentId && action === 'create_purchase') {
+    return { success: true, batch_id: batchId, already_synced: true };
+  }
+
+  const { data, error } = await supabase.functions.invoke('accounting-posting-intents-process', {
+    body: intentId ? { intentId } : { batch_size: 5 },
+  });
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    let detail = error.message;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const payload = await ctx.json();
+        if (payload?.error) detail = String(payload.error);
+      } catch (_) { /* fall through */ }
+    }
+    throw new Error(detail);
+  }
+
+  const payload = data as Record<string, unknown> | null;
+  const results = Array.isArray(payload?.results) ? payload.results as Record<string, unknown>[] : [];
+  const result = results.find((row) => row.intent_id === intentId) ?? results[0];
+  if (!payload?.success || !result || result.status !== 'posted') {
+    throw new Error(String(result?.error ?? payload?.error ?? 'QBO Purchase posting intent did not complete'));
+  }
+
+  return (result.response_payload as Record<string, unknown> | undefined) ?? result;
+}
+
 // ─── usePurchaseBatches ─────────────────────────────────────
 
 export function usePurchaseBatches() {
@@ -350,11 +392,10 @@ export function useCreatePurchaseBatch() {
           .catch((err) => console.warn(`Product enrichment for ${mpn} failed (non-blocking):`, err));
       }
 
-      // Fire-and-forget: push the batch to QBO. Failures are recorded on the
+      // Fire-and-forget: queue the batch QBO push. Failures are recorded on the
       // batch row (qbo_sync_status='error') so the operator can retry from
       // the BatchDetail page.
-      supabase.functions
-        .invoke('v2-push-purchase-to-qbo', { body: { batch_id: batchId } })
+      postQboPurchaseViaIntent(batchId, 'create_purchase')
         .catch((err) => console.warn(`QBO push for ${batchId} failed (non-blocking):`, err));
 
       return batchId;
@@ -371,23 +412,11 @@ export function usePushPurchaseToQbo() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (batchId: string) => {
-      const { data, error } = await supabase.functions.invoke('v2-push-purchase-to-qbo', {
-        body: { batch_id: batchId },
-      });
-      if (error) {
-        const ctx = (error as { context?: Response }).context;
-        if (ctx && typeof ctx.json === 'function') {
-          try {
-            const payload = await ctx.json();
-            if (payload?.error) throw new Error(payload.error);
-          } catch (_) { /* fall through */ }
-        }
-        throw new Error(error.message);
-      }
-      if (data && typeof data === 'object' && 'error' in data) {
-        throw new Error(String((data as { error: unknown }).error));
-      }
-      return data as { success: boolean; batch_id: string; qbo_purchase_id?: string };
+      return postQboPurchaseViaIntent(batchId, 'create_purchase') as Promise<{
+        success: boolean;
+        batch_id: string;
+        qbo_purchase_id?: string;
+      }>;
     },
     onSuccess: (_data, batchId) => {
       queryClient.invalidateQueries({ queryKey: purchaseBatchKeys.all });
@@ -456,28 +485,23 @@ export function useUpdatePurchaseBatch() {
 
       // 3. If already in QBO, push the update.
       if (qboPurchaseId) {
-        const { data, error } = await supabase.functions.invoke('v2-update-purchase-in-qbo', {
-          body: { batch_id: input.batchId },
-        });
-        if (error) {
-          const ctx = (error as { context?: Response }).context;
-          let detail = error.message;
-          if (ctx && typeof ctx.json === 'function') {
-            try {
-              const payload = await ctx.json();
-              if (payload?.error) detail = String(payload.error);
-            } catch (_) { /* ignore */ }
+        try {
+          const data = await postQboPurchaseViaIntent(input.batchId, 'update_purchase');
+          if (data && typeof data === 'object' && 'error' in data) {
+            return {
+              batch_id: input.batchId,
+              qbo_pushed: false,
+              qbo_error: String((data as { error: unknown }).error),
+            };
           }
-          return { batch_id: input.batchId, qbo_pushed: false, qbo_error: detail };
-        }
-        if (data && typeof data === 'object' && 'error' in data) {
+          return { batch_id: input.batchId, qbo_pushed: true };
+        } catch (err) {
           return {
             batch_id: input.batchId,
             qbo_pushed: false,
-            qbo_error: String((data as { error: unknown }).error),
+            qbo_error: err instanceof Error ? err.message : String(err),
           };
         }
-        return { batch_id: input.batchId, qbo_pushed: true };
       }
 
       return { batch_id: input.batchId, qbo_pushed: false };
@@ -568,28 +592,23 @@ export function useUpdatePurchaseLineItem() {
           };
         }
 
-        const { data, error } = await supabase.functions.invoke('v2-update-purchase-in-qbo', {
-          body: { batch_id: input.batchId },
-        });
-        if (error) {
-          const ctx = (error as { context?: Response }).context;
-          let detail = error.message;
-          if (ctx && typeof ctx.json === 'function') {
-            try {
-              const payload = await ctx.json();
-              if (payload?.error) detail = String(payload.error);
-            } catch (_) { /* ignore */ }
+        try {
+          const data = await postQboPurchaseViaIntent(input.batchId, 'update_purchase');
+          if (data && typeof data === 'object' && 'error' in data) {
+            return {
+              line_item_id: input.lineItemId,
+              qbo_pushed: false,
+              qbo_error: String((data as { error: unknown }).error),
+            };
           }
-          return { line_item_id: input.lineItemId, qbo_pushed: false, qbo_error: detail };
-        }
-        if (data && typeof data === 'object' && 'error' in data) {
+          return { line_item_id: input.lineItemId, qbo_pushed: true };
+        } catch (err) {
           return {
             line_item_id: input.lineItemId,
             qbo_pushed: false,
-            qbo_error: String((data as { error: unknown }).error),
+            qbo_error: err instanceof Error ? err.message : String(err),
           };
         }
-        return { line_item_id: input.lineItemId, qbo_pushed: true };
       }
 
       return { line_item_id: input.lineItemId, qbo_pushed: false };
@@ -615,8 +634,16 @@ export function useDeletePurchaseBatch() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: { batchId: string; skipQbo?: boolean }): Promise<DeletePurchaseBatchResult> => {
+      if (!input.skipQbo) {
+        const data = await postQboPurchaseViaIntent(input.batchId, 'delete_purchase');
+        if (data && typeof data === 'object' && 'error' in data) {
+          throw new Error(String((data as { error: unknown }).error));
+        }
+        return data as unknown as DeletePurchaseBatchResult;
+      }
+
       const { data, error } = await supabase.functions.invoke('v2-delete-purchase-batch', {
-        body: { batch_id: input.batchId, skip_qbo: input.skipQbo ?? false },
+        body: { batch_id: input.batchId, skip_qbo: true },
       });
       if (error) {
         // FunctionsHttpError carries the response body as `error.context`.
