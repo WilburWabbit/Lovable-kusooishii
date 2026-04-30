@@ -629,6 +629,8 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
         if (postingIntentError) {
           throw new Error(`Failed to queue QBO posting intent: ${postingIntentError.message}`);
         }
+
+        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
       }
 
       return { orderId, orderNumber, allAllocated };

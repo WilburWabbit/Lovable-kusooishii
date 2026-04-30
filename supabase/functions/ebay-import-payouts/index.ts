@@ -418,6 +418,29 @@ Deno.serve(async (req) => {
           if (accountingErr) {
             console.warn(`Failed to refresh accounting events for ${salesOrderId}: ${accountingErr.message}`);
           }
+
+          const { error: settlementErr } = await admin
+            .rpc("refresh_order_settlement_lines", {
+              p_sales_order_id: salesOrderId,
+              p_rebuild_cases: true,
+            });
+
+          if (settlementErr) {
+            console.warn(`Failed to refresh settlement lines for ${salesOrderId}: ${settlementErr.message}`);
+          }
+        }
+      }
+
+      for (const order of orderMap.values()) {
+        const salesOrderId = order.id as string;
+        const { error: settlementErr } = await admin
+          .rpc("refresh_order_settlement_lines", {
+            p_sales_order_id: salesOrderId,
+            p_rebuild_cases: true,
+          });
+
+        if (settlementErr) {
+          console.warn(`Failed to refresh settlement lines for ${salesOrderId}: ${settlementErr.message}`);
         }
       }
 

@@ -1098,6 +1098,16 @@ Deno.serve(async (req) => {
       qboSyncStatus = "needs_manual_review";
       qboSyncError = postingIntentErr.message;
       console.error(`Failed to queue QBO posting intent for eBay order ${orderId}: ${qboSyncError}`);
+    } else {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      fetch(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ batchSize: 10 }),
+      }).catch(() => console.warn("posting intent processor trigger failed (non-blocking)"));
     }
 
     // ── Step 13: Update sales_order with QBO posting state ──
