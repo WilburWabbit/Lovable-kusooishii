@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 export const operationsKeys = {
   all: ["v2", "operations"] as const,
   reconciliation: ["v2", "operations", "reconciliation"] as const,
+  reconciliationNotes: (caseId: string) => ["v2", "operations", "reconciliation", caseId, "notes"] as const,
+  owners: ["v2", "operations", "owners"] as const,
   postingIntents: ["v2", "operations", "posting-intents"] as const,
   listingCommands: ["v2", "operations", "listing-commands"] as const,
   settlementPeriodClose: ["v2", "operations", "settlement-period-close"] as const,
@@ -22,11 +24,18 @@ export interface ReconciliationInboxCase {
   payoutId: string | null;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
   suspectedRootCause: string | null;
   recommendedAction: string | null;
   diagnosis: string | null;
   nextStep: string | null;
   evidence: Record<string, unknown>;
+  requiresEvidence: boolean;
+  noteCount: number;
+  latestNoteAt: string | null;
+  latestNote: string | null;
+  slaStatus: string;
   amountExpected: number | null;
   amountActual: number | null;
   varianceAmount: number | null;
@@ -107,6 +116,23 @@ export interface SettlementPeriodCloseRow {
   closeStatus: string;
 }
 
+export interface ReconciliationCaseNote {
+  id: string;
+  reconciliationCaseId: string;
+  actorId: string | null;
+  actorName: string | null;
+  noteType: string;
+  note: string | null;
+  evidence: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ReconciliationCaseOwner {
+  userId: string;
+  displayName: string;
+  roles: string[];
+}
+
 const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   id: row.id as string,
   caseType: row.case_type as string,
@@ -118,17 +144,41 @@ const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   payoutId: (row.payout_id as string | null) ?? null,
   relatedEntityType: (row.related_entity_type as string | null) ?? null,
   relatedEntityId: (row.related_entity_id as string | null) ?? null,
+  ownerId: (row.owner_id as string | null) ?? null,
+  ownerName: (row.owner_name as string | null) ?? null,
   suspectedRootCause: (row.suspected_root_cause as string | null) ?? null,
   recommendedAction: (row.recommended_action as string | null) ?? null,
   diagnosis: (row.diagnosis as string | null) ?? null,
   nextStep: (row.next_step as string | null) ?? null,
   evidence: ((row.evidence as Record<string, unknown> | null) ?? {}),
+  requiresEvidence: Boolean(row.requires_evidence ?? false),
+  noteCount: Number(row.note_count ?? 0),
+  latestNoteAt: (row.latest_note_at as string | null) ?? null,
+  latestNote: (row.latest_note as string | null) ?? null,
+  slaStatus: (row.sla_status as string | null) ?? "no_due_date",
   amountExpected: row.amount_expected == null ? null : Number(row.amount_expected),
   amountActual: row.amount_actual == null ? null : Number(row.amount_actual),
   varianceAmount: row.variance_amount == null ? null : Number(row.variance_amount),
   dueAt: (row.due_at as string | null) ?? null,
   createdAt: row.created_at as string,
   updatedAt: row.updated_at as string,
+});
+
+const mapCaseNote = (row: Record<string, unknown>): ReconciliationCaseNote => ({
+  id: row.id as string,
+  reconciliationCaseId: row.reconciliation_case_id as string,
+  actorId: (row.actor_id as string | null) ?? null,
+  actorName: (row.actor_name as string | null) ?? null,
+  noteType: row.note_type as string,
+  note: (row.note as string | null) ?? null,
+  evidence: ((row.evidence as Record<string, unknown> | null) ?? {}),
+  createdAt: row.created_at as string,
+});
+
+const mapCaseOwner = (row: Record<string, unknown>): ReconciliationCaseOwner => ({
+  userId: row.user_id as string,
+  displayName: (row.display_name as string) ?? "Unnamed user",
+  roles: Array.isArray(row.roles) ? (row.roles as string[]) : [],
 });
 
 type OperationsExportKind =
@@ -277,6 +327,39 @@ export function useReconciliationInbox() {
   });
 }
 
+export function useReconciliationCaseOwners() {
+  return useQuery({
+    queryKey: operationsKeys.owners,
+    queryFn: async (): Promise<ReconciliationCaseOwner[]> => {
+      const { data, error } = await supabase
+        .from("v_reconciliation_case_owner" as never)
+        .select("*")
+        .order("display_name" as never, { ascending: true });
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapCaseOwner);
+    },
+  });
+}
+
+export function useReconciliationCaseNotes(caseId: string | null) {
+  return useQuery({
+    queryKey: operationsKeys.reconciliationNotes(caseId ?? ""),
+    enabled: !!caseId,
+    queryFn: async (): Promise<ReconciliationCaseNote[]> => {
+      const { data, error } = await supabase
+        .from("v_reconciliation_case_note" as never)
+        .select("*")
+        .eq("reconciliation_case_id" as never, caseId!)
+        .order("created_at" as never, { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapCaseNote);
+    },
+  });
+}
+
 export function usePostingIntents() {
   return useQuery({
     queryKey: operationsKeys.postingIntents,
@@ -386,17 +469,112 @@ export function useUpdateReconciliationCaseStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: "resolved" | "ignored" | "in_progress" }) => {
-      const { error } = await supabase
-        .from("reconciliation_case" as never)
-        .update({
-          status,
-          close_code: status === "resolved" ? "resolved_from_operations_inbox" : status === "ignored" ? "ignored_from_operations_inbox" : null,
-          closed_at: status === "resolved" || status === "ignored" ? new Date().toISOString() : null,
-        } as never)
-        .eq("id" as never, id);
+    mutationFn: async ({
+      id,
+      status,
+      note,
+      evidence,
+    }: {
+      id: string;
+      status: "open" | "resolved" | "ignored" | "in_progress";
+      note?: string | null;
+      evidence?: Record<string, unknown>;
+    }) => {
+      const { data, error } = await supabase.rpc("update_reconciliation_case_workflow" as never, {
+        p_case_id: id,
+        p_status: status,
+        p_note: note ?? null,
+        p_evidence: evidence ?? {},
+      } as never);
+      if (error) throw error;
+      return data as unknown as { success?: boolean };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useUpdateReconciliationCaseWorkflow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      status,
+      ownerId,
+      dueAt,
+      note,
+      evidence,
+      clearOwner,
+      clearDueAt,
+    }: {
+      id: string;
+      status?: "open" | "resolved" | "ignored" | "in_progress" | null;
+      ownerId?: string | null;
+      dueAt?: string | null;
+      note?: string | null;
+      evidence?: Record<string, unknown>;
+      clearOwner?: boolean;
+      clearDueAt?: boolean;
+    }) => {
+      const { data, error } = await supabase.rpc("update_reconciliation_case_workflow" as never, {
+        p_case_id: id,
+        p_status: status ?? null,
+        p_owner_id: ownerId ?? null,
+        p_due_at: dueAt ?? null,
+        p_note: note ?? null,
+        p_evidence: evidence ?? {},
+        p_clear_owner: !!clearOwner,
+        p_clear_due_at: !!clearDueAt,
+      } as never);
 
       if (error) throw error;
+      return data as unknown as { success?: boolean };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliationNotes(variables.id) });
+    },
+  });
+}
+
+export function useBulkUpdateReconciliationCases() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      status,
+      ownerId,
+      dueAt,
+      note,
+      evidence,
+      clearOwner,
+      clearDueAt,
+    }: {
+      ids: string[];
+      status?: "open" | "resolved" | "ignored" | "in_progress" | null;
+      ownerId?: string | null;
+      dueAt?: string | null;
+      note?: string | null;
+      evidence?: Record<string, unknown>;
+      clearOwner?: boolean;
+      clearDueAt?: boolean;
+    }) => {
+      const { data, error } = await supabase.rpc("bulk_update_reconciliation_case_workflow" as never, {
+        p_case_ids: ids,
+        p_status: status ?? null,
+        p_owner_id: ownerId ?? null,
+        p_due_at: dueAt ?? null,
+        p_note: note ?? null,
+        p_evidence: evidence ?? {},
+        p_clear_owner: !!clearOwner,
+        p_clear_due_at: !!clearDueAt,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as { updated?: number; errors?: Array<Record<string, unknown>> };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
