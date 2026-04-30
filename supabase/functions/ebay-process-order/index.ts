@@ -8,7 +8,6 @@ const corsHeaders = {
 };
 
 const EBAY_API = "https://api.ebay.com";
-const QBO_API_BASE = "https://quickbooks.api.intuit.com/v3/company";
 const FETCH_TIMEOUT_MS = 30_000;
 
 /** Fetch with timeout to prevent indefinite hangs on external APIs */
@@ -84,150 +83,6 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   const text = await res.text();
   if (!text?.trim()) return null;
   return JSON.parse(text);
-}
-
-// ─── QBO helpers ────────────────────────────────────────────
-
-async function getQboAccessToken(admin: any): Promise<{ accessToken: string; realmId: string }> {
-  const realmId = Deno.env.get("QBO_REALM_ID");
-  const clientId = Deno.env.get("QBO_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
-  if (!realmId || !clientId || !clientSecret) throw new Error("QBO credentials not configured");
-
-  const { data: conn, error } = await admin
-    .from("qbo_connection")
-    .select("*")
-    .eq("realm_id", realmId)
-    .single();
-  if (error || !conn) throw new Error("No QBO connection found.");
-
-  if (new Date(conn.token_expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
-    const tokenRes = await fetchWithTimeout("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-        Accept: "application/json",
-      },
-      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
-    });
-    if (!tokenRes.ok) throw new Error(`QBO token refresh failed [${tokenRes.status}]`);
-    const tokens = await tokenRes.json();
-    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-    await admin.from("qbo_connection").update({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      token_expires_at: expiresAt,
-    }).eq("realm_id", realmId);
-    return { accessToken: tokens.access_token, realmId };
-  }
-  return { accessToken: conn.access_token, realmId };
-}
-
-async function qboRequest(accessToken: string, realmId: string, path: string, options: RequestInit = {}) {
-  const url = `${QBO_API_BASE}/${realmId}${path}${path.includes("?") ? "&" : "?"}minorversion=65`;
-  const res = await fetchWithTimeout(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`QBO API [${res.status}]: ${JSON.stringify(data)}`);
-  return data;
-}
-
-// ─── QBO Customer upsert (ported from Kuso Hub) ────────────
-
-async function findOrCreateCustomer(
-  accessToken: string,
-  realmId: string,
-  customerName: string,
-  details?: {
-    email?: string | null;
-    shippingAddress?: {
-      line1?: string; line2?: string; city?: string;
-      stateOrProvince?: string; postalCode?: string; country?: string;
-    } | null;
-  }
-): Promise<{ id: string; name: string }> {
-  const escaped = customerName.replace(/'/g, "''");
-  const queryResult = await qboRequest(
-    accessToken, realmId,
-    `/query?query=${encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${escaped}'`)}`
-  );
-  const existing = queryResult?.QueryResponse?.Customer;
-  if (existing?.length) {
-    const cust = existing[0];
-    // Sparse-update with missing details
-    const updates: any = { Id: cust.Id, SyncToken: cust.SyncToken, sparse: true };
-    let needsUpdate = false;
-    if (details?.email && !cust.PrimaryEmailAddr?.Address) {
-      updates.PrimaryEmailAddr = { Address: details.email };
-      needsUpdate = true;
-    }
-    if (details?.shippingAddress && !cust.ShipAddr?.Line1) {
-      const a = details.shippingAddress;
-      const addr = {
-        Line1: a.line1 || "", Line2: a.line2 || "", City: a.city || "",
-        CountrySubDivisionCode: a.stateOrProvince || "",
-        PostalCode: a.postalCode || "", Country: a.country || "",
-      };
-      updates.ShipAddr = addr;
-      updates.BillAddr = addr;
-      needsUpdate = true;
-    }
-    if (needsUpdate) {
-      try {
-        await qboRequest(accessToken, realmId, "/customer", {
-          method: "POST", body: JSON.stringify(updates),
-        });
-      } catch (e: any) {
-        console.warn(`Failed to update QBO Customer ${cust.Id}:`, e.message);
-      }
-    }
-    return { id: cust.Id, name: cust.DisplayName };
-  }
-
-  // Create new
-  const body: any = { DisplayName: customerName };
-  if (details?.email) body.PrimaryEmailAddr = { Address: details.email };
-  if (details?.shippingAddress) {
-    const a = details.shippingAddress;
-    const addr = {
-      Line1: a.line1 || "", Line2: a.line2 || "", City: a.city || "",
-      CountrySubDivisionCode: a.stateOrProvince || "",
-      PostalCode: a.postalCode || "", Country: a.country || "",
-    };
-    body.ShipAddr = addr;
-    body.BillAddr = addr;
-  }
-  const createResult = await qboRequest(accessToken, realmId, "/customer", {
-    method: "POST", body: JSON.stringify(body),
-  });
-  const created = createResult?.Customer;
-  if (!created?.Id) throw new Error(`Failed to create QBO customer: ${customerName}`);
-  return { id: created.Id, name: created.DisplayName };
-}
-
-// ─── QBO Item lookup ────────────────────────────────────────
-
-async function findQboItemBySku(
-  accessToken: string, realmId: string, sku: string
-): Promise<{ id: string; name: string } | null> {
-  try {
-    const escaped = sku.replace(/'/g, "''");
-    const result = await qboRequest(
-      accessToken, realmId,
-      `/query?query=${encodeURIComponent(`SELECT * FROM Item WHERE Sku = '${escaped}'`)}`
-    );
-    const items = result?.QueryResponse?.Item;
-    if (items?.length) return { id: items[0].Id, name: items[0].Name };
-  } catch { /* not found */ }
-  return null;
 }
 
 // ─── Tax resolution ─────────────────────────────────────────
@@ -336,51 +191,6 @@ async function resolveVatForShippingCountry(
     qboTaxRateId: match.vat_rate.qbo_tax_rate_id,
     ratePercent: Number(match.vat_rate.rate_percent),
   };
-}
-
-/**
- * Resolve the UK standard-rate (20%) tax info for QBO TaxRateRef.
- * Used as a fallback when the inline QBO sync needs a default TaxRateRef
- * (e.g. for the TxnTaxDetail block). Per-line TaxCodeRef comes from
- * the already-resolved vatResolution.
- */
-async function resolveDefaultSalesTaxInfo(
-  admin: any, qboAccessToken: string, realmId: string
-): Promise<{ taxCodeId: string; taxRateId: string; ratePercent: number }> {
-  // Try local tax_code + vat_rate tables first
-  const { data: taxCodes } = await admin
-    .from("tax_code")
-    .select("qbo_tax_code_id, sales_tax_rate_id, vat_rate:sales_tax_rate_id(qbo_tax_rate_id, rate_percent)")
-    .eq("active", true)
-    .not("sales_tax_rate_id", "is", null);
-
-  if (taxCodes?.length) {
-    const standard = taxCodes.find((tc: any) => Number(tc.vat_rate?.rate_percent) === 20);
-    const pick = standard || taxCodes[0];
-    if (pick?.vat_rate) {
-      return {
-        taxCodeId: pick.qbo_tax_code_id,
-        taxRateId: pick.vat_rate.qbo_tax_rate_id,
-        ratePercent: Number(pick.vat_rate.rate_percent),
-      };
-    }
-  }
-
-  // Fallback: query QBO directly
-  console.log("No local tax info — querying QBO...");
-  const result = await qboRequest(
-    qboAccessToken, realmId,
-    `/query?query=${encodeURIComponent("SELECT * FROM TaxCode WHERE Active = true MAXRESULTS 50")}`
-  );
-  const qboTaxCodes = result?.QueryResponse?.TaxCode;
-  if (!qboTaxCodes?.length) throw new Error("No active TaxCodes found in QBO");
-
-  const std = qboTaxCodes.find((tc: any) =>
-    tc.Name?.includes("20") && tc.Name?.match(/S/i) && !tc.Name?.match(/Purchase|P\b/i)
-  );
-  const pick = std || qboTaxCodes[0];
-  const salesRateId = pick.SalesTaxRateList?.TaxRateDetail?.[0]?.TaxRateRef?.value || "0";
-  return { taxCodeId: pick.Id, taxRateId: String(salesRateId), ratePercent: 20 };
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -524,51 +334,6 @@ Deno.serve(async (req) => {
         console.log(`Stock units for order ${localOrder.id} marked as shipped`);
       }
 
-      // ── Update QBO SalesReceipt with shipping metadata ──
-      let qboUpdated = false;
-      try {
-        const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
-
-        // Find the existing SalesReceipt by DocNumber
-        const docNumber = localOrder.doc_number || (orderId.length <= 21 ? orderId : orderId.substring(0, 21));
-        const escaped = docNumber.replace(/'/g, "''");
-        const queryResult = await qboRequest(
-          qboToken, realmId,
-          `/query?query=${encodeURIComponent(`SELECT * FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`
-        );
-        const existingReceipt = queryResult?.QueryResponse?.SalesReceipt?.[0];
-
-        if (existingReceipt) {
-          // Sparse update with shipping fields
-          const sparseUpdate: any = {
-            Id: existingReceipt.Id,
-            SyncToken: existingReceipt.SyncToken,
-            sparse: true,
-          };
-
-          if (shippedDate) {
-            sparseUpdate.ShipDate = shippedDate;
-          }
-          if (shippingCarrier) {
-            sparseUpdate.ShipMethodRef = { value: shippingCarrier, name: shippingCarrier };
-          }
-          if (trackingNumber) {
-            sparseUpdate.TrackingNum = trackingNumber;
-          }
-
-          await qboRequest(qboToken, realmId, "/salesreceipt", {
-            method: "POST",
-            body: JSON.stringify(sparseUpdate),
-          });
-          qboUpdated = true;
-          console.log(`QBO SalesReceipt ${existingReceipt.Id} updated with shipping data`);
-        } else {
-          console.warn(`No QBO SalesReceipt found with DocNumber "${docNumber}"`);
-        }
-      } catch (e: any) {
-        console.error(`Failed to update QBO SalesReceipt: ${e.message}`);
-      }
-
       // ── Audit event ──
       await admin.from("audit_event").insert({
         entity_type: "sales_order",
@@ -582,7 +347,8 @@ Deno.serve(async (req) => {
           shipped_via: shippingCarrier,
           tracking_number: trackingNumber,
           shipped_date: shippedDate,
-          qbo_updated: qboUpdated,
+          qbo_updated: false,
+          qbo_update_reason: "QBO SalesReceipt updates are handled by posting/reconciliation workers, not eBay notification processing.",
         },
       });
 
