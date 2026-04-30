@@ -9,7 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
-import type { OrderLineItem, StockUnitStatus } from "@/lib/types/admin";
+import type { OrderLineItem } from "@/lib/types/admin";
 import { Mono, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 
@@ -39,55 +39,20 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
   const processReturn = useMutation({
     mutationFn: async () => {
       const affectedSkus = new Set<string>();
-
       for (const li of returnableLines) {
-        const action = actions[li.id];
-        if (!action || !li.stockUnitId) continue;
-
-        if (action === "refund") {
-          // Mark unit as refunded (terminal state)
-          await supabase
-            .from("stock_unit")
-            .update({
-              v2_status: "refunded" as StockUnitStatus,
-            } as never)
-            .eq("id", li.stockUnitId);
-        } else if (action === "restock") {
-          // Return unit to inventory — set to 'listed' so it's available again
-          const now = new Date().toISOString();
-          await supabase
-            .from("stock_unit")
-            .update({
-              v2_status: "listed" as StockUnitStatus,
-              order_id: null,
-              listed_at: now,
-            } as never)
-            .eq("id", li.stockUnitId);
-        }
-
         if (li.sku) affectedSkus.add(li.sku);
       }
 
-      // Recalculate variant stats for affected SKUs
-      for (const skuCode of affectedSkus) {
-        await supabase.rpc("v2_recalculate_variant_stats" as never, { p_sku_code: skuCode } as never);
-      }
+      const lineActions = returnableLines
+        .map((li) => ({ line_item_id: li.id, action: actions[li.id] }))
+        .filter((entry) => entry.action === "refund" || entry.action === "restock");
 
-      // Determine final order status based on all line actions
-      const allRefunded = returnableLines.every((li) => actions[li.id] === "refund");
-
-      // Update order status
-      await supabase
-        .from("sales_order")
-        .update({
-          status: allRefunded ? "complete" : "complete",
-        } as never)
-        .eq("id", orderId);
-
-      // Trigger QBO RefundReceipt for refunded items (fire-and-forget)
-      const refundedLines = returnableLines.filter((li) => actions[li.id] === "refund");
-      // QBO refund sync will be handled by retry queue in a future release
-      console.log("Refund recorded — QBO sync pending for order", orderId);
+      const { error } = await supabase.rpc("process_order_return" as never, {
+        p_sales_order_id: orderId,
+        p_line_actions: lineActions,
+        p_reason: "Admin return processing",
+      } as never);
+      if (error) throw error;
 
       // Push updated stock counts to eBay (non-blocking). Restocked
       // units re-enter availability; pushing for every affected SKU is
@@ -98,20 +63,9 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
           .catch((err) => console.warn("eBay quantity sync failed (non-blocking):", err));
       }
 
-      // Audit event
-      await supabase.from("audit_event").insert({
-        entity_type: "sales_order",
-        entity_id: orderId,
-        trigger_type: "admin_action",
-        actor_type: "user",
-        source_system: "admin_v2",
-        after_json: {
-          action: "return_processed",
-          line_actions: actions,
-          refunded_count: refundedLines.length,
-          restocked_count: returnableLines.length - refundedLines.length,
-        },
-      });
+      for (const skuCode of affectedSkus) {
+        await supabase.rpc("v2_recalculate_variant_stats" as never, { p_sku_code: skuCode } as never);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: orderKeys.all });
