@@ -370,6 +370,44 @@ export function useCancelListingCommand() {
   });
 }
 
+export function useRetryPostingIntent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.rpc("retry_qbo_posting_intent" as never, {
+        p_posting_intent_id: id,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useCancelPostingIntent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.rpc("cancel_qbo_posting_intent" as never, {
+        p_posting_intent_id: id,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
 export function useRefreshReconciliationCases() {
   const queryClient = useQueryClient();
 

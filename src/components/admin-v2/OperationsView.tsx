@@ -4,12 +4,14 @@ import { toast } from "sonner";
 import {
   useBlueBellOpenAccruals,
   useBlueBellStatement,
+  useCancelPostingIntent,
   useCreateBlueBellSettlement,
   useCancelListingCommand,
   useListingCommands,
   usePostingIntents,
   useRefreshReconciliationCases,
   useReconciliationInbox,
+  useRetryPostingIntent,
   useRetryListingCommand,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
@@ -137,6 +139,8 @@ export function OperationsView() {
   const refreshReconciliation = useRefreshReconciliationCases();
   const retryListingCommand = useRetryListingCommand();
   const cancelListingCommand = useCancelListingCommand();
+  const retryPostingIntent = useRetryPostingIntent();
+  const cancelPostingIntent = useCancelPostingIntent();
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
@@ -186,6 +190,20 @@ export function OperationsView() {
     cancelListingCommand.mutate(id, {
       onSuccess: () => toast.success("Listing command cancelled"),
       onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command cancel failed"),
+    });
+  };
+
+  const handleRetryPostingIntent = (id: string) => {
+    retryPostingIntent.mutate(id, {
+      onSuccess: () => toast.success("QBO posting intent queued for retry"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "QBO posting retry failed"),
+    });
+  };
+
+  const handleCancelPostingIntent = (id: string) => {
+    cancelPostingIntent.mutate(id, {
+      onSuccess: () => toast.success("QBO posting intent cancelled"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "QBO posting cancel failed"),
     });
   };
 
@@ -501,13 +519,14 @@ export function OperationsView() {
                 <th className="px-3 py-2 font-semibold">Next Attempt</th>
                 <th className="px-3 py-2 font-semibold">QBO Ref</th>
                 <th className="px-4 py-2 font-semibold">Last Error</th>
+                <th className="px-4 py-2 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {intentsLoading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Loading posting intents...</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">Loading posting intents...</td></tr>
               ) : intents.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No QBO posting intents yet.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">No QBO posting intents yet.</td></tr>
               ) : (
                 intents.map((intent) => (
                   <tr key={intent.id} className="align-top hover:bg-zinc-50/70">
@@ -518,6 +537,30 @@ export function OperationsView() {
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(intent.nextAttemptAt)}</td>
                     <td className="px-3 py-3"><Mono color={intent.qboReferenceId ? "green" : "dim"}>{intent.qboReferenceId ?? "—"}</Mono></td>
                     <td className="max-w-[360px] px-4 py-3 text-xs text-red-600">{intent.lastError ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRetryPostingIntent(intent.id)}
+                          disabled={retryPostingIntent.isPending || intent.status === "processing" || intent.status === "posted"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Retry posting"
+                          aria-label="Retry posting"
+                        >
+                          <RefreshCcw className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCancelPostingIntent(intent.id)}
+                          disabled={cancelPostingIntent.isPending || intent.status === "processing" || intent.status === "posted"}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Cancel posting"
+                          aria-label="Cancel posting"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
