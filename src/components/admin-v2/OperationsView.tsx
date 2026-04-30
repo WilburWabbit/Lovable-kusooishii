@@ -1,11 +1,15 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Clock, Play, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, FileText, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import {
+  useBlueBellOpenAccruals,
+  useBlueBellStatement,
+  useCreateBlueBellSettlement,
   usePostingIntents,
   useReconciliationInbox,
   useRunPostingIntentProcessor,
   useUpdateReconciliationCaseStatus,
+  type BlueBellStatementRow,
   type PostingIntentRow,
   type ReconciliationInboxCase,
 } from "@/hooks/admin/use-operations";
@@ -46,6 +50,15 @@ function formatDateTime(value: string | null): string {
   });
 }
 
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function shortId(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
@@ -67,9 +80,37 @@ function PostingIntentTarget({ intent }: { intent: PostingIntentRow }) {
   return <Mono color="dim">{shortId(intent.entityId)}</Mono>;
 }
 
+function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRow; canCreate: boolean }) {
+  const createSettlement = useCreateBlueBellSettlement();
+
+  const handleCreateSettlement = () => {
+    createSettlement.mutate(
+      { periodStart: row.periodStart, periodEnd: row.periodEnd },
+      {
+        onSuccess: (settlementId) => toast.success(`Blue Bell settlement created: ${shortId(settlementId)}`),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Blue Bell settlement failed"),
+      },
+    );
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCreateSettlement}
+      disabled={createSettlement.isPending || !canCreate}
+      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+    >
+      <FileText className="h-3.5 w-3.5" />
+      {createSettlement.isPending ? "Creating..." : "Create Settlement"}
+    </button>
+  );
+}
+
 export function OperationsView() {
   const { data: cases = [], isLoading: casesLoading } = useReconciliationInbox();
   const { data: intents = [], isLoading: intentsLoading } = usePostingIntents();
+  const { data: blueBellStatement = [], isLoading: blueBellStatementLoading } = useBlueBellStatement();
+  const { data: blueBellAccruals = [], isLoading: blueBellAccrualsLoading } = useBlueBellOpenAccruals();
   const updateCase = useUpdateReconciliationCaseStatus();
   const runProcessor = useRunPostingIntentProcessor();
 
@@ -77,6 +118,12 @@ export function OperationsView() {
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
   const pendingIntents = intents.filter((i) => i.status === "pending").length;
   const failedIntents = intents.filter((i) => i.status === "failed").length;
+  const blueBellOutstanding = blueBellStatement.reduce((sum, row) => sum + row.commissionOutstanding, 0);
+  const unsettledBlueBellPeriods = new Set(
+    blueBellAccruals
+      .filter((accrual) => accrual.status === "open" && !accrual.settlementId)
+      .map((accrual) => accrual.createdAt.slice(0, 7)),
+  );
 
   const handleCaseStatus = (id: string, status: "resolved" | "ignored" | "in_progress") => {
     updateCase.mutate(
@@ -113,12 +160,108 @@ export function OperationsView() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <SummaryCard label="Open Cases" value={openCases} color={openCases > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="High Severity" value={criticalCases} color={criticalCases > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Pending QBO Posts" value={pendingIntents} color={pendingIntents > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed QBO Posts" value={failedIntents} color={failedIntents > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="Blue Bell Owed" value={formatMoney(blueBellOutstanding)} color={blueBellOutstanding > 0 ? "#D97706" : "#16A34A"} />
       </div>
+
+      <SurfaceCard noPadding>
+        <div className="border-b border-zinc-200 px-4 py-3">
+          <SectionHead>Blue Bell Statement</SectionHead>
+          <p className="text-xs text-zinc-500">Monthly commission accruals from the sales-program ledger.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Period</th>
+                <th className="px-3 py-2 text-right font-semibold">Orders</th>
+                <th className="px-3 py-2 text-right font-semibold">Basis</th>
+                <th className="px-3 py-2 text-right font-semibold">Discount</th>
+                <th className="px-3 py-2 text-right font-semibold">Accrued</th>
+                <th className="px-3 py-2 text-right font-semibold">Settled</th>
+                <th className="px-3 py-2 text-right font-semibold">Outstanding</th>
+                <th className="px-4 py-2 text-right font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {blueBellStatementLoading ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">Loading Blue Bell statement...</td></tr>
+              ) : blueBellStatement.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">No Blue Bell accruals yet.</td></tr>
+              ) : (
+                blueBellStatement.map((row) => (
+                  <tr key={row.periodStart} className="hover:bg-zinc-50/70">
+                    <td className="px-4 py-3 text-xs text-zinc-700">
+                      {formatDate(row.periodStart)} - {formatDate(row.periodEnd)}
+                    </td>
+                    <td className="px-3 py-3 text-right"><Mono>{row.qualifyingOrderCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(row.basisAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color="dim">{formatMoney(row.discountAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color="amber">{formatMoney(row.commissionAccrued - row.commissionReversed)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.commissionSettled > 0 ? "green" : "dim"}>{formatMoney(row.commissionSettled)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.commissionOutstanding > 0 ? "red" : "green"}>{formatMoney(row.commissionOutstanding)}</Mono></td>
+                    <td className="px-4 py-3 text-right">
+                      <BlueBellStatementActions
+                        row={row}
+                        canCreate={unsettledBlueBellPeriods.has(row.periodStart.slice(0, 7))}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
+
+      <SurfaceCard noPadding>
+        <div className="border-b border-zinc-200 px-4 py-3">
+          <SectionHead>Blue Bell Open Accruals</SectionHead>
+          <p className="text-xs text-zinc-500">Recent sales-program accruals waiting for settlement or final payment.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Order</th>
+                <th className="px-3 py-2 text-right font-semibold">Basis</th>
+                <th className="px-3 py-2 text-right font-semibold">Discount</th>
+                <th className="px-3 py-2 text-right font-semibold">Commission</th>
+                <th className="px-3 py-2 font-semibold">Settlement</th>
+                <th className="px-4 py-2 font-semibold">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {blueBellAccrualsLoading ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Loading Blue Bell accruals...</td></tr>
+              ) : blueBellAccruals.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No open Blue Bell accruals.</td></tr>
+              ) : (
+                blueBellAccruals.map((accrual) => (
+                  <tr key={accrual.id} className="hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><Badge label={accrual.status.replaceAll("_", " ")} color={statusColors[accrual.status] ?? "#71717A"} small /></td>
+                    <td className="px-3 py-3 text-xs">
+                      <Link to={`/admin/orders/${accrual.salesOrderId}`} className="text-amber-600 hover:text-amber-500">
+                        {accrual.orderNumber ?? shortId(accrual.salesOrderId)}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(accrual.basisAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color="dim">{formatMoney(accrual.discountAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color="amber">{formatMoney(accrual.commissionAmount - accrual.reversedAmount)}</Mono></td>
+                    <td className="px-3 py-3"><Mono color={accrual.settlementId ? "green" : "dim"}>{shortId(accrual.settlementId)}</Mono></td>
+                    <td className="px-4 py-3 text-xs text-zinc-500">{formatDateTime(accrual.createdAt)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
 
       <SurfaceCard noPadding>
         <div className="border-b border-zinc-200 px-4 py-3">

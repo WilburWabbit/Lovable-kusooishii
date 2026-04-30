@@ -5,6 +5,8 @@ export const operationsKeys = {
   all: ["v2", "operations"] as const,
   reconciliation: ["v2", "operations", "reconciliation"] as const,
   postingIntents: ["v2", "operations", "posting-intents"] as const,
+  blueBellStatement: ["v2", "operations", "blue-bell-statement"] as const,
+  blueBellAccruals: ["v2", "operations", "blue-bell-accruals"] as const,
 };
 
 export interface ReconciliationInboxCase {
@@ -44,6 +46,31 @@ export interface PostingIntentRow {
   postedAt: string | null;
 }
 
+export interface BlueBellStatementRow {
+  periodStart: string;
+  periodEnd: string;
+  qualifyingOrderCount: number;
+  basisAmount: number;
+  discountAmount: number;
+  commissionAccrued: number;
+  commissionReversed: number;
+  commissionSettled: number;
+  commissionOutstanding: number;
+}
+
+export interface BlueBellAccrualRow {
+  id: string;
+  salesOrderId: string;
+  orderNumber: string | null;
+  status: string;
+  basisAmount: number;
+  discountAmount: number;
+  commissionAmount: number;
+  reversedAmount: number;
+  settlementId: string | null;
+  createdAt: string;
+}
+
 const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   id: row.id as string,
   caseType: row.case_type as string,
@@ -81,6 +108,35 @@ const mapPostingIntent = (row: Record<string, unknown>): PostingIntentRow => ({
   postedAt: (row.posted_at as string | null) ?? null,
 });
 
+const mapBlueBellStatement = (row: Record<string, unknown>): BlueBellStatementRow => ({
+  periodStart: row.period_start as string,
+  periodEnd: row.period_end as string,
+  qualifyingOrderCount: Number(row.qualifying_order_count ?? 0),
+  basisAmount: Number(row.basis_amount ?? 0),
+  discountAmount: Number(row.discount_amount ?? 0),
+  commissionAccrued: Number(row.commission_accrued ?? 0),
+  commissionReversed: Number(row.commission_reversed ?? 0),
+  commissionSettled: Number(row.commission_settled ?? 0),
+  commissionOutstanding: Number(row.commission_outstanding ?? 0),
+});
+
+const mapBlueBellAccrual = (row: Record<string, unknown>): BlueBellAccrualRow => {
+  const order = row.sales_order as Record<string, unknown> | null;
+
+  return {
+    id: row.id as string,
+    salesOrderId: row.sales_order_id as string,
+    orderNumber: (order?.order_number as string | null) ?? null,
+    status: row.status as string,
+    basisAmount: Number(row.basis_amount ?? 0),
+    discountAmount: Number(row.discount_amount ?? 0),
+    commissionAmount: Number(row.commission_amount ?? 0),
+    reversedAmount: Number(row.reversed_amount ?? 0),
+    settlementId: (row.settlement_id as string | null) ?? null,
+    createdAt: row.created_at as string,
+  };
+};
+
 export function useReconciliationInbox() {
   return useQuery({
     queryKey: operationsKeys.reconciliation,
@@ -109,6 +165,61 @@ export function usePostingIntents() {
 
       if (error) throw error;
       return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapPostingIntent);
+    },
+  });
+}
+
+export function useBlueBellStatement() {
+  return useQuery({
+    queryKey: operationsKeys.blueBellStatement,
+    queryFn: async (): Promise<BlueBellStatementRow[]> => {
+      const { data, error } = await supabase
+        .from("v_blue_bell_statement" as never)
+        .select("*")
+        .order("period_start" as never, { ascending: false })
+        .limit(24);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapBlueBellStatement);
+    },
+  });
+}
+
+export function useBlueBellOpenAccruals() {
+  return useQuery({
+    queryKey: operationsKeys.blueBellAccruals,
+    queryFn: async (): Promise<BlueBellAccrualRow[]> => {
+      const { data: program, error: programError } = await supabase
+        .from("sales_program" as never)
+        .select("id")
+        .eq("program_code" as never, "blue_bell")
+        .maybeSingle();
+
+      if (programError) throw programError;
+      const programId = (program as unknown as Record<string, unknown> | null)?.id as string | undefined;
+      if (!programId) return [];
+
+      const { data, error } = await supabase
+        .from("sales_program_accrual" as never)
+        .select(`
+          id,
+          sales_order_id,
+          status,
+          basis_amount,
+          discount_amount,
+          commission_amount,
+          reversed_amount,
+          settlement_id,
+          created_at,
+          sales_order:sales_order_id(order_number)
+        `)
+        .eq("sales_program_id" as never, programId)
+        .in("status" as never, ["open", "partially_settled"])
+        .order("created_at" as never, { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapBlueBellAccrual);
     },
   });
 }
@@ -149,6 +260,29 @@ export function useRunPostingIntentProcessor() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useCreateBlueBellSettlement() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ periodStart, periodEnd }: { periodStart: string; periodEnd: string }) => {
+      const { data, error } = await supabase.rpc("create_sales_program_settlement" as never, {
+        p_program_code: "blue_bell",
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_notes: "Created from Operations dashboard",
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellStatement });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellAccruals });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
     },
   });
