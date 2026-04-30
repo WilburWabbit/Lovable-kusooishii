@@ -24,6 +24,9 @@ export interface ReconciliationInboxCase {
   relatedEntityId: string | null;
   suspectedRootCause: string | null;
   recommendedAction: string | null;
+  diagnosis: string | null;
+  nextStep: string | null;
+  evidence: Record<string, unknown>;
   amountExpected: number | null;
   amountActual: number | null;
   varianceAmount: number | null;
@@ -117,6 +120,9 @@ const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   relatedEntityId: (row.related_entity_id as string | null) ?? null,
   suspectedRootCause: (row.suspected_root_cause as string | null) ?? null,
   recommendedAction: (row.recommended_action as string | null) ?? null,
+  diagnosis: (row.diagnosis as string | null) ?? null,
+  nextStep: (row.next_step as string | null) ?? null,
+  evidence: ((row.evidence as Record<string, unknown> | null) ?? {}),
   amountExpected: row.amount_expected == null ? null : Number(row.amount_expected),
   amountActual: row.amount_actual == null ? null : Number(row.amount_actual),
   varianceAmount: row.variance_amount == null ? null : Number(row.variance_amount),
@@ -124,6 +130,61 @@ const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   createdAt: row.created_at as string,
   updatedAt: row.updated_at as string,
 });
+
+type OperationsExportKind =
+  | "settlement-close"
+  | "blue-bell-statement"
+  | "reconciliation-cases"
+  | "margin-profit";
+
+const exportConfig: Record<OperationsExportKind, { view: string; filename: string; orderBy: string }> = {
+  "settlement-close": {
+    view: "v_settlement_close_export",
+    filename: "settlement-close-export",
+    orderBy: "period_start",
+  },
+  "blue-bell-statement": {
+    view: "v_blue_bell_monthly_statement_export",
+    filename: "blue-bell-monthly-statement",
+    orderBy: "period_start",
+  },
+  "reconciliation-cases": {
+    view: "v_reconciliation_case_export",
+    filename: "reconciliation-case-export",
+    orderBy: "created_at",
+  },
+  "margin-profit": {
+    view: "v_margin_profit_report",
+    filename: "margin-profit-report",
+    orderBy: "order_date",
+  },
+};
+
+function csvValue(value: unknown): string {
+  if (value == null) return "";
+  const raw = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+}
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return "";
+  const headers = Object.keys(rows[0]);
+  const body = rows.map((row) => headers.map((header) => csvValue(row[header])).join(","));
+  return [headers.join(","), ...body].join("\n");
+}
+
+function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
+  const csv = toCsv(rows);
+  const blob = new Blob([csv ? `\uFEFF${csv}` : ""], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 const mapPostingIntent = (row: Record<string, unknown>): PostingIntentRow => ({
   id: row.id as string,
@@ -580,6 +641,24 @@ export function useCreateBlueBellSettlement() {
       queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellStatement });
       queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellAccruals });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useOperationsExport() {
+  return useMutation({
+    mutationFn: async (kind: OperationsExportKind) => {
+      const config = exportConfig[kind];
+      const { data, error } = await supabase
+        .from(config.view as never)
+        .select("*")
+        .order(config.orderBy as never, { ascending: false })
+        .limit(5000);
+
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
+      downloadCsv(config.filename, rows);
+      return rows.length;
     },
   });
 }
