@@ -553,13 +553,43 @@ Deno.serve(async (req) => {
       const { sku_id } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
 
-      const { error: dErr } = await admin
+      const { data: listings, error: lookupErr } = await admin
         .from("channel_listing")
-        .delete()
+        .select("id")
         .eq("sku_id", sku_id)
         .eq("channel", "web");
-      if (dErr) throw dErr;
-      result = { success: true };
+
+      if (lookupErr) throw lookupErr;
+
+      const listingIds = ((listings ?? []) as Array<{ id: string }>).map((listing) => listing.id);
+      if (listingIds.length === 0) {
+        result = { success: true, ended: 0, command_ids: [] };
+      } else {
+        const endedAt = new Date().toISOString();
+        const { error: updateErr } = await admin
+          .from("channel_listing")
+          .update({
+            listed_quantity: 0,
+            offer_status: "ENDED",
+            v2_status: "ended",
+            synced_at: endedAt,
+          } as never)
+          .in("id", listingIds);
+
+        if (updateErr) throw updateErr;
+
+        const commandIds: string[] = [];
+        for (const listingId of listingIds) {
+          const { data: commandId, error: commandErr } = await admin.rpc("queue_listing_command", {
+            p_channel_listing_id: listingId,
+            p_command_type: "end",
+          });
+          if (commandErr) throw commandErr;
+          if (commandId) commandIds.push(commandId);
+        }
+
+        result = { success: true, ended: listingIds.length, command_ids: commandIds };
+      }
 
     /* ── Media CRUD ── */
 
