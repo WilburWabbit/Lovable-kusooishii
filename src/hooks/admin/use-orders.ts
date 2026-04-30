@@ -52,7 +52,7 @@ function mapOrder(row: Record<string, unknown>, blueBellOrderIds?: Set<string>):
     carrier: (row.shipped_via as string) ?? null,
     trackingNumber: (row.tracking_number as string) ?? null,
     shippingCost: (row.shipping_total as number) ?? null,
-    blueBellClub: programAttributed || ((row.blue_bell_club as boolean) ?? false),
+    blueBellClub: programAttributed,
     docNumber: (row.doc_number as string) ?? null,
     qboSalesReceiptId: (row.qbo_sales_receipt_id as string) ?? null,
     qboSyncStatus: (row.qbo_sync_status as QBOSyncStatus) ?? 'pending',
@@ -140,7 +140,7 @@ function mapLineItem(
     sku: sku ? (sku.sku_code as string) : null,
     name: sku ? ((sku.name as string) ?? null) : null,
     unitPrice,
-    cogs: ((source.cogs_amount as number) ?? (row.cogs_amount as number) ?? (row.cogs as number)) ?? null,
+    cogs: ((source.cogs_amount as number) ?? (row.cogs_amount as number)) ?? null,
     vatRate: ratePct,
     lineVat,
     costingMethod: (source.costing_method as string) ?? null,
@@ -194,7 +194,7 @@ export function useOrders() {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
+            id, sales_order_id, stock_unit_id, unit_price, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )
@@ -253,7 +253,7 @@ export function useOrder(orderId: string | undefined) {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
+            id, sales_order_id, stock_unit_id, unit_price, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )

@@ -133,7 +133,7 @@ serve(async (req) => {
     const { data: skuRows, error: skuError } = await adminClient
       .from("sku")
       .select(
-        "id, sku_code, price, name, condition_grade, product:product_id(mpn, name, img_url)"
+        "id, sku_code, name, condition_grade, product:product_id(mpn, name, img_url)"
       )
       .in("id", skuIds)
       .eq("active_flag", true)
@@ -149,13 +149,36 @@ serve(async (req) => {
       skuMap.set(row.id, row);
     }
 
+    const { data: pricingRows, error: pricingError } = await adminClient
+      .from("v_current_sku_pricing")
+      .select("sku_id, current_price, channel")
+      .in("sku_id", skuIds);
+
+    if (pricingError) {
+      throw new Error("Failed to look up product pricing");
+    }
+
+    const priceBySku = new Map<string, number>();
+    const priceRank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
+    const rankedBySku = new Map<string, number>();
+    for (const row of (pricingRows ?? []) as Record<string, unknown>[]) {
+      const skuId = row.sku_id as string;
+      const price = Number(row.current_price ?? 0);
+      const rank = priceRank(row.channel);
+      if (price <= 0) continue;
+      if (!rankedBySku.has(skuId) || rank > (rankedBySku.get(skuId) ?? 0)) {
+        priceBySku.set(skuId, price);
+        rankedBySku.set(skuId, rank);
+      }
+    }
+
     // Validate every requested item exists and has a price
     for (const item of validatedItems) {
       const sku = skuMap.get(item.skuId);
       if (!sku) {
         throw new Error(`Product not found or unavailable: ${item.skuId}`);
       }
-      if (sku.price == null || sku.price <= 0) {
+      if ((priceBySku.get(item.skuId) ?? 0) <= 0) {
         throw new Error(`Product has no valid price: ${item.skuId}`);
       }
     }
@@ -174,7 +197,7 @@ serve(async (req) => {
     for (const item of validatedItems) {
       const sku = skuMap.get(item.skuId)!;
       const product = sku.product as any;
-      const unitPrice = Number(sku.price);
+      const unitPrice = priceBySku.get(item.skuId)!;
       merchandiseSubtotal += unitPrice * item.quantity;
 
       const primaryImage = product?.img_url;
