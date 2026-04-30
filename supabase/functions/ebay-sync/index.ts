@@ -881,16 +881,16 @@ Deno.serve(async (req) => {
     }
 
     /* ═══════════════════════════════════════════════
-       CREATE LISTING — inventory item → offer → publish
+       CREATE LISTING — queue app-owned listing command
        ═══════════════════════════════════════════════ */
     if (action === "create_listing") {
-      const { sku_id, listing_title, listing_description } = body;
+      const { sku_id, listing_title, listing_description, listed_price } = body;
       if (!sku_id) throw new Error("sku_id is required");
 
       // Fetch SKU + product data
       const { data: sku, error: skuErr } = await admin
         .from("sku")
-        .select("id, sku_code, condition_grade, price, name, product:product_id(id, mpn, name, description, img_url, weight_kg, length_cm, width_cm, height_cm)")
+        .select("id, sku_code, price, name, product:product_id(id, mpn, name, description)")
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new Error("SKU not found");
@@ -903,155 +903,55 @@ Deno.serve(async (req) => {
         .eq("sku_id", sku_id)
         .eq("status", "available");
 
-      const conditionMap: Record<string, string> = {
-        "1": "NEW", "2": "LIKE_NEW", "3": "VERY_GOOD", "4": "GOOD", "5": "ACCEPTABLE",
-      };
-      const ebayCondition = conditionMap[sku.condition_grade] || "LIKE_NEW";
-
       const title = listing_title || prod?.name || sku.name || `LEGO ${prod?.mpn}`;
       const desc = listing_description || prod?.description || title;
 
-      // Resolve image URLs from product_media only
-      let imageUrls: string[] = [];
-      if (prod?.id) {
-        const { data: mediaRows } = await admin
-          .from("product_media")
-          .select("media_asset:media_asset_id(original_url)")
-          .eq("product_id", prod.id)
-          .order("sort_order")
-          .limit(12);
-        imageUrls = (mediaRows || [])
-          .map((r: any) => r.media_asset?.original_url)
-          .filter(Boolean);
+      const finalPrice = typeof listed_price === "number" && listed_price > 0
+        ? listed_price
+        : sku.price;
+      if (!finalPrice || finalPrice <= 0) {
+        throw new Error(`Cannot queue eBay listing for ${sku.sku_code}: no valid listing price`);
       }
 
-      if (imageUrls.length === 0) {
-        throw new Error(`Cannot publish ${sku.sku_code}: no images found in product_media. Add at least one image first.`);
-      }
-
-      // Step 1: PUT inventory item
-      const inventoryBody: any = {
-        product: {
-          title: title.substring(0, 80),
-          description: desc,
-          aspects: { Brand: ["LEGO"], MPN: [prod?.mpn || "N/A"] },
-          imageUrls,
-        },
-        condition: ebayCondition,
-        availability: {
-          shipToLocationAvailability: { quantity: stockCount || 0 },
-        },
-      };
-      if (prod?.weight_kg) {
-        inventoryBody.packageWeightAndSize = {
-          weight: { value: prod.weight_kg, unit: "KILOGRAM" },
-          dimensions: prod.length_cm ? {
-            length: { value: prod.length_cm, unit: "CENTIMETER" },
-            width: { value: prod.width_cm || 0, unit: "CENTIMETER" },
-            height: { value: prod.height_cm || 0, unit: "CENTIMETER" },
-          } : undefined,
-        };
-      }
-
-      await ebayFetch(accessToken, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku.sku_code)}`, {
-        method: "PUT",
-        body: JSON.stringify(inventoryBody),
-      });
-      console.log(`Inventory item created/updated: ${sku.sku_code}`);
-
-      // Step 1.5: Fetch business policies for listing
-      const [fulfillmentRes, paymentRes, returnRes] = await Promise.all([
-        ebayFetch(accessToken, `/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_GB`),
-        ebayFetch(accessToken, `/sell/account/v1/payment_policy?marketplace_id=EBAY_GB`),
-        ebayFetch(accessToken, `/sell/account/v1/return_policy?marketplace_id=EBAY_GB`),
-      ]);
-
-      const fulfillmentPolicyId = fulfillmentRes?.fulfillmentPolicies?.[0]?.fulfillmentPolicyId;
-      const paymentPolicyId = paymentRes?.paymentPolicies?.[0]?.paymentPolicyId;
-      const returnPolicyId = returnRes?.returnPolicies?.[0]?.returnPolicyId;
-
-      if (!fulfillmentPolicyId || !paymentPolicyId || !returnPolicyId) {
-        throw new Error(
-          `eBay business policies missing. Found: fulfillment=${!!fulfillmentPolicyId}, payment=${!!paymentPolicyId}, return=${!!returnPolicyId}. Configure policies in eBay Seller Hub first.`
-        );
-      }
-
-      // Step 2: POST offer
-      const offerBody = {
-        sku: sku.sku_code,
-        marketplaceId: "EBAY_GB",
-        format: "FIXED_PRICE",
-        listingDescription: desc,
-        availableQuantity: stockCount || 0,
-        pricingSummary: {
-          price: { value: String(sku.price ?? 0), currency: "GBP" },
-        },
-        merchantLocationKey: "brookville",
-        categoryId: "19006", // LEGO sets category
-        listingPolicies: {
-          fulfillmentPolicyId,
-          paymentPolicyId,
-          returnPolicyId,
-        },
-      };
-
-      let offerId: string | null = null;
-      let listingId: string | null = null;
-
-      // Check if an offer already exists for this SKU
-      try {
-        const existingOffers = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku.sku_code)}&limit=10`);
-        const existing = (existingOffers?.offers || [])[0];
-        if (existing) {
-          offerId = existing.offerId;
-          listingId = existing.listing?.listingId ?? null;
-          console.log(`Existing offer found: ${offerId}`);
-        }
-      } catch { /* no existing offer */ }
-
-      if (!offerId) {
-        const offerRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer`, {
-          method: "POST",
-          body: JSON.stringify(offerBody),
-        });
-        offerId = offerRes?.offerId;
-        console.log(`Offer created: ${offerId}`);
-      }
-
-      // Step 3: Publish offer
-      if (offerId && !listingId) {
-        const publishRes = await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offerId}/publish`, {
-          method: "POST",
-        });
-        listingId = publishRes?.listingId ?? null;
-        console.log(`Offer published, listing: ${listingId}`);
-      }
-
-      // Upsert channel_listing
-      await admin.from("channel_listing").upsert(
+      const { data: listing, error: listingErr } = await admin.from("channel_listing").upsert(
         {
           channel: "ebay",
           external_sku: sku.sku_code,
           sku_id: sku.id,
-          external_listing_id: listingId,
-          listed_price: sku.price,
+          listed_price: finalPrice,
           listed_quantity: stockCount || 0,
           listing_title: title,
           listing_description: desc,
-          offer_status: listingId ? "PUBLISHED" : "PENDING",
+          offer_status: "PUBLISH_QUEUED",
+          v2_status: "draft",
           synced_at: new Date().toISOString(),
         },
         { onConflict: "channel,external_sku", ignoreDuplicates: false }
-      );
+      ).select("id").single();
+      if (listingErr) throw listingErr;
+
+      const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+        p_sku_id: sku.id,
+        p_channel: "ebay",
+        p_channel_listing_id: listing.id,
+        p_candidate_price: finalPrice,
+      });
+      if (snapshotErr) throw snapshotErr;
+
+      const { data: commandId, error: commandErr } = await admin.rpc("queue_listing_command", {
+        p_channel_listing_id: listing.id,
+        p_command_type: "publish",
+      });
+      if (commandErr) throw commandErr;
 
       return new Response(
-        JSON.stringify({ success: true, offerId, listingId }),
+        JSON.stringify({ success: true, queued: true, listingId: listing.id, commandId }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     /* ═══════════════════════════════════════════════
-       REMOVE LISTING — withdraw offer and delete channel_listing
+       REMOVE LISTING — queue app-owned end command
        ═══════════════════════════════════════════════ */
     if (action === "remove_listing") {
       const skuId = body.sku_id;
@@ -1068,28 +968,23 @@ Deno.serve(async (req) => {
       if (listErr) throw new Error(`Failed to look up listing: ${listErr.message}`);
       if (!listing) throw new Error("No eBay listing found for this SKU");
 
-      // Try to withdraw the offer on eBay
-      if (listing.external_sku) {
-        try {
-          const existingOffers = await ebayFetch(accessToken, `/sell/inventory/v1/offer?sku=${encodeURIComponent(listing.external_sku)}&limit=10`);
-          const offer = (existingOffers?.offers || [])[0];
-          if (offer?.offerId) {
-            // Withdraw the offer (ends the listing)
-            await ebayFetch(accessToken, `/sell/inventory/v1/offer/${offer.offerId}/withdraw`, {
-              method: "POST",
-            });
-            console.log(`Offer ${offer.offerId} withdrawn`);
-          }
-        } catch (e: any) {
-          console.warn(`Could not withdraw eBay offer: ${e.message}`);
-        }
-      }
+      await admin
+        .from("channel_listing")
+        .update({
+          listed_quantity: 0,
+          offer_status: "END_QUEUED",
+          synced_at: new Date().toISOString(),
+        })
+        .eq("id", listing.id);
 
-      // Delete the channel_listing row
-      await admin.from("channel_listing").delete().eq("id", listing.id);
+      const { data: commandId, error: commandErr } = await admin.rpc("queue_listing_command", {
+        p_channel_listing_id: listing.id,
+        p_command_type: "end",
+      });
+      if (commandErr) throw commandErr;
 
       return new Response(
-        JSON.stringify({ success: true }),
+        JSON.stringify({ success: true, queued: true, listingId: listing.id, commandId }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

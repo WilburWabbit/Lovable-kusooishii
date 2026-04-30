@@ -13,10 +13,12 @@ import {
   fetchWithTimeout,
   jsonResponse,
 } from "../_shared/qbo-helpers.ts";
+import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 
 const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 50;
 const MAX_RETRY_COUNT = 5;
+const EBAY_API = "https://api.ebay.com";
 
 type ListingCommand = {
   id: string;
@@ -115,13 +117,92 @@ async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>
   };
 }
 
-async function processEbayCommand(command: ListingCommand): Promise<Record<string, unknown>> {
+async function ebayApiFetch(token: string, path: string, options: RequestInit = {}): Promise<Record<string, unknown> | null> {
+  const res = await fetchWithTimeout(`${EBAY_API}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "en-GB",
+      "Accept-Language": "en-GB",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
+      ...(options.headers || {}),
+    },
+  }, 60_000);
+
+  const payload = await parseJsonResponse(res);
+  if (!res.ok) {
+    throw new Error(String(payload.error ?? payload.message ?? payload.raw_response ?? `eBay API failed [${res.status}] ${path}`));
+  }
+  return payload;
+}
+
+async function processEbayEndCommand(
+  admin: ReturnType<typeof createAdminClient>,
+  command: ListingCommand,
+): Promise<Record<string, unknown>> {
+  if (!command.entity_id) {
+    throw new Error("eBay end command must target a channel_listing");
+  }
+
+  const { data: listing, error } = await admin
+    .from("channel_listing")
+    .select("id, external_listing_id, external_sku")
+    .eq("id" as never, command.entity_id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!listing) throw new Error(`channel_listing ${command.entity_id} not found`);
+
+  const offerId = (listing as Record<string, unknown>).external_listing_id as string | null;
+  if (offerId) {
+    const token = await getEbayAccessToken(admin);
+    try {
+      await ebayApiFetch(token, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, {
+        method: "POST",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const alreadyEnded =
+        /\[404\]|not\s+found|already\s+(ended|withdrawn)|not\s+published|not\s+active/i.test(message);
+      if (!alreadyEnded) throw err;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const { error: updateErr } = await admin
+    .from("channel_listing")
+    .update({
+      offer_status: "ENDED",
+      v2_status: "ended",
+      listed_quantity: 0,
+      synced_at: now,
+    } as never)
+    .eq("id" as never, command.entity_id);
+
+  if (updateErr) throw updateErr;
+
+  return {
+    channel_listing_id: command.entity_id,
+    offer_id: offerId,
+    ended_on_ebay: Boolean(offerId),
+  };
+}
+
+async function processEbayCommand(
+  admin: ReturnType<typeof createAdminClient>,
+  command: ListingCommand,
+): Promise<Record<string, unknown>> {
   if (command.entity_type !== "channel_listing" || !command.entity_id) {
     throw new Error("eBay listing command must target a channel_listing");
   }
 
-  if (!["publish", "reprice", "update_price"].includes(command.command_type)) {
+  if (!["publish", "reprice", "update_price", "end"].includes(command.command_type)) {
     throw new Error(`Unsupported eBay listing command ${command.command_type}`);
+  }
+
+  if (command.command_type === "end") {
+    return processEbayEndCommand(admin, command);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -156,7 +237,7 @@ async function processCommand(
 
   const target = normalizeTarget(command.target_system);
   if (target === "web") return acknowledgeWebCommand(admin, command);
-  if (target === "ebay") return processEbayCommand(command);
+  if (target === "ebay") return processEbayCommand(admin, command);
 
   throw new Error(
     `Listing command target '${command.target_system}' is not implemented yet. ` +
