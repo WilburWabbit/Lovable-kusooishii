@@ -14,6 +14,196 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounting_event: {
+        Row: {
+          amount: number
+          created_at: string
+          credit_account_purpose: string | null
+          currency: string
+          debit_account_purpose: string | null
+          entity_id: string | null
+          entity_type: string
+          event_type: string
+          id: string
+          idempotency_key: string
+          metadata: Json
+          occurred_at: string
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          source: string
+          status: string
+          stock_unit_id: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          credit_account_purpose?: string | null
+          currency?: string
+          debit_account_purpose?: string | null
+          entity_id?: string | null
+          entity_type: string
+          event_type: string
+          id?: string
+          idempotency_key: string
+          metadata?: Json
+          occurred_at?: string
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          source?: string
+          status?: string
+          stock_unit_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          credit_account_purpose?: string | null
+          currency?: string
+          debit_account_purpose?: string | null
+          entity_id?: string | null
+          entity_type?: string
+          event_type?: string
+          id?: string
+          idempotency_key?: string
+          metadata?: Json
+          occurred_at?: string
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          source?: string
+          status?: string
+          stock_unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounting_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+        ]
+      }
+      actual_settlement_line: {
+        Row: {
+          amount: number
+          category: string
+          created_at: string
+          currency: string
+          external_reference: string | null
+          id: string
+          idempotency_key: string
+          metadata: Json
+          occurred_at: string | null
+          payout_fee_id: string | null
+          payout_id: string | null
+          qbo_posting_reference_id: string | null
+          sales_order_id: string | null
+          source_system: string
+        }
+        Insert: {
+          amount: number
+          category: string
+          created_at?: string
+          currency?: string
+          external_reference?: string | null
+          id?: string
+          idempotency_key: string
+          metadata?: Json
+          occurred_at?: string | null
+          payout_fee_id?: string | null
+          payout_id?: string | null
+          qbo_posting_reference_id?: string | null
+          sales_order_id?: string | null
+          source_system: string
+        }
+        Update: {
+          amount?: number
+          category?: string
+          created_at?: string
+          currency?: string
+          external_reference?: string | null
+          id?: string
+          idempotency_key?: string
+          metadata?: Json
+          occurred_at?: string | null
+          payout_fee_id?: string | null
+          payout_id?: string | null
+          qbo_posting_reference_id?: string | null
+          sales_order_id?: string | null
+          source_system?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "actual_settlement_line_payout_fee_id_fkey"
+            columns: ["payout_fee_id"]
+            isOneToOne: false
+            referencedRelation: "payout_fee"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_qbo_posting_reference_id_fkey"
+            columns: ["qbo_posting_reference_id"]
+            isOneToOne: false
+            referencedRelation: "qbo_posting_reference"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_settings: {
         Row: {
           id: string
@@ -851,6 +1041,7 @@ export type Database = {
           channel: string
           confidence_score: number | null
           created_at: string
+          current_price_decision_snapshot_id: string | null
           estimated_fees: number | null
           estimated_net: number | null
           external_listing_id: string | null
@@ -882,6 +1073,7 @@ export type Database = {
           channel?: string
           confidence_score?: number | null
           created_at?: string
+          current_price_decision_snapshot_id?: string | null
           estimated_fees?: number | null
           estimated_net?: number | null
           external_listing_id?: string | null
@@ -913,6 +1105,7 @@ export type Database = {
           channel?: string
           confidence_score?: number | null
           created_at?: string
+          current_price_decision_snapshot_id?: string | null
           estimated_fees?: number | null
           estimated_net?: number | null
           external_listing_id?: string | null
@@ -942,6 +1135,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "channel_listing_current_price_decision_snapshot_id_fkey"
+            columns: ["current_price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "price_decision_snapshot"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "channel_listing_sku_id_fkey"
             columns: ["sku_id"]
             isOneToOne: false
@@ -953,6 +1153,75 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_listing_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      channel_price_policy: {
+        Row: {
+          active: boolean
+          advertising_fee_rate: number
+          channel: string
+          created_at: string
+          default_delivery_cost: number
+          default_packaging_cost: number
+          fixed_fee_amount: number
+          id: string
+          marketplace_fee_rate: number
+          metadata: Json
+          minimum_margin_rate: number | null
+          minimum_profit_amount: number | null
+          payment_fee_rate: number
+          price_policy_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          advertising_fee_rate?: number
+          channel: string
+          created_at?: string
+          default_delivery_cost?: number
+          default_packaging_cost?: number
+          fixed_fee_amount?: number
+          id?: string
+          marketplace_fee_rate?: number
+          metadata?: Json
+          minimum_margin_rate?: number | null
+          minimum_profit_amount?: number | null
+          payment_fee_rate?: number
+          price_policy_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          advertising_fee_rate?: number
+          channel?: string
+          created_at?: string
+          default_delivery_cost?: number
+          default_packaging_cost?: number
+          fixed_fee_amount?: number
+          id?: string
+          marketplace_fee_rate?: number
+          metadata?: Json
+          minimum_margin_rate?: number | null
+          minimum_profit_amount?: number | null
+          payment_fee_rate?: number
+          price_policy_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_price_policy_price_policy_id_fkey"
+            columns: ["price_policy_id"]
+            isOneToOne: false
+            referencedRelation: "price_policy"
             referencedColumns: ["id"]
           },
         ]
@@ -1520,6 +1789,87 @@ export type Database = {
           used_at?: string | null
         }
         Relationships: []
+      }
+      expected_settlement_line: {
+        Row: {
+          amount: number
+          category: string
+          confidence: string
+          created_at: string
+          currency: string
+          id: string
+          idempotency_key: string
+          metadata: Json
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          sales_program_accrual_id: string | null
+          source: string
+        }
+        Insert: {
+          amount: number
+          category: string
+          confidence?: string
+          created_at?: string
+          currency?: string
+          id?: string
+          idempotency_key: string
+          metadata?: Json
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          sales_program_accrual_id?: string | null
+          source?: string
+        }
+        Update: {
+          amount?: number
+          category?: string
+          confidence?: string
+          created_at?: string
+          currency?: string
+          id?: string
+          idempotency_key?: string
+          metadata?: Json
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          sales_program_accrual_id?: string | null
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_program_accrual_id_fkey"
+            columns: ["sales_program_accrual_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_accrual"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       google_merchant_connection: {
         Row: {
@@ -2324,6 +2674,240 @@ export type Database = {
           },
         ]
       }
+      market_price_snapshot: {
+        Row: {
+          captured_at: string
+          channel: string | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          confidence_score: number
+          created_at: string
+          currency: string
+          freshness_score: number | null
+          id: string
+          metadata: Json
+          mpn: string | null
+          price: number
+          price_high: number | null
+          price_low: number | null
+          raw_landing_id: string | null
+          raw_landing_table: string | null
+          sample_size: number | null
+          sku_id: string | null
+          source_id: string
+          vat_treatment: string
+        }
+        Insert: {
+          captured_at?: string
+          channel?: string | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          confidence_score?: number
+          created_at?: string
+          currency?: string
+          freshness_score?: number | null
+          id?: string
+          metadata?: Json
+          mpn?: string | null
+          price: number
+          price_high?: number | null
+          price_low?: number | null
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          sample_size?: number | null
+          sku_id?: string | null
+          source_id: string
+          vat_treatment?: string
+        }
+        Update: {
+          captured_at?: string
+          channel?: string | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          confidence_score?: number
+          created_at?: string
+          currency?: string
+          freshness_score?: number | null
+          id?: string
+          metadata?: Json
+          mpn?: string | null
+          price?: number
+          price_high?: number | null
+          price_low?: number | null
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          sample_size?: number | null
+          sku_id?: string | null
+          source_id?: string
+          vat_treatment?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_price_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_price_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_price_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "market_price_snapshot_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "market_signal_source"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_signal: {
+        Row: {
+          channel: string | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          created_at: string
+          freshness_score: number | null
+          id: string
+          metadata: Json
+          mpn: string | null
+          observed_at: string
+          observed_price: number | null
+          observed_price_max: number | null
+          observed_price_min: number | null
+          raw_landing_id: string | null
+          raw_landing_table: string | null
+          sample_size: number | null
+          signal_type: string
+          sku_id: string | null
+          source_confidence: number
+          source_id: string
+          vat_treatment: string
+        }
+        Insert: {
+          channel?: string | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          created_at?: string
+          freshness_score?: number | null
+          id?: string
+          metadata?: Json
+          mpn?: string | null
+          observed_at?: string
+          observed_price?: number | null
+          observed_price_max?: number | null
+          observed_price_min?: number | null
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          sample_size?: number | null
+          signal_type: string
+          sku_id?: string | null
+          source_confidence?: number
+          source_id: string
+          vat_treatment?: string
+        }
+        Update: {
+          channel?: string | null
+          condition_grade?:
+            | Database["public"]["Enums"]["condition_grade"]
+            | null
+          created_at?: string
+          freshness_score?: number | null
+          id?: string
+          metadata?: Json
+          mpn?: string | null
+          observed_at?: string
+          observed_price?: number | null
+          observed_price_max?: number | null
+          observed_price_min?: number | null
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          sample_size?: number | null
+          signal_type?: string
+          sku_id?: string | null
+          source_confidence?: number
+          source_id?: string
+          vat_treatment?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_signal_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_signal_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_signal_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "market_signal_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "market_signal_source"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_signal_source: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          metadata: Json
+          name: string
+          rate_limit_per_day: number | null
+          source_code: string
+          source_type: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          metadata?: Json
+          name: string
+          rate_limit_per_day?: number | null
+          source_code: string
+          source_type?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          metadata?: Json
+          name?: string
+          rate_limit_per_day?: number | null
+          source_code?: string
+          source_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       media_asset: {
         Row: {
           alt_text: string | null
@@ -2455,6 +3039,60 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      outbound_command: {
+        Row: {
+          command_type: string
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          id: string
+          idempotency_key: string
+          last_error: string | null
+          next_attempt_at: string | null
+          payload: Json
+          response_payload: Json | null
+          retry_count: number
+          sent_at: string | null
+          status: string
+          target_system: string
+          updated_at: string
+        }
+        Insert: {
+          command_type: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          idempotency_key: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          response_payload?: Json | null
+          retry_count?: number
+          sent_at?: string | null
+          status?: string
+          target_system: string
+          updated_at?: string
+        }
+        Update: {
+          command_type?: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          idempotency_key?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          response_payload?: Json | null
+          retry_count?: number
+          sent_at?: string | null
+          status?: string
+          target_system?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       payout_fee: {
         Row: {
@@ -2684,6 +3322,63 @@ export type Database = {
         }
         Relationships: []
       }
+      posting_intent: {
+        Row: {
+          action: string
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          id: string
+          idempotency_key: string
+          last_error: string | null
+          next_attempt_at: string | null
+          payload: Json
+          posted_at: string | null
+          qbo_reference_id: string | null
+          response_payload: Json | null
+          retry_count: number
+          status: string
+          target_system: string
+          updated_at: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          idempotency_key: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          posted_at?: string | null
+          qbo_reference_id?: string | null
+          response_payload?: Json | null
+          retry_count?: number
+          status?: string
+          target_system?: string
+          updated_at?: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          idempotency_key?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          posted_at?: string | null
+          qbo_reference_id?: string | null
+          response_payload?: Json | null
+          retry_count?: number
+          status?: string
+          target_system?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       price_audit_log: {
         Row: {
           created_at: string
@@ -2728,6 +3423,371 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_audit_log_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      price_decision_snapshot: {
+        Row: {
+          blocking_reasons: Json
+          calculation_version: string
+          candidate_price: number | null
+          carrying_value_basis: number
+          ceiling_price: number | null
+          channel: string
+          channel_listing_id: string | null
+          channel_price_policy_id: string | null
+          confidence_score: number
+          created_at: string
+          created_by: string | null
+          currency: string
+          current_price: number | null
+          delivery_cost: number
+          estimated_fees: number
+          estimated_program_commission: number
+          estimated_program_discount: number
+          expected_gross: number
+          expected_margin_amount: number | null
+          expected_margin_rate: number | null
+          expected_net_before_cogs: number
+          floor_price: number | null
+          freshness_score: number | null
+          id: string
+          inputs: Json
+          market_consensus_price: number | null
+          override_required: boolean
+          packaging_cost: number
+          price_policy_id: string | null
+          recommendation: string
+          sales_program_id: string | null
+          sku_id: string
+          source_divergence_score: number | null
+          target_price: number | null
+        }
+        Insert: {
+          blocking_reasons?: Json
+          calculation_version?: string
+          candidate_price?: number | null
+          carrying_value_basis?: number
+          ceiling_price?: number | null
+          channel: string
+          channel_listing_id?: string | null
+          channel_price_policy_id?: string | null
+          confidence_score?: number
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          current_price?: number | null
+          delivery_cost?: number
+          estimated_fees?: number
+          estimated_program_commission?: number
+          estimated_program_discount?: number
+          expected_gross?: number
+          expected_margin_amount?: number | null
+          expected_margin_rate?: number | null
+          expected_net_before_cogs?: number
+          floor_price?: number | null
+          freshness_score?: number | null
+          id?: string
+          inputs?: Json
+          market_consensus_price?: number | null
+          override_required?: boolean
+          packaging_cost?: number
+          price_policy_id?: string | null
+          recommendation?: string
+          sales_program_id?: string | null
+          sku_id: string
+          source_divergence_score?: number | null
+          target_price?: number | null
+        }
+        Update: {
+          blocking_reasons?: Json
+          calculation_version?: string
+          candidate_price?: number | null
+          carrying_value_basis?: number
+          ceiling_price?: number | null
+          channel?: string
+          channel_listing_id?: string | null
+          channel_price_policy_id?: string | null
+          confidence_score?: number
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          current_price?: number | null
+          delivery_cost?: number
+          estimated_fees?: number
+          estimated_program_commission?: number
+          estimated_program_discount?: number
+          expected_gross?: number
+          expected_margin_amount?: number | null
+          expected_margin_rate?: number | null
+          expected_net_before_cogs?: number
+          floor_price?: number | null
+          freshness_score?: number | null
+          id?: string
+          inputs?: Json
+          market_consensus_price?: number | null
+          override_required?: boolean
+          packaging_cost?: number
+          price_policy_id?: string | null
+          recommendation?: string
+          sales_program_id?: string | null
+          sku_id?: string
+          source_divergence_score?: number | null
+          target_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_decision_snapshot_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "channel_listing"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_channel_price_policy_id_fkey"
+            columns: ["channel_price_policy_id"]
+            isOneToOne: false
+            referencedRelation: "channel_price_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_price_policy_id_fkey"
+            columns: ["price_policy_id"]
+            isOneToOne: false
+            referencedRelation: "price_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_sales_program_id_fkey"
+            columns: ["sales_program_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      price_override: {
+        Row: {
+          approved_by: string | null
+          channel: string
+          channel_listing_id: string | null
+          created_at: string
+          expires_at: string | null
+          id: string
+          new_price: number
+          old_price: number | null
+          override_type: string
+          performed_by: string | null
+          price_decision_snapshot_id: string | null
+          reason_code: string
+          reason_note: string | null
+          sku_id: string
+        }
+        Insert: {
+          approved_by?: string | null
+          channel: string
+          channel_listing_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          new_price: number
+          old_price?: number | null
+          override_type: string
+          performed_by?: string | null
+          price_decision_snapshot_id?: string | null
+          reason_code: string
+          reason_note?: string | null
+          sku_id: string
+        }
+        Update: {
+          approved_by?: string | null
+          channel?: string
+          channel_listing_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          new_price?: number
+          old_price?: number | null
+          override_type?: string
+          performed_by?: string | null
+          price_decision_snapshot_id?: string | null
+          reason_code?: string
+          reason_note?: string | null
+          sku_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_override_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "channel_listing"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_override_price_decision_snapshot_id_fkey"
+            columns: ["price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "price_decision_snapshot"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_override_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_override_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_override_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      price_policy: {
+        Row: {
+          clearance_markdown_days: number
+          clearance_markdown_rate: number
+          created_at: string
+          first_markdown_days: number
+          first_markdown_rate: number
+          id: string
+          metadata: Json
+          minimum_margin_rate: number
+          minimum_profit_amount: number
+          name: string
+          policy_code: string
+          risk_reserve_rate: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          clearance_markdown_days?: number
+          clearance_markdown_rate?: number
+          created_at?: string
+          first_markdown_days?: number
+          first_markdown_rate?: number
+          id?: string
+          metadata?: Json
+          minimum_margin_rate?: number
+          minimum_profit_amount?: number
+          name: string
+          policy_code: string
+          risk_reserve_rate?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          clearance_markdown_days?: number
+          clearance_markdown_rate?: number
+          created_at?: string
+          first_markdown_days?: number
+          first_markdown_rate?: number
+          id?: string
+          metadata?: Json
+          minimum_margin_rate?: number
+          minimum_profit_amount?: number
+          name?: string
+          policy_code?: string
+          risk_reserve_rate?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      pricing_fee_component: {
+        Row: {
+          active: boolean
+          applies_to: string
+          channel: string
+          channel_price_policy_id: string | null
+          created_at: string
+          fee_category: string
+          fee_name: string
+          fixed_amount: number
+          id: string
+          notes: string | null
+          rate_percent: number
+          source_id: string | null
+          source_table: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          applies_to?: string
+          channel: string
+          channel_price_policy_id?: string | null
+          created_at?: string
+          fee_category?: string
+          fee_name: string
+          fixed_amount?: number
+          id?: string
+          notes?: string | null
+          rate_percent?: number
+          source_id?: string | null
+          source_table?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          applies_to?: string
+          channel?: string
+          channel_price_policy_id?: string | null
+          created_at?: string
+          fee_category?: string
+          fee_name?: string
+          fixed_amount?: number
+          id?: string
+          notes?: string | null
+          rate_percent?: number
+          source_id?: string | null
+          source_table?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_fee_component_channel_price_policy_id_fkey"
+            columns: ["channel_price_policy_id"]
+            isOneToOne: false
+            referencedRelation: "channel_price_policy"
             referencedColumns: ["id"]
           },
         ]
@@ -3428,6 +4488,62 @@ export type Database = {
         }
         Relationships: []
       }
+      qbo_posting_reference: {
+        Row: {
+          created_at: string
+          id: string
+          local_entity_id: string | null
+          local_entity_type: string
+          metadata: Json
+          posting_intent_id: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string
+          qbo_entity_type: string
+          raw_landing_id: string | null
+          raw_landing_table: string | null
+          source_column: string | null
+          synced_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          local_entity_id?: string | null
+          local_entity_type: string
+          metadata?: Json
+          posting_intent_id?: string | null
+          qbo_doc_number?: string | null
+          qbo_entity_id: string
+          qbo_entity_type: string
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          source_column?: string | null
+          synced_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          local_entity_id?: string | null
+          local_entity_type?: string
+          metadata?: Json
+          posting_intent_id?: string | null
+          qbo_doc_number?: string | null
+          qbo_entity_id?: string
+          qbo_entity_type?: string
+          raw_landing_id?: string | null
+          raw_landing_table?: string | null
+          source_column?: string | null
+          synced_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_posting_reference_posting_intent_id_fkey"
+            columns: ["posting_intent_id"]
+            isOneToOne: false
+            referencedRelation: "posting_intent"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rebrickable_inventories: {
         Row: {
           id: number
@@ -3509,6 +4625,114 @@ export type Database = {
           num_parts?: number
         }
         Relationships: []
+      }
+      reconciliation_case: {
+        Row: {
+          amount_actual: number | null
+          amount_expected: number | null
+          case_type: string
+          close_code: string | null
+          closed_at: string | null
+          created_at: string
+          due_at: string | null
+          evidence: Json
+          id: string
+          owner_id: string | null
+          payout_id: string | null
+          recommended_action: string | null
+          related_entity_id: string | null
+          related_entity_type: string | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          severity: string
+          status: string
+          suspected_root_cause: string | null
+          updated_at: string
+          variance_amount: number | null
+        }
+        Insert: {
+          amount_actual?: number | null
+          amount_expected?: number | null
+          case_type: string
+          close_code?: string | null
+          closed_at?: string | null
+          created_at?: string
+          due_at?: string | null
+          evidence?: Json
+          id?: string
+          owner_id?: string | null
+          payout_id?: string | null
+          recommended_action?: string | null
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          severity?: string
+          status?: string
+          suspected_root_cause?: string | null
+          updated_at?: string
+          variance_amount?: number | null
+        }
+        Update: {
+          amount_actual?: number | null
+          amount_expected?: number | null
+          case_type?: string
+          close_code?: string | null
+          closed_at?: string | null
+          created_at?: string
+          due_at?: string | null
+          evidence?: Json
+          id?: string
+          owner_id?: string | null
+          payout_id?: string | null
+          recommended_action?: string | null
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          severity?: string
+          status?: string
+          suspected_root_cause?: string | null
+          updated_at?: string
+          variance_amount?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_case_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+        ]
       }
       sales_order: {
         Row: {
@@ -3694,10 +4918,21 @@ export type Database = {
       sales_order_line: {
         Row: {
           cogs: number | null
+          cogs_amount: number | null
+          cogs_source_unit_id: string | null
+          costing_method: string | null
           created_at: string
+          economics_status: string
+          fee_snapshot: Json
+          gross_margin_amount: number | null
           id: string
           line_discount: number
           line_total: number
+          net_margin_amount: number | null
+          net_margin_rate: number | null
+          price_decision_snapshot_id: string | null
+          program_commission_amount: number
+          program_discount_amount: number
           qbo_tax_code_ref: string | null
           quantity: number
           sales_order_id: string
@@ -3709,10 +4944,21 @@ export type Database = {
         }
         Insert: {
           cogs?: number | null
+          cogs_amount?: number | null
+          cogs_source_unit_id?: string | null
+          costing_method?: string | null
           created_at?: string
+          economics_status?: string
+          fee_snapshot?: Json
+          gross_margin_amount?: number | null
           id?: string
           line_discount?: number
           line_total: number
+          net_margin_amount?: number | null
+          net_margin_rate?: number | null
+          price_decision_snapshot_id?: string | null
+          program_commission_amount?: number
+          program_discount_amount?: number
           qbo_tax_code_ref?: string | null
           quantity?: number
           sales_order_id: string
@@ -3724,10 +4970,21 @@ export type Database = {
         }
         Update: {
           cogs?: number | null
+          cogs_amount?: number | null
+          cogs_source_unit_id?: string | null
+          costing_method?: string | null
           created_at?: string
+          economics_status?: string
+          fee_snapshot?: Json
+          gross_margin_amount?: number | null
           id?: string
           line_discount?: number
           line_total?: number
+          net_margin_amount?: number | null
+          net_margin_rate?: number | null
+          price_decision_snapshot_id?: string | null
+          program_commission_amount?: number
+          program_discount_amount?: number
           qbo_tax_code_ref?: string | null
           quantity?: number
           sales_order_id?: string
@@ -3738,6 +4995,34 @@ export type Database = {
           vat_rate_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_price_decision_snapshot_id_fkey"
+            columns: ["price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "price_decision_snapshot"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
@@ -3760,6 +5045,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
             foreignKeyName: "sales_order_line_stock_unit_id_fkey"
             columns: ["stock_unit_id"]
             isOneToOne: false
@@ -3774,6 +5066,13 @@ export type Database = {
             referencedColumns: ["stock_unit_id"]
           },
           {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
             foreignKeyName: "sales_order_line_tax_code_id_fkey"
             columns: ["tax_code_id"]
             isOneToOne: false
@@ -3785,6 +5084,307 @@ export type Database = {
             columns: ["vat_rate_id"]
             isOneToOne: false
             referencedRelation: "vat_rate"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_program: {
+        Row: {
+          created_at: string
+          default_commission_rate: number
+          default_discount_rate: number
+          id: string
+          metadata: Json
+          name: string
+          program_code: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_commission_rate?: number
+          default_discount_rate?: number
+          id?: string
+          metadata?: Json
+          name: string
+          program_code: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_commission_rate?: number
+          default_discount_rate?: number
+          id?: string
+          metadata?: Json
+          name?: string
+          program_code?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sales_program_accrual: {
+        Row: {
+          accrual_type: string
+          attribution_id: string | null
+          basis_amount: number
+          commission_amount: number
+          created_at: string
+          currency: string
+          discount_amount: number
+          id: string
+          metadata: Json
+          reversed_amount: number
+          sales_order_id: string
+          sales_program_id: string
+          settlement_id: string | null
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          accrual_type?: string
+          attribution_id?: string | null
+          basis_amount?: number
+          commission_amount?: number
+          created_at?: string
+          currency?: string
+          discount_amount?: number
+          id?: string
+          metadata?: Json
+          reversed_amount?: number
+          sales_order_id: string
+          sales_program_id: string
+          settlement_id?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          accrual_type?: string
+          attribution_id?: string | null
+          basis_amount?: number
+          commission_amount?: number
+          created_at?: string
+          currency?: string
+          discount_amount?: number
+          id?: string
+          metadata?: Json
+          reversed_amount?: number
+          sales_order_id?: string
+          sales_program_id?: string
+          settlement_id?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_accrual_attribution_id_fkey"
+            columns: ["attribution_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_attribution"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_program_id_fkey"
+            columns: ["sales_program_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_settlement"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_program_attribution: {
+        Row: {
+          actor_id: string | null
+          attribution_reason: string | null
+          attribution_source: string
+          corrected_from_attribution_id: string | null
+          created_at: string
+          id: string
+          locked_at: string | null
+          sales_order_id: string
+          sales_program_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          attribution_reason?: string | null
+          attribution_source: string
+          corrected_from_attribution_id?: string | null
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          sales_order_id: string
+          sales_program_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          attribution_reason?: string | null
+          attribution_source?: string
+          corrected_from_attribution_id?: string | null
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          sales_order_id?: string
+          sales_program_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_attribution_corrected_from_attribution_id_fkey"
+            columns: ["corrected_from_attribution_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_attribution"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_program_id_fkey"
+            columns: ["sales_program_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_program_rule: {
+        Row: {
+          active: boolean
+          commission_basis: string
+          commission_rate: number
+          created_at: string
+          created_by: string | null
+          currency: string
+          discount_basis: string
+          discount_rate: number
+          effective_from: string
+          effective_to: string | null
+          id: string
+          sales_program_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          commission_basis?: string
+          commission_rate?: number
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          discount_basis?: string
+          discount_rate?: number
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          sales_program_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          commission_basis?: string
+          commission_rate?: number
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          discount_basis?: string
+          discount_rate?: number
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          sales_program_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_rule_sales_program_id_fkey"
+            columns: ["sales_program_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_program_settlement: {
+        Row: {
+          commission_amount: number
+          created_at: string
+          created_by: string | null
+          discount_amount: number
+          gross_sales_amount: number
+          id: string
+          notes: string | null
+          paid_amount: number
+          period_end: string
+          period_start: string
+          qbo_expense_id: string | null
+          qbo_payment_reference: string | null
+          reversed_amount: number
+          sales_program_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          commission_amount?: number
+          created_at?: string
+          created_by?: string | null
+          discount_amount?: number
+          gross_sales_amount?: number
+          id?: string
+          notes?: string | null
+          paid_amount?: number
+          period_end: string
+          period_start: string
+          qbo_expense_id?: string | null
+          qbo_payment_reference?: string | null
+          reversed_amount?: number
+          sales_program_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          commission_amount?: number
+          created_at?: string
+          created_by?: string | null
+          discount_amount?: number
+          gross_sales_amount?: number
+          id?: string
+          notes?: string | null
+          paid_amount?: number
+          period_end?: string
+          period_start?: string
+          qbo_expense_id?: string | null
+          qbo_payment_reference?: string | null
+          reversed_amount?: number
+          sales_program_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_settlement_sales_program_id_fkey"
+            columns: ["sales_program_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program"
             referencedColumns: ["id"]
           },
         ]
@@ -4006,6 +5606,269 @@ export type Database = {
           },
         ]
       }
+      stock_allocation: {
+        Row: {
+          actor_id: string | null
+          allocated_at: string | null
+          allocation_method: string
+          allocation_source: string
+          created_at: string
+          failure_reason: string | null
+          id: string
+          idempotency_key: string
+          released_at: string | null
+          requested_stock_unit_id: string | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          selected_stock_unit_id: string | null
+          sku_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          actor_id?: string | null
+          allocated_at?: string | null
+          allocation_method: string
+          allocation_source?: string
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          idempotency_key: string
+          released_at?: string | null
+          requested_stock_unit_id?: string | null
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          selected_stock_unit_id?: string | null
+          sku_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          actor_id?: string | null
+          allocated_at?: string | null
+          allocation_method?: string
+          allocation_source?: string
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          idempotency_key?: string
+          released_at?: string | null
+          requested_stock_unit_id?: string | null
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          selected_stock_unit_id?: string | null
+          sku_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_allocation_requested_stock_unit_id_fkey"
+            columns: ["requested_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_requested_stock_unit_id_fkey"
+            columns: ["requested_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_requested_stock_unit_id_fkey"
+            columns: ["requested_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_selected_stock_unit_id_fkey"
+            columns: ["selected_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_selected_stock_unit_id_fkey"
+            columns: ["selected_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_selected_stock_unit_id_fkey"
+            columns: ["selected_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      stock_cost_event: {
+        Row: {
+          amount: number
+          carrying_value_after: number | null
+          carrying_value_before: number | null
+          costing_method: string | null
+          created_at: string
+          currency: string
+          event_at: string
+          event_type: string
+          id: string
+          idempotency_key: string
+          metadata: Json
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          source: string
+          stock_allocation_id: string | null
+          stock_unit_id: string | null
+        }
+        Insert: {
+          amount?: number
+          carrying_value_after?: number | null
+          carrying_value_before?: number | null
+          costing_method?: string | null
+          created_at?: string
+          currency?: string
+          event_at?: string
+          event_type: string
+          id?: string
+          idempotency_key: string
+          metadata?: Json
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          source?: string
+          stock_allocation_id?: string | null
+          stock_unit_id?: string | null
+        }
+        Update: {
+          amount?: number
+          carrying_value_after?: number | null
+          carrying_value_before?: number | null
+          costing_method?: string | null
+          created_at?: string
+          currency?: string
+          event_at?: string
+          event_type?: string
+          id?: string
+          idempotency_key?: string
+          metadata?: Json
+          sales_order_id?: string | null
+          sales_order_line_id?: string | null
+          source?: string
+          stock_allocation_id?: string | null
+          stock_unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_stock_allocation_id_fkey"
+            columns: ["stock_allocation_id"]
+            isOneToOne: false
+            referencedRelation: "stock_allocation"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+        ]
+      }
       stock_unit: {
         Row: {
           accumulated_impairment: number
@@ -4149,6 +6012,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sku_public"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_unit_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
           },
         ]
       }
@@ -4614,6 +6484,245 @@ export type Database = {
           },
         ]
       }
+      v_blue_bell_statement: {
+        Row: {
+          basis_amount: number | null
+          commission_accrued: number | null
+          commission_outstanding: number | null
+          commission_reversed: number | null
+          commission_settled: number | null
+          discount_amount: number | null
+          period_end: string | null
+          period_start: string | null
+          qualifying_order_count: number | null
+        }
+        Relationships: []
+      }
+      v_current_sku_pricing: {
+        Row: {
+          avg_cost: number | null
+          blocking_reasons: Json | null
+          ceiling_price: number | null
+          channel: string | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          confidence_score: number | null
+          cost_range: string | null
+          current_price: number | null
+          expected_margin_amount: number | null
+          expected_margin_rate: number | null
+          floor_price: number | null
+          market_price: number | null
+          mpn: string | null
+          override_required: boolean | null
+          priced_at: string | null
+          recommendation: string | null
+          sku_code: string | null
+          sku_id: string | null
+          target_price: number | null
+        }
+        Relationships: []
+      }
+      v_order_line_economics: {
+        Row: {
+          cogs_amount: number | null
+          cogs_source_unit_id: string | null
+          costing_method: string | null
+          economics_status: string | null
+          fee_snapshot: Json | null
+          gross_margin_amount: number | null
+          line_discount: number | null
+          line_total: number | null
+          net_margin_amount: number | null
+          net_margin_rate: number | null
+          order_created_at: string | null
+          order_number: string | null
+          origin_channel: string | null
+          program_commission_amount: number | null
+          program_discount_amount: number | null
+          quantity: number | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          sku_id: string | null
+          stock_unit_id: string | null
+          total_fee_amount: number | null
+          unit_price: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "stock_unit"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["stock_unit_id"]
+          },
+        ]
+      }
+      v_reconciliation_inbox: {
+        Row: {
+          amount_actual: number | null
+          amount_expected: number | null
+          case_type: string | null
+          created_at: string | null
+          due_at: string | null
+          id: string | null
+          order_number: string | null
+          owner_id: string | null
+          payout_id: string | null
+          recommended_action: string | null
+          related_entity_id: string | null
+          related_entity_type: string | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          severity: string | null
+          status: string | null
+          suspected_root_cause: string | null
+          updated_at: string | null
+          variance_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_case_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+        ]
+      }
+      v_unit_profit_v2: {
+        Row: {
+          batch_id: string | null
+          fee_pct: number | null
+          gross_margin_pct: number | null
+          gross_revenue: number | null
+          landed_cost: number | null
+          net_margin_pct: number | null
+          net_profit: number | null
+          payout_id: string | null
+          program_commission_amount: number | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          sku: string | null
+          stock_unit_id: string | null
+          total_fee_amount: number | null
+          uid: string | null
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_stock_unit_payout"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_unit_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v2_variant_stock_summary: {
         Row: {
           avg_cost: number | null
@@ -4747,6 +6856,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      allocate_stock_for_order_line: {
+        Args: {
+          p_actor_id?: string
+          p_requested_stock_unit_id?: string
+          p_sales_order_line_id: string
+        }
+        Returns: Json
+      }
       allocate_stock_units: {
         Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
         Returns: string[]
@@ -4793,6 +6910,36 @@ export type Database = {
           themes: string[]
           years: number[]
         }[]
+      }
+      commerce_quote_price: {
+        Args: {
+          p_candidate_price?: number
+          p_channel?: string
+          p_sales_program_code?: string
+          p_sku_id: string
+        }
+        Returns: Json
+      }
+      create_price_decision_snapshot: {
+        Args: {
+          p_actor_id?: string
+          p_candidate_price?: number
+          p_channel?: string
+          p_channel_listing_id?: string
+          p_sales_program_code?: string
+          p_sku_id: string
+        }
+        Returns: string
+      }
+      create_sales_program_settlement: {
+        Args: {
+          p_actor_id?: string
+          p_notes?: string
+          p_period_end: string
+          p_period_start: string
+          p_program_code: string
+        }
+        Returns: string
       }
       csv_sync_apply_changeset: {
         Args: { p_session_id: string }
@@ -4894,6 +7041,15 @@ export type Database = {
           mpn: string
         }[]
       }
+      process_order_return: {
+        Args: {
+          p_actor_id?: string
+          p_line_actions: Json
+          p_reason?: string
+          p_sales_order_id: string
+        }
+        Returns: Json
+      }
       product_detail_offers: {
         Args: { p_mpn: string }
         Returns: {
@@ -4904,6 +7060,23 @@ export type Database = {
           stock_count: number
         }[]
       }
+      queue_listing_command: {
+        Args: {
+          p_actor_id?: string
+          p_allow_below_floor?: boolean
+          p_channel_listing_id: string
+          p_command_type: string
+        }
+        Returns: string
+      }
+      queue_qbo_posting_intents_for_order: {
+        Args: { p_sales_order_id: string }
+        Returns: number
+      }
+      queue_qbo_refund_posting_intent_for_order: {
+        Args: { p_refunded_line_ids?: string[]; p_sales_order_id: string }
+        Returns: string
+      }
       read_email_batch: {
         Args: { batch_size: number; queue_name: string; vt: number }
         Returns: {
@@ -4911,6 +7084,38 @@ export type Database = {
           msg_id: number
           read_ct: number
         }[]
+      }
+      rebuild_reconciliation_cases: {
+        Args: { p_sales_order_id?: string }
+        Returns: number
+      }
+      record_order_accounting_events: {
+        Args: { p_sales_order_id: string; p_source?: string }
+        Returns: number
+      }
+      record_sales_program_accrual: {
+        Args: {
+          p_actor_id?: string
+          p_attribution_source?: string
+          p_basis_amount?: number
+          p_commission_amount?: number
+          p_discount_amount?: number
+          p_program_code?: string
+          p_sales_order_id: string
+        }
+        Returns: string
+      }
+      refresh_market_price_snapshots: {
+        Args: { p_sku_id?: string }
+        Returns: number
+      }
+      refresh_order_line_economics: {
+        Args: { p_sales_order_id: string }
+        Returns: number
+      }
+      refresh_order_settlement_lines: {
+        Args: { p_rebuild_cases?: boolean; p_sales_order_id: string }
+        Returns: number
       }
       search_catalog_for_wishlist: {
         Args: {
@@ -4929,6 +7134,7 @@ export type Database = {
           theme_name: string
         }[]
       }
+      subledger_staff_read_policy: { Args: never; Returns: boolean }
       v2_calculate_apportioned_costs: {
         Args: { p_batch_id: string }
         Returns: undefined
