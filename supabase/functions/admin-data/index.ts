@@ -509,7 +509,7 @@ Deno.serve(async (req) => {
       await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);
 
       // Upsert channel_listing for web
-      const { error: uErr } = await admin.from("channel_listing").upsert(
+      const { data: webListing, error: uErr } = await admin.from("channel_listing").upsert(
         {
           channel: "web",
           external_sku: sku.sku_code,
@@ -528,9 +528,27 @@ Deno.serve(async (req) => {
           synced_at: new Date().toISOString(),
         },
         { onConflict: "channel,external_sku", ignoreDuplicates: false }
-      );
+      ).select("id").single();
       if (uErr) throw uErr;
-      result = { success: true };
+
+      const listingId = webListing?.id;
+      if (listingId) {
+        const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+          p_sku_id: sku.id,
+          p_channel: "web",
+          p_channel_listing_id: listingId,
+          p_candidate_price: finalPrice,
+        });
+        if (snapshotErr) throw snapshotErr;
+
+        const { error: commandErr } = await admin.rpc("queue_listing_command", {
+          p_channel_listing_id: listingId,
+          p_command_type: "publish",
+        });
+        if (commandErr) throw commandErr;
+      }
+
+      result = { success: true, listing_id: listingId };
     } else if (action === "remove-web-listing") {
       const { sku_id } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
@@ -1191,6 +1209,22 @@ Deno.serve(async (req) => {
         }
         if (Object.keys(skuUpdates).length > 0) {
           await admin.from("sku").update(skuUpdates).eq("id", listingRow.sku_id);
+        }
+
+        if (listingRow?.sku_id) {
+          const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+            p_sku_id: listingRow.sku_id,
+            p_channel: listingRow.channel,
+            p_channel_listing_id: listing_id,
+            p_candidate_price: updates.listed_price,
+          });
+          if (snapshotErr) throw snapshotErr;
+
+          const { error: commandErr } = await admin.rpc("queue_listing_command", {
+            p_channel_listing_id: listing_id,
+            p_command_type: "reprice",
+          });
+          if (commandErr) throw commandErr;
         }
       }
 

@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -293,6 +294,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
   const queryClient = useQueryClient();
   const [lineItems, setLineItems] = useState<CashSaleLine[]>([createEmptyLine()]);
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
+  const [isBlueBellSale, setIsBlueBellSale] = useState(false);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
@@ -462,13 +464,16 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           : null;
       }
 
-      const grossBeforeDiscount = roundCurrency(
-        preparedLines.reduce((sum, line) => sum + line.totals.grossSubtotal, 0),
+      const manualDiscountTotal = roundCurrency(
+        preparedLines.reduce((sum, line) => sum + line.totals.discountTotal, 0),
       );
+      const blueBellDiscountTotal = isBlueBellSale
+        ? roundCurrency(preparedLines.reduce((sum, line) => sum + roundCurrency(line.totals.grossTotal * 0.05), 0))
+        : 0;
       const grossTotal = roundCurrency(
-        preparedLines.reduce((sum, line) => sum + line.totals.grossTotal, 0),
+        preparedLines.reduce((sum, line) => sum + line.totals.grossTotal, 0) - blueBellDiscountTotal,
       );
-      const discountTotal = roundCurrency(grossBeforeDiscount - grossTotal);
+      const discountTotal = roundCurrency(manualDiscountTotal + blueBellDiscountTotal);
       const taxTotal = roundCurrency(grossTotal - grossTotal / 1.2);
       const netAmount = roundCurrency(grossTotal - taxTotal);
       const guestName = customerName || "Cash Sale";
@@ -493,11 +498,12 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           gross_total: grossTotal,
           net_amount: netAmount,
           payment_method: paymentMethod,
-          blue_bell_club: false,
           qbo_sync_status: "pending",
           v2_status: "new",
           global_tax_calculation: "TaxInclusive",
-          notes: "Recorded manually in Admin V2 cash sale modal.",
+          notes: isBlueBellSale
+            ? "Recorded manually in Admin V2 cash sale modal. Blue Bell sale selected by staff."
+            : "Recorded manually in Admin V2 cash sale modal.",
         } as never)
         .select("id, order_number")
         .single();
@@ -511,9 +517,26 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
 
       let allAllocated = true;
 
+      if (isBlueBellSale) {
+        const { error: programError } = await supabase
+          .rpc("record_sales_program_accrual" as never, {
+            p_sales_order_id: orderId,
+            p_program_code: "blue_bell",
+            p_attribution_source: "staff_flag",
+            p_basis_amount: grossTotal,
+            p_discount_amount: blueBellDiscountTotal,
+            p_commission_amount: roundCurrency(grossTotal * 0.05),
+          } as never);
+
+        if (programError) {
+          throw new Error(`Failed to record Blue Bell programme accrual: ${programError.message}`);
+        }
+      }
+
       for (const line of preparedLines) {
+        const blueBellLineDiscount = isBlueBellSale ? roundCurrency(line.totals.grossTotal * 0.05) : 0;
         const perUnitDiscounts = distributeDiscountAcrossUnits(
-          line.totals.discountTotal,
+          roundCurrency(line.totals.discountTotal + blueBellLineDiscount),
           line.totals.quantity,
         );
 
@@ -541,21 +564,28 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           const lineId = (insertedLine as Record<string, unknown>).id as string;
 
           try {
-            const { error: allocationError } = await supabase.rpc(
-              "allocate_order_line_stock_unit" as never,
-              {
-                p_order_id: orderId,
-                p_line_item_id: lineId,
-                p_sku_code: line.skuCode,
-              } as never,
-            );
+            const { data: allocation, error: allocationError } = await supabase
+              .rpc("allocate_stock_for_order_line" as never, {
+                p_sales_order_line_id: lineId,
+              } as never);
 
-            if (allocationError) throw allocationError;
+            if (allocationError || !allocation) {
+              allAllocated = false;
+              continue;
+            }
+
+            const allocationResult = allocation as Record<string, unknown>;
+            if (allocationResult.status !== "allocated") {
+              allAllocated = false;
+            }
           } catch {
             allAllocated = false;
           }
         }
       }
+
+      await supabase
+        .rpc("refresh_order_line_economics" as never, { p_sales_order_id: orderId } as never);
 
       if (!allAllocated) {
         const { error: statusUpdateError } = await supabase
@@ -619,6 +649,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
   function resetForm() {
     setLineItems([createEmptyLine()]);
     setPaymentMethod("cash");
+    setIsBlueBellSale(false);
     setCustomerPickerOpen(false);
     setCustomerSearch("");
     setSelectedCustomerId(null);
@@ -666,13 +697,16 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
   const orderSummary = lineItems.reduce(
     (summary, line) => {
       const totals = calculateLineTotals(line);
+      const blueBellDiscount = isBlueBellSale ? roundCurrency(totals.grossTotal * 0.05) : 0;
       return {
         grossSubtotal: roundCurrency(summary.grossSubtotal + totals.grossSubtotal),
-        discountTotal: roundCurrency(summary.discountTotal + totals.discountTotal),
-        grossTotal: roundCurrency(summary.grossTotal + totals.grossTotal),
+        manualDiscountTotal: roundCurrency(summary.manualDiscountTotal + totals.discountTotal),
+        blueBellDiscountTotal: roundCurrency(summary.blueBellDiscountTotal + blueBellDiscount),
+        discountTotal: roundCurrency(summary.discountTotal + totals.discountTotal + blueBellDiscount),
+        grossTotal: roundCurrency(summary.grossTotal + totals.grossTotal - blueBellDiscount),
       };
     },
-    { grossSubtotal: 0, discountTotal: 0, grossTotal: 0 },
+    { grossSubtotal: 0, manualDiscountTotal: 0, blueBellDiscountTotal: 0, discountTotal: 0, grossTotal: 0 },
   );
 
   const customerTriggerLabel = selectedCustomer
@@ -773,6 +807,20 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
                   ))}
                 </div>
               </div>
+
+              <label className="flex items-start gap-3 rounded-md border border-zinc-200 bg-white p-3 text-[13px] text-zinc-700">
+                <Checkbox
+                  checked={isBlueBellSale}
+                  onCheckedChange={(checked) => setIsBlueBellSale(checked === true)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-medium text-zinc-900">Blue Bell LEGO Club sale</span>
+                  <span className="mt-0.5 block text-[11px] text-zinc-500">
+                    Applies the default 5% customer discount and records the 5% venue commission accrual.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
@@ -791,9 +839,15 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
                   <Mono color="dim">£{orderSummary.grossSubtotal.toFixed(2)}</Mono>
                 </div>
                 <div className="flex items-center justify-between text-zinc-500">
-                  <span>Discounts</span>
-                  <Mono color="amber">-£{orderSummary.discountTotal.toFixed(2)}</Mono>
+                  <span>{isBlueBellSale ? "Manual discounts" : "Discounts"}</span>
+                  <Mono color="amber">-£{orderSummary.manualDiscountTotal.toFixed(2)}</Mono>
                 </div>
+                {isBlueBellSale && (
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Blue Bell</span>
+                    <Mono color="amber">-£{orderSummary.blueBellDiscountTotal.toFixed(2)}</Mono>
+                  </div>
+                )}
                 <div className="flex items-center justify-between border-t border-zinc-200 pt-2">
                   <span className="font-medium text-zinc-900">Total</span>
                   <Mono color="teal">£{orderSummary.grossTotal.toFixed(2)}</Mono>

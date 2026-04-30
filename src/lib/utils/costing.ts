@@ -135,7 +135,8 @@ export function weightedAverage(
 
 /**
  * Client-side FIFO helper: select the oldest listed unit by createdAt.
- * Actual consumption uses the database function v2_consume_fifo_unit().
+ * Actual sale allocation uses allocate_stock_for_order_line(), which records
+ * the stock allocation and COGS event in one database transaction.
  */
 export function selectFIFOUnit<
   T extends { createdAt: string; status: string },

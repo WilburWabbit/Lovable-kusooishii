@@ -3,8 +3,8 @@
 // V2 Process Order — Post-Order Hook
 // Called after ANY order is created (Stripe, eBay, admin) to
 // perform v2 lifecycle steps:
-//   1. FIFO stock consumption via v2_consume_fifo_unit()
-//   2. COGS recording on order line items
+//   1. Domain allocation via allocate_stock_for_order_line()
+//   2. COGS/cost-event recording on order line items
 //   3. v2_status lifecycle tracking
 //   4. Variant stats recalculation
 //   5. QBO SalesReceipt sync trigger
@@ -101,54 +101,31 @@ Deno.serve(async (req) => {
 
       const skuCode = (skuRow as Record<string, unknown>).sku_code as string;
 
-      // Call v2_consume_fifo_unit to get the oldest listed unit
-      const { data: consumedUnit, error: fifoErr } = await admin
-        .rpc("v2_consume_fifo_unit", { p_sku_code: skuCode });
+      const { data: allocation, error: allocationErr } = await admin
+        .rpc("allocate_stock_for_order_line", { p_sales_order_line_id: line.id });
 
-      if (fifoErr) {
-        console.warn(`FIFO consumption failed for ${skuCode}: ${fifoErr.message}`);
+      if (allocationErr) {
+        console.warn(`Allocation failed for ${skuCode}: ${allocationErr.message}`);
         continue;
       }
 
-      if (!consumedUnit) {
+      const allocationResult = allocation as Record<string, unknown> | null;
+      if (!allocationResult || allocationResult.status !== "allocated") {
         console.warn(`No listed units available for ${skuCode}`);
         continue;
-      }
-
-      const unit = consumedUnit as Record<string, unknown>;
-      const unitId = unit.id as string;
-      const landedCost = (unit.landed_cost as number) ?? 0;
-
-      // Update order line with stock unit and COGS
-      const { error: lineUpdateErr } = await admin
-        .from("sales_order_line")
-        .update({
-          stock_unit_id: unitId,
-          cogs: landedCost,
-        })
-        .eq("id", line.id);
-
-      if (lineUpdateErr) {
-        console.error(`Failed to update line ${line.id}: ${lineUpdateErr.message}`);
-        continue;
-      }
-
-      // Link stock unit back to order
-      const { error: unitUpdateErr } = await admin
-        .from("stock_unit")
-        .update({
-          order_id: orderId,
-        } as never)
-        .eq("id", unitId);
-
-      if (unitUpdateErr) {
-        console.warn(`Failed to link unit ${unitId} to order: ${unitUpdateErr.message}`);
       }
 
       affectedSkus.add(skuCode);
       affectedSkuIds.add(skuId);
       processedLines += 1;
-      cogsTotal += landedCost;
+      cogsTotal += (allocationResult.cogs_amount as number) ?? 0;
+    }
+
+    const { error: economicsErr } = await admin
+      .rpc("refresh_order_line_economics", { p_sales_order_id: orderId });
+
+    if (economicsErr) {
+      console.warn(`Failed to refresh order economics for ${orderId}: ${economicsErr.message}`);
     }
 
     // ─── 2b. Push updated stock counts to eBay (non-blocking) ──
