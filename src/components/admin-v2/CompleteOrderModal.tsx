@@ -385,16 +385,17 @@ export function CompleteOrderModal({
           const lineId = (insertedLine as Record<string, unknown>).id as string;
 
           try {
-            const { error: allocationErr } = await supabase.rpc(
-              "allocate_order_line_stock_unit" as never,
-              {
-                p_order_id: orderId,
-                p_line_item_id: lineId,
-                p_sku_code: line.skuCode,
-              } as never,
-            );
+            const { data: allocation, error: allocationErr } = await supabase
+              .rpc("allocate_stock_for_order_line" as never, {
+                p_sales_order_line_id: lineId,
+              } as never);
 
             if (allocationErr) throw allocationErr;
+
+            const allocationResult = allocation as Record<string, unknown> | null;
+            if (allocationResult?.status !== "allocated") {
+              allAllocated = false;
+            }
           } catch {
             allAllocated = false;
           }
@@ -423,7 +424,6 @@ export function CompleteOrderModal({
           net_amount: merchandiseSubtotal,
           discount_total: discountAmount > 0 ? discountAmount : 0,
           payment_method: hasCashPortion ? "split" : (paymentMethod ?? "card"),
-          blue_bell_club: blueBellDonation,
           notes: updatedNotes || null,
           v2_status: allAllocated ? "new" : "needs_allocation",
           qbo_sync_status: allAllocated ? "pending" : "needs_manual_review",
@@ -431,6 +431,25 @@ export function CompleteOrderModal({
         .eq("id", orderId);
 
       if (orderUpdateErr) throw new Error(`Failed to update order: ${orderUpdateErr.message}`);
+
+      if (blueBellDonation) {
+        const { error: programError } = await supabase
+          .rpc("record_sales_program_accrual" as never, {
+            p_sales_order_id: orderId,
+            p_program_code: "blue_bell",
+            p_attribution_source: "staff_flag",
+            p_basis_amount: saleGross,
+            p_discount_amount: discountAmount,
+            p_commission_amount: roundCurrency(saleGross * 0.05),
+          } as never);
+
+        if (programError) {
+          throw new Error(`Failed to record Blue Bell programme accrual: ${programError.message}`);
+        }
+      }
+
+      await supabase
+        .rpc("refresh_order_line_economics" as never, { p_sales_order_id: orderId } as never);
 
       // Trigger QBO sync if fully allocated
       if (allAllocated) {
