@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Clock, FileText, Play, RefreshCcw, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Download, FileText, Play, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   useBlueBellOpenAccruals,
@@ -8,6 +8,7 @@ import {
   useCreateBlueBellSettlement,
   useCancelListingCommand,
   useListingCommands,
+  useOperationsExport,
   usePostingIntents,
   useRefreshActualSettlements,
   useRefreshReconciliationCases,
@@ -86,6 +87,15 @@ function humanizeToken(value: string): string {
   return value.replace(/_/g, " ");
 }
 
+function evidenceSummary(evidence: Record<string, unknown>): string {
+  const entries = Object.entries(evidence).filter(([, value]) => value != null && value !== "");
+  if (entries.length === 0) return "No structured evidence was recorded for this case.";
+  return entries
+    .slice(0, 4)
+    .map(([key, value]) => `${humanizeToken(key)}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`)
+    .join(" · ");
+}
+
 function reconciliationTarget(caseRow: ReconciliationInboxCase) {
   if (caseRow.orderNumber) {
     return <Link to={`/admin/orders/${caseRow.salesOrderId}`} className="text-amber-600 hover:text-amber-500">{caseRow.orderNumber}</Link>;
@@ -133,6 +143,46 @@ function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRo
       <FileText className="h-3.5 w-3.5" />
       {createSettlement.isPending ? "Creating..." : "Create Settlement"}
     </button>
+  );
+}
+
+function ExportButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+    >
+      <Download className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function CaseDiagnosis({ caseRow }: { caseRow: ReconciliationInboxCase }) {
+  return (
+    <div className="max-w-[420px] space-y-2 text-xs">
+      <div>
+        <div className="font-semibold text-zinc-700">Likely cause</div>
+        <div className="text-zinc-600">{caseRow.diagnosis ?? caseRow.suspectedRootCause ?? "No diagnosis recorded yet."}</div>
+      </div>
+      <div>
+        <div className="font-semibold text-zinc-700">Fix next</div>
+        <div className="text-zinc-600">{caseRow.nextStep ?? caseRow.recommendedAction ?? "Review the related records, then resolve with a note."}</div>
+      </div>
+      <div className="rounded-md bg-zinc-50 px-2 py-1.5 text-[11px] text-zinc-500">
+        {evidenceSummary(caseRow.evidence)}
+      </div>
+    </div>
   );
 }
 
@@ -211,6 +261,7 @@ export function OperationsView() {
   const cancelListingCommand = useCancelListingCommand();
   const retryPostingIntent = useRetryPostingIntent();
   const cancelPostingIntent = useCancelPostingIntent();
+  const exportReport = useOperationsExport();
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
@@ -317,6 +368,16 @@ export function OperationsView() {
     });
   };
 
+  const handleExport = (
+    kind: "settlement-close" | "blue-bell-statement" | "reconciliation-cases" | "margin-profit",
+    label: string,
+  ) => {
+    exportReport.mutate(kind, {
+      onSuccess: (count) => toast.success(`${label} exported (${count} row${count === 1 ? "" : "s"})`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : `${label} export failed`),
+    });
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -325,6 +386,16 @@ export function OperationsView() {
           <p className="text-xs text-zinc-500">Listing commands, finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ExportButton
+            label="Profit CSV"
+            onClick={() => handleExport("margin-profit", "Margin/profit report")}
+            disabled={exportReport.isPending}
+          />
+          <ExportButton
+            label="Cases CSV"
+            onClick={() => handleExport("reconciliation-cases", "Reconciliation cases")}
+            disabled={exportReport.isPending}
+          />
           <button
             type="button"
             onClick={handleRefreshReconciliation}
@@ -377,9 +448,16 @@ export function OperationsView() {
       </div>
 
       <SurfaceCard noPadding>
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <SectionHead>Settlement Period Close</SectionHead>
-          <p className="text-xs text-zinc-500">Monthly close readiness from expected settlement, actual payout evidence, variance, and open cases.</p>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Settlement Period Close</SectionHead>
+            <p className="text-xs text-zinc-500">Monthly close readiness from expected settlement, actual payout evidence, variance, and open cases.</p>
+          </div>
+          <ExportButton
+            label="Export Close"
+            onClick={() => handleExport("settlement-close", "Settlement close")}
+            disabled={exportReport.isPending}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-sm">
@@ -503,9 +581,16 @@ export function OperationsView() {
       </SurfaceCard>
 
       <SurfaceCard noPadding>
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <SectionHead>Blue Bell Statement</SectionHead>
-          <p className="text-xs text-zinc-500">Monthly commission accruals from the sales-program ledger.</p>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Blue Bell Statement</SectionHead>
+            <p className="text-xs text-zinc-500">Monthly commission accruals from the sales-program ledger.</p>
+          </div>
+          <ExportButton
+            label="Export Statement"
+            onClick={() => handleExport("blue-bell-statement", "Blue Bell statement")}
+            disabled={exportReport.isPending}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-left text-sm">
@@ -598,9 +683,16 @@ export function OperationsView() {
       </SurfaceCard>
 
       <SurfaceCard noPadding>
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <SectionHead>Reconciliation Inbox</SectionHead>
-          <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, programme, and QBO posting exceptions.</p>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Reconciliation Inbox</SectionHead>
+            <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, programme, and QBO posting exceptions with diagnosis and next action.</p>
+          </div>
+          <ExportButton
+            label="Export Cases"
+            onClick={() => handleExport("reconciliation-cases", "Reconciliation cases")}
+            disabled={exportReport.isPending}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-sm">
@@ -636,9 +728,8 @@ export function OperationsView() {
                       <div className="text-zinc-900">{formatMoney(caseRow.varianceAmount)}</div>
                       <div className="text-[11px] text-zinc-500">{formatMoney(caseRow.amountExpected)} exp / {formatMoney(caseRow.amountActual)} act</div>
                     </td>
-                    <td className="max-w-[300px] px-3 py-3 text-xs text-zinc-600">
-                      <div>{caseRow.suspectedRootCause ?? "—"}</div>
-                      {caseRow.recommendedAction && <div className="mt-1 text-zinc-400">{caseRow.recommendedAction}</div>}
+                    <td className="px-3 py-3">
+                      <CaseDiagnosis caseRow={caseRow} />
                     </td>
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(caseRow.createdAt)}</td>
                     <td className="px-4 py-3">
