@@ -74,13 +74,17 @@ function mapChannel(ch: string | null): Channel {
   return 'website';
 }
 
-function mapLineItem(row: Record<string, unknown>): OrderLineItem {
+function mapLineItem(
+  row: Record<string, unknown>,
+  economics?: Record<string, unknown>,
+): OrderLineItem {
   const sku = row.sku as Record<string, unknown> | null;
   const vatRateRow = row.vat_rate as Record<string, unknown> | null;
   const ratePct = vatRateRow ? ((vatRateRow.rate_percent as number) ?? 20) : 20;
   const unitPrice = (row.unit_price as number) ?? 0;
   const net = unitPrice / (1 + ratePct / 100);
   const lineVat = Math.round((unitPrice - net) * 100) / 100;
+  const source = economics ?? row;
 
   return {
     id: row.id as string,
@@ -89,10 +93,46 @@ function mapLineItem(row: Record<string, unknown>): OrderLineItem {
     sku: sku ? (sku.sku_code as string) : null,
     name: sku ? ((sku.name as string) ?? null) : null,
     unitPrice,
-    cogs: ((row.cogs_amount as number) ?? (row.cogs as number)) ?? null,
+    cogs: ((source.cogs_amount as number) ?? (row.cogs_amount as number) ?? (row.cogs as number)) ?? null,
     vatRate: ratePct,
     lineVat,
+    costingMethod: (source.costing_method as string) ?? null,
+    economicsStatus: (source.economics_status as string) ?? null,
+    totalFees: (source.total_fee_amount as number) ?? null,
+    programDiscountAmount: (source.program_discount_amount as number) ?? null,
+    programCommissionAmount: (source.program_commission_amount as number) ?? null,
+    grossMarginAmount: (source.gross_margin_amount as number) ?? null,
+    netMarginAmount: (source.net_margin_amount as number) ?? null,
+    netMarginRate: (source.net_margin_rate as number) ?? null,
   };
+}
+
+async function fetchLineEconomics(lineIds: string[]) {
+  if (lineIds.length === 0) return new Map<string, Record<string, unknown>>();
+
+  const { data, error } = await supabase
+    .from('v_order_line_economics' as never)
+    .select(`
+      sales_order_line_id,
+      costing_method,
+      cogs_amount,
+      total_fee_amount,
+      program_discount_amount,
+      program_commission_amount,
+      gross_margin_amount,
+      net_margin_amount,
+      net_margin_rate,
+      economics_status
+    `)
+    .in('sales_order_line_id' as never, lineIds);
+
+  if (error) throw error;
+
+  const byLineId = new Map<string, Record<string, unknown>>();
+  for (const row of ((data ?? []) as Record<string, unknown>[])) {
+    byLineId.set(row.sales_order_line_id as string, row);
+  }
+  return byLineId;
 }
 
 // ─── useOrders ──────────────────────────────────────────────
@@ -116,9 +156,17 @@ export function useOrders() {
 
       if (error) throw error;
 
+      const lineIds = ((data ?? []) as Record<string, unknown>[])
+        .flatMap((row) => (row.sales_order_line as Record<string, unknown>[]) ?? [])
+        .map((line) => line.id as string)
+        .filter(Boolean);
+      const economicsByLine = await fetchLineEconomics(lineIds);
+
       return ((data ?? []) as Record<string, unknown>[]).map((row) => {
         const order = mapOrder(row);
-        const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map(mapLineItem);
+        const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map((line) =>
+          mapLineItem(line, economicsByLine.get(line.id as string)),
+        );
         const customerRow = row.customer as Record<string, unknown> | null;
         return {
           ...order,
@@ -165,7 +213,11 @@ export function useOrder(orderId: string | undefined) {
       if (error) throw error;
       const row = data as Record<string, unknown>;
       const order = mapOrder(row);
-      const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map(mapLineItem);
+      const rawLines = (row.sales_order_line as Record<string, unknown>[]) ?? [];
+      const economicsByLine = await fetchLineEconomics(
+        rawLines.map((line) => line.id as string).filter(Boolean),
+      );
+      const lines = rawLines.map((line) => mapLineItem(line, economicsByLine.get(line.id as string)));
 
       // Fetch stock unit statuses for allocated line items
       const allocatedUnitIds = lines

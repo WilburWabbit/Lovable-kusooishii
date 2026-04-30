@@ -184,6 +184,19 @@ export interface ProductVariant {
   createdAt: string;
 }
 
+export interface ProductVariantPricing {
+  skuId: string;
+  skuCode: string;
+  channel: Channel | null;
+  currentPrice: number | null;
+  floorPrice: number | null;
+  marketPrice: number | null;
+  avgCost: number | null;
+  costRange: string | null;
+  confidenceScore: number | null;
+  pricedAt: string | null;
+}
+
 // ─── 2.6 Product Image ────────────────────────────────────
 
 export interface ProductImage {
@@ -254,6 +267,14 @@ export interface OrderLineItem {
   cogs: number | null; // landed cost of consumed stock unit (FIFO)
   vatRate: number; // e.g. 20
   lineVat: number; // VAT amount for this line
+  costingMethod?: string | null;
+  economicsStatus?: string | null;
+  totalFees?: number | null;
+  programDiscountAmount?: number | null;
+  programCommissionAmount?: number | null;
+  grossMarginAmount?: number | null;
+  netMarginAmount?: number | null;
+  netMarginRate?: number | null;
 }
 
 // ─── 2.10 Customer ────────────────────────────────────────
@@ -317,7 +338,7 @@ export interface Payout {
 /** Purchase batch with its line items and stock units */
 export interface PurchaseBatchDetail extends PurchaseBatch {
   lineItems: (PurchaseLineItem & { units: StockUnit[] })[];
-  productDataMap?: Map<string, any>;
+  productDataMap?: Map<string, Record<string, unknown>>;
 }
 
 // ─── BrickEconomy Reference Data ─────────────────────────

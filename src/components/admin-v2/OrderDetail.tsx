@@ -30,6 +30,18 @@ interface OrderDetailProps {
   orderId: string;
 }
 
+interface WelcomeCodeRow {
+  code: string;
+  promo_code: string;
+  ebay_order_id: string | null;
+  primary_sku: string | null;
+  order_postcode: string | null;
+  buyer_name: string | null;
+  redeemed_at: string | null;
+  scan_count: number | null;
+  scanned_at: string | null;
+}
+
 export function OrderDetail({ orderId }: OrderDetailProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -53,12 +65,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const { data: welcomeCode } = useQuery({
     queryKey: ["welcome-code", "order", orderId],
     queryFn: async () => {
-      const { data } = await (supabase as any)
-        .from("welcome_code")
-        .select("code, promo_code, ebay_order_id, primary_sku, order_postcode, buyer_name, redeemed_at, scan_count, scanned_at")
+      const { data } = await supabase
+        .from("welcome_code" as never)
+        .select("code, promo_code, ebay_order_id, primary_sku, order_postcode, buyer_name, redeemed_at, scan_count, scanned_at" as never)
         .eq("sales_order_id", orderId)
         .maybeSingle();
-      return data as any;
+      return data as unknown as WelcomeCodeRow | null;
     },
     enabled: !!order?.id && order?.channel === "ebay",
   });
@@ -89,7 +101,15 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     return acc;
   }, {});
   const totalOrderFees = orderFees.reduce((s, f) => s + f.amount, 0);
+  const totalLineFees = order?.lineItems.reduce((s, li) => s + (li.totalFees ?? 0), 0) ?? 0;
   const totalCogs = order?.lineItems.reduce((s, li) => s + (li.cogs ?? 0), 0) ?? 0;
+  const totalProgramCommission =
+    order?.lineItems.reduce((s, li) => s + (li.programCommissionAmount ?? 0), 0) ?? 0;
+  const subledgerNetMargins = order?.lineItems
+    .map((li) => li.netMarginAmount)
+    .filter((value): value is number => value != null) ?? [];
+  const hasSubledgerNetMargin = subledgerNetMargins.length > 0;
+  const totalSubledgerNetMargin = subledgerNetMargins.reduce((s, value) => s + value, 0);
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading order…</p>;
   if (!order) return <p className="text-muted-foreground text-sm">Order not found.</p>;
@@ -111,12 +131,16 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const netRevenue = subtotalExVat;
   // COGS is already stored ex-VAT — use as-is
   const netCogs = totalCogs;
-  const netFees = exVAT(totalOrderFees);
-  const netProfit = netRevenue - netCogs - netFees;
+  const economicsFees = totalLineFees > 0 ? totalLineFees : totalOrderFees;
+  const netFees = exVAT(economicsFees);
+  const netProgramCommission = exVAT(totalProgramCommission);
+  const netProfit = hasSubledgerNetMargin
+    ? totalSubledgerNetMargin
+    : netRevenue - netCogs - netFees - netProgramCommission;
   const margin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
   // Input VAT on stock = ex-VAT cost × 20%
   const vatReclaimCogs = totalCogs * 0.2;
-  const vatReclaimFees = totalOrderFees - netFees;
+  const vatReclaimFees = economicsFees - netFees;
   const totalVatReclaim = vatReclaimCogs + vatReclaimFees;
 
   const fmt = (n: number) => `£${n.toFixed(2)}`;
@@ -217,7 +241,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
           <table className="w-full border-collapse text-xs min-w-[700px]">
             <thead>
               <tr className="border-b border-border">
-                {["Item", "SKU", "Qty", "Unit (ex-VAT)", "VAT", "Line Total", "COGS", ""].map((h) => (
+                {["Item", "SKU", "Qty", "Unit (ex-VAT)", "VAT", "Line Total", "COGS", "Economics", ""].map((h) => (
                   <th key={h} className={`px-3 py-2 text-[10px] uppercase tracking-wider font-medium ${
                     ["Unit (ex-VAT)", "VAT", "Line Total", "COGS"].includes(h) ? "text-right" : "text-left"
                   } text-muted-foreground`}>
@@ -276,6 +300,22 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                       </Mono>
                     </td>
                     <td className="px-3 py-2.5">
+                      <div className="flex flex-col gap-1 items-start">
+                        {item.economicsStatus && (
+                          <Badge
+                            label={item.economicsStatus.replace(/_/g, " ")}
+                            color={item.economicsStatus === "finalized" ? "#22C55E" : "#F59E0B"}
+                            small
+                          />
+                        )}
+                        {item.costingMethod && (
+                          <span className="text-muted-foreground/70 text-[10px]">
+                            {item.costingMethod.replace(/_/g, " ")}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
                       {item.stockUnitId && (
                         <button
                           onClick={() => setSlideItem({
@@ -298,7 +338,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                 );
               })}
               {order.lineItems.length === 0 && (
-                <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground text-sm">No line items.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-6 text-center text-muted-foreground text-sm">No line items.</td></tr>
               )}
             </tbody>
           </table>
@@ -324,9 +364,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       </SurfaceCard>
 
       {/* ── P&L Summary ───────────────────────────── */}
-      {(totalOrderFees > 0 || totalCogs > 0) && (
+      {(economicsFees > 0 || totalCogs > 0 || totalProgramCommission > 0 || hasSubledgerNetMargin) && (
         <SurfaceCard className="mb-5">
-          <SectionHead>Profit & Loss (ex-VAT)</SectionHead>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <SectionHead>Profit & Loss (ex-VAT)</SectionHead>
+            {hasSubledgerNetMargin && <Badge label="Subledger economics" color="#14B8A6" small />}
+          </div>
           <div className="grid gap-1 text-xs max-w-sm">
             <div className="flex justify-between py-1">
               <span className="text-muted-foreground">Net Revenue</span>
@@ -340,6 +383,12 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               <span className="text-muted-foreground">Fees</span>
               <Mono color="dim">{fmt(netFees)}</Mono>
             </div>
+            {totalProgramCommission > 0 && (
+              <div className="flex justify-between py-1">
+                <span className="text-muted-foreground">Program Commission</span>
+                <Mono color="dim">{fmt(netProgramCommission)}</Mono>
+              </div>
+            )}
             <div className="flex justify-between py-1.5 border-t border-border font-semibold">
               <span className="text-foreground">Net Profit</span>
               <span className="flex items-center gap-2">

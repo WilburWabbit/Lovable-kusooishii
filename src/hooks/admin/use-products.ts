@@ -14,6 +14,7 @@ import type {
   BrickEconomyData,
   FieldOverride,
   ConditionGrade,
+  ProductVariantPricing,
 } from '@/lib/types/admin';
 
 // ─── Query Keys ─────────────────────────────────────────────
@@ -80,6 +81,66 @@ function mapVariant(row: Record<string, unknown>): ProductVariant {
   };
 }
 
+function mapVariantPricing(row: Record<string, unknown>): ProductVariantPricing {
+  return {
+    skuId: row.sku_id as string,
+    skuCode: row.sku_code as string,
+    channel: (row.channel as ProductVariantPricing['channel']) ?? null,
+    currentPrice: (row.current_price as number) ?? null,
+    floorPrice: (row.floor_price as number) ?? null,
+    marketPrice: (row.market_price as number) ?? null,
+    avgCost: (row.avg_cost as number) ?? null,
+    costRange: (row.cost_range as string) ?? null,
+    confidenceScore: (row.confidence_score as number) ?? null,
+    pricedAt: (row.priced_at as string) ?? null,
+  };
+}
+
+function preferredPricing(
+  rows: ProductVariantPricing[],
+): Map<string, ProductVariantPricing> {
+  const rank = (row: ProductVariantPricing) => {
+    if (row.channel === 'website' || row.channel === 'web') return 3;
+    if (row.channel == null) return 2;
+    return 1;
+  };
+
+  const bySku = new Map<string, ProductVariantPricing>();
+  for (const row of rows) {
+    const existing = bySku.get(row.skuCode);
+    if (!existing) {
+      bySku.set(row.skuCode, row);
+      continue;
+    }
+
+    const rankDiff = rank(row) - rank(existing);
+    if (rankDiff > 0) {
+      bySku.set(row.skuCode, row);
+      continue;
+    }
+
+    if (rankDiff === 0) {
+      const tNew = new Date(row.pricedAt ?? 0).getTime();
+      const tOld = new Date(existing.pricedAt ?? 0).getTime();
+      if (tNew > tOld) bySku.set(row.skuCode, row);
+    }
+  }
+  return bySku;
+}
+
+function applyPricing(variant: ProductVariant, pricing: ProductVariantPricing | undefined): ProductVariant {
+  if (!pricing) return variant;
+
+  return {
+    ...variant,
+    salePrice: pricing.currentPrice ?? variant.salePrice,
+    floorPrice: pricing.floorPrice ?? variant.floorPrice,
+    avgCost: pricing.avgCost ?? variant.avgCost,
+    costRange: pricing.costRange ?? variant.costRange,
+    marketPrice: pricing.marketPrice ?? variant.marketPrice,
+  };
+}
+
 function mapImage(
   pm: Record<string, unknown>,
   ma: Record<string, unknown>,
@@ -129,12 +190,21 @@ export function useProducts() {
         .from('v2_variant_stock_summary' as never)
         .select('*');
 
+      const { data: pricingRows } = await supabase
+        .from('v_current_sku_pricing' as never)
+        .select('sku_id, sku_code, channel, current_price, floor_price, market_price, avg_cost, cost_range, confidence_score, priced_at');
+
+      const pricingBySku = preferredPricing(
+        ((pricingRows ?? []) as Record<string, unknown>[]).map(mapVariantPricing),
+      );
+
       // Build a lookup of variants per product MPN
       const variantsByMpn = new Map<string, ProductVariant[]>();
       for (const row of ((variantRows ?? []) as Record<string, unknown>[])) {
         const mpn = row.mpn as string;
         const list = variantsByMpn.get(mpn) ?? [];
-        list.push(mapVariant(row));
+        const variant = mapVariant(row);
+        list.push(applyPricing(variant, pricingBySku.get(variant.sku)));
         variantsByMpn.set(mpn, list);
       }
 
@@ -230,15 +300,25 @@ export function useProduct(mpn: string | undefined) {
         summaryByCode.set(row.sku_code as string, row);
       }
 
+      const { data: pricingRows } = await supabase
+        .from('v_current_sku_pricing' as never)
+        .select('sku_id, sku_code, channel, current_price, floor_price, market_price, avg_cost, cost_range, confidence_score, priced_at')
+        .eq('mpn' as never, mpn!);
+
+      const pricingBySku = preferredPricing(
+        ((pricingRows ?? []) as Record<string, unknown>[]).map(mapVariantPricing),
+      );
+
       const variants: ProductVariant[] = ((skuRows ?? []) as Record<string, unknown>[]).map((row) => {
         const code = row.sku_code as string;
         const summary = summaryByCode.get(code);
-        return {
+        const variant = {
           ...mapVariant({ ...row, mpn: mpn! }),
           qtyOnHand: summary ? (summary.qty_on_hand as number) ?? 0 : 0,
           avgCost: summary ? (summary.avg_cost as number) ?? null : (row.avg_cost as number) ?? null,
           floorPrice: summary ? (summary.floor_price as number) ?? null : (row.floor_price as number) ?? null,
         };
+        return applyPricing(variant, pricingBySku.get(code));
       });
 
       // Fetch images
