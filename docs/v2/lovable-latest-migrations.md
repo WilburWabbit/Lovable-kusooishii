@@ -4,6 +4,7 @@ If the smoke query only returns `cancel_listing_outbound_command` and
 `process_order_return`, run this catch-up migration once in Lovable SQL:
 
 1. `supabase/migrations/20260430235900_lovable_subledger_function_catchup.sql`
+2. `supabase/migrations/20260430240000_manage_qbo_posting_intents.sql`
 
 It recreates the missing functions and supporting indexes from the latest batch
 in a single idempotent SQL file.
@@ -31,6 +32,7 @@ no JavaScript-style `//` comments.
 11. `supabase/migrations/20260430235600_queue_qbo_item_posting_intents.sql`
 12. `supabase/migrations/20260430235700_queue_qbo_customer_posting_intents.sql`
 13. `supabase/migrations/20260430235800_queue_qbo_purchase_posting_intents.sql`
+14. `supabase/migrations/20260430240000_manage_qbo_posting_intents.sql`
 
 ## Smoke Checks
 
@@ -44,6 +46,7 @@ JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE pg_namespace.nspname = 'public'
   AND proname IN (
     'cancel_listing_outbound_command',
+    'cancel_qbo_posting_intent',
     'queue_listing_command',
     'queue_qbo_refund_posting_intent_for_order',
     'queue_qbo_payout_posting_intent',
@@ -57,7 +60,8 @@ WHERE pg_namespace.nspname = 'public'
     'refresh_sku_cost_rollups',
     'release_stock_allocation_for_order_line',
     'process_order_return',
-    'retry_listing_outbound_command'
+    'retry_listing_outbound_command',
+    'retry_qbo_posting_intent'
   )
 ORDER BY proname;
 ```
@@ -66,6 +70,7 @@ Expected function names:
 
 ```text
 cancel_listing_outbound_command
+cancel_qbo_posting_intent
 process_order_return
 queue_listing_command
 queue_qbo_customer_posting_intent
@@ -80,6 +85,7 @@ refresh_market_price_snapshots
 refresh_sku_cost_rollups
 release_stock_allocation_for_order_line
 retry_listing_outbound_command
+retry_qbo_posting_intent
 ```
 
 If the smoke query only returns `cancel_listing_outbound_command` and
