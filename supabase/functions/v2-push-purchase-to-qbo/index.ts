@@ -132,32 +132,53 @@ async function ensureQboItemForLine(
 
   const existing = (sku as Record<string, unknown> | null)?.qbo_item_id as string | null;
   if (existing) return existing;
+  const skuId = (sku as Record<string, unknown> | null)?.id as string | null;
+  if (!skuId) throw new Error(`SKU not found: ${skuCode}`);
 
-  // Call qbo-sync-item to create it
+  // Queue the QBO item upsert through the posting outbox, then process it
+  // synchronously because the Purchase payload needs the ItemRef immediately.
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const purchaseCost = line.landed_cost_per_unit ?? line.unit_cost;
-  const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-sync-item`, {
+  const { data: intentId, error: intentErr } = await admin.rpc("queue_qbo_item_posting_intent" as never, {
+    p_sku_id: skuId,
+    p_purchase_cost: purchaseCost,
+    p_supplier_vat_registered: supplierVatRegistered,
+  } as never);
+  if (intentErr) {
+    throw new Error(`QBO item intent failed for ${skuCode}: ${intentErr.message}`);
+  }
+
+  const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
     method: "POST",
     headers: {
       Authorization: authHeader,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({
-      skuCode,
-      purchaseCost,
-      supplierVatRegistered,
-    }),
+    body: JSON.stringify(intentId ? { intentId } : { batch_size: 5 }),
   });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`qbo-sync-item failed for ${skuCode} [${res.status}]: ${txt.substring(0, 300)}`);
+    throw new Error(`QBO item posting processor failed for ${skuCode} [${res.status}]: ${txt.substring(0, 300)}`);
   }
   const payload = await res.json();
-  if (!payload.success) {
-    throw new Error(`qbo-sync-item refused ${skuCode}: ${payload.qbo_error ?? payload.error ?? "unknown"}`);
+  const results = Array.isArray(payload?.results) ? payload.results as Record<string, unknown>[] : [];
+  const itemResult = results.find((row) => row.intent_id === intentId) ?? results[0];
+  if (!payload.success || !itemResult || itemResult.status !== "posted") {
+    throw new Error(`QBO item posting refused ${skuCode}: ${itemResult?.error ?? payload.error ?? "unknown"}`);
   }
-  return String(payload.qbo_item_id);
+
+  const qboItemId = itemResult.qbo_item_id ? String(itemResult.qbo_item_id) : null;
+  if (qboItemId) return qboItemId;
+
+  const { data: refreshedSku } = await admin
+    .from("sku")
+    .select("qbo_item_id")
+    .eq("id", skuId)
+    .maybeSingle();
+  const refreshedId = (refreshedSku as Record<string, unknown> | null)?.qbo_item_id as string | null;
+  if (!refreshedId) throw new Error(`QBO item posting completed for ${skuCode} but no qbo_item_id was returned`);
+  return refreshedId;
 }
 
 Deno.serve(async (req) => {

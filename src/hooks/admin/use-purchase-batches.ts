@@ -86,6 +86,49 @@ function mapStockUnit(row: Record<string, unknown>): StockUnit {
   };
 }
 
+async function postQboItemViaIntent(input: {
+  skuCode: string;
+  purchaseCost?: number;
+  supplierVatRegistered?: boolean;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  const { data: sku, error: skuErr } = await supabase
+    .from('sku')
+    .select('id')
+    .eq('sku_code', input.skuCode)
+    .maybeSingle();
+
+  if (skuErr) return { success: false, error: skuErr.message };
+  const skuId = (sku as Record<string, unknown> | null)?.id as string | null;
+  if (!skuId) return { success: false, error: `SKU not found: ${input.skuCode}` };
+
+  const { data: intentId, error: queueErr } = await supabase.rpc(
+    'queue_qbo_item_posting_intent' as never,
+    {
+      p_sku_id: skuId,
+      p_purchase_cost: input.purchaseCost ?? null,
+      p_supplier_vat_registered: input.supplierVatRegistered ?? null,
+    } as never,
+  );
+  if (queueErr) return { success: false, error: queueErr.message };
+
+  const { data, error } = await supabase.functions.invoke('accounting-posting-intents-process', {
+    body: intentId ? { intentId } : { batch_size: 5 },
+  });
+  if (error) return { success: false, error: error.message };
+
+  const payload = data as Record<string, unknown> | null;
+  const results = Array.isArray(payload?.results) ? payload.results as Record<string, unknown>[] : [];
+  const result = results.find((row) => row.intent_id === intentId) ?? results[0];
+  if (!payload?.success || !result || result.status !== 'posted') {
+    return {
+      success: false,
+      error: String(result?.error ?? payload?.error ?? 'QBO Item posting intent did not complete'),
+    };
+  }
+
+  return { success: true };
+}
+
 // ─── usePurchaseBatches ─────────────────────────────────────
 
 export function usePurchaseBatches() {
@@ -505,33 +548,16 @@ export function useUpdatePurchaseLineItem() {
       if (qboPurchaseId) {
         const skuCode = `${input.mpn}.5`;
         try {
-          const { data: itemData, error: itemErr } = await supabase.functions.invoke(
-            'qbo-sync-item',
-            {
-              body: {
-                skuCode,
-                purchaseCost: input.unitCost,
-                supplierVatRegistered: false, // qbo-sync-item ex-VATs as needed; cost is gross
-              },
-            },
-          );
-          if (itemErr) {
-            const ctx = (itemErr as { context?: Response }).context;
-            let detail = itemErr.message;
-            if (ctx && typeof ctx.json === 'function') {
-              try {
-                const payload = await ctx.json();
-                if (payload?.error) detail = String(payload.error);
-              } catch (_) { /* ignore */ }
-            }
-            return { line_item_id: input.lineItemId, qbo_pushed: false, qbo_error: `QBO Item sync: ${detail}` };
-          }
-          if (itemData && typeof itemData === 'object' && 'success' in itemData && !(itemData as { success: boolean }).success) {
-            const errPayload = itemData as { qbo_error?: string; error?: string };
+          const itemResult = await postQboItemViaIntent({
+            skuCode,
+            purchaseCost: input.unitCost,
+            supplierVatRegistered: false,
+          });
+          if (!itemResult.success) {
             return {
               line_item_id: input.lineItemId,
               qbo_pushed: false,
-              qbo_error: `QBO Item sync: ${errPayload.qbo_error ?? errPayload.error ?? 'unknown'}`,
+              qbo_error: `QBO Item sync: ${itemResult.error}`,
             };
           }
         } catch (e) {
