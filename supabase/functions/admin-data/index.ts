@@ -493,16 +493,18 @@ Deno.serve(async (req) => {
       let finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
 
-      // Validate against floor price from existing listing
-      const { data: existingListing } = await admin
-        .from("channel_listing")
-        .select("price_floor")
-        .eq("sku_id", sku_id)
-        .eq("channel", "web")
-        .maybeSingle();
-      if (existingListing?.price_floor != null && finalPrice < existingListing.price_floor) {
-        // Bump to floor price to prevent listing below cost
-        finalPrice = existingListing.price_floor;
+      // Validate against the domain quote floor, not legacy listing columns.
+      const { data: quote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+        p_sku_id: sku_id,
+        p_channel: "web",
+        p_candidate_price: finalPrice,
+      });
+      if (quoteErr) throw quoteErr;
+
+      const quoteFloor = Number((quote as Record<string, unknown> | null)?.floor_price ?? 0);
+      if (quoteFloor > 0 && finalPrice < quoteFloor) {
+        // Bump to the channel-net floor before creating the publish snapshot.
+        finalPrice = quoteFloor;
       }
 
       // Sync resolved price back to SKU
@@ -782,15 +784,20 @@ Deno.serve(async (req) => {
       const heightCm = product.height_cm;
       const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
 
-      // 2. Get carrying value (avg of available stock)
+      // 2. Get carrying value basis for pooled stock. Use the highest eligible
+      // unit value so a SKU-level sale price protects every available unit.
       const { data: stockUnits } = await admin
         .from("stock_unit")
-        .select("carrying_value")
+        .select("carrying_value, landed_cost")
         .eq("sku_id", sku_id)
         .eq("status", "available");
-      const avgCarrying = stockUnits && stockUnits.length > 0
-        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+      const carryingValues = (stockUnits ?? [])
+        .map((su: any) => Number(su.carrying_value ?? su.landed_cost ?? 0))
+        .filter((value: number) => value > 0);
+      const avgCarrying = carryingValues.length > 0
+        ? carryingValues.reduce((sum: number, value: number) => sum + value, 0) / carryingValues.length
         : 0;
+      const carryingValueBasis = carryingValues.length > 0 ? Math.max(...carryingValues) : 0;
 
       // 3. Get active fees for channel
       const { data: fees } = await admin
@@ -858,10 +865,12 @@ Deno.serve(async (req) => {
       const riskReserveRate = defaultsMap["risk_reserve_rate"] ?? 0;
       const riskReserve = Math.round(salePrice * (riskReserveRate / 100) * 100) / 100;
 
-      const totalCostToSell = Math.round((avgCarrying + packagingCost + shippingCost + totalChannelFees + riskReserve) * 100) / 100;
+      const totalCostToSell = Math.round((carryingValueBasis + packagingCost + shippingCost + totalChannelFees + riskReserve) * 100) / 100;
 
       result = {
-        carrying_value: Math.round(avgCarrying * 100) / 100,
+        carrying_value: Math.round(carryingValueBasis * 100) / 100,
+        average_carrying_value: Math.round(avgCarrying * 100) / 100,
+        stock_unit_count: carryingValues.length,
         packaging_cost: packagingCost,
         shipping_cost: shippingCost,
         channel_fees: Math.round(totalChannelFees * 100) / 100,
@@ -900,15 +909,20 @@ Deno.serve(async (req) => {
       const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
       const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
 
-      // 3. Get carrying value (avg of available stock)
+      // 3. Get carrying value basis for pooled listings. The floor price uses
+      // the highest eligible unit value unless a specific unit is reserved.
       const { data: stockUnits } = await admin
         .from("stock_unit")
-        .select("carrying_value")
+        .select("carrying_value, landed_cost")
         .eq("sku_id", sku_id)
         .eq("status", "available");
-      const avgCarrying = stockUnits && stockUnits.length > 0
-        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+      const carryingValues = (stockUnits ?? [])
+        .map((su: any) => Number(su.carrying_value ?? su.landed_cost ?? 0))
+        .filter((value: number) => value > 0);
+      const avgCarrying = carryingValues.length > 0
+        ? carryingValues.reduce((sum: number, value: number) => sum + value, 0) / carryingValues.length
         : 0;
+      const carryingValueBasis = carryingValues.length > 0 ? Math.max(...carryingValues) : 0;
 
       // 4. Get shipping cost — Evri-first strategy
       const weightKg = product.weight_kg ?? 0;
@@ -980,8 +994,8 @@ Deno.serve(async (req) => {
         .eq("active", true);
 
       // For floor calculation, we need a cost_base that doesn't depend on sale_price
-      // cost_base = carrying_value + packaging + shipping
-      const costBase = avgCarrying + packagingCost + shippingCost;
+      // cost_base = protected carrying value + packaging + shipping
+      const costBase = carryingValueBasis + packagingCost + shippingCost;
 
       // 6. Get normalized market consensus first; fall back to legacy BrickEconomy cache.
       let marketConsensus: number | null = null;
@@ -1093,7 +1107,7 @@ Deno.serve(async (req) => {
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
-      if (avgCarrying > 0) confidence += 0.3; // have stock cost
+      if (carryingValueBasis > 0) confidence += 0.3; // have stock cost
       if (marketConfidence > 0) confidence += Math.min(marketConfidence, 1) * 0.4; // have market data
       if (hasDimensions) confidence += 0.15; // have dimensions for shipping
       if ((fees ?? []).length > 0) confidence += 0.15; // have channel fees
@@ -1106,12 +1120,15 @@ Deno.serve(async (req) => {
         target_price: targetPrice,
         ceiling_price: ceilingPrice,
         cost_base: Math.round(costBase * 100) / 100,
-        carrying_value: Math.round(avgCarrying * 100) / 100,
+        carrying_value: Math.round(carryingValueBasis * 100) / 100,
+        average_carrying_value: Math.round(avgCarrying * 100) / 100,
+        stock_unit_count: carryingValues.length,
         market_consensus: marketConsensus,
         condition_multiplier: condMultiplier,
         confidence_score: confidence,
         breakdown: {
-          carrying_value: Math.round(avgCarrying * 100) / 100,
+          carrying_value: Math.round(carryingValueBasis * 100) / 100,
+          average_carrying_value: Math.round(avgCarrying * 100) / 100,
           packaging_cost: packagingCost,
           shipping_cost: shippingCost,
           total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
