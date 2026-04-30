@@ -1,13 +1,13 @@
 // Redeployed: 2026-03-23
 // ============================================================
-// V2 Process Order — Post-Order Hook
-// Called after ANY order is created (Stripe, eBay, admin) to
-// perform v2 lifecycle steps:
+// V2 Process Order — Compatibility Post-Order Hook
+// Retained for older/manual callers. New order flows perform these
+// steps directly in their domain handlers.
 //   1. Domain allocation via allocate_stock_for_order_line()
 //   2. COGS/cost-event recording on order line items
 //   3. v2_status lifecycle tracking
-//   4. Variant stats recalculation
-//   5. QBO SalesReceipt sync trigger
+//   4. Compatibility SKU cost rollup refresh
+//   5. QBO posting-intent queueing
 //
 // Idempotent: skips lines that already have stock_unit_id.
 // ============================================================
@@ -140,13 +140,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ─── 3. Recalculate variant stats for affected SKUs ─────
-    for (const skuCode of affectedSkus) {
-      const { error: statsErr } = await admin
-        .rpc("v2_recalculate_variant_stats", { p_sku_code: skuCode });
+    // ─── 3. Refresh compatibility SKU cost rollups ──────────
+    for (const skuId of affectedSkuIds) {
+      const { error: rollupErr } = await admin
+        .rpc("refresh_sku_cost_rollups", { p_sku_id: skuId });
 
-      if (statsErr) {
-        console.warn(`Failed to recalculate stats for ${skuCode}: ${statsErr.message}`);
+      if (rollupErr) {
+        console.warn(`Failed to refresh SKU cost rollup for ${skuId}: ${rollupErr.message}`);
       }
     }
 

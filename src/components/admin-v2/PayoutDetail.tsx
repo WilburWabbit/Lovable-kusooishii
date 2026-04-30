@@ -17,6 +17,12 @@ import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 import { ArrowLeft, ExternalLink, ChevronRight, ChevronDown } from "lucide-react";
 
+type ResetSyncResult = {
+  expensesReset?: number;
+  depositReset?: number;
+  salesReceiptsReset?: number;
+};
+
 const formatDate = (iso: string | null) => {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-GB", {
@@ -701,7 +707,12 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                 onSuccess: (data) => {
                   const d = data as Record<string, unknown>;
                   if (d.success) {
-                    toast.success(`QBO synced — Deposit #${d.qbo_deposit_id}${d.qbo_expense_id ? `, Expense #${d.qbo_expense_id}` : ""}`);
+                    const results = Array.isArray(d.results) ? d.results as Record<string, unknown>[] : [];
+                    const posted = results.find((result) => result.status === "posted");
+                    const depositId = posted?.qbo_deposit_id ?? d.qbo_deposit_id;
+                    toast.success(depositId
+                      ? `QBO payout posting complete — Deposit #${depositId}`
+                      : "QBO payout posting intent queued");
                   } else {
                     toast.error(`QBO sync failed: ${d.error ?? "Unknown error"}`);
                   }
@@ -732,7 +743,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <button
               onClick={() => {
                 resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "expenses" }, {
-                  onSuccess: (d: any) => toast.success(`Reset ${d.expensesReset ?? 0} expense records`),
+                  onSuccess: (d: ResetSyncResult) => toast.success(`Reset ${d.expensesReset ?? 0} expense records`),
                   onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
                 });
               }}
@@ -744,7 +755,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <button
               onClick={() => {
                 resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "deposit" }, {
-                  onSuccess: (d: any) => toast.success(`Deposit reset (${d.depositReset ?? 0}) + ${d.salesReceiptsReset ?? 0} sales receipts cleared`),
+                  onSuccess: (d: ResetSyncResult) => toast.success(`Deposit reset (${d.depositReset ?? 0}) + ${d.salesReceiptsReset ?? 0} sales receipts cleared`),
                   onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
                 });
               }}
@@ -756,7 +767,7 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
             <button
               onClick={() => {
                 resetSync.mutate({ payoutId: payout.externalPayoutId!, scope: "all" }, {
-                  onSuccess: (d: any) => toast.success(`Reset ${d.expensesReset ?? 0} expenses, deposit (${d.depositReset ?? 0}), ${d.salesReceiptsReset ?? 0} sales receipts`),
+                  onSuccess: (d: ResetSyncResult) => toast.success(`Reset ${d.expensesReset ?? 0} expenses, deposit (${d.depositReset ?? 0}), ${d.salesReceiptsReset ?? 0} sales receipts`),
                   onError: (err) => toast.error(err instanceof Error ? err.message : "Reset failed"),
                 });
               }}

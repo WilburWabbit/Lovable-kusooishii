@@ -43,17 +43,28 @@ function getSalesOrderId(intent: PostingIntent): string | null {
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
 }
 
+function getPayoutId(intent: PostingIntent): string | null {
+  if (intent.entity_type === "payout" && intent.entity_id) return intent.entity_id;
+  const fromPayload = intent.payload?.payout_id;
+  return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
+}
+
 function getRefundedLineIds(intent: PostingIntent): string[] {
   const value = intent.payload?.refunded_line_ids;
   if (!Array.isArray(value)) return [];
   return value.filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
-function qboActionConfig(intent: PostingIntent, orderId: string) {
+function getEntityIdForIntent(intent: PostingIntent): string | null {
+  if (intent.action === "create_payout_deposit") return getPayoutId(intent);
+  return getSalesOrderId(intent);
+}
+
+function qboActionConfig(intent: PostingIntent, entityId: string) {
   if (intent.action === "create_sales_receipt") {
     return {
       functionName: "qbo-sync-sales-receipt",
-      requestBody: { orderId },
+      requestBody: { orderId: entityId },
       qboEntityType: "SalesReceipt",
       responseIdField: "qbo_sales_receipt_id",
       resultIdField: "qbo_sales_receipt_id",
@@ -65,11 +76,22 @@ function qboActionConfig(intent: PostingIntent, orderId: string) {
     const refundedLineIds = getRefundedLineIds(intent);
     return {
       functionName: "qbo-sync-refund-receipt",
-      requestBody: { orderId, refundedLineIds },
+      requestBody: { orderId: entityId, refundedLineIds },
       qboEntityType: "RefundReceipt",
       responseIdField: "qbo_refund_receipt_id",
       resultIdField: "qbo_refund_receipt_id",
       sourceColumn: "posting_intent.payload.refunded_line_ids",
+    };
+  }
+
+  if (intent.action === "create_payout_deposit") {
+    return {
+      functionName: "qbo-sync-payout",
+      requestBody: { payoutId: entityId },
+      qboEntityType: "Deposit",
+      responseIdField: "qbo_deposit_id",
+      resultIdField: "qbo_deposit_id",
+      sourceColumn: "payouts.qbo_deposit_id",
     };
   }
 
@@ -91,7 +113,7 @@ Deno.serve(async (req) => {
       .from("posting_intent")
       .select("id, action, entity_type, entity_id, idempotency_key, retry_count, payload")
       .eq("target_system", "qbo")
-      .in("action", ["create_sales_receipt", "create_refund_receipt"] as never)
+      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit"] as never)
       .order("created_at", { ascending: true })
       .limit(batchSize);
 
@@ -115,7 +137,7 @@ Deno.serve(async (req) => {
     const results: Array<Record<string, unknown>> = [];
 
     for (const intent of (intents ?? []) as PostingIntent[]) {
-      const orderId = getSalesOrderId(intent);
+      const entityId = getEntityIdForIntent(intent);
       const retryCount = (intent.retry_count ?? 0) + 1;
 
       const { data: claimed, error: claimErr } = await admin
@@ -141,8 +163,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (!orderId) {
-        const message = "Posting intent has no sales_order id";
+      if (!entityId) {
+        const message = `Posting intent has no ${intent.entity_type} id`;
         await admin
           .from("posting_intent")
           .update({
@@ -157,7 +179,7 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const actionConfig = qboActionConfig(intent, orderId);
+        const actionConfig = qboActionConfig(intent, entityId);
         const syncRes = await fetchWithTimeout(`${supabaseUrl}/functions/v1/${actionConfig.functionName}`, {
           method: "POST",
           headers: {
@@ -199,7 +221,8 @@ Deno.serve(async (req) => {
 
           results.push({
             intent_id: intent.id,
-            sales_order_id: orderId,
+            entity_type: intent.entity_type,
+            entity_id: entityId,
             status: exhausted ? "failed" : "retry_scheduled",
             error: message,
             next_attempt_at: nextAttempt,
@@ -223,20 +246,32 @@ Deno.serve(async (req) => {
           .eq("id", intent.id);
 
         if (qboEntityId) {
-          const { data: order } = await admin
-            .from("sales_order")
-            .select("order_number, doc_number")
-            .eq("id", orderId)
-            .maybeSingle();
+          let docNumber: string | null = null;
+
+          if (intent.entity_type === "sales_order") {
+            const { data: order } = await admin
+              .from("sales_order")
+              .select("order_number, doc_number")
+              .eq("id", entityId)
+              .maybeSingle();
+            docNumber = order?.doc_number ?? order?.order_number ?? null;
+          } else if (intent.entity_type === "payout") {
+            const { data: payout } = await admin
+              .from("payouts" as never)
+              .select("external_payout_id")
+              .eq("id", entityId)
+              .maybeSingle();
+            docNumber = ((payout as Record<string, unknown> | null)?.external_payout_id as string | null) ?? null;
+          }
 
           await admin
             .from("qbo_posting_reference")
             .upsert({
-              local_entity_type: "sales_order",
-              local_entity_id: orderId,
+              local_entity_type: intent.entity_type,
+              local_entity_id: entityId,
               qbo_entity_type: actionConfig.qboEntityType,
               qbo_entity_id: qboEntityId,
-              qbo_doc_number: order?.doc_number ?? order?.order_number ?? null,
+              qbo_doc_number: docNumber,
               source_column: actionConfig.sourceColumn,
               posting_intent_id: intent.id,
               synced_at: new Date().toISOString(),
@@ -251,7 +286,8 @@ Deno.serve(async (req) => {
 
         results.push({
           intent_id: intent.id,
-          sales_order_id: orderId,
+          entity_type: intent.entity_type,
+          entity_id: entityId,
           status: "posted",
           [actionConfig.resultIdField]: qboEntityId || null,
         });
@@ -274,7 +310,8 @@ Deno.serve(async (req) => {
 
         results.push({
           intent_id: intent.id,
-          sales_order_id: orderId,
+          entity_type: intent.entity_type,
+          entity_id: entityId,
           status: exhausted ? "failed" : "retry_scheduled",
           error: message,
           next_attempt_at: nextAttempt,

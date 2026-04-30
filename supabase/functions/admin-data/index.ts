@@ -8,6 +8,12 @@ class ValidationError extends Error {
 const STOCK_MATCHABLE = ["available", "received", "graded"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
 
+function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
+  const status = unit.status ?? "";
+  const v2Status = unit.v2_status ?? "";
+  return STOCK_MATCHABLE.includes(status) && !["sold", "written_off"].includes(v2Status);
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -493,16 +499,18 @@ Deno.serve(async (req) => {
       let finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
 
-      // Validate against floor price from existing listing
-      const { data: existingListing } = await admin
-        .from("channel_listing")
-        .select("price_floor")
-        .eq("sku_id", sku_id)
-        .eq("channel", "web")
-        .maybeSingle();
-      if (existingListing?.price_floor != null && finalPrice < existingListing.price_floor) {
-        // Bump to floor price to prevent listing below cost
-        finalPrice = existingListing.price_floor;
+      // Validate against the domain quote floor, not legacy listing columns.
+      const { data: quote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+        p_sku_id: sku_id,
+        p_channel: "web",
+        p_candidate_price: finalPrice,
+      });
+      if (quoteErr) throw quoteErr;
+
+      const quoteFloor = Number((quote as Record<string, unknown> | null)?.floor_price ?? 0);
+      if (quoteFloor > 0 && finalPrice < quoteFloor) {
+        // Bump to the channel-net floor before creating the publish snapshot.
+        finalPrice = quoteFloor;
       }
 
       // Sync resolved price back to SKU
@@ -782,15 +790,20 @@ Deno.serve(async (req) => {
       const heightCm = product.height_cm;
       const hasDimensions = lengthCm != null && widthCm != null && heightCm != null;
 
-      // 2. Get carrying value (avg of available stock)
+      // 2. Get carrying value basis for pooled stock. Use the highest eligible
+      // unit value so a SKU-level sale price protects every available unit.
       const { data: stockUnits } = await admin
         .from("stock_unit")
-        .select("carrying_value")
+        .select("carrying_value, landed_cost")
         .eq("sku_id", sku_id)
         .eq("status", "available");
-      const avgCarrying = stockUnits && stockUnits.length > 0
-        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+      const carryingValues = (stockUnits ?? [])
+        .map((su: any) => Number(su.carrying_value ?? su.landed_cost ?? 0))
+        .filter((value: number) => value > 0);
+      const avgCarrying = carryingValues.length > 0
+        ? carryingValues.reduce((sum: number, value: number) => sum + value, 0) / carryingValues.length
         : 0;
+      const carryingValueBasis = carryingValues.length > 0 ? Math.max(...carryingValues) : 0;
 
       // 3. Get active fees for channel
       const { data: fees } = await admin
@@ -858,10 +871,12 @@ Deno.serve(async (req) => {
       const riskReserveRate = defaultsMap["risk_reserve_rate"] ?? 0;
       const riskReserve = Math.round(salePrice * (riskReserveRate / 100) * 100) / 100;
 
-      const totalCostToSell = Math.round((avgCarrying + packagingCost + shippingCost + totalChannelFees + riskReserve) * 100) / 100;
+      const totalCostToSell = Math.round((carryingValueBasis + packagingCost + shippingCost + totalChannelFees + riskReserve) * 100) / 100;
 
       result = {
-        carrying_value: Math.round(avgCarrying * 100) / 100,
+        carrying_value: Math.round(carryingValueBasis * 100) / 100,
+        average_carrying_value: Math.round(avgCarrying * 100) / 100,
+        stock_unit_count: carryingValues.length,
         packaging_cost: packagingCost,
         shipping_cost: shippingCost,
         channel_fees: Math.round(totalChannelFees * 100) / 100,
@@ -900,15 +915,20 @@ Deno.serve(async (req) => {
       const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
       const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
 
-      // 3. Get carrying value (avg of available stock)
+      // 3. Get carrying value basis for pooled listings. The floor price uses
+      // the highest eligible unit value unless a specific unit is reserved.
       const { data: stockUnits } = await admin
         .from("stock_unit")
-        .select("carrying_value")
+        .select("carrying_value, landed_cost")
         .eq("sku_id", sku_id)
         .eq("status", "available");
-      const avgCarrying = stockUnits && stockUnits.length > 0
-        ? stockUnits.reduce((sum: number, su: any) => sum + (su.carrying_value ?? 0), 0) / stockUnits.length
+      const carryingValues = (stockUnits ?? [])
+        .map((su: any) => Number(su.carrying_value ?? su.landed_cost ?? 0))
+        .filter((value: number) => value > 0);
+      const avgCarrying = carryingValues.length > 0
+        ? carryingValues.reduce((sum: number, value: number) => sum + value, 0) / carryingValues.length
         : 0;
+      const carryingValueBasis = carryingValues.length > 0 ? Math.max(...carryingValues) : 0;
 
       // 4. Get shipping cost — Evri-first strategy
       const weightKg = product.weight_kg ?? 0;
@@ -980,8 +1000,8 @@ Deno.serve(async (req) => {
         .eq("active", true);
 
       // For floor calculation, we need a cost_base that doesn't depend on sale_price
-      // cost_base = carrying_value + packaging + shipping
-      const costBase = avgCarrying + packagingCost + shippingCost;
+      // cost_base = protected carrying value + packaging + shipping
+      const costBase = carryingValueBasis + packagingCost + shippingCost;
 
       // 6. Get normalized market consensus first; fall back to legacy BrickEconomy cache.
       let marketConsensus: number | null = null;
@@ -1093,7 +1113,7 @@ Deno.serve(async (req) => {
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
-      if (avgCarrying > 0) confidence += 0.3; // have stock cost
+      if (carryingValueBasis > 0) confidence += 0.3; // have stock cost
       if (marketConfidence > 0) confidence += Math.min(marketConfidence, 1) * 0.4; // have market data
       if (hasDimensions) confidence += 0.15; // have dimensions for shipping
       if ((fees ?? []).length > 0) confidence += 0.15; // have channel fees
@@ -1106,12 +1126,15 @@ Deno.serve(async (req) => {
         target_price: targetPrice,
         ceiling_price: ceilingPrice,
         cost_base: Math.round(costBase * 100) / 100,
-        carrying_value: Math.round(avgCarrying * 100) / 100,
+        carrying_value: Math.round(carryingValueBasis * 100) / 100,
+        average_carrying_value: Math.round(avgCarrying * 100) / 100,
+        stock_unit_count: carryingValues.length,
         market_consensus: marketConsensus,
         condition_multiplier: condMultiplier,
         confidence_score: confidence,
         breakdown: {
-          carrying_value: Math.round(avgCarrying * 100) / 100,
+          carrying_value: Math.round(carryingValueBasis * 100) / 100,
+          average_carrying_value: Math.round(avgCarrying * 100) / 100,
           packaging_cost: packagingCost,
           shipping_cost: shippingCost,
           total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
@@ -1507,6 +1530,7 @@ Deno.serve(async (req) => {
       // First, find valid completed order IDs, then find their unlinked lines.
       let stockClosed = 0;
       const closedSkuIds = new Set<string>();
+      const refreshedOrderIds = new Set<string>();
 
       // Step A0: Reopen stock incorrectly closed by previous runs that
       // didn't filter by order status. Find stock_units closed by our
@@ -1536,21 +1560,29 @@ Deno.serve(async (req) => {
         const orderStatus = (lineOrder as any)?.sales_order?.status;
         const validStatuses = VALID_SALE_STATUSES;
         if (orderStatus && !validStatuses.includes(orderStatus)) {
-          // This stock was closed for an invalid order — reopen it
-          const { error: reopenErr } = await admin
-            .from("stock_unit")
-            .update({ status: "available", updated_at: new Date().toISOString() })
-            .eq("id", audit.entity_id)
-            .eq("status", "closed");
+          // This stock was closed for an invalid order. Release the linked
+          // line through the subledger so COGS/allocation events are reversed.
+          const { error: releaseErr } = await admin.rpc("release_stock_allocation_for_order_line" as never, {
+            p_sales_order_line_id: lineId,
+            p_reason: "reconcile_stock_invalid_order_status",
+          } as never);
 
-          if (!reopenErr) {
-            // Unlink from the order line
+          if (!releaseErr) {
+            const { error: reopenErr } = await admin
+              .from("stock_unit")
+              .update({ status: "available", updated_at: new Date().toISOString() })
+              .eq("id", audit.entity_id)
+              .eq("status", "closed");
+
+            if (!reopenErr) stockReopened++;
+          } else {
+            // Fall back to making the stock visibly available only when the
+            // subledger release fails; leave the line untouched for review.
             await admin
-              .from("sales_order_line")
-              .update({ stock_unit_id: null })
-              .eq("id", lineId)
-              .eq("stock_unit_id", audit.entity_id);
-            stockReopened++;
+              .from("stock_unit")
+              .update({ status: "available", updated_at: new Date().toISOString() })
+              .eq("id", audit.entity_id)
+              .eq("status", "closed");
           }
         }
       }
@@ -1574,57 +1606,53 @@ Deno.serve(async (req) => {
           const batchIds = validOrderIds.slice(b, b + BATCH);
           const { data: unlinkedLines } = await admin
             .from("sales_order_line")
-            .select("id, sku_id, quantity")
+            .select("id, sales_order_id, sku_id, quantity")
             .in("sales_order_id", batchIds)
             .is("stock_unit_id", null);
 
           for (const line of (unlinkedLines ?? [])) {
-            for (let i = 0; i < (line.quantity ?? 1); i++) {
-              const { data: stockUnit } = await admin
-                .from("stock_unit")
-                .select("id")
-                .eq("sku_id", line.sku_id)
-                .in("status", STOCK_MATCHABLE)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+            if ((line.quantity ?? 1) !== 1) {
+              await admin.from("reconciliation_case").insert({
+                case_type: "unallocated_order_line",
+                severity: "high",
+                sales_order_id: line.sales_order_id,
+                sales_order_line_id: line.id,
+                related_entity_type: "sales_order_line",
+                related_entity_id: line.id,
+                suspected_root_cause: "Historical order line has quantity greater than one and cannot be represented by a single stock_unit_id.",
+                recommended_action: "Split the order line into unit-level lines or record an approved manual allocation exception.",
+                evidence: {
+                  sku_id: line.sku_id,
+                  quantity: line.quantity,
+                  source: "admin-data.reconcile-stock",
+                  correlation_id: correlationId,
+                },
+              });
+              continue;
+            }
 
-              if (stockUnit) {
-                const { error: closeErr } = await admin
-                  .from("stock_unit")
-                  .update({ status: "closed", updated_at: new Date().toISOString() })
-                  .eq("id", stockUnit.id);
+            const { data: allocation, error: allocationErr } = await admin.rpc("allocate_stock_for_order_line" as never, {
+              p_sales_order_line_id: line.id,
+              p_actor_id: userId,
+            } as never);
 
-                if (!closeErr) {
-                  if ((line.quantity ?? 1) === 1) {
-                    await admin
-                      .from("sales_order_line")
-                      .update({ stock_unit_id: stockUnit.id })
-                      .eq("id", line.id);
-                  }
-                  stockClosed++;
-                  closedSkuIds.add(line.sku_id);
+            if (allocationErr) {
+              console.warn(`Subledger allocation failed for line ${line.id}:`, allocationErr.message);
+              continue;
+            }
 
-                  await admin.from("audit_event").insert({
-                    entity_type: "stock_unit",
-                    entity_id: stockUnit.id,
-                    trigger_type: "stock_reconciliation_sale",
-                    actor_type: "user",
-                    actor_id: userId,
-                    source_system: "admin-data",
-                    correlation_id: correlationId,
-                    before_json: { status: "available" },
-                    after_json: { status: "closed" },
-                    input_json: {
-                      sales_order_line_id: line.id,
-                      sku_id: line.sku_id,
-                    },
-                  });
-                }
-              }
+            const allocationResult = allocation as Record<string, unknown> | null;
+            if (allocationResult?.status === "allocated") {
+              stockClosed++;
+              closedSkuIds.add(line.sku_id);
+              refreshedOrderIds.add(line.sales_order_id);
             }
           }
         }
+      }
+
+      for (const orderId of refreshedOrderIds) {
+        await admin.rpc("refresh_order_line_economics" as never, { p_sales_order_id: orderId } as never);
       }
 
       if (stockClosed > 0) {
@@ -1633,15 +1661,15 @@ Deno.serve(async (req) => {
 
       // ── Step A2: Update channel listings for closed SKUs ──
       for (const skuId of closedSkuIds) {
-        const { count: availableCount } = await admin
+        const { data: skuUnits } = await admin
           .from("stock_unit")
-          .select("id", { count: "exact", head: true })
-          .eq("sku_id", skuId)
-          .eq("status", "available");
+          .select("id, status, v2_status")
+          .eq("sku_id", skuId);
+        const availableCount = (skuUnits ?? []).filter(isAvailableStockUnit).length;
 
         await admin
           .from("channel_listing")
-          .update({ listed_quantity: availableCount ?? 0, synced_at: new Date().toISOString() })
+          .update({ listed_quantity: availableCount, synced_at: new Date().toISOString() })
           .eq("sku_id", skuId);
       }
 
@@ -1686,13 +1714,14 @@ Deno.serve(async (req) => {
 
         const qboQty = Math.floor(Number(qboItem.QtyOnHand ?? 0));
 
-        // Count all non-closed/non-written-off stock (available + received + graded)
-        const { count: appCount } = await admin
+        // Count units still saleable in the app. v2_status is the subledger
+        // sale marker, so sold units are excluded even if legacy status lags.
+        const { data: appUnits } = await admin
           .from("stock_unit")
-          .select("id", { count: "exact", head: true })
-          .eq("sku_id", sku.id)
-          .in("status", STOCK_MATCHABLE);
-        const available = appCount ?? 0;
+          .select("id, status, v2_status")
+          .eq("sku_id", sku.id);
+        const availableUnits = (appUnits ?? []).filter(isAvailableStockUnit);
+        const available = availableUnits.length;
         totalChecked++;
 
         if (available === qboQty) {
@@ -1707,14 +1736,12 @@ Deno.serve(async (req) => {
 
           const { data: excessUnits } = await admin
             .from("stock_unit")
-            .select("id, status, landed_cost, carrying_value")
+            .select("id, status, v2_status, landed_cost, carrying_value")
             .eq("sku_id", sku.id)
-            .in("status", STOCK_MATCHABLE)
-            .order("created_at", { ascending: true })
-            .limit(excess);
+            .order("created_at", { ascending: true });
 
           let unitWrittenOff = 0;
-          for (const unit of (excessUnits ?? [])) {
+          for (const unit of (excessUnits ?? []).filter(isAvailableStockUnit).slice(0, excess)) {
             await admin.from("stock_unit").update({
               status: "written_off",
               accumulated_impairment: unit.landed_cost ?? 0,
