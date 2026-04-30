@@ -6,6 +6,7 @@ export const operationsKeys = {
   reconciliation: ["v2", "operations", "reconciliation"] as const,
   postingIntents: ["v2", "operations", "posting-intents"] as const,
   listingCommands: ["v2", "operations", "listing-commands"] as const,
+  settlementPeriodClose: ["v2", "operations", "settlement-period-close"] as const,
   blueBellStatement: ["v2", "operations", "blue-bell-statement"] as const,
   blueBellAccruals: ["v2", "operations", "blue-bell-accruals"] as const,
 };
@@ -85,6 +86,22 @@ export interface BlueBellAccrualRow {
   reversedAmount: number;
   settlementId: string | null;
   createdAt: string;
+}
+
+export interface SettlementPeriodCloseRow {
+  periodStart: string;
+  periodEnd: string;
+  channelCount: number;
+  orderCount: number;
+  expectedTotal: number;
+  actualTotal: number;
+  varianceAmount: number;
+  payoutCount: number;
+  unreconciledPayoutCount: number;
+  openCaseCount: number;
+  missingPayoutCaseCount: number;
+  amountMismatchCaseCount: number;
+  closeStatus: string;
 }
 
 const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
@@ -167,6 +184,22 @@ const mapBlueBellAccrual = (row: Record<string, unknown>): BlueBellAccrualRow =>
     createdAt: row.created_at as string,
   };
 };
+
+const mapSettlementPeriodClose = (row: Record<string, unknown>): SettlementPeriodCloseRow => ({
+  periodStart: row.period_start as string,
+  periodEnd: row.period_end as string,
+  channelCount: Number(row.channel_count ?? 0),
+  orderCount: Number(row.order_count ?? 0),
+  expectedTotal: Number(row.expected_total ?? 0),
+  actualTotal: Number(row.actual_total ?? 0),
+  varianceAmount: Number(row.variance_amount ?? 0),
+  payoutCount: Number(row.payout_count ?? 0),
+  unreconciledPayoutCount: Number(row.unreconciled_payout_count ?? 0),
+  openCaseCount: Number(row.open_case_count ?? 0),
+  missingPayoutCaseCount: Number(row.missing_payout_case_count ?? 0),
+  amountMismatchCaseCount: Number(row.amount_mismatch_case_count ?? 0),
+  closeStatus: row.close_status as string,
+});
 
 export function useReconciliationInbox() {
   return useQuery({
@@ -272,6 +305,22 @@ export function useBlueBellOpenAccruals() {
   });
 }
 
+export function useSettlementPeriodClose() {
+  return useQuery({
+    queryKey: operationsKeys.settlementPeriodClose,
+    queryFn: async (): Promise<SettlementPeriodCloseRow[]> => {
+      const { data, error } = await supabase
+        .from("v_settlement_period_close" as never)
+        .select("*")
+        .order("period_start" as never, { ascending: false })
+        .limit(18);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapSettlementPeriodClose);
+    },
+  });
+}
+
 export function useUpdateReconciliationCaseStatus() {
   const queryClient = useQueryClient();
 
@@ -294,6 +343,49 @@ export function useUpdateReconciliationCaseStatus() {
   });
 }
 
+export function useResolveReconciliationCase() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, resolution, note }: { id: string; resolution: string; note?: string }) => {
+      const { data, error } = await supabase.rpc("resolve_reconciliation_case" as never, {
+        p_case_id: id,
+        p_resolution: resolution,
+        p_note: note ?? null,
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as { success?: boolean; action?: string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.settlementPeriodClose });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+    },
+  });
+}
+
+export function useRefreshActualSettlements() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc("refresh_actual_settlement_lines" as never, {
+        p_sales_order_id: null,
+        p_payout_id: null,
+        p_rebuild_cases: true,
+      } as never);
+
+      if (error) throw error;
+      return Number(data ?? 0);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.settlementPeriodClose });
+    },
+  });
+}
+
 export function useRunPostingIntentProcessor() {
   const queryClient = useQueryClient();
 
@@ -309,6 +401,7 @@ export function useRunPostingIntentProcessor() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.settlementPeriodClose });
     },
   });
 }

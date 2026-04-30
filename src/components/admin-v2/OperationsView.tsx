@@ -9,19 +9,23 @@ import {
   useCancelListingCommand,
   useListingCommands,
   usePostingIntents,
+  useRefreshActualSettlements,
   useRefreshReconciliationCases,
   useReconciliationInbox,
+  useResolveReconciliationCase,
   useRunListingCommandNow,
   useRetryPostingIntent,
   useRetryListingCommand,
   useRunPostingIntentNow,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
+  useSettlementPeriodClose,
   useUpdateReconciliationCaseStatus,
   type BlueBellStatementRow,
   type ListingCommandRow,
   type PostingIntentRow,
   type ReconciliationInboxCase,
+  type SettlementPeriodCloseRow,
 } from "@/hooks/admin/use-operations";
 import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "./ui-primitives";
 
@@ -45,6 +49,9 @@ const statusColors: Record<string, string> = {
   in_progress: "#2563EB",
   resolved: "#16A34A",
   ignored: "#71717A",
+  blocked: "#DC2626",
+  review: "#D97706",
+  ready: "#16A34A",
 };
 
 function formatMoney(value: number | null): string {
@@ -129,13 +136,72 @@ function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRo
   );
 }
 
+function ReconciliationSmartActions({
+  caseRow,
+  onAction,
+  disabled,
+}: {
+  caseRow: ReconciliationInboxCase;
+  onAction: (id: string, resolution: string) => void;
+  disabled: boolean;
+}) {
+  const actions: Array<{ label: string; resolution: string; title: string }> = [];
+
+  if (caseRow.caseType === "unmatched_payout_fee") {
+    actions.push({
+      label: "Link",
+      resolution: "link_payout_fee_by_external_order",
+      title: "Match this fee to a sales order by external order ID",
+    });
+  }
+  if (caseRow.caseType === "missing_payout" || caseRow.caseType === "amount_mismatch" || caseRow.caseType === "duplicate_candidate") {
+    actions.push({
+      label: "Refresh",
+      resolution: "refresh_settlement",
+      title: "Refresh expected and actual settlement evidence",
+    });
+  }
+  if (caseRow.caseType === "qbo_posting_gap" && caseRow.salesOrderId) {
+    actions.push({
+      label: "Queue QBO",
+      resolution: "queue_qbo_order_posting",
+      title: "Queue QBO posting for this order",
+    });
+  }
+  if (actions.length === 0) return null;
+
+  return (
+    <>
+      {actions.map((action) => (
+        <button
+          key={action.resolution}
+          type="button"
+          onClick={() => onAction(caseRow.id, action.resolution)}
+          disabled={disabled}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 px-2 text-[11px] font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+          title={action.title}
+        >
+          {action.label}
+        </button>
+      ))}
+    </>
+  );
+}
+
+function SettlementPeriodStatus({ row }: { row: SettlementPeriodCloseRow }) {
+  return <Badge label={row.closeStatus} color={statusColors[row.closeStatus] ?? "#71717A"} small />;
+}
+
 export function OperationsView() {
   const { data: cases = [], isLoading: casesLoading } = useReconciliationInbox();
   const { data: intents = [], isLoading: intentsLoading } = usePostingIntents();
   const { data: listingCommands = [], isLoading: listingCommandsLoading } = useListingCommands();
+  const { data: settlementPeriods = [], isLoading: settlementPeriodsLoading } = useSettlementPeriodClose();
   const { data: blueBellStatement = [], isLoading: blueBellStatementLoading } = useBlueBellStatement();
   const { data: blueBellAccruals = [], isLoading: blueBellAccrualsLoading } = useBlueBellOpenAccruals();
   const updateCase = useUpdateReconciliationCaseStatus();
+  const resolveCase = useResolveReconciliationCase();
+  const refreshActualSettlements = useRefreshActualSettlements();
   const runProcessor = useRunPostingIntentProcessor();
   const runPostingIntentNow = useRunPostingIntentNow();
   const runListingProcessor = useRunListingCommandProcessor();
@@ -153,6 +219,8 @@ export function OperationsView() {
   const pendingListingCommands = listingCommands.filter((c) => c.status === "pending").length;
   const failedListingCommands = listingCommands.filter((c) => c.status === "failed").length;
   const blueBellOutstanding = blueBellStatement.reduce((sum, row) => sum + row.commissionOutstanding, 0);
+  const blockedPeriods = settlementPeriods.filter((row) => row.closeStatus === "blocked").length;
+  const settlementVariance = settlementPeriods.slice(0, 3).reduce((sum, row) => sum + row.varianceAmount, 0);
   const unsettledBlueBellPeriods = new Set(
     blueBellAccruals
       .filter((accrual) => accrual.status === "open" && !accrual.settlementId)
@@ -165,6 +233,16 @@ export function OperationsView() {
       {
         onSuccess: () => toast.success(status === "in_progress" ? "Case marked in progress" : `Case ${status}`),
         onError: (err) => toast.error(err instanceof Error ? err.message : "Case update failed"),
+      },
+    );
+  };
+
+  const handleSmartCaseAction = (id: string, resolution: string) => {
+    resolveCase.mutate(
+      { id, resolution, note: "Run from Operations dashboard" },
+      {
+        onSuccess: () => toast.success("Reconciliation action completed"),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation action failed"),
       },
     );
   };
@@ -232,6 +310,13 @@ export function OperationsView() {
     });
   };
 
+  const handleRefreshActualSettlements = () => {
+    refreshActualSettlements.mutate(undefined, {
+      onSuccess: (count) => toast.success(`Refreshed ${count} actual settlement line(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Actual settlement refresh failed"),
+    });
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -248,6 +333,15 @@ export function OperationsView() {
           >
             <RefreshCcw className="h-3.5 w-3.5" />
             {refreshReconciliation.isPending ? "Refreshing..." : "Refresh Cases"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRefreshActualSettlements}
+            disabled={refreshActualSettlements.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" />
+            {refreshActualSettlements.isPending ? "Refreshing..." : "Refresh Settlements"}
           </button>
           <button
             type="button"
@@ -270,15 +364,67 @@ export function OperationsView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-9">
         <SummaryCard label="Open Cases" value={openCases} color={openCases > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="High Severity" value={criticalCases} color={criticalCases > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="Blocked Periods" value={blockedPeriods} color={blockedPeriods > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="3mo Variance" value={formatMoney(settlementVariance)} color={Math.abs(settlementVariance) > 0.05 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Pending Listings" value={pendingListingCommands} color={pendingListingCommands > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed Listings" value={failedListingCommands} color={failedListingCommands > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Pending QBO Posts" value={pendingIntents} color={pendingIntents > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed QBO Posts" value={failedIntents} color={failedIntents > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Blue Bell Owed" value={formatMoney(blueBellOutstanding)} color={blueBellOutstanding > 0 ? "#D97706" : "#16A34A"} />
       </div>
+
+      <SurfaceCard noPadding>
+        <div className="border-b border-zinc-200 px-4 py-3">
+          <SectionHead>Settlement Period Close</SectionHead>
+          <p className="text-xs text-zinc-500">Monthly close readiness from expected settlement, actual payout evidence, variance, and open cases.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Period</th>
+                <th className="px-3 py-2 text-right font-semibold">Orders</th>
+                <th className="px-3 py-2 text-right font-semibold">Expected</th>
+                <th className="px-3 py-2 text-right font-semibold">Actual</th>
+                <th className="px-3 py-2 text-right font-semibold">Variance</th>
+                <th className="px-3 py-2 text-right font-semibold">Payouts</th>
+                <th className="px-3 py-2 text-right font-semibold">Open Cases</th>
+                <th className="px-4 py-2 text-right font-semibold">Mismatch / Missing</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {settlementPeriodsLoading ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">Loading settlement close periods...</td></tr>
+              ) : settlementPeriods.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No settlement period data yet.</td></tr>
+              ) : (
+                settlementPeriods.map((row) => (
+                  <tr key={row.periodStart} className="hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><SettlementPeriodStatus row={row} /></td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{formatDate(row.periodStart)} - {formatDate(row.periodEnd)}</td>
+                    <td className="px-3 py-3 text-right"><Mono>{row.orderCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(row.expectedTotal)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(row.actualTotal)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={Math.abs(row.varianceAmount) > 0.05 ? "amber" : "green"}>{formatMoney(row.varianceAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right">
+                      <div><Mono>{row.payoutCount}</Mono></div>
+                      {row.unreconciledPayoutCount > 0 && <div className="text-[11px] text-red-600">{row.unreconciledPayoutCount} unreconciled</div>}
+                    </td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.openCaseCount > 0 ? "red" : "green"}>{row.openCaseCount}</Mono></td>
+                    <td className="px-4 py-3 text-right text-[11px] text-zinc-500">
+                      {row.amountMismatchCaseCount} mismatch / {row.missingPayoutCaseCount} missing
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
 
       <SurfaceCard noPadding>
         <div className="border-b border-zinc-200 px-4 py-3">
@@ -497,6 +643,11 @@ export function OperationsView() {
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(caseRow.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1.5">
+                        <ReconciliationSmartActions
+                          caseRow={caseRow}
+                          onAction={handleSmartCaseAction}
+                          disabled={resolveCase.isPending}
+                        />
                         <button
                           type="button"
                           onClick={() => handleCaseStatus(caseRow.id, "in_progress")}
