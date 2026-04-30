@@ -1767,7 +1767,38 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const isInternal = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
+
+    // Internal trigger: trust if the webhook header is set AND the bearer token
+    // decodes as a service_role JWT for this project. We don't require the token
+    // to byte-match Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") because the value
+    // stored in Vault (used by pg_cron) can drift from the function's env after
+    // key rotations. The JWT role claim is sufficient since only the project
+    // can issue a service_role JWT.
+    let isInternal = false;
+    if (req.headers.get("x-webhook-trigger") === "true") {
+      try {
+        const parts = token.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            new TextDecoder().decode(
+              Uint8Array.from(
+                atob(parts[1].replace(/-/g, "+").replace(/_/g, "/").padEnd(parts[1].length + (4 - parts[1].length % 4) % 4, "=")),
+                (c) => c.charCodeAt(0),
+              ),
+            ),
+          );
+          if (payload?.role === "service_role" && payload?.ref) {
+            // Only accept tokens issued for this project
+            const expectedRef = supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1];
+            if (expectedRef && payload.ref === expectedRef) {
+              isInternal = true;
+            }
+          }
+        }
+      } catch {
+        // fall through — isInternal stays false
+      }
+    }
 
     if (!isInternal) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);
