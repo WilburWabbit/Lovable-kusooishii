@@ -2480,14 +2480,27 @@ Deno.serve(async (req) => {
 
       const ghostIds = (ghosts ?? []).map((g: any) => g.id);
       let deleted = 0;
+      let releasedLines = 0;
       // Delete in batches of 100
       for (let i = 0; i < ghostIds.length; i += 100) {
         const batch = ghostIds.slice(i, i + 100);
-        // Unlink from order lines first
-        await admin
+        // Release linked sale-line economics through the subledger before
+        // deleting the orphaned stock units.
+        const { data: linkedLines, error: linkedErr } = await admin
           .from("sales_order_line")
-          .update({ stock_unit_id: null, cogs: null } as any)
+          .select("id")
           .in("stock_unit_id", batch);
+        if (linkedErr) throw linkedErr;
+
+        for (const line of (linkedLines ?? []) as Array<{ id: string }>) {
+          const { error: releaseErr } = await admin.rpc("release_stock_allocation_for_order_line" as never, {
+            p_sales_order_line_id: line.id,
+            p_reason: "cleanup_ghost_units",
+          } as never);
+          if (releaseErr) throw releaseErr;
+          releasedLines++;
+        }
+
         const { error: delErr } = await admin
           .from("stock_unit")
           .delete()
@@ -2509,7 +2522,7 @@ Deno.serve(async (req) => {
         resetCount++;
       }
 
-      result = { success: true, deleted, resetCount, message: `Deleted ${deleted} ghost stock units, reset ${resetCount} errored purchases to pending` };
+      result = { success: true, deleted, releasedLines, resetCount, message: `Deleted ${deleted} ghost stock units, released ${releasedLines} sale lines, reset ${resetCount} errored purchases to pending` };
 
     } else if (action === "reset-qbo-purchase") {
       // Targeted reset for specific stuck QBO purchases
@@ -2529,30 +2542,14 @@ Deno.serve(async (req) => {
       result = { success: true, resetCount, message: `Reset ${resetCount} purchases to pending` };
 
     } else if (action === "recalc-avg-cost") {
-      // Recalculate avg_cost on all SKUs from their linked stock units
-      const { data: skus, error: skuErr } = await admin
-        .from("sku")
-        .select("id, sku_code");
-      if (skuErr) throw skuErr;
+      // Refresh deprecated compatibility rollups through the subledger RPC.
+      const { data: updated, error: rollupErr } = await admin.rpc("refresh_sku_cost_rollups" as never, {
+        p_sku_id: null,
+      } as never);
+      if (rollupErr) throw rollupErr;
+      const updatedCount = Number(updated ?? 0);
 
-      let updated = 0;
-      for (const sku of (skus ?? [])) {
-        const { data: units } = await admin
-          .from("stock_unit")
-          .select("landed_cost")
-          .not("landed_cost", "is", null)
-          .gt("landed_cost", 0)
-          .eq("sku_id" as any, sku.id);
-
-        if (units && units.length > 0) {
-          const total = units.reduce((sum: number, u: any) => sum + Number(u.landed_cost ?? 0), 0);
-          const avg = Math.round((total / units.length) * 100) / 100;
-          await admin.from("sku").update({ avg_cost: avg } as any).eq("id", sku.id);
-          updated++;
-        }
-      }
-
-      result = { success: true, updated, message: `Recalculated avg_cost on ${updated} SKUs` };
+      result = { success: true, updated: updatedCount, message: `Recalculated avg_cost on ${updatedCount} SKUs` };
 
     } else if (action === "retry-failed-qbo-push") {
       const { data: resetRows, error: resetErr } = await admin
