@@ -332,6 +332,22 @@ export function useRunListingCommandProcessor() {
   });
 }
 
+export function useRefreshReconciliationCases() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc("rebuild_reconciliation_cases" as never);
+
+      if (error) throw error;
+      return Number(data ?? 0);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
 export function useCreateBlueBellSettlement() {
   const queryClient = useQueryClient();
 
