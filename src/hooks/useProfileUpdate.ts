@@ -14,6 +14,19 @@ interface ProfileFields {
   instagram_handle?: string | null;
 }
 
+async function queueAndProcessCustomerPosting(payload: Record<string, unknown>) {
+  const { data: intentId, error: queueError } = await supabase.rpc(
+    "queue_qbo_customer_posting_intent" as never,
+    { p_payload: payload } as never,
+  );
+  if (queueError) throw queueError;
+
+  const { error } = await supabase.functions.invoke("accounting-posting-intents-process", {
+    body: intentId ? { intentId } : { batch_size: 5 },
+  });
+  if (error) throw error;
+}
+
 export function useProfileUpdate(userId: string) {
   const [saving, setSaving] = useState(false);
 
@@ -59,35 +72,25 @@ export function useProfileUpdate(userId: string) {
         console.log("Profile changes:", changeEntries);
       }
 
-      // 3. Push to QBO immediately
+      // 3. Queue QBO customer update through the posting outbox.
       const ebayUrl = updates.ebay_username
         ? `https://www.ebay.co.uk/usr/${updates.ebay_username}`
         : null;
 
       try {
-        const { error: qboError } = await supabase.functions.invoke(
-          "qbo-upsert-customer",
-          {
-            body: {
-              first_name: updates.first_name,
-              last_name: updates.last_name,
-              company_name: updates.company_name,
-              display_name: updates.display_name,
-              email: null, // email comes from auth, not editable
-              phone: updates.phone,
-              mobile: updates.mobile,
-              ebay_url: ebayUrl,
-            },
-          }
-        );
-
-        if (qboError) {
-          console.warn("QBO sync warning:", qboError);
-          toast.success("Profile saved. Note: QBO sync pending.");
-        } else {
-          toast.success("Profile saved and synced to QuickBooks.");
-        }
-      } catch {
+        await queueAndProcessCustomerPosting({
+          first_name: updates.first_name,
+          last_name: updates.last_name,
+          company_name: updates.company_name,
+          display_name: updates.display_name,
+          email: null, // email comes from auth, not editable
+          phone: updates.phone,
+          mobile: updates.mobile,
+          ebay_url: ebayUrl,
+        });
+        toast.success("Profile saved and queued to QuickBooks.");
+      } catch (err) {
+        console.warn("QBO customer posting warning:", err);
         // QBO failure is non-blocking
         toast.success("Profile saved. QBO sync will retry later.");
       }

@@ -55,6 +55,12 @@ function getSkuId(intent: PostingIntent): string | null {
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
 }
 
+function getCustomerId(intent: PostingIntent): string | null {
+  if (intent.entity_type === "customer" && intent.entity_id) return intent.entity_id;
+  const fromPayload = intent.payload?.customer_id;
+  return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
+}
+
 function getRefundedLineIds(intent: PostingIntent): string[] {
   const value = intent.payload?.refunded_line_ids;
   if (!Array.isArray(value)) return [];
@@ -64,6 +70,7 @@ function getRefundedLineIds(intent: PostingIntent): string[] {
 function getEntityIdForIntent(intent: PostingIntent): string | null {
   if (intent.action === "create_payout_deposit") return getPayoutId(intent);
   if (intent.action === "upsert_item") return getSkuId(intent);
+  if (intent.action === "upsert_customer") return getCustomerId(intent) ?? intent.id;
   return getSalesOrderId(intent);
 }
 
@@ -120,6 +127,18 @@ function qboActionConfig(intent: PostingIntent, entityId: string) {
     };
   }
 
+  if (intent.action === "upsert_customer") {
+    const requestBody = { ...intent.payload };
+    return {
+      functionName: "qbo-upsert-customer",
+      requestBody,
+      qboEntityType: "Customer",
+      responseIdField: "qbo_customer_id",
+      resultIdField: "qbo_customer_id",
+      sourceColumn: "customer.qbo_customer_id",
+    };
+  }
+
   throw new Error(`Unsupported QBO posting intent action ${intent.action}`);
 }
 
@@ -138,7 +157,7 @@ Deno.serve(async (req) => {
       .from("posting_intent")
       .select("id, action, entity_type, entity_id, idempotency_key, retry_count, payload")
       .eq("target_system", "qbo")
-      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit", "upsert_item"] as never)
+      .in("action", ["create_sales_receipt", "create_refund_receipt", "create_payout_deposit", "upsert_item", "upsert_customer"] as never)
       .order("created_at", { ascending: true })
       .limit(batchSize);
 
@@ -272,6 +291,7 @@ Deno.serve(async (req) => {
 
         if (qboEntityId) {
           let docNumber: string | null = null;
+          let localEntityId = entityId;
 
           if (intent.entity_type === "sales_order") {
             const { data: order } = await admin
@@ -294,13 +314,35 @@ Deno.serve(async (req) => {
               .eq("id", entityId)
               .maybeSingle();
             docNumber = ((sku as Record<string, unknown> | null)?.sku_code as string | null) ?? null;
+          } else if (intent.entity_type === "customer") {
+            const { data: customer } = await admin
+              .from("customer")
+              .select("display_name, email")
+              .eq("id", entityId)
+              .maybeSingle();
+            const customerRow = customer as Record<string, unknown> | null;
+            docNumber = (customerRow?.display_name as string | null) ?? (customerRow?.email as string | null) ?? null;
+          }
+
+          if (intent.entity_type === "customer") {
+            const { data: customerByQboId } = await admin
+              .from("customer")
+              .select("id, display_name, email")
+              .eq("qbo_customer_id", qboEntityId)
+              .maybeSingle();
+            const customerRow = customerByQboId as Record<string, unknown> | null;
+            if (customerRow?.id) localEntityId = customerRow.id as string;
+            docNumber = docNumber
+              ?? (customerRow?.display_name as string | null)
+              ?? (customerRow?.email as string | null)
+              ?? null;
           }
 
           await admin
             .from("qbo_posting_reference")
             .upsert({
               local_entity_type: intent.entity_type,
-              local_entity_id: entityId,
+              local_entity_id: localEntityId,
               qbo_entity_type: actionConfig.qboEntityType,
               qbo_entity_id: qboEntityId,
               qbo_doc_number: docNumber,
