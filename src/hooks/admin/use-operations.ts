@@ -313,6 +313,25 @@ export function useRunPostingIntentProcessor() {
   });
 }
 
+export function useRunPostingIntentNow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (intentId: string) => {
+      const { data, error } = await supabase.functions.invoke("accounting-posting-intents-process", {
+        body: { intentId },
+      });
+
+      if (error) throw error;
+      return data as { processed?: number; results?: unknown[] };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
 export function useRunListingCommandProcessor() {
   const queryClient = useQueryClient();
 
@@ -320,6 +339,25 @@ export function useRunListingCommandProcessor() {
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke("listing-command-process", {
         body: { batchSize: 25 },
+      });
+
+      if (error) throw error;
+      return data as { processed?: number; results?: unknown[] };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+    },
+  });
+}
+
+export function useRunListingCommandNow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (commandId: string) => {
+      const { data, error } = await supabase.functions.invoke("listing-command-process", {
+        body: { commandId },
       });
 
       if (error) throw error;
