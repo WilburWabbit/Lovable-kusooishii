@@ -9,13 +9,8 @@ SELECT
   rc.status,
   rc.sales_order_id,
   so.order_number,
-  so.origin_channel,
   rc.sales_order_line_id,
-  sol.sku_id,
-  sk.sku_code,
   rc.payout_id,
-  p.external_payout_id,
-  p.channel::text AS payout_channel,
   rc.related_entity_type,
   rc.related_entity_id,
   rc.suspected_root_cause,
@@ -25,6 +20,13 @@ SELECT
   rc.variance_amount,
   rc.owner_id,
   rc.due_at,
+  rc.created_at,
+  rc.updated_at,
+  so.origin_channel,
+  sol.sku_id,
+  sk.sku_code,
+  p.external_payout_id,
+  p.channel::text AS payout_channel,
   rc.evidence,
   CASE
     WHEN rc.case_type = 'missing_cogs' THEN 'No cost basis has been posted for this sold line. Usually the sale line was finalized before stock allocation or before carrying value existed.'
@@ -49,9 +51,7 @@ SELECT
     WHEN rc.case_type = 'listing_command_failed' THEN 'Open the listing command, fix the channel/listing data named in the error, then retry the command.'
     WHEN rc.case_type = 'duplicate_candidate' THEN 'Review candidates in the evidence payload and choose the correct order/payout link manually.'
     ELSE COALESCE(rc.recommended_action, 'Review the evidence payload and related records, then resolve or ignore with a note.')
-  END AS next_step,
-  rc.created_at,
-  rc.updated_at
+  END AS next_step
 FROM public.reconciliation_case rc
 LEFT JOIN public.sales_order so ON so.id = rc.sales_order_id
 LEFT JOIN public.sales_order_line sol ON sol.id = rc.sales_order_line_id
