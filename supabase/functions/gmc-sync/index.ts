@@ -211,15 +211,20 @@ Deno.serve(async (req) => {
 
       if (skuErr) throw new Error(`Failed to fetch SKUs: ${skuErr.message}`);
 
-      // Get web channel listings to know which SKUs are listed on web
+      // Get web channel listings to know which SKUs are listed on web.
+      // Offer status casing is historical; v2_status is preferred where present.
       const { data: webListings } = await supabaseAdmin
         .from("channel_listing")
-        .select("sku_id, offer_status")
-        .eq("channel", "web")
-        .eq("offer_status", "live");
+        .select("sku_id, offer_status, v2_status")
+        .eq("channel", "web");
 
       const webSkuIds = new Set(
-        (webListings ?? []).map((l: Record<string, unknown>) => l.sku_id),
+        (webListings ?? [])
+          .filter((l: Record<string, unknown>) =>
+            l.v2_status === "live" ||
+            ["live", "published", "PUBLISHED"].includes(String(l.offer_status ?? "")),
+          )
+          .map((l: Record<string, unknown>) => l.sku_id),
       );
 
       // Get stock counts
@@ -234,7 +239,7 @@ Deno.serve(async (req) => {
         stockMap.set(skuId, (stockMap.get(skuId) || 0) + 1);
       }
 
-      let published = 0;
+      let queued = 0;
       let errors = 0;
       let skipped = 0;
       const errorDetails: string[] = [];
@@ -259,49 +264,39 @@ Deno.serve(async (req) => {
         }
 
         const stockCount = stockMap.get(sku.id) || 0;
-        const productInput = mapToProductInput(product, sku, stockCount, siteUrl);
 
         try {
-          const url = `${GMC_API_BASE}/accounts/${merchantId}/productInputs:insert?dataSource=${dataSource}`;
-          const res = await fetch(url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(productInput),
-          });
-
-          if (!res.ok) {
-            const errBody = await res.text();
-            console.error(
-              `GMC publish failed for ${sku.sku_code}: ${res.status} ${errBody}`,
-            );
-            errors++;
-            errorDetails.push(`${sku.sku_code}: ${res.status}`);
-            continue;
-          }
-
-          const result = await res.json();
-
-          // Upsert channel_listing for google_shopping
-          await supabaseAdmin.from("channel_listing").upsert(
+          const { data: listing, error: listingErr } = await supabaseAdmin.from("channel_listing").upsert(
             {
               channel: "google_shopping",
               external_sku: sku.sku_code,
               sku_id: sku.id,
-              external_listing_id: result.name || null,
-              offer_status: "published",
+              offer_status: "publish_queued",
               listed_price: sku.price,
               listed_quantity: stockCount,
               synced_at: new Date().toISOString(),
             },
             { onConflict: "channel,external_sku" },
-          );
+          ).select("id").single();
+          if (listingErr) throw listingErr;
 
-          published++;
+          const { error: snapshotErr } = await supabaseAdmin.rpc("create_price_decision_snapshot", {
+            p_sku_id: sku.id,
+            p_channel: "google_shopping",
+            p_channel_listing_id: listing.id,
+            p_candidate_price: sku.price,
+          });
+          if (snapshotErr) throw snapshotErr;
+
+          const { error: commandErr } = await supabaseAdmin.rpc("queue_listing_command", {
+            p_channel_listing_id: listing.id,
+            p_command_type: "publish",
+          });
+          if (commandErr) throw commandErr;
+
+          queued++;
         } catch (e) {
-          console.error(`GMC publish error for ${sku.sku_code}:`, e);
+          console.error(`GMC queue publish error for ${sku.sku_code}:`, e);
           errors++;
           errorDetails.push(
             `${sku.sku_code}: ${e instanceof Error ? e.message : "unknown"}`,
@@ -310,7 +305,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ published, errors, skipped, errorDetails }),
+        JSON.stringify({ queued, published: queued, errors, skipped, errorDetails }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -328,28 +323,23 @@ Deno.serve(async (req) => {
         .eq("external_sku", sku_code)
         .maybeSingle();
 
-      if (!listing?.external_listing_id) {
+      if (!listing) {
         throw new Error(`No GMC listing found for ${sku_code}`);
-      }
-
-      const deleteUrl = `${GMC_API_BASE}/accounts/${merchantId}/productInputs/${listing.external_listing_id}`;
-      const res = await fetch(deleteUrl, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (!res.ok && res.status !== 404) {
-        const errBody = await res.text();
-        throw new Error(`GMC delete failed [${res.status}]: ${errBody}`);
       }
 
       await supabaseAdmin
         .from("channel_listing")
-        .update({ offer_status: "ended", synced_at: new Date().toISOString() })
+        .update({ offer_status: "end_queued", listed_quantity: 0, synced_at: new Date().toISOString() })
         .eq("id", listing.id);
 
+      const { data: commandId, error: commandErr } = await supabaseAdmin.rpc("queue_listing_command", {
+        p_channel_listing_id: listing.id,
+        p_command_type: "end",
+      });
+      if (commandErr) throw commandErr;
+
       return new Response(
-        JSON.stringify({ success: true }),
+        JSON.stringify({ success: true, queued: true, listingId: listing.id, commandId }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
