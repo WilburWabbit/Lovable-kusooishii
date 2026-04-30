@@ -70,7 +70,7 @@ function mapLineItem(row: Record<string, unknown>): OrderLineItem {
     stockUnitId: (row.stock_unit_id as string) ?? null,
     sku: sku ? (sku.sku_code as string) : null,
     unitPrice: (row.unit_price as number) ?? 0,
-    cogs: (row.cogs as number) ?? null,
+    cogs: ((row.cogs_amount as number) ?? (row.cogs as number)) ?? null,
   };
 }
 
@@ -86,7 +86,7 @@ export function useOrders() {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs,
+            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
             sku:sku_id(sku_code)
           )
         `)
@@ -131,7 +131,7 @@ export function useOrder(orderId: string | undefined) {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs,
+            id, sales_order_id, stock_unit_id, unit_price, cogs, cogs_amount,
             sku:sku_id(sku_code)
           )
         `)
@@ -210,34 +210,21 @@ export function useAllocateOrderItems() {
   return useMutation({
     mutationFn: async ({ orderId, allocations }: AllocateInput) => {
       for (const alloc of allocations) {
-        // Consume FIFO unit via database function
-        const { data: unit, error: fifoErr } = await supabase
-          .rpc('v2_consume_fifo_unit' as never, { p_sku_code: alloc.skuCode } as never);
+        const { data: allocation, error: allocationErr } = await supabase
+          .rpc('allocate_stock_for_order_line' as never, {
+            p_sales_order_line_id: alloc.lineItemId,
+          } as never);
 
-        if (fifoErr) throw fifoErr;
-        const consumed = unit as unknown as Record<string, unknown>;
+        if (allocationErr) throw allocationErr;
 
-        // Update the order line item with the allocated unit
-        const { error: lineErr } = await supabase
-          .from('sales_order_line')
-          .update({
-            stock_unit_id: consumed.id,
-            cogs: consumed.landed_cost,
-          } as never)
-          .eq('id', alloc.lineItemId);
-
-        if (lineErr) throw lineErr;
-
-        // Link stock unit to the order
-        const { error: unitErr } = await supabase
-          .from('stock_unit')
-          .update({
-            order_id: orderId,
-          } as never)
-          .eq('id', consumed.id as string);
-
-        if (unitErr) throw unitErr;
+        const result = allocation as unknown as Record<string, unknown>;
+        if (result.status !== 'allocated') {
+          throw new Error(`No saleable stock unit was available for ${alloc.skuCode}`);
+        }
       }
+
+      await supabase
+        .rpc('refresh_order_line_economics' as never, { p_sales_order_id: orderId } as never);
 
       // Transition order status from needs_allocation → new
       const { error: statusErr } = await supabase

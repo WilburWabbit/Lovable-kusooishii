@@ -102,7 +102,7 @@ function VariantChannelsCard({
         estimatedFees: feeCalc.estimatedFees,
         estimatedNet: feeCalc.estimatedNet,
       });
-      toast.success(`Published ${variant.sku} to ${ch.label}`);
+      toast.success(`Queued ${variant.sku} for ${ch.label}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Publish failed";
       toast.error(message);

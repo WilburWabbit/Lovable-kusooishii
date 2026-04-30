@@ -183,24 +183,28 @@ Deno.serve(async (req) => {
         .eq("v2_status" as never, "live")
         .select("id, channel");
 
-      // Push price update to external channels (fire-and-forget)
+      // Queue price updates through the listing orchestrator outbox.
       if (liveListings) {
         for (const listing of liveListings as { id: string; channel: string }[]) {
-          if (listing.channel === "ebay") {
-            fetch(`${supabaseUrl}/functions/v1/ebay-push-listing`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${serviceRoleKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                listingId: listing.id,
-                action: "update_price",
-                newPrice,
-              }),
-            }).catch((err) =>
-              console.warn(`eBay price push for listing ${listing.id} failed (non-blocking):`, err),
-            );
+          const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+            p_sku_id: skuId,
+            p_channel: listing.channel,
+            p_channel_listing_id: listing.id,
+            p_candidate_price: newPrice,
+          });
+
+          if (snapshotErr) {
+            console.warn(`Failed to snapshot markdown price for listing ${listing.id}: ${snapshotErr.message}`);
+            continue;
+          }
+
+          const { error: commandErr } = await admin.rpc("queue_listing_command", {
+            p_channel_listing_id: listing.id,
+            p_command_type: "reprice",
+          });
+
+          if (commandErr) {
+            console.warn(`Failed to queue markdown reprice for listing ${listing.id}: ${commandErr.message}`);
           }
         }
       }

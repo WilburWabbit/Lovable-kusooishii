@@ -648,11 +648,6 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
         shipping_country: shippingCountry,
         qbo_sync_status: isTestEvent ? "skipped" : "pending",
         is_test: isTestEvent,
-        ...(isCollection
-          ? {
-              club_discount_amount: discountTotal,
-            }
-          : {}),
       })
       .select("id, order_number")
       .single();
@@ -663,6 +658,22 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     }
 
     console.log(`Created order ${order.order_number} (${order.id})`);
+
+    if (isCollection) {
+      const { error: programError } = await supabase
+        .rpc("record_sales_program_accrual", {
+          p_sales_order_id: order.id,
+          p_program_code: "blue_bell",
+          p_attribution_source: "checkout_shipping_method",
+          p_basis_amount: Math.round((grossTotal - shippingTotal) * 100) / 100,
+          p_discount_amount: discountTotal,
+          p_commission_amount: Math.round((grossTotal - shippingTotal) * 5) / 100,
+        });
+
+      if (programError) {
+        console.error(`Failed to record Blue Bell accrual for order ${order.id}:`, programError);
+      }
+    }
 
     // ── Alert admin if VAT resolution fell back to default ──
     if (vatResolutionFallback) {
@@ -696,19 +707,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       }
     }
 
-    // ── Create order lines with FIFO stock allocation ──
+    // ── Create order lines with domain stock allocation ──
     for (const pl of preparedLines) {
-      // FIFO: pick the oldest available stock unit for this SKU
-      const { data: stockUnit } = await supabase
-        .from("stock_unit")
-        .select("id")
-        .eq("sku_id", pl.skuId)
-        .eq("status", "available")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .single();
-
-      const { error: lineError } = await supabase
+      const { data: insertedLine, error: lineError } = await supabase
         .from("sales_order_line")
         .insert({
           sales_order_id: order.id,
@@ -716,46 +717,30 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
           quantity: 1,
           unit_price: pl.netUnitPrice,
           line_total: pl.netLineTotal,
-          stock_unit_id: stockUnit?.id ?? null,
           tax_code_id: vatResolution.taxCodeId,
           vat_rate_id: vatResolution.vatRateId,
           qbo_tax_code_ref: vatResolution.qboTaxCodeId,
-        });
+        })
+        .select("id")
+        .single();
 
       if (lineError) {
         console.error(`Failed to create order line for SKU ${pl.skuCode}:`, lineError);
         continue;
       }
 
-      // Mark stock unit as closed (sold)
-      if (stockUnit) {
-        const { error: stockError } = await supabase
-          .from("stock_unit")
-          .update({ status: "closed" })
-          .eq("id", stockUnit.id);
+      const lineId = (insertedLine as Record<string, unknown>).id as string;
+      const { data: allocation, error: allocationError } = await supabase
+        .rpc("allocate_stock_for_order_line", { p_sales_order_line_id: lineId });
 
-        if (stockError) {
-          console.error(`Failed to close stock unit ${stockUnit.id}:`, stockError);
-        } else {
-          // Audit the inventory change
-          await supabase.from("audit_event").insert({
-            entity_type: "stock_unit",
-            entity_id: stockUnit.id,
-            trigger_type: "stripe_webhook",
-            actor_type: "system",
-            source_system: "stripe",
-            after_json: {
-              status: "closed",
-              reason: "sold",
-              order_id: order.id,
-              order_number: order.order_number,
-            },
-          });
-        }
-      } else {
-        console.warn(`No available stock unit for SKU ${pl.skuCode}, order line created without stock`);
+      const allocationResult = allocation as Record<string, unknown> | null;
+      if (allocationError || allocationResult?.status !== "allocated") {
+        console.warn(`No available stock unit for SKU ${pl.skuCode}, order line created without stock`, allocationError);
       }
     }
+
+    await supabase
+      .rpc("refresh_order_line_economics", { p_sales_order_id: order.id });
 
     if (preparedLines.length > 0) {
       console.log(`Created ${preparedLines.length} order line(s) for ${new Set(preparedLines.map(l => l.skuId)).size} SKU(s)`);
