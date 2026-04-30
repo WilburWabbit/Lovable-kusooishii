@@ -351,7 +351,6 @@ Deno.serve(async (req) => {
           tax_total: vatAmount,
           net_amount: netAmount,
           payment_method: "ebay_managed",
-          blue_bell_club: false,
           qbo_sync_status: "pending",
           ...(tracking ? {
             tracking_number: tracking.trackingNumber,
