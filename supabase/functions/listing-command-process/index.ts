@@ -526,7 +526,10 @@ function buildGmcProductInput(
 ) {
   const mpn = String(product.mpn ?? sku.mpn ?? "");
   const skuCode = String(sku.sku_code ?? listing.external_sku ?? "");
-  const price = Number(listing.listed_price ?? sku.price ?? 0);
+  const price = Number(listing.listed_price ?? 0);
+  if (price <= 0) {
+    throw new Error(`Google Shopping listing ${skuCode} has no listed price`);
+  }
   const conditionGrade = Number(sku.condition_grade ?? 3);
   const title = String(product.seo_title ?? listing.listing_title ?? product.name ?? `LEGO ${mpn}`);
   const description = String(product.seo_description ?? listing.listing_description ?? product.description ?? "");
@@ -626,7 +629,7 @@ async function processGoogleShoppingCommand(
 
   const { data: sku, error: skuErr } = await admin
     .from("sku")
-    .select("id, sku_code, price, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)")
+    .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)")
     .eq("id" as never, skuId)
     .single();
   if (skuErr) throw skuErr;

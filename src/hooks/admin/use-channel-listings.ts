@@ -49,8 +49,8 @@ function mapListing(
     listingDescription: (row.listing_description as string) ?? null,
     listingPrice: (row.listed_price as number) ?? null,
     feeAdjustedPrice: (row.fee_adjusted_price as number) ?? null,
-    estimatedFees: snapshot?.estimatedFees ?? (row.estimated_fees as number) ?? null,
-    estimatedNet: snapshot?.estimatedNet ?? (row.estimated_net as number) ?? null,
+    estimatedFees: snapshot?.estimatedFees ?? null,
+    estimatedNet: snapshot?.estimatedNet ?? null,
   };
 }
 

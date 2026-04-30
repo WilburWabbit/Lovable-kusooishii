@@ -70,10 +70,10 @@ function mapVariant(row: Record<string, unknown>): ProductVariant {
     grade: Number(row.condition_grade) as ConditionGrade,
     stripeProductId: (row.stripe_product_id as string) ?? null,
     stripePriceId: (row.stripe_price_id as string) ?? null,
-    salePrice: (row.price as number) ?? null,
-    floorPrice: (row.floor_price as number) ?? null,
-    avgCost: (row.avg_cost as number) ?? null,
-    costRange: (row.cost_range as string) ?? null,
+    salePrice: null,
+    floorPrice: null,
+    avgCost: null,
+    costRange: null,
     qtyOnHand: (row.qty_on_hand as number) ?? 0,
     conditionNotes: (row.condition_notes as string) ?? null,
     marketPrice: (row.market_price as number) ?? null,
@@ -315,8 +315,8 @@ export function useProduct(mpn: string | undefined) {
         const variant = {
           ...mapVariant({ ...row, mpn: mpn! }),
           qtyOnHand: summary ? (summary.qty_on_hand as number) ?? 0 : 0,
-          avgCost: summary ? (summary.avg_cost as number) ?? null : (row.avg_cost as number) ?? null,
-          floorPrice: summary ? (summary.floor_price as number) ?? null : (row.floor_price as number) ?? null,
+          avgCost: summary ? (summary.avg_cost as number) ?? null : null,
+          floorPrice: null,
         };
         return applyPricing(variant, pricingBySku.get(code));
       });
