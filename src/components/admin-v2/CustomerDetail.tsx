@@ -13,7 +13,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { WelcomeQrLabel } from "./WelcomeQrLabel";
 import { Gift, Tag } from "lucide-react";
 
-type WelcomeCodeRow = Record<string, unknown>;
+type WelcomeCodeRow = {
+  id: string;
+  code: string;
+  promo_code: string | null;
+  discount_pct: number | null;
+  created_at: string;
+  scanned_at: string | null;
+  scan_count: number | null;
+  redeemed_at: string | null;
+  ebay_order_id: string | null;
+  primary_sku: string | null;
+  order_postcode: string | null;
+  buyer_name: string | null;
+};
 
 async function queueAndProcessCustomerPosting(customerId: string, payload: Record<string, unknown>) {
   const { data: intentId, error: queueError } = await supabase.rpc(
@@ -50,7 +63,20 @@ export function CustomerDetail() {
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
-      return (data || []) as WelcomeCodeRow[];
+      return ((data || []) as Record<string, unknown>[]).map((row): WelcomeCodeRow => ({
+        id: String(row.id),
+        code: String(row.code ?? ""),
+        promo_code: typeof row.promo_code === "string" ? row.promo_code : null,
+        discount_pct: typeof row.discount_pct === "number" ? row.discount_pct : null,
+        created_at: String(row.created_at ?? ""),
+        scanned_at: typeof row.scanned_at === "string" ? row.scanned_at : null,
+        scan_count: typeof row.scan_count === "number" ? row.scan_count : null,
+        redeemed_at: typeof row.redeemed_at === "string" ? row.redeemed_at : null,
+        ebay_order_id: typeof row.ebay_order_id === "string" ? row.ebay_order_id : null,
+        primary_sku: typeof row.primary_sku === "string" ? row.primary_sku : null,
+        order_postcode: typeof row.order_postcode === "string" ? row.order_postcode : null,
+        buyer_name: typeof row.buyer_name === "string" ? row.buyer_name : null,
+      }));
     },
     enabled: !!customerId,
   });

@@ -71,6 +71,10 @@ function shortId(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
 
+function humanizeToken(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
 function reconciliationTarget(caseRow: ReconciliationInboxCase) {
   if (caseRow.orderNumber) {
     return <Link to={`/admin/orders/${caseRow.salesOrderId}`} className="text-amber-600 hover:text-amber-500">{caseRow.orderNumber}</Link>;
@@ -269,7 +273,7 @@ export function OperationsView() {
                   <tr key={command.id} className="align-top hover:bg-zinc-50/70">
                     <td className="px-4 py-3"><Badge label={command.status} color={statusColors[command.status] ?? "#71717A"} small /></td>
                     <td className="px-3 py-3 text-xs text-zinc-700">{command.targetSystem}</td>
-                    <td className="px-3 py-3 text-xs text-zinc-700">{command.commandType.replaceAll("_", " ")}</td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{humanizeToken(command.commandType)}</td>
                     <td className="px-3 py-3 text-xs"><ListingCommandTarget command={command} /></td>
                     <td className="px-3 py-3"><Mono color={command.retryCount > 0 ? "amber" : "dim"}>{command.retryCount}</Mono></td>
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(command.nextAttemptAt)}</td>
@@ -382,7 +386,7 @@ export function OperationsView() {
               ) : (
                 blueBellAccruals.map((accrual) => (
                   <tr key={accrual.id} className="hover:bg-zinc-50/70">
-                    <td className="px-4 py-3"><Badge label={accrual.status.replaceAll("_", " ")} color={statusColors[accrual.status] ?? "#71717A"} small /></td>
+                    <td className="px-4 py-3"><Badge label={humanizeToken(accrual.status)} color={statusColors[accrual.status] ?? "#71717A"} small /></td>
                     <td className="px-3 py-3 text-xs">
                       <Link to={`/admin/orders/${accrual.salesOrderId}`} className="text-amber-600 hover:text-amber-500">
                         {accrual.orderNumber ?? shortId(accrual.salesOrderId)}
@@ -431,7 +435,7 @@ export function OperationsView() {
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                        <span className="font-medium text-zinc-900">{caseRow.caseType.replaceAll("_", " ")}</span>
+                        <span className="font-medium text-zinc-900">{humanizeToken(caseRow.caseType)}</span>
                       </div>
                       <Mono color="dim">{shortId(caseRow.id)}</Mono>
                     </td>
@@ -508,7 +512,7 @@ export function OperationsView() {
                 intents.map((intent) => (
                   <tr key={intent.id} className="align-top hover:bg-zinc-50/70">
                     <td className="px-4 py-3"><Badge label={intent.status} color={statusColors[intent.status] ?? "#71717A"} small /></td>
-                    <td className="px-3 py-3 text-xs text-zinc-700">{intent.action.replaceAll("_", " ")}</td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{humanizeToken(intent.action)}</td>
                     <td className="px-3 py-3 text-xs"><PostingIntentTarget intent={intent} /></td>
                     <td className="px-3 py-3"><Mono color={intent.retryCount > 0 ? "amber" : "dim"}>{intent.retryCount}</Mono></td>
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(intent.nextAttemptAt)}</td>

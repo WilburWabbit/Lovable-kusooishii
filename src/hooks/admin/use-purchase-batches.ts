@@ -577,7 +577,7 @@ export function useUpdatePurchaseLineItem() {
             purchaseCost: input.unitCost,
             supplierVatRegistered: false,
           });
-          if (!itemResult.success) {
+          if (itemResult.success === false) {
             return {
               line_item_id: input.lineItemId,
               qbo_pushed: false,
