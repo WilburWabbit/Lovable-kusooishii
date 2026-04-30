@@ -383,27 +383,6 @@ async function resolveDefaultSalesTaxInfo(
   return { taxCodeId: pick.Id, taxRateId: String(salesRateId), ratePercent: 20 };
 }
 
-// ─── Inventory push ─────────────────────────────────────────
-
-async function updateInventoryQuantity(ebayToken: string, sku: string, quantity: number) {
-  const existing = await ebayFetch(ebayToken, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
-  if (!existing) throw new Error(`Inventory item ${sku} not found on eBay`);
-  const updated = {
-    ...existing,
-    availability: {
-      ...(existing.availability || {}),
-      shipToLocationAvailability: {
-        ...(existing.availability?.shipToLocationAvailability || {}),
-        quantity,
-      },
-    },
-  };
-  await ebayFetch(ebayToken, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-    method: "PUT",
-    body: JSON.stringify(updated),
-  });
-}
-
 // ═════════════════════════════════════════════════════════════
 // MAIN HANDLER
 // ═════════════════════════════════════════════════════════════
@@ -981,8 +960,8 @@ Deno.serve(async (req) => {
     await admin
       .rpc("refresh_order_line_economics", { p_sales_order_id: newOrder.id });
 
-    // ── Step 10: Push updated stock counts to channels ──
-    let stockPushed = 0;
+    // ── Step 10: Queue updated stock counts to channels ──
+    let stockSyncQueued = 0;
 
     if (affectedSkuIds.size > 0) {
       const skuIdArray = [...affectedSkuIds];
@@ -1007,28 +986,31 @@ Deno.serve(async (req) => {
         const qty = stockCounts.get(listing.sku_id) || 0;
         if (listing.channel === "ebay") {
           try {
-            await updateInventoryQuantity(ebayToken, listing.external_sku, qty);
-            await admin.from("channel_listing").update({
-              listed_quantity: qty,
-              synced_at: new Date().toISOString(),
-            }).eq("id", listing.id);
-            stockPushed++;
-            console.log(`Pushed stock ${listing.external_sku} → ${qty} on eBay`);
-          } catch (e: any) {
-            console.error(`Failed to push stock for ${listing.external_sku}:`, e.message);
-            // Audit the stock sync failure — local stock is closed but eBay still shows old quantity.
+            const { error: commandErr } = await admin.rpc("queue_listing_command", {
+              p_channel_listing_id: listing.id,
+              p_command_type: "sync_quantity",
+            });
+            if (commandErr) throw commandErr;
+
+            stockSyncQueued++;
+            console.log(`Queued stock sync ${listing.external_sku} → ${qty} on eBay`);
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            console.error(`Failed to queue stock sync for ${listing.external_sku}:`, message);
+            // Audit the stock sync failure — local stock is closed but eBay
+            // still needs an outbox command to converge.
             // Wrapped in try/catch so a failed audit insert doesn't break the loop
             // and prevent remaining listings from being updated.
             try {
               await admin.from("audit_event").insert({
                 entity_type: "channel_listing",
                 entity_id: listing.id,
-                trigger_type: "ebay_stock_push_failed",
+                trigger_type: "ebay_stock_sync_queue_failed",
                 actor_type: "system",
                 source_system: "ebay-process-order",
                 correlation_id: correlationId,
                 after_json: {
-                  error: e.message,
+                  error: message,
                   external_sku: listing.external_sku,
                   intended_quantity: qty,
                   order_id: orderId,
@@ -1038,13 +1020,14 @@ Deno.serve(async (req) => {
               await admin.from("admin_alert").insert({
                 severity: "critical",
                 category: "ebay_stock_desync",
-                title: `eBay stock out of sync: ${listing.external_sku}`,
-                detail: `Failed to update eBay quantity to ${qty} after order ${orderId}. Local stock is depleted but eBay listing may still show available inventory. Error: ${e.message}`,
+                title: `eBay stock sync not queued: ${listing.external_sku}`,
+                detail: `Failed to queue eBay quantity sync to ${qty} after order ${orderId}. Local stock is depleted but eBay listing may still show available inventory until this is corrected. Error: ${message}`,
                 entity_type: "channel_listing",
                 entity_id: listing.id,
               });
-            } catch (alertErr: any) {
-              console.error(`Failed to create stock desync audit/alert for ${listing.external_sku}:`, alertErr.message);
+            } catch (alertErr) {
+              const alertMessage = alertErr instanceof Error ? alertErr.message : String(alertErr);
+              console.error(`Failed to create stock desync audit/alert for ${listing.external_sku}:`, alertMessage);
             }
           }
         }
@@ -1071,13 +1054,13 @@ Deno.serve(async (req) => {
         order_id: orderId,
         lines: processedLines.length,
         units_depleted: unitsDepletedTotal,
-        stock_pushed: stockPushed,
+        stock_sync_queued: stockSyncQueued,
         landing_id: landingId,
         qbo_sync_status: "pending",
       },
     });
 
-    console.log(`Local pipeline complete for ${orderId}: ${processedLines.length} lines, ${unitsDepletedTotal} units depleted, ${stockPushed} stock pushes`);
+    console.log(`Local pipeline complete for ${orderId}: ${processedLines.length} lines, ${unitsDepletedTotal} units depleted, ${stockSyncQueued} stock sync commands queued`);
 
     // ═══════════════════════════════════════════════════════════
     // Step 12: Queue QBO posting intent (NON-FATAL)
@@ -1179,7 +1162,7 @@ Deno.serve(async (req) => {
         qbo_customer_id: qboCustomerId,
         lines_processed: processedLines.length,
         units_depleted: unitsDepletedTotal,
-        stock_pushed: stockPushed,
+        stock_sync_queued: stockSyncQueued,
         welcome_code_triggered: welcomeCodeTriggered,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

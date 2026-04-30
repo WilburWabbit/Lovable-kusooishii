@@ -1,11 +1,10 @@
 // ============================================================
-// Sync eBay Quantity
+// Queue eBay Quantity Sync
 // ------------------------------------------------------------
 // Lightweight wrapper around the shared eBay inventory sync
 // helper. Lets the admin UI (write-off, ship, return dialogs)
-// nudge eBay after mutating stock_unit / sales_order_line
-// directly via PostgREST, without each component having to
-// re-implement the eBay API call.
+// queue a listing outbox command after mutating stock_unit /
+// sales_order_line directly via PostgREST.
 //
 // Body: { skuIds?: string[]; skuCodes?: string[] }
 // ============================================================
@@ -58,7 +57,7 @@ Deno.serve(async (req) => {
 
     const unique = new Set(skuIds);
     if (unique.size === 0) {
-      return json({ success: true, pushed: 0, withdrawn: 0, failed: 0, note: "no skus" });
+      return json({ success: true, queued: 0, withdrawn: 0, failed: 0, note: "no skus" });
     }
 
     const result = await pushEbayQuantityForSkus(admin, unique, {
@@ -66,7 +65,7 @@ Deno.serve(async (req) => {
       orderId: body.orderId,
     });
 
-    return json({ success: true, ...result, skusProcessed: unique.size });
+    return json({ success: true, queued: result.pushed + result.withdrawn, withdrawn: result.withdrawn, failed: result.failed, skusProcessed: unique.size });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error("sync-ebay-quantity failed:", msg);

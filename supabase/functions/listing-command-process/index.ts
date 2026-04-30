@@ -117,6 +117,12 @@ async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>
       statusPatch.listed_price = listedPrice;
       statusPatch.fee_adjusted_price = listedPrice;
     }
+  } else if (command.command_type === "sync_quantity") {
+    const listedQuantity = Number(command.payload?.listed_quantity ?? 0);
+    if (!Number.isFinite(listedQuantity) || listedQuantity < 0) {
+      throw new Error("Website quantity sync command has invalid listed_quantity");
+    }
+    statusPatch.listed_quantity = Math.floor(listedQuantity);
   } else {
     throw new Error(`Unsupported website listing command ${command.command_type}`);
   }
@@ -207,6 +213,119 @@ async function processEbayEndCommand(
   };
 }
 
+async function processEbayQuantityCommand(
+  admin: ReturnType<typeof createAdminClient>,
+  command: ListingCommand,
+): Promise<Record<string, unknown>> {
+  if (!command.entity_id) {
+    throw new Error("eBay quantity command must target a channel_listing");
+  }
+
+  const { data: listing, error } = await admin
+    .from("channel_listing")
+    .select("id, sku_id, external_listing_id, external_sku")
+    .eq("id" as never, command.entity_id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!listing) throw new Error(`channel_listing ${command.entity_id} not found`);
+
+  const listingRow = listing as Record<string, unknown>;
+  const sku = listingRow.external_sku as string | null;
+  const offerId = listingRow.external_listing_id as string | null;
+  const payloadQuantity = Number(command.payload?.listed_quantity);
+  let quantity = Number.isFinite(payloadQuantity) && payloadQuantity >= 0 ? Math.floor(payloadQuantity) : null;
+
+  if (!sku) throw new Error("eBay quantity command listing has no external_sku");
+
+  if (quantity == null) {
+    const skuId = listingRow.sku_id as string | null;
+    if (!skuId) throw new Error("eBay quantity command listing has no sku_id");
+
+    const { count } = await admin
+      .from("stock_unit")
+      .select("id", { count: "exact", head: true })
+      .eq("sku_id" as never, skuId)
+      .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
+    quantity = count ?? 0;
+  }
+
+  const token = await getEbayAccessToken(admin);
+  let withdrew = false;
+
+  if (quantity === 0) {
+    if (offerId) {
+      let withdrawError: string | null = null;
+      try {
+        await ebayApiFetch(token, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, {
+          method: "POST",
+        });
+      } catch (err) {
+        withdrawError = err instanceof Error ? err.message : String(err);
+      }
+
+      let confirmedEnded = false;
+      try {
+        const offer = await ebayApiFetch(token, `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`);
+        const offerStatus = String(offer?.status ?? "").toUpperCase();
+        const listingStatus = String((offer?.listing as Record<string, unknown> | undefined)?.listingStatus ?? "").toUpperCase();
+        confirmedEnded = offerStatus !== "PUBLISHED" || (listingStatus !== "" && listingStatus !== "ACTIVE");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/\[404\]|not\s+found|25710/i.test(message)) confirmedEnded = true;
+      }
+
+      if (!confirmedEnded) {
+        throw new Error(
+          `Withdraw did not end offer ${offerId} for ${sku}. ` +
+            (withdrawError ? `Withdraw response: ${withdrawError}. ` : "") +
+            "Offer is still published on eBay.",
+        );
+      }
+      withdrew = true;
+    }
+  } else {
+    const existing = await ebayApiFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+    if (!existing) throw new Error(`Inventory item ${sku} not found on eBay`);
+
+    await ebayApiFetch(token, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        ...existing,
+        availability: {
+          ...((existing.availability as Record<string, unknown> | undefined) ?? {}),
+          shipToLocationAvailability: {
+            ...(((existing.availability as Record<string, unknown> | undefined)?.shipToLocationAvailability as Record<string, unknown> | undefined) ?? {}),
+            quantity,
+          },
+        },
+      }),
+    });
+  }
+
+  const patch: Record<string, unknown> = {
+    listed_quantity: quantity,
+    synced_at: new Date().toISOString(),
+  };
+  if (withdrew) {
+    patch.offer_status = "ENDED";
+    patch.v2_status = "ended";
+  }
+
+  const { error: updateErr } = await admin
+    .from("channel_listing")
+    .update(patch as never)
+    .eq("id" as never, command.entity_id);
+  if (updateErr) throw updateErr;
+
+  return {
+    channel_listing_id: command.entity_id,
+    external_sku: sku,
+    listed_quantity: quantity,
+    withdrew,
+  };
+}
+
 async function processEbayCommand(
   admin: ReturnType<typeof createAdminClient>,
   command: ListingCommand,
@@ -215,12 +334,15 @@ async function processEbayCommand(
     throw new Error("eBay listing command must target a channel_listing");
   }
 
-  if (!["publish", "reprice", "update_price", "end"].includes(command.command_type)) {
+  if (!["publish", "reprice", "update_price", "end", "sync_quantity"].includes(command.command_type)) {
     throw new Error(`Unsupported eBay listing command ${command.command_type}`);
   }
 
   if (command.command_type === "end") {
     return processEbayEndCommand(admin, command);
+  }
+  if (command.command_type === "sync_quantity") {
+    return processEbayQuantityCommand(admin, command);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -363,7 +485,7 @@ async function processGoogleShoppingCommand(
     throw new Error("Google Shopping listing command must target a channel_listing");
   }
 
-  if (!["publish", "reprice", "update_price", "end"].includes(command.command_type)) {
+  if (!["publish", "reprice", "update_price", "end", "sync_quantity"].includes(command.command_type)) {
     throw new Error(`Unsupported Google Shopping listing command ${command.command_type}`);
   }
 
@@ -433,7 +555,7 @@ async function processGoogleShoppingCommand(
     .from("stock_unit")
     .select("id", { count: "exact", head: true })
     .eq("sku_id" as never, skuId)
-    .in("v2_status" as never, ["graded", "listed"] as never);
+    .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
   const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
   const productInput = buildGmcProductInput(listingRow, skuRow, product, stockCount);
 
