@@ -432,15 +432,12 @@ Deno.serve(async (req) => {
         .update({ status: "committed", processed_at: new Date().toISOString() } as never)
         .eq("external_id", ebayOrderId);
 
-      // ─── Fire-and-forget: QBO sync ─────────────────────
-      fetch(`${supabaseUrl}/functions/v1/qbo-sync-sales-receipt`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceRoleKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ orderId: localOrderId }),
-      }).catch(() => {});
+      const { error: postingIntentErr } = await admin
+        .rpc("queue_qbo_posting_intents_for_order", { p_sales_order_id: localOrderId });
+
+      if (postingIntentErr) {
+        console.warn(`Failed to queue QBO posting intent for eBay order ${localOrderId}: ${postingIntentErr.message}`);
+      }
 
       // ─── Fire-and-forget: v2 post-order processing ────
       // FIFO stock consumption, COGS recording, variant stats

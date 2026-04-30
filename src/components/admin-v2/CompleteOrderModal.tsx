@@ -451,9 +451,13 @@ export function CompleteOrderModal({
       await supabase
         .rpc("refresh_order_line_economics" as never, { p_sales_order_id: orderId } as never);
 
-      // Trigger QBO sync if fully allocated
       if (allAllocated) {
-        supabase.functions.invoke("qbo-trigger-sync").catch(() => {});
+        const { error: postingIntentError } = await supabase
+          .rpc("queue_qbo_posting_intents_for_order" as never, { p_sales_order_id: orderId } as never);
+
+        if (postingIntentError) {
+          throw new Error(`Failed to queue QBO posting intent: ${postingIntentError.message}`);
+        }
       }
 
       // Dismiss admin alert for this order

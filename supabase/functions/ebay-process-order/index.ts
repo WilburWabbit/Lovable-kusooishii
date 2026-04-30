@@ -1080,181 +1080,34 @@ Deno.serve(async (req) => {
     console.log(`Local pipeline complete for ${orderId}: ${processedLines.length} lines, ${unitsDepletedTotal} units depleted, ${stockPushed} stock pushes`);
 
     // ═══════════════════════════════════════════════════════════
-    // Step 12: Attempt QBO sync (NON-FATAL)
+    // Step 12: Queue QBO posting intent (NON-FATAL)
     //
-    // The local order is committed. If QBO fails here, the
-    // qbo-retry-sync function will pick it up automatically.
+    // The local order is committed. QBO posting is handled by the
+    // posting_intent outbox so external financial writes are async,
+    // idempotent, and observable.
     // ═══════════════════════════════════════════════════════════
     let qboSyncStatus = "pending";
-    let qboCustomerId: string | null = null;
-    let qboSalesReceiptId: string | null = null;
+    const qboCustomerId: string | null = null;
+    const qboSalesReceiptId: string | null = null;
     let qboSyncError: string | null = null;
 
-    try {
-      const { accessToken: qboToken, realmId } = await getQboAccessToken(admin);
+    const { error: postingIntentErr } = await admin
+      .rpc("queue_qbo_posting_intents_for_order", { p_sales_order_id: newOrder.id });
 
-      // Upsert QBO Customer
-      const qboCustomer = await findOrCreateCustomer(qboToken, realmId, buyerName, {
-        email: buyerEmail,
-        shippingAddress: shippingAddr ? {
-          line1: shippingAddr.addressLine1 || "",
-          line2: shippingAddr.addressLine2 || "",
-          city: shippingAddr.city || "",
-          stateOrProvince: shippingAddr.stateOrProvince || "",
-          postalCode: shippingAddr.postalCode || "",
-          country: shippingAddr.countryCode || "GB",
-        } : null,
-      });
-      qboCustomerId = qboCustomer.id;
-      console.log(`QBO Customer: ${qboCustomer.name} (ID: ${qboCustomer.id})`);
-
-      // Backfill qbo_customer_id on the local customer record
-      if (localCustomerId) {
-        await admin.from("customer").update({
-          qbo_customer_id: qboCustomer.id,
-          synced_at: new Date().toISOString(),
-        }).eq("id", localCustomerId);
-      }
-
-      // Resolve QBO-specific tax info for TaxCodeRef and TaxRateRef
-      const taxInfo = await resolveDefaultSalesTaxInfo(admin, qboToken, realmId);
-
-      // Build QBO SalesReceipt lines — processedLines already contain NET amounts
-      const qboLines: any[] = [];
-      let totalNet = 0;
-      let totalTax = 0;
-
-      for (const pl of processedLines) {
-        totalNet += pl.lineTotal;   // already NET
-        totalTax += pl.lineTax;     // already computed from resolved rate
-
-        // Resolve QBO ItemRef
-        let itemRef: any = null;
-        const matchedSku = skuMap.get(pl.ebaySku);
-        if (matchedSku?.qbo_item_id) {
-          itemRef = { value: matchedSku.qbo_item_id };
-        } else {
-          const qboItem = await findQboItemBySku(qboToken, realmId, pl.skuCode);
-          if (qboItem) itemRef = { value: qboItem.id, name: qboItem.name };
-        }
-
-        qboLines.push({
-          DetailType: "SalesItemLineDetail",
-          Amount: pl.lineTotal,
-          Description: pl.title,
-          SalesItemLineDetail: {
-            Qty: pl.qty,
-            UnitPrice: pl.unitPrice,
-            TaxCodeRef: { value: vatResolution.qboTaxCodeId || taxInfo.taxCodeId },
-            ...(itemRef ? { ItemRef: itemRef } : {}),
-          },
-        });
-      }
-
-      totalNet = Math.round(totalNet * 100) / 100;
-      totalTax = Math.round(totalTax * 100) / 100;
-
-      // Rounding adjustment — QBO must reflect the exact eBay order total
-      const computedGross = totalNet + totalTax;
-      const diff = Math.round((ebayGrossTotal - computedGross) * 100) / 100;
-      if (diff !== 0 && qboLines.length > 0) {
-        const lastLine = qboLines[qboLines.length - 1];
-        lastLine.Amount = Math.round((lastLine.Amount + diff) * 100) / 100;
-        lastLine.SalesItemLineDetail.UnitPrice = Math.round((lastLine.Amount / lastLine.SalesItemLineDetail.Qty) * 100) / 100;
-        totalNet = Math.round((totalNet + diff) * 100) / 100;
-      }
-
-      if (!qboLines.length) {
-        // Fallback: single line if no SKUs matched
-        const fallbackNet = Math.round((ebayGrossTotal / vatMultiplier) * 100) / 100;
-        const fallbackTax = Math.round((ebayGrossTotal - fallbackNet) * 100) / 100;
-        qboLines.push({
-          DetailType: "SalesItemLineDetail",
-          Amount: fallbackNet,
-          Description: `eBay order ${orderId}`,
-          SalesItemLineDetail: { Qty: 1, UnitPrice: fallbackNet, TaxCodeRef: { value: vatResolution.qboTaxCodeId || taxInfo.taxCodeId } },
-        });
-        totalNet = fallbackNet;
-        totalTax = fallbackTax;
-      }
-
-      // Check if SalesReceipt already exists in QBO (by DocNumber)
-      let existingReceiptId: string | null = null;
-      try {
-        const escaped = docNumber.replace(/'/g, "''");
-        const result = await qboRequest(
-          qboToken, realmId,
-          `/query?query=${encodeURIComponent(`SELECT Id FROM SalesReceipt WHERE DocNumber = '${escaped}'`)}`
-        );
-        existingReceiptId = result?.QueryResponse?.SalesReceipt?.[0]?.Id || null;
-      } catch { /* not found */ }
-
-      if (existingReceiptId) {
-        qboSalesReceiptId = existingReceiptId;
-        console.log(`SalesReceipt already exists in QBO (ID: ${existingReceiptId}), skipping creation`);
-      } else {
-        const receiptBody: any = {
-          CustomerRef: { value: qboCustomer.id },
-          TxnDate: creationDate,
-          CurrencyRef: { value: currency },
-          GlobalTaxCalculation: "TaxExcluded",
-          DocNumber: docNumber,
-          Line: qboLines,
-          TxnTaxDetail: {
-            TotalTax: totalTax,
-            TaxLine: [{
-              Amount: totalTax,
-              DetailType: "TaxLineDetail",
-              TaxLineDetail: {
-                TaxRateRef: { value: vatResolution.qboTaxRateId || taxInfo.taxRateId },
-                PercentBased: true,
-                TaxPercent: vatResolution.ratePercent,
-                NetAmountTaxable: totalNet,
-              },
-            }],
-          },
-        };
-
-        const result = await qboRequest(qboToken, realmId, "/salesreceipt", {
-          method: "POST", body: JSON.stringify(receiptBody),
-        });
-        const receipt = result?.SalesReceipt;
-        if (!receipt?.Id) throw new Error("QBO SalesReceipt creation returned no Id");
-        qboSalesReceiptId = receipt.Id;
-        console.log(`QBO SalesReceipt created: ID=${receipt.Id}, Total=${receipt.TotalAmt}`);
-      }
-
-      qboSyncStatus = "synced";
-    } catch (qboErr: any) {
-      qboSyncError = (qboErr.message || "Unknown QBO error").substring(0, 500);
-      qboSyncStatus = "pending";
-      console.error(`QBO sync failed for eBay order ${orderId} (non-fatal, will retry): ${qboSyncError}`);
+    if (postingIntentErr) {
+      qboSyncStatus = "needs_manual_review";
+      qboSyncError = postingIntentErr.message;
+      console.error(`Failed to queue QBO posting intent for eBay order ${orderId}: ${qboSyncError}`);
     }
 
-    // ── Step 13: Update sales_order with QBO sync result ──
+    // ── Step 13: Update sales_order with QBO posting state ──
     await admin.from("sales_order").update({
       qbo_sync_status: qboSyncStatus,
       qbo_sales_receipt_id: qboSalesReceiptId,
       qbo_customer_id: qboCustomerId,
-      qbo_last_attempt_at: new Date().toISOString(),
       qbo_last_error: qboSyncError,
-      qbo_retry_count: qboSyncStatus === "synced" ? 0 : 1,
+      qbo_retry_count: 0,
     }).eq("id", newOrder.id);
-
-    // ── Step 14: Trigger qbo-retry-sync if sync failed (best-effort) ──
-    if (qboSyncStatus !== "synced") {
-      try {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        fetch(`${supabaseUrl}/functions/v1/qbo-retry-sync`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${serviceKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({}),
-        }).catch(() => console.warn("qbo-retry-sync trigger failed (non-blocking)"));
-      } catch { /* best effort */ }
-    }
 
     // ── Step 15: Trigger v2 order processing (FIFO, COGS, variant stats) ──
     try {
