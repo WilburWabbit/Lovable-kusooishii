@@ -953,10 +953,33 @@ Deno.serve(async (req) => {
       // cost_base = carrying_value + packaging + shipping
       const costBase = avgCarrying + packagingCost + shippingCost;
 
-      // 6. Get BrickEconomy valuation as market_consensus
+      // 6. Get normalized market consensus first; fall back to legacy BrickEconomy cache.
       let marketConsensus: number | null = null;
-      let beConfidence = 0;
-      if (mpn) {
+      let marketConfidence = 0;
+      const { data: marketSnapshots } = await admin
+        .from("market_price_snapshot")
+        .select("price, confidence_score, channel, captured_at, source:source_id(source_code)")
+        .eq("sku_id", sku_id)
+        .in("channel", [channel, "all", "legacy"])
+        .order("captured_at", { ascending: false })
+        .limit(12);
+
+      type MarketSnapshotRow = {
+        price: number | string | null;
+        confidence_score: number | string | null;
+        channel: string | null;
+      };
+      const snapshotRows = (marketSnapshots ?? []) as MarketSnapshotRow[];
+      const preferredSnapshot =
+        snapshotRows.find((row) => row.channel === channel)
+        ?? snapshotRows.find((row) => row.channel === "all")
+        ?? snapshotRows.find((row) => row.channel === "legacy")
+        ?? null;
+
+      if (preferredSnapshot?.price != null) {
+        marketConsensus = Number(preferredSnapshot.price);
+        marketConfidence = Number(preferredSnapshot.confidence_score ?? 0.5);
+      } else if (mpn) {
         // Match by both full MPN (e.g. "10281-1") and base MPN (e.g. "10281")
         const baseMpn = mpn.replace(/-\d+$/, "");
         const candidates = [mpn];
@@ -969,7 +992,7 @@ Deno.serve(async (req) => {
           .maybeSingle();
         if (beData?.current_value != null) {
           marketConsensus = Number(beData.current_value);
-          beConfidence = 1;
+          marketConfidence = 0.7;
         }
       }
 
@@ -1041,7 +1064,7 @@ Deno.serve(async (req) => {
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
       if (avgCarrying > 0) confidence += 0.3; // have stock cost
-      if (beConfidence > 0) confidence += 0.4; // have market data
+      if (marketConfidence > 0) confidence += Math.min(marketConfidence, 1) * 0.4; // have market data
       if (hasDimensions) confidence += 0.15; // have dimensions for shipping
       if ((fees ?? []).length > 0) confidence += 0.15; // have channel fees
       confidence = Math.round(confidence * 100) / 100;
@@ -1066,6 +1089,7 @@ Deno.serve(async (req) => {
           risk_reserve_rate: riskReserveRate,
           min_profit: minProfit,
           min_margin: minMargin * 100,
+          market_confidence: Math.round(marketConfidence * 100) / 100,
         },
       };
 

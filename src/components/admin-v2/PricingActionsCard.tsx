@@ -3,7 +3,7 @@ import { SurfaceCard, SectionHead, Mono } from './ui-primitives';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Play, Loader2, Search } from 'lucide-react';
+import { Play, Loader2, RefreshCcw, Search } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
 interface BatchResult {
@@ -34,6 +34,25 @@ export function PricingActionsCard() {
   const [singleChannel, setSingleChannel] = useState('ebay');
   const [singleRunning, setSingleRunning] = useState(false);
   const [singleResult, setSingleResult] = useState<PricingCalculation | null>(null);
+  const [marketRefreshRunning, setMarketRefreshRunning] = useState(false);
+  const [marketRefreshCount, setMarketRefreshCount] = useState<number | null>(null);
+
+  const refreshMarketSnapshots = useCallback(async () => {
+    setMarketRefreshRunning(true);
+
+    try {
+      const { data, error } = await supabase.rpc('refresh_market_price_snapshots' as never);
+      if (error) throw error;
+
+      const count = Number(data ?? 0);
+      setMarketRefreshCount(count);
+      toast.success(`Refreshed ${count} market pricing record(s)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Market snapshot refresh failed');
+    } finally {
+      setMarketRefreshRunning(false);
+    }
+  }, []);
 
   const runAll = useCallback(async () => {
     setRunning(true);
@@ -140,6 +159,31 @@ export function PricingActionsCard() {
 
   return (
     <div className="space-y-4">
+      {/* Market intelligence */}
+      <SurfaceCard>
+        <SectionHead>Market Intelligence</SectionHead>
+        <p className="text-xs text-zinc-500 mt-1 mb-4">
+          Refresh weighted market consensus from realized sales and normalized market signals before recalculating prices.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={refreshMarketSnapshots}
+            disabled={marketRefreshRunning}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
+          >
+            {marketRefreshRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+            {marketRefreshRunning ? 'Refreshing...' : 'Refresh Market Snapshots'}
+          </button>
+
+          {marketRefreshCount != null && (
+            <div className="text-[11px] text-zinc-500">
+              Last refresh created <Mono color="teal">{marketRefreshCount}</Mono> signal/snapshot row(s)
+            </div>
+          )}
+        </div>
+      </SurfaceCard>
+
       {/* Batch pricing */}
       <SurfaceCard>
         <SectionHead>Batch Price Calculation</SectionHead>
