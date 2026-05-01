@@ -3068,6 +3068,46 @@ Deno.serve(async (req) => {
         if (error) throw error;
         result = { success: true, updated: productIds.length };
       }
+    } else if (action === "diagnostics-snapshot") {
+      const limit = Math.min(Number(params.limit) || 200, 1000);
+
+      const [tablesRes, routinesRes, settingsRes, rolesRes, landingPendingRes, auditRes, landingErrRes] = await Promise.all([
+        admin.from("information_schema.tables" as never).select("table_schema, table_name").eq("table_schema", "public"),
+        admin.from("information_schema.routines" as never).select("routine_schema, routine_name").eq("routine_schema", "public"),
+        admin.from("app_settings").select("*", { count: "exact", head: true }),
+        admin.from("user_roles").select("role"),
+        admin.from("landing_raw_qbo").select("*", { count: "exact", head: true }).in("status", ["pending", "error"]),
+        admin.from("audit_events").select("*").order("created_at", { ascending: false }).limit(limit),
+        admin.from("landing_raw_qbo").select("*").eq("status", "error").order("created_at", { ascending: false }).limit(limit),
+      ]);
+
+      const userRoleCounts: Record<string, number> = {};
+      for (const r of (rolesRes.data ?? []) as Array<{ role: string }>) {
+        userRoleCounts[r.role] = (userRoleCounts[r.role] ?? 0) + 1;
+      }
+
+      result = {
+        generated_at: new Date().toISOString(),
+        schema: {
+          tables: tablesRes.data ?? [],
+          routines: routinesRes.data ?? [],
+          table_error: tablesRes.error?.message ?? null,
+          routine_error: routinesRes.error?.message ?? null,
+        },
+        health: {
+          app_settings_rows: settingsRes.count ?? 0,
+          settings_error: settingsRes.error?.message ?? null,
+          roles_error: rolesRes.error?.message ?? null,
+          user_role_counts: userRoleCounts,
+          pending_or_error_qbo_landing: landingPendingRes.count ?? 0,
+        },
+        logs: {
+          audit_events: auditRes.data ?? [],
+          landing_qbo_errors: landingErrRes.data ?? [],
+          audit_error: auditRes.error?.message ?? null,
+          landing_error: landingErrRes.error?.message ?? null,
+        },
+      };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),

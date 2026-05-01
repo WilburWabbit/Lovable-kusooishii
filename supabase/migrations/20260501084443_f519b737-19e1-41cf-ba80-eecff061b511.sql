@@ -1,0 +1,1 @@
+truncate table public.lovable_agent_transcripts;
