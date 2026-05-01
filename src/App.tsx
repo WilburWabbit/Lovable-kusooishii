@@ -60,6 +60,7 @@ const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));
 const ChannelMappingsSettingsPage = lazy(() => import("./pages/admin-v2/ChannelMappingsSettingsPage"));
 const AppHealthPage = lazy(() => import("./pages/admin-v2/AppHealthPage"));
+const TranscriptsPage = lazy(() => import("./pages/admin-v2/TranscriptsPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
