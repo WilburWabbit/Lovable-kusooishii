@@ -226,6 +226,13 @@ export function AdminV2Sidebar({
           active={isActive("/admin/settings/app-health")}
           onNavigate={onClose}
         />
+        <SidebarItem
+          icon={MessageSquare}
+          label="Transcripts"
+          to="/admin/system/transcripts"
+          active={isActive("/admin/system/transcripts")}
+          onNavigate={onClose}
+        />
       </div>
 
       {/* Connection Status Footer */}
