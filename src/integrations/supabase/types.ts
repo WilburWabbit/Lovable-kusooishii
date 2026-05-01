@@ -2716,6 +2716,51 @@ export type Database = {
           },
         ]
       }
+      lovable_agent_transcripts: {
+        Row: {
+          body: string
+          char_count: number
+          created_at: string
+          id: string
+          message_index: number
+          message_index_end: number | null
+          occurred_at: string | null
+          part_number: number
+          role: string
+          source_file: string
+          title: string | null
+          token_count: number
+        }
+        Insert: {
+          body: string
+          char_count?: number
+          created_at?: string
+          id?: string
+          message_index: number
+          message_index_end?: number | null
+          occurred_at?: string | null
+          part_number: number
+          role: string
+          source_file: string
+          title?: string | null
+          token_count?: number
+        }
+        Update: {
+          body?: string
+          char_count?: number
+          created_at?: string
+          id?: string
+          message_index?: number
+          message_index_end?: number | null
+          occurred_at?: string | null
+          part_number?: number
+          role?: string
+          source_file?: string
+          title?: string | null
+          token_count?: number
+        }
+        Relationships: []
+      }
       market_price_snapshot: {
         Row: {
           captured_at: string
