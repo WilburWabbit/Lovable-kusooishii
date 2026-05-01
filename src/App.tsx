@@ -130,6 +130,7 @@ const App = () => (
             <Route path="/admin/operations" element={<RequireAdmin><OperationsPage /></RequireAdmin>} />
             <Route path="/admin/settings/channel-mappings" element={<RequireAdmin><ChannelMappingsSettingsPage /></RequireAdmin>} />
             <Route path="/admin/settings/app-health" element={<RequireAdmin><AppHealthPage /></RequireAdmin>} />
+            <Route path="/admin/system/transcripts" element={<RequireAdmin><TranscriptsPage /></RequireAdmin>} />
             <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
             <Route path="/admin/ebay-callback" element={<RequireAdmin><EbayCallbackPage /></RequireAdmin>} />
             <Route path="/admin/gmc-callback" element={<RequireAdmin><GmcCallbackPage /></RequireAdmin>} />
