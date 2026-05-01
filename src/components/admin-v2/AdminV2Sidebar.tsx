@@ -13,6 +13,7 @@ import {
   Truck,
   Settings,
   Activity,
+  MessageSquare,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
