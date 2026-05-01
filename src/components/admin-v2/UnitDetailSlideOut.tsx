@@ -92,8 +92,8 @@ export function UnitDetailSlideOut({ unit, open, onClose }: UnitDetailSlideOutPr
             {unit.grade !== null && (
               <div>
                 <SectionHead>Edit Grade</SectionHead>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {([1, 2, 3, 4] as ConditionGrade[]).map((g) => {
+                <div className="grid grid-cols-5 gap-1.5">
+                  {([1, 2, 3, 4, 5] as ConditionGrade[]).map((g) => {
                     const color = GRADE_COLORS[g];
                     const selected = selectedGrade === g;
                     return (

@@ -24,7 +24,7 @@ const GRADE_LABELS: Record<string, string> = {
   "2": "Silver Lining",
   "3": "Bronze Age",
   "4": "Black Sheep",
-  "5": "Non-saleable",
+  "5": "Red Card",
 };
 
 const INVENTORY_START_DATE = "2023-04-14";
@@ -106,6 +106,24 @@ Deno.serve(async (req) => {
     const productName = (product?.name as string) ?? skuCode;
     const grade = (sku as Record<string, unknown>).condition_grade as string;
     const gradeLabel = GRADE_LABELS[grade] ?? `Grade ${grade}`;
+
+    if (!(sku as Record<string, unknown>).qbo_item_id) {
+      const { data: gradedUnits, error: gradedUnitsErr } = await admin
+        .from("stock_unit")
+        .select("id")
+        .eq("sku_id", (sku as Record<string, unknown>).id)
+        .in("v2_status", ["graded", "listed", "sold", "shipped", "delivered", "payout_received", "complete", "restocked"])
+        .limit(1);
+
+      if (gradedUnitsErr) throw gradedUnitsErr;
+      if ((gradedUnits ?? []).length === 0) {
+        return jsonResponse({
+          success: false,
+          qbo_error: `SKU ${skuCode} has not been graded yet. App-created items are only sent to QBO after grading.`,
+          skuCode,
+        }, 400);
+      }
+    }
 
     // ─── 2. Determine QBO item ID ───────────────────────────
     const accessToken = await ensureValidToken(admin, realmId, clientId, clientSecret);

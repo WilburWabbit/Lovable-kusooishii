@@ -30,7 +30,7 @@ const GRADE_LABELS: Record<string, string> = {
   "2": "2 · Excellent / open-box",
   "3": "3 · Good / used complete",
   "4": "4 · Acceptable / used worn",
-  "5": "5 · Non-saleable",
+  "5": "5 · Red Card",
 };
 
 export function EbayConditionsPanel() {
@@ -50,7 +50,7 @@ export function EbayConditionsPanel() {
   const policy = policyResult?.policy ?? null;
 
   const resolvedGrades = useMemo(
-    () => ["1", "2", "3", "4"].map((g) => resolveGradeForPolicy(g, policy)),
+    () => ["1", "2", "3", "4", "5"].map((g) => resolveGradeForPolicy(g, policy)),
     [policy],
   );
 

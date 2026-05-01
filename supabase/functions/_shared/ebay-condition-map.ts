@@ -1,7 +1,8 @@
 // ============================================================
 // Grade → eBay Condition mapping
 //
-// Internal condition grades 1-5 (5 is non-saleable, never published).
+// Internal condition grades 1-5. Grade 5 is Red Card and can be published
+// when the operator deliberately lists it with full disclosure.
 //
 // eBay's condition vocabulary varies per category. The Taxonomy API
 // `get_item_condition_policies` endpoint reports which `conditionId`s
@@ -41,8 +42,6 @@ export const EBAY_CONDITION_ENUM: Record<string, string> = {
 // preferred conditionId; subsequent entries are progressive fallbacks
 // used only when the category does not allow the preferred value.
 //
-// Grade 5 is non-saleable so it's never resolved — included only as a
-// safety net.
 const GRADE_PREFERENCES: Record<string, string[]> = {
   // 1 = New / sealed
   "1": ["1000", "1500", "2750", "3000"],
@@ -52,7 +51,7 @@ const GRADE_PREFERENCES: Record<string, string[]> = {
   "3": ["3000", "4000", "5000", "6000"],
   // 4 = Acceptable / used with notable wear
   "4": ["5000", "6000", "4000", "3000"],
-  // 5 = Non-saleable. Should never publish but pick the lowest if it does.
+  // 5 = Red Card / lowest condition tier.
   "5": ["7000", "6000", "5000"],
 };
 

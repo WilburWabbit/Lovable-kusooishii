@@ -63,7 +63,7 @@ export function BulkGradeDialog({ open, onClose, stockUnitIds }: BulkGradeDialog
           <div>
             <SectionHead>Assign Grade</SectionHead>
             <div className="grid grid-cols-2 gap-2">
-              {([1, 2, 3, 4] as ConditionGrade[]).map((g) => {
+              {([1, 2, 3, 4, 5] as ConditionGrade[]).map((g) => {
                 const color = GRADE_COLORS[g];
                 const selected = selectedGrade === g;
                 return (

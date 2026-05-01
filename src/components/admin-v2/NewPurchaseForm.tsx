@@ -10,6 +10,8 @@ interface LineItemDraft {
   key: number;
   mpn: string;
   name: string;
+  brand: string;
+  ebayCategoryId: string;
   quantity: number;
   unitCost: number;
 }
@@ -40,7 +42,7 @@ export function NewPurchaseForm() {
 
   // Line items
   const [lineItems, setLineItems] = useState<LineItemDraft[]>([
-    { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
+    { key: nextKey++, mpn: "", name: "", brand: "LEGO", ebayCategoryId: "", quantity: 1, unitCost: 0 },
   ]);
 
   // For each line: lookup the existing product by MPN (case-insensitive)
@@ -74,7 +76,7 @@ export function NewPurchaseForm() {
   const addLine = () => {
     setLineItems((prev) => [
       ...prev,
-      { key: nextKey++, mpn: "", name: "", quantity: 1, unitCost: 0 },
+      { key: nextKey++, mpn: "", name: "", brand: "LEGO", ebayCategoryId: "", quantity: 1, unitCost: 0 },
     ]);
   };
 
@@ -94,16 +96,18 @@ export function NewPurchaseForm() {
     );
   };
 
-  // For new MPNs (not in catalog), the operator must enter a Product Name so it
-  // flows correctly into QBO. Existing MPNs reuse the stored name automatically.
+  // For new MPNs, capture essential product data up front. This keeps placeholder
+  // app records out of QBO and gives listing/category flows enough context.
   const canSubmit =
     supplierName.trim() !== "" &&
     lineItems.length > 0 &&
     lineItems.every((li, idx) => {
       const baseValid = li.mpn.trim() !== "" && li.quantity > 0 && li.unitCost > 0;
       if (!baseValid) return false;
-      const isNew = !lineProductMatches[idx];
-      if (isNew && li.name.trim() === "") return false;
+      const product = lineProductMatches[idx];
+      if ((product?.name ?? li.name).trim() === "") return false;
+      if ((product?.brand ?? li.brand).trim() === "") return false;
+      if ((product?.ebayCategoryId ?? li.ebayCategoryId).trim() === "") return false;
       return true;
     });
 
@@ -128,8 +132,14 @@ export function NewPurchaseForm() {
         lineItems: lineItems.map((li, idx) => ({
           mpn: li.mpn.trim(),
           name: lineProductMatches[idx]
-            ? lineProductMatches[idx]!.name
+            ? lineProductMatches[idx]!.name || li.name.trim()
             : li.name.trim() || undefined,
+          brand: lineProductMatches[idx]
+            ? (lineProductMatches[idx]!.brand ?? li.brand.trim()) || undefined
+            : li.brand.trim() || undefined,
+          ebayCategoryId: lineProductMatches[idx]
+            ? (lineProductMatches[idx]!.ebayCategoryId ?? li.ebayCategoryId.trim()) || undefined
+            : li.ebayCategoryId.trim() || undefined,
           quantity: li.quantity,
           unitCost: li.unitCost,
         })),
@@ -271,6 +281,9 @@ export function NewPurchaseForm() {
               const landedPerUnit = li.unitCost + apportPerUnit;
               const matchedProduct = lineProductMatches[idx];
               const isNewMpn = li.mpn.trim() !== "" && !matchedProduct;
+              const needsNameInput = isNewMpn || (Boolean(matchedProduct) && !matchedProduct?.name?.trim());
+              const needsBrandInput = isNewMpn || (Boolean(matchedProduct) && !matchedProduct?.brand?.trim());
+              const needsCategoryInput = isNewMpn || (Boolean(matchedProduct) && !matchedProduct?.ebayCategoryId?.trim());
 
               return (
                 <>
@@ -331,20 +344,50 @@ export function NewPurchaseForm() {
                   {(isNewMpn || matchedProduct) && (
                     <tr key={`${li.key}-name`} className="border-b border-zinc-200 bg-zinc-50/40">
                       <td colSpan={7} className="px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold w-32">
-                            {isNewMpn ? "Product Name *" : "Product Name"}
+                        <div className="grid gap-2 md:grid-cols-[120px_1fr_120px_160px] md:items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                            {needsNameInput ? "Product Name *" : "Product Name"}
                           </span>
-                          {isNewMpn ? (
+                          {needsNameInput ? (
                             <input
                               value={li.name}
                               onChange={(e) => updateLine(li.key, "name", e.target.value)}
-                              placeholder="Required for new MPN — flows to QuickBooks"
+                              placeholder="Required before stock can be created"
                               className="flex-1 px-2 py-1 bg-white border border-amber-300 rounded text-zinc-900 text-xs"
                             />
                           ) : (
                             <span className="text-xs text-zinc-700">
-                              {matchedProduct!.name}
+                              {matchedProduct?.name}
+                            </span>
+                          )}
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                            {needsBrandInput ? "Brand *" : "Brand"}
+                          </span>
+                          {needsBrandInput ? (
+                            <input
+                              value={li.brand}
+                              onChange={(e) => updateLine(li.key, "brand", e.target.value)}
+                              placeholder="LEGO"
+                              className="px-2 py-1 bg-white border border-amber-300 rounded text-zinc-900 text-xs"
+                            />
+                          ) : (
+                            <span className="text-xs text-zinc-700">
+                              {matchedProduct?.brand}
+                            </span>
+                          )}
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold md:col-start-1">
+                            {needsCategoryInput ? "eBay Category *" : "eBay Category"}
+                          </span>
+                          {needsCategoryInput ? (
+                            <input
+                              value={li.ebayCategoryId}
+                              onChange={(e) => updateLine(li.key, "ebayCategoryId", e.target.value)}
+                              placeholder="Required category ID"
+                              className="px-2 py-1 bg-white border border-amber-300 rounded text-zinc-900 text-xs font-mono md:col-span-3"
+                            />
+                          ) : (
+                            <span className="text-xs text-zinc-700 font-mono md:col-span-3">
+                              {matchedProduct!.ebayCategoryId ?? "—"}
                             </span>
                           )}
                         </div>

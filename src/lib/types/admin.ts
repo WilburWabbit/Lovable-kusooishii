@@ -44,10 +44,10 @@ export type PayoutChannel = 'ebay' | 'stripe';
 
 export type QBOSyncStatus = 'pending' | 'synced' | 'partial' | 'error' | 'needs_manual_review';
 
-/** Saleable condition grades only. Grade 5 (Red Card) is internal/parts-only. */
-export type ConditionGrade = 1 | 2 | 3 | 4;
+/** Saleable condition grades. Grade 5 (Red Card) is saleable when deliberately graded that way. */
+export type ConditionGrade = 1 | 2 | 3 | 4 | 5;
 
-/** All condition grades including non-saleable. */
+/** Compatibility alias for code that previously distinguished internal grades. */
 export type ConditionGradeAll = 1 | 2 | 3 | 4 | 5;
 
 export type ConditionFlag =
@@ -144,6 +144,7 @@ export interface Product {
   id: string;
   mpn: string;
   name: string;
+  brand: string | null;
   productType: "set" | "minifig";
   theme: string | null;
   subtheme: string | null;

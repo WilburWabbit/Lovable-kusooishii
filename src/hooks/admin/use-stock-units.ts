@@ -177,7 +177,7 @@ export function useGradeStockUnit() {
           .limit(1)
           .maybeSingle();
 
-        const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4 };
+        const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.25 };
         const baseMarketPrice = (beData as Record<string, unknown> | null)?.current_value as number | null;
         const gradeMarketPrice = baseMarketPrice
           ? Math.round(baseMarketPrice * (GRADE_RATIOS[grade] ?? 0.5) * 100) / 100
@@ -216,7 +216,7 @@ export function useGradeStockUnit() {
             product_id: product.id,
             condition_grade: String(grade),
             active_flag: true,
-            saleable_flag: grade <= 4,
+            saleable_flag: true,
             mpn,
           };
           if (gradeMarketPrice != null) {

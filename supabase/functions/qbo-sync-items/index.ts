@@ -131,33 +131,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Deactivate SKUs for items no longer in QBO (stale cleanup)
-    // This is a landing-layer concern: mark items not seen as needing attention
-    const seenIds = new Set(qboItems.map(i => String(i.Id)));
-    let deactivated = 0;
-
-    // Paginate through all active SKUs with qbo_item_id
-    let from = 0;
-    const pageSize = 1000;
-    while (true) {
-      const { data } = await admin.from("sku")
-        .select("id, qbo_item_id").not("qbo_item_id", "is", null)
-        .eq("active_flag", true).range(from, from + pageSize - 1);
-      if (!data || data.length === 0) break;
-      for (const sku of data) {
-        if (!seenIds.has(sku.qbo_item_id)) {
-          await admin.from("sku").update({ active_flag: false }).eq("id", sku.id);
-          deactivated++;
-        }
-      }
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
-
     return new Response(
       JSON.stringify({
         success: true, total: qboItems.length,
-        landed, skipped, deactivated,
+        landed, skipped,
+        canonical_changes: 0,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
