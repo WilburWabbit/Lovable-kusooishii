@@ -226,6 +226,9 @@ export function CustomerDetail() {
       </div>
       <p className="text-muted-foreground text-[13px] mb-5">
         {customer.orderCount} orders · £{customer.totalSpend.toFixed(2)} total spend · Customer since {formatDate(customer.firstOrderAt ?? customer.createdAt)}
+        <span className="ml-3 font-mono text-[11px] text-muted-foreground/70">App: {customer.id}</span>
+        <span className="ml-3 font-mono text-[11px] text-muted-foreground/70">QBO: {customer.qboCustomerId ?? "—"}</span>
+        <span className="ml-3 font-mono text-[11px] text-muted-foreground/70">Stripe: {customer.stripeCustomerId ?? "—"}</span>
       </p>
 
       {/* Edit / Save buttons */}
@@ -267,6 +270,9 @@ export function CustomerDetail() {
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <InfoField label="App Customer ID" value={customer.id} mono />
+            <InfoField label="QBO Customer ID" value={customer.qboCustomerId ?? "—"} mono />
+            <InfoField label="Stripe Customer ID" value={customer.stripeCustomerId ?? "—"} mono />
             <InfoField label="First Name" value={customer.firstName ?? "—"} />
             <InfoField label="Last Name" value={customer.lastName ?? "—"} />
             <InfoField label="Email" value={customer.email || "—"} />
@@ -281,7 +287,6 @@ export function CustomerDetail() {
                   : "—"
               }
             />
-            <InfoField label="QBO Customer ID" value={customer.qboCustomerId ?? "—"} mono />
             {customer.notes && (
               <div className="col-span-full">
                 <InfoField label="Notes" value={customer.notes} />
