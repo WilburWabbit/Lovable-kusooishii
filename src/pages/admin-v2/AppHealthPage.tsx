@@ -29,7 +29,7 @@ export default function AppHealthPage() {
   return (
     <AdminV2Layout>
       <div className="space-y-6">
-        <SectionHead title="App Health" subtitle="Live diagnostics snapshot of schema, operational signals, and recent logs." />
+        <SectionHead>App Health — Live diagnostics snapshot of schema, operational signals, and recent logs.</SectionHead>
         <button className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground" onClick={() => refetch()}>Refresh snapshot</button>
         {isLoading ? <SurfaceCard>Loading…</SurfaceCard> : null}
         {error ? <SurfaceCard><p className="text-sm text-destructive">Failed to load diagnostics: {(error as Error).message}</p></SurfaceCard> : null}
