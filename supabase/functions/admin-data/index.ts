@@ -3108,6 +3108,25 @@ Deno.serve(async (req) => {
           landing_error: landingErrRes.error?.message ?? null,
         },
       };
+    } else if (action === "list-transcripts") {
+      const role = (params as { role?: string }).role;
+      const search = (params as { search?: string }).search?.trim();
+      const from = Number((params as { from?: number }).from ?? 0);
+      const to = Number((params as { to?: number }).to ?? 49);
+      let q = admin
+        .from("lovable_agent_transcripts")
+        .select("*", { count: "exact" })
+        .order("occurred_at", { ascending: false, nullsFirst: false })
+        .order("message_index", { ascending: false })
+        .range(from, to);
+      if (role && role !== "all") q = q.eq("role", role);
+      if (search) {
+        const term = search.replace(/%/g, "");
+        q = q.or(`body.ilike.%${term}%,title.ilike.%${term}%`);
+      }
+      const { data, error, count } = await q;
+      if (error) throw error;
+      result = { rows: data ?? [], total: count ?? 0 };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
