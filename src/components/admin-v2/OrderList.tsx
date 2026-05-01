@@ -26,7 +26,7 @@ function getValue(row: OrderRow, key: string): unknown {
     case "items":
       return row.lineItems.length;
     case "ref":
-      return row.externalOrderId || row.docNumber || row.orderNumber;
+      return row.orderNumber;
     default:
       return (row as unknown as Record<string, unknown>)[key];
   }
@@ -46,13 +46,11 @@ const formatDate = (iso: string | null) => {
 const COLUMNS: ColumnDef<OrderRow>[] = [
   {
     key: "ref",
-    label: "Ref",
+    label: "App Ref",
     defaultVisible: true,
     sortable: true,
     render: (r) => {
-      const ref = r.externalOrderId || r.docNumber || r.orderNumber;
-      const isInternal = !r.externalOrderId && !r.docNumber;
-      return <Mono color={isInternal ? "dim" : "amber"}>{ref}</Mono>;
+      return <Mono color="amber">{r.orderNumber}</Mono>;
     },
   },
   {
@@ -238,6 +236,27 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     render: (r) => <Mono color="dim">{r.docNumber ?? "—"}</Mono>,
   },
   {
+    key: "qboSalesReceiptId",
+    label: "QBO ID",
+    defaultVisible: false,
+    sortable: false,
+    render: (r) => <Mono color="dim">{r.qboSalesReceiptId ?? "—"}</Mono>,
+  },
+  {
+    key: "externalOrderId",
+    label: "Channel Ref",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.externalOrderId ?? "—"}</Mono>,
+  },
+  {
+    key: "paymentReference",
+    label: "Payment Ref",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.paymentReference ?? "—"}</Mono>,
+  },
+  {
     key: "shippedAt",
     label: "Shipped",
     defaultVisible: false,
@@ -266,8 +285,8 @@ function csvEscape(value: unknown): string {
   return s;
 }
 
-function downloadCsv(rows: OrderRow[], visibleColumns: string[]) {
-  const cols = visibleColumns.map((k) => COLUMN_MAP.get(k)).filter(Boolean) as ColumnDef<OrderRow>[];
+function downloadCsv(rows: OrderRow[]) {
+  const cols = COLUMNS;
   const headers = cols.map((c) => csvEscape(c.label));
 
   const csvRows = rows.map((row) =>
@@ -324,6 +343,8 @@ export function OrderList() {
           r.orderNumber.toLowerCase().includes(term) ||
           (r.externalOrderId ?? "").toLowerCase().includes(term) ||
           (r.docNumber ?? "").toLowerCase().includes(term) ||
+          (r.qboSalesReceiptId ?? "").toLowerCase().includes(term) ||
+          (r.paymentReference ?? "").toLowerCase().includes(term) ||
           (r.customer?.name ?? "Cash Sales").toLowerCase().includes(term),
       );
     }
@@ -366,7 +387,7 @@ export function OrderList() {
             onMoveColumn={moveColumn}
           />
           <button
-            onClick={() => downloadCsv(processedRows, prefs.visibleColumns)}
+            onClick={() => downloadCsv(processedRows)}
             className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />

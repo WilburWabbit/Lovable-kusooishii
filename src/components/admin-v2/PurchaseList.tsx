@@ -204,6 +204,13 @@ const COLUMNS: ColumnDef<PurchaseRow>[] = [
     },
   },
   {
+    key: "qboPurchaseId",
+    label: "QBO ID",
+    defaultVisible: false,
+    sortable: false,
+    render: (r) => <Mono color="dim">{r.qboPurchaseId ?? "—"}</Mono>,
+  },
+  {
     key: "createdAt",
     label: "Created",
     defaultVisible: false,
@@ -253,6 +260,7 @@ export function PurchaseList() {
         (r) =>
           r.id.toLowerCase().includes(term) ||
           (r.reference ?? "").toLowerCase().includes(term) ||
+          (r.qboPurchaseId ?? "").toLowerCase().includes(term) ||
           r.supplierName.toLowerCase().includes(term),
       );
     }
@@ -393,7 +401,8 @@ function csvEscape(value: unknown): string {
 }
 
 const CSV_COLUMNS = [
-  "Batch ID", "Supplier", "Purchase Date", "Supplier VAT Reg",
+  "Batch ID", "Supplier Ref", "QBO Purchase ID", "QBO Sync Status",
+  "Supplier", "Purchase Date", "Supplier VAT Reg",
   "Shared Shipping", "Shared Broker Fee", "Shared Other",
   "MPN", "Product Name", "Line Qty", "Unit Cost", "Apportioned Cost", "Landed Cost/Unit",
   "Unit ID", "Unit UID", "Grade", "SKU", "Status", "Condition Flags", "Landed Cost",
@@ -483,7 +492,8 @@ function buildCsvRow(
   unit: Record<string, unknown> | null,
 ): string {
   const vals = [
-    batch.id, batch.supplierName, batch.purchaseDate,
+    batch.id, batch.reference ?? "", batch.qboPurchaseId ?? "", batch.qboSyncStatus ?? "",
+    batch.supplierName, batch.purchaseDate,
     batch.supplierVatRegistered ? "Yes" : "No",
     batch.sharedCosts.shipping, batch.sharedCosts.broker_fee, batch.sharedCosts.other,
     mpn, productName,

@@ -86,49 +86,6 @@ function mapStockUnit(row: Record<string, unknown>): StockUnit {
   };
 }
 
-async function postQboItemViaIntent(input: {
-  skuCode: string;
-  purchaseCost?: number;
-  supplierVatRegistered?: boolean;
-}): Promise<{ success: true } | { success: false; error: string }> {
-  const { data: sku, error: skuErr } = await supabase
-    .from('sku')
-    .select('id')
-    .eq('sku_code', input.skuCode)
-    .maybeSingle();
-
-  if (skuErr) return { success: false, error: skuErr.message };
-  const skuId = (sku as Record<string, unknown> | null)?.id as string | null;
-  if (!skuId) return { success: false, error: `SKU not found: ${input.skuCode}` };
-
-  const { data: intentId, error: queueErr } = await supabase.rpc(
-    'queue_qbo_item_posting_intent' as never,
-    {
-      p_sku_id: skuId,
-      p_purchase_cost: input.purchaseCost ?? null,
-      p_supplier_vat_registered: input.supplierVatRegistered ?? null,
-    } as never,
-  );
-  if (queueErr) return { success: false, error: queueErr.message };
-
-  const { data, error } = await supabase.functions.invoke('accounting-posting-intents-process', {
-    body: intentId ? { intentId } : { batch_size: 5 },
-  });
-  if (error) return { success: false, error: error.message };
-
-  const payload = data as Record<string, unknown> | null;
-  const results = Array.isArray(payload?.results) ? payload.results as Record<string, unknown>[] : [];
-  const result = results.find((row) => row.intent_id === intentId) ?? results[0];
-  if (!payload?.success || !result || result.status !== 'posted') {
-    return {
-      success: false,
-      error: String(result?.error ?? payload?.error ?? 'QBO Item posting intent did not complete'),
-    };
-  }
-
-  return { success: true };
-}
-
 async function postQboPurchaseViaIntent(
   batchId: string,
   action: 'create_purchase' | 'update_purchase' | 'delete_purchase',
@@ -338,6 +295,8 @@ interface CreateBatchInput {
   lineItems: {
     mpn: string;
     name?: string;
+    brand?: string;
+    ebayCategoryId?: string;
     quantity: number;
     unitCost: number;
   }[];
@@ -361,6 +320,8 @@ export function useCreatePurchaseBatch() {
         line_items: input.lineItems.map((li) => ({
           mpn: li.mpn,
           name: li.name ?? null,
+          brand: li.brand ?? null,
+          ebay_category_id: li.ebayCategoryId ?? null,
           quantity: li.quantity,
           unit_cost: li.unitCost,
         })),
@@ -391,12 +352,6 @@ export function useCreatePurchaseBatch() {
           .invoke('rebrickable-sync', { body: { mpn } })
           .catch((err) => console.warn(`Product enrichment for ${mpn} failed (non-blocking):`, err));
       }
-
-      // Fire-and-forget: queue the batch QBO push. Failures are recorded on the
-      // batch row (qbo_sync_status='error') so the operator can retry from
-      // the BatchDetail page.
-      postQboPurchaseViaIntent(batchId, 'create_purchase')
-        .catch((err) => console.warn(`QBO push for ${batchId} failed (non-blocking):`, err));
 
       return batchId;
     },
@@ -567,31 +522,9 @@ export function useUpdatePurchaseLineItem() {
         console.warn(`Re-apportion failed for ${input.batchId}: ${rpcErr.message}`);
       }
 
-      // 5. If batch already in QBO, push the QBO Item update (name + cost),
-      //    then push the QBO Purchase update (line totals).
+      // 5. If batch already in QBO, push the QBO Purchase update. Item refs are
+      // resolved from the final graded SKUs inside the QBO purchase function.
       if (qboPurchaseId) {
-        const skuCode = `${input.mpn}.5`;
-        try {
-          const itemResult = await postQboItemViaIntent({
-            skuCode,
-            purchaseCost: input.unitCost,
-            supplierVatRegistered: false,
-          });
-          if (itemResult.success === false) {
-            return {
-              line_item_id: input.lineItemId,
-              qbo_pushed: false,
-              qbo_error: `QBO Item sync: ${itemResult.error}`,
-            };
-          }
-        } catch (e) {
-          return {
-            line_item_id: input.lineItemId,
-            qbo_pushed: false,
-            qbo_error: `QBO Item sync threw: ${e instanceof Error ? e.message : String(e)}`,
-          };
-        }
-
         try {
           const data = await postQboPurchaseViaIntent(input.batchId, 'update_purchase');
           if (data && typeof data === 'object' && 'error' in data) {

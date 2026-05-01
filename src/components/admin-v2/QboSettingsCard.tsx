@@ -44,8 +44,8 @@ export function QboSettingsCard() {
   const [reconcileDetails, setReconcileDetails] = useState<Record<string, unknown>[] | null>(null);
   const [reconcileType, setReconcileType] = useState<string>('stock');
   const [reconcilingEntity, setReconcilingEntity] = useState<string | null>(null);
-  const [rebuilding, setRebuilding] = useState(false);
-  const [rebuildPhase, setRebuildPhase] = useState('');
+  const [refreshingQboDryRun, setRefreshingQboDryRun] = useState(false);
+  const [qboDryRunPhase, setQboDryRunPhase] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
   const [cleaningGhosts, setCleaningGhosts] = useState(false);
   const [recalcingCost, setRecalcingCost] = useState(false);
@@ -60,7 +60,7 @@ export function QboSettingsCard() {
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || rebuilding || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || refreshingQboDryRun || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
 
   // ── Fetch status on mount ──
   useState(() => {
@@ -350,99 +350,30 @@ export function QboSettingsCard() {
   };
 
 
-  const rebuildFromQbo = async () => {
+  const runQboDryRunRefresh = async () => {
     if (!confirm(
-      'FULL REBUILD: This will:\n' +
-      '1. Clear all QBO landing tables\n' +
-      '2. Re-fetch ALL data from QBO live\n' +
-      '3. Delete all transactional data\n' +
-      '4. Reprocess everything chronologically\n\n' +
-      'This may take several minutes. Continue?'
+      'QBO DRY-RUN REFRESH: This will:\n' +
+      '1. Land a fresh QBO snapshot into staging tables\n' +
+      '2. Compare QBO references and DocNumbers against app records\n' +
+      '3. Create drift cases for review\n\n' +
+      'It will not delete or rewrite canonical app data, website listings, eBay listings, prices, listing IDs, or outbound commands. Continue?'
     )) return;
 
-    setRebuilding(true);
+    setRefreshingQboDryRun(true);
     try {
-      // ═══ Phase 1: Clear landing tables & wipe canonical data ═══
-      setRebuildPhase('Phase 1: Clearing landing tables & canonical data...');
-      const resetData = await invokeWithAuth<Record<string, unknown>>('admin-data', { action: 'rebuild-from-qbo' });
-      if ((resetData as Record<string, unknown>)?.error) throw new Error(String((resetData as Record<string, unknown>).error));
-
-      // ═══ Phase 2: Re-fetch from QBO live ═══
-      // 2a: Tax rates (single call)
-      setRebuildPhase('Phase 2a: Syncing tax rates from QBO...');
-      await invokeWithAuth('qbo-sync-tax-rates');
-
-      // 2b: Customers (single call)
-      setRebuildPhase('Phase 2b: Landing customers from QBO...');
-      await invokeWithAuth('qbo-sync-customers');
-
-      // 2c: Items (single call)
-      setRebuildPhase('Phase 2c: Landing items from QBO...');
-      await invokeWithAuth('qbo-sync-items');
-
-      // 2d: Vendors (single call)
-      setRebuildPhase('Phase 2d: Landing vendors from QBO...');
-      await invokeWithAuth('qbo-sync-vendors');
-
-      // 2e: Purchases (month by month)
-      setRebuildPhase('Phase 2e: Landing purchases from QBO...');
-      await syncAllMonths('qbo-sync-purchases', 'Purchases', setRebuildPhase, () => {});
-
-      // 2f: Sales (month by month)
-      setRebuildPhase('Phase 2f: Landing sales from QBO...');
-      await syncAllMonths('qbo-sync-sales', 'Sales', setRebuildPhase, () => {});
-
-      // 2g: Deposits (single call)
-      setRebuildPhase('Phase 2g: Landing deposits from QBO...');
-      await invokeWithAuth('qbo-sync-deposits');
-
-      // ═══ Phase 3: Process in strict dependency order ═══
-      // 3a: Vendors
-      setRebuildPhase('Phase 3a: Processing vendors...');
-      await drainPending('Processing vendors', 'vendors');
-
-      // 3b: Customers
-      setRebuildPhase('Phase 3b: Processing customers...');
-      await drainPending('Processing customers', 'customers');
-
-      // 3c: Items → SKUs
-      setRebuildPhase('Phase 3c: Processing items...');
-      await drainPending('Processing items', 'items');
-
-      // 3d: Purchases → Receipts → Purchase Batches → Stock Units
-      setRebuildPhase('Phase 3d: Processing purchases...');
-      const purchasesProcessed = await drainPending('Processing purchases', 'purchases');
-
-      // 3e: Safety check — verify purchases created batches
-      setRebuildPhase('Phase 3e: Verifying purchase integrity...');
-      const verifyData = await invokeWithAuth<Record<string, unknown>>('qbo-process-pending', { entity_type: 'purchases', batch_size: 1 });
-      const purchaseRemaining = ((verifyData as Record<string, unknown>)?.remaining as Record<string, number>)?.purchases ?? 0;
-      if (purchaseRemaining > 0) {
-        toast.error(`${purchaseRemaining} purchases still pending — stopping before sales`);
-        return;
-      }
-
-      // 3f: Sales + Refunds
-      setRebuildPhase('Phase 3f: Processing sales receipts...');
-      await drainPending('Processing sales', 'sales');
-      await drainPending('Processing refunds', 'refunds');
-
-      // 3g: Deposits
-      setRebuildPhase('Phase 3g: Processing deposits...');
-      await drainPending('Processing deposits', 'deposits');
-
-      // ═══ Phase 4: Non-QBO channel data ═══
-      // Stripe/eBay orders and payouts cannot be auto-replayed from QBO rebuild.
-      // They must be re-imported manually via their respective sync tools
-      // (eBay Sync, Stripe Sync) after rebuild completes.
-      setRebuildPhase('Phase 4: Skipped — re-import eBay/Stripe data via their sync tools after rebuild');
-
-      toast.success(`Rebuild complete — ${purchasesProcessed}+ records committed from fresh QBO snapshot`);
+      setQboDryRunPhase('Landing QBO snapshot and creating drift cases...');
+      const data = await invokeWithAuth<Record<string, unknown>>('qbo-wholesale-refresh', {
+        mode: 'dry_run',
+        monthsBack: 36,
+      });
+      if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
+      const driftRows = Number((data as Record<string, unknown>).drift_rows_and_cases ?? 0);
+      toast.success(`QBO dry-run refresh complete — ${driftRows} drift row/case action(s) created`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Rebuild failed');
+      toast.error(err instanceof Error ? err.message : 'QBO dry-run refresh failed');
     } finally {
-      setRebuilding(false);
-      setRebuildPhase('');
+      setRefreshingQboDryRun(false);
+      setQboDryRunPhase('');
     }
   };
 
@@ -625,9 +556,9 @@ export function QboSettingsCard() {
             </div>
           )}
           {processLabel && <p className="text-[10px] text-zinc-500">{processLabel}</p>}
-          {rebuildPhase && (
+          {qboDryRunPhase && (
             <div className="space-y-1">
-              <p className="text-[10px] text-amber-600 font-medium">{rebuildPhase}</p>
+              <p className="text-[10px] text-amber-600 font-medium">{qboDryRunPhase}</p>
               <div className="h-1.5 bg-amber-100 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-400 animate-pulse" style={{ width: '100%' }} />
               </div>
@@ -730,7 +661,7 @@ export function QboSettingsCard() {
           <div>
             <p className="text-[9px] uppercase tracking-wider text-zinc-400 mb-1.5">Admin</p>
             <div className="flex flex-wrap gap-1.5">
-              <DangerBtn onClick={rebuildFromQbo} busy={rebuilding}>Rebuild from QBO</DangerBtn>
+              <DangerBtn onClick={runQboDryRunRefresh} busy={refreshingQboDryRun}>Dry-run QBO refresh</DangerBtn>
               <DangerBtn onClick={disconnect} busy={disconnecting}>Disconnect</DangerBtn>
             </div>
           </div>

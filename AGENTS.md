@@ -15,7 +15,7 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 3. **Dual mastery** — QBO is the financial/accounting master. The app is the operational master (unit-level stock, content, media, pricing, listings, audit).
 4. **Master once, project many** — Content, media, SEO, and pricing are mastered centrally and projected to channels.
 5. **Audit first** — Every material event must be traceable.
-6. **Version-aware LEGO modelling** — MPN includes version suffix (e.g., `75367-1`). SKU = `MPN.grade` (e.g., `75367-1.3`). Condition grades 1–4 are saleable, 5 is non-saleable.
+6. **Version-aware LEGO modelling** — MPN includes version suffix (e.g., `75367-1`). SKU = `MPN.grade` (e.g., `75367-1.3`). Condition grades 1–5 are saleable; grade 5 is Red Card and requires clear disclosure.
 7. **Settings separate from operations** — Configuration and integrations live in Settings, not operational pages.
 
 ## Key Domain Terms
@@ -27,7 +27,7 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 | Stock unit | Individual physical item tracked at unit level |
 | Landed cost | Purchase cost + apportioned buying/delivery fees |
 | Carrying value | Landed cost − accumulated impairment |
-| Condition grade | 1 (best) to 4 (lowest saleable), 5 (non-saleable) |
+| Condition grade | 1 (best) to 5 (Red Card, lowest condition tier and saleable by operator choice) |
 
 ## Repository Structure
 

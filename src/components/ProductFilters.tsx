@@ -32,7 +32,7 @@ const CONDITIONS = [
   { value: '2', label: 'Grade 2 — Excellent' },
   { value: '3', label: 'Grade 3 — Good' },
   { value: '4', label: 'Grade 4 — Acceptable' },
-  { value: '5', label: 'Grade 5 — Fair' },
+  { value: '5', label: 'Grade 5 — Red Card' },
 ];
 
 export default function ProductFilters({

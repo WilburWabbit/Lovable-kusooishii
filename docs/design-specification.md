@@ -70,17 +70,12 @@ The version suffix is material and must be treated as part of the canonical iden
 1 = highest condition
 2 = high condition
 3 = acceptable condition
-4 = lowest saleable condition
-5 = non-saleable
+4 = lower condition
+5 = Red Card
 ```
 
-Grades `1` to `4` are saleable.  
-Grade `5` is non-saleable and routes to one of the following disposition paths:
-
-- write-off
-- scrap sale
-- part-out
-- internal hold for review
+Grades `1` to `5` are saleable when the operator chooses to list them.
+Grade `5` is **Red Card**: the lowest condition tier, requiring clear disclosure, photos, and pricing that reflects defects, incompleteness, box condition, or other compromises.
 
 ### 3.3 Rebrickable role
 
@@ -697,7 +692,7 @@ Key fields:
 
 #### `sku`
 
-Purpose: one record per saleable or non-saleable condition variant.
+Purpose: one record per condition variant.
 
 Key fields:
 
@@ -981,8 +976,9 @@ When a unit is better monetised through part-out:
 
 ### 13.10 Scrap and recovery
 
-For grade `5` stock, a disposition decision matrix should choose between:
+For heavily compromised stock, including some grade `5` Red Card stock, a disposition decision matrix should choose between:
 
+- sale with clear Red Card disclosure
 - write-off with zero recovery
 - scrap sale with recovery proceeds
 - part-out
@@ -1100,7 +1096,7 @@ Condition grade must directly affect:
 - media/copy requirements
 - refund risk reserve
 
-Grade `5` is non-saleable and excluded from standard listings.
+Grade `5` is Red Card and remains eligible for listing, pricing, market intelligence, and QBO item posting once grading is complete.
 
 ---
 

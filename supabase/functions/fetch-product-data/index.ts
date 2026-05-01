@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
 
     // ─── Cache market prices ───────────────────────────────
     // Determine the base market price (G1 equivalent)
-    const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4 };
+    const GRADE_RATIOS: Record<number, number> = { 1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.25 };
     let baseMarketPrice: number | null = null;
 
     // Prefer BrickEconomy current_value, fall back to BrickLink avg
@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
     }
 
     const marketPrices: Record<number, number | null> = {};
-    for (let grade = 1; grade <= 4; grade++) {
+    for (let grade = 1; grade <= 5; grade++) {
       marketPrices[grade] = baseMarketPrice
         ? Math.round(baseMarketPrice * GRADE_RATIOS[grade] * 100) / 100
         : null;

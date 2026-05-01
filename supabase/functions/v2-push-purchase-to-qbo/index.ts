@@ -1,10 +1,9 @@
 // ============================================================
 // v2-push-purchase-to-qbo
 // Pushes a locally-created purchase batch to QuickBooks as a
-// Cash Purchase. For each line item it ensures the placeholder
-// grade-5 SKU has a QBO Item (creating it as Inventory if not),
-// then builds and POSTs the Purchase. The returned QBO Id is
-// stored on purchase_batches.qbo_purchase_id.
+// Cash Purchase after grading. The QBO lines are built from the final
+// graded SKU assignments, so placeholder intake SKUs never reach QBO.
+// The returned QBO Id is stored on purchase_batches.qbo_purchase_id.
 // ============================================================
 
 import {
@@ -30,6 +29,9 @@ import {
 interface LineItemRow {
   id: string;
   mpn: string;
+  sku_id: string;
+  sku_code: string;
+  qbo_item_id: string | null;
   quantity: number;
   unit_cost: number;
   landed_cost_per_unit: number | null;
@@ -116,36 +118,93 @@ async function ensureQboVendor(
   return qboId;
 }
 
-/** Resolve / create QBO item for a line item's placeholder grade-5 SKU. */
+async function loadGradedPurchaseLines(
+  admin: ReturnType<typeof createAdminClient>,
+  batchId: string,
+): Promise<LineItemRow[]> {
+  const { data: units, error: unitErr } = await admin
+    .from("stock_unit")
+    .select("id, line_item_id, sku_id, condition_grade, v2_status")
+    .eq("batch_id", batchId);
+  if (unitErr) throw new Error(`Load stock units failed: ${unitErr.message}`);
+
+  const unitRows = (units ?? []) as Record<string, unknown>[];
+  if (unitRows.length === 0) throw new Error("Batch has no stock units");
+
+  const ungraded = unitRows.filter((unit) => !unit.sku_id || String(unit.v2_status ?? "purchased") === "purchased");
+  if (ungraded.length > 0) {
+    throw new Error(`Batch has ${ungraded.length} ungraded stock unit(s). Push to QBO only after grading is complete.`);
+  }
+
+  const lineIds = [...new Set(unitRows.map((unit) => unit.line_item_id).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  const skuIds = [...new Set(unitRows.map((unit) => unit.sku_id).filter((id): id is string => typeof id === "string" && id.length > 0))];
+
+  const { data: purchaseLines, error: lineErr } = await admin
+    .from("purchase_line_items" as never)
+    .select("id, mpn, unit_cost, landed_cost_per_unit")
+    .in("id" as never, lineIds);
+  if (lineErr) throw new Error(`Load purchase lines failed: ${lineErr.message}`);
+
+  const { data: skus, error: skuErr } = await admin
+    .from("sku")
+    .select("id, sku_code, qbo_item_id")
+    .in("id", skuIds);
+  if (skuErr) throw new Error(`Load SKUs failed: ${skuErr.message}`);
+
+  const lineById = new Map<string, Record<string, unknown>>();
+  for (const line of (purchaseLines ?? []) as Record<string, unknown>[]) lineById.set(line.id as string, line);
+
+  const skuById = new Map<string, Record<string, unknown>>();
+  for (const sku of (skus ?? []) as Record<string, unknown>[]) skuById.set(sku.id as string, sku);
+
+  const grouped = new Map<string, LineItemRow>();
+  for (const unit of unitRows) {
+    const lineId = unit.line_item_id as string;
+    const skuId = unit.sku_id as string;
+    const line = lineById.get(lineId);
+    const sku = skuById.get(skuId);
+    if (!line || !sku) throw new Error("Batch has graded units that no longer match their purchase line or SKU");
+    const key = `${lineId}:${skuId}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.quantity += 1;
+      continue;
+    }
+    grouped.set(key, {
+      id: key,
+      mpn: line.mpn as string,
+      sku_id: skuId,
+      sku_code: sku.sku_code as string,
+      qbo_item_id: (sku.qbo_item_id as string | null) ?? null,
+      quantity: 1,
+      unit_cost: Number(line.unit_cost ?? 0),
+      landed_cost_per_unit: line.landed_cost_per_unit == null ? null : Number(line.landed_cost_per_unit),
+    });
+  }
+
+  return [...grouped.values()].sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+}
+
+/** Resolve / create QBO item for a final graded SKU. */
 async function ensureQboItemForLine(
   admin: ReturnType<typeof createAdminClient>,
   authHeader: string,
   line: LineItemRow,
   supplierVatRegistered: boolean,
 ): Promise<string> {
-  const skuCode = `${line.mpn}.5`;
-  const { data: sku } = await admin
-    .from("sku")
-    .select("id, qbo_item_id")
-    .eq("sku_code", skuCode)
-    .maybeSingle();
-
-  const existing = (sku as Record<string, unknown> | null)?.qbo_item_id as string | null;
-  if (existing) return existing;
-  const skuId = (sku as Record<string, unknown> | null)?.id as string | null;
-  if (!skuId) throw new Error(`SKU not found: ${skuCode}`);
+  if (line.qbo_item_id) return line.qbo_item_id;
 
   // Queue the QBO item upsert through the posting outbox, then process it
   // synchronously because the Purchase payload needs the ItemRef immediately.
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const purchaseCost = line.landed_cost_per_unit ?? line.unit_cost;
   const { data: intentId, error: intentErr } = await admin.rpc("queue_qbo_item_posting_intent" as never, {
-    p_sku_id: skuId,
+    p_sku_id: line.sku_id,
     p_purchase_cost: purchaseCost,
     p_supplier_vat_registered: supplierVatRegistered,
   } as never);
   if (intentErr) {
-    throw new Error(`QBO item intent failed for ${skuCode}: ${intentErr.message}`);
+    throw new Error(`QBO item intent failed for ${line.sku_code}: ${intentErr.message}`);
   }
 
   const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/accounting-posting-intents-process`, {
@@ -159,13 +218,13 @@ async function ensureQboItemForLine(
   });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`QBO item posting processor failed for ${skuCode} [${res.status}]: ${txt.substring(0, 300)}`);
+    throw new Error(`QBO item posting processor failed for ${line.sku_code} [${res.status}]: ${txt.substring(0, 300)}`);
   }
   const payload = await res.json();
   const results = Array.isArray(payload?.results) ? payload.results as Record<string, unknown>[] : [];
   const itemResult = results.find((row) => row.intent_id === intentId) ?? results[0];
   if (!payload.success || !itemResult || itemResult.status !== "posted") {
-    throw new Error(`QBO item posting refused ${skuCode}: ${itemResult?.error ?? payload.error ?? "unknown"}`);
+    throw new Error(`QBO item posting refused ${line.sku_code}: ${itemResult?.error ?? payload.error ?? "unknown"}`);
   }
 
   const qboItemId = itemResult.qbo_item_id ? String(itemResult.qbo_item_id) : null;
@@ -174,10 +233,10 @@ async function ensureQboItemForLine(
   const { data: refreshedSku } = await admin
     .from("sku")
     .select("qbo_item_id")
-    .eq("id", skuId)
+    .eq("id", line.sku_id)
     .maybeSingle();
   const refreshedId = (refreshedSku as Record<string, unknown> | null)?.qbo_item_id as string | null;
-  if (!refreshedId) throw new Error(`QBO item posting completed for ${skuCode} but no qbo_item_id was returned`);
+  if (!refreshedId) throw new Error(`QBO item posting completed for ${line.sku_code} but no qbo_item_id was returned`);
   return refreshedId;
 }
 
@@ -225,12 +284,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Batch has no supplier_id" }, 400);
     }
 
-    const { data: lineRows, error: lineErr } = await admin
-      .from("purchase_line_items" as never)
-      .select("id, mpn, quantity, unit_cost, landed_cost_per_unit")
-      .eq("batch_id", batchId);
-    if (lineErr) throw new Error(`Load line items failed: ${lineErr.message}`);
-    const lines = (lineRows ?? []) as LineItemRow[];
+    const lines = await loadGradedPurchaseLines(admin, batchId);
     if (lines.length === 0) {
       await setStatus(admin, batchId, "error", { qbo_sync_error: "Batch has no line items" });
       return jsonResponse({ error: "Batch has no line items" }, 400);
@@ -394,7 +448,7 @@ Deno.serve(async (req) => {
         return {
           DetailType: "ItemBasedExpenseLineDetail",
           Amount: lineNet,
-          Description: src.mpn,
+          Description: src.sku_code,
           ItemBasedExpenseLineDetail: {
             ItemRef: { value: itemRefs.get(src.id)! },
             Qty: qty,
@@ -473,6 +527,7 @@ Deno.serve(async (req) => {
     await audit(admin, actorId, "purchase_batch_qbo_pushed", { batch_id: batchId }, {
       batch_id: batchId,
       qbo_purchase_id: qboId,
+      qbo_doc_number: docNumber,
       vendor_ref: vendorRef,
       line_count: lines.length,
     });

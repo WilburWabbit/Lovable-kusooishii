@@ -41,6 +41,7 @@ const GRADE_DESCRIPTIONS: Record<number, string> = {
   2: "Opened but complete",
   3: "Built/used, still complete",
   4: "Incomplete, all issues disclosed",
+  5: "Heavy issues, saleable if disclosed",
 };
 
 export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], product, rawProductData }: GradeSlideOutProps) {
@@ -191,7 +192,7 @@ export function GradeSlideOut({ unit, bulkUnits, open, onClose, variants = [], p
             <div>
               <SectionHead>Assign Grade</SectionHead>
               <div className="grid grid-cols-2 gap-2">
-                {([1, 2, 3, 4] as ConditionGrade[]).map((g) => {
+                {([1, 2, 3, 4, 5] as ConditionGrade[]).map((g) => {
                   const color = GRADE_COLORS[g];
                   const selected = selectedGrade === g;
                   return (

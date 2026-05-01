@@ -62,9 +62,12 @@ function getCustomerId(intent: PostingIntent): string | null {
 }
 
 function getPurchaseBatchId(intent: PostingIntent): string | null {
-  if (intent.entity_type === "purchase_batch" && intent.entity_id) return intent.entity_id;
   const fromPayload = intent.payload?.batch_id ?? intent.payload?.purchase_batch_id;
   return typeof fromPayload === "string" && fromPayload.length > 0 ? fromPayload : null;
+}
+
+function isUuid(value: string | null): value is string {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function getRefundedLineIds(intent: PostingIntent): string[] {
@@ -382,6 +385,8 @@ Deno.serve(async (req) => {
             docNumber = ((batch as Record<string, unknown> | null)?.reference as string | null) ?? entityId;
           }
 
+          const localEntityUuid = isUuid(localEntityId) ? localEntityId : null;
+
           if (intent.entity_type === "customer") {
             const { data: customerByQboId } = await admin
               .from("customer")
@@ -400,16 +405,17 @@ Deno.serve(async (req) => {
             .from("qbo_posting_reference")
             .upsert({
               local_entity_type: intent.entity_type,
-              local_entity_id: localEntityId,
+              local_entity_id: localEntityUuid,
               qbo_entity_type: actionConfig.qboEntityType,
               qbo_entity_id: qboEntityId,
-              qbo_doc_number: docNumber,
+              qbo_doc_number: (responsePayload.qbo_doc_number as string | undefined) ?? docNumber,
               source_column: actionConfig.sourceColumn,
               posting_intent_id: intent.id,
               synced_at: new Date().toISOString(),
               metadata: {
                 processor: "accounting-posting-intents-process",
                 idempotency_key: intent.idempotency_key,
+                local_entity_reference: localEntityUuid ? null : localEntityId,
                 action: intent.action,
                 refunded_line_ids: getRefundedLineIds(intent),
               },

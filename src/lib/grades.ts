@@ -33,8 +33,8 @@ export const GRADE_DETAILS: Record<string, { label: string; shortDesc: string; l
   },
   "5": {
     label: "Red Card",
-    shortDesc: "Parts only. Rarely listed. Internal use.",
-    longDesc: "A box of parts — sometimes not even the box. These sets have been stripped, donated to, or arrived incomplete beyond redemption. We don't usually sell them as sets, but individual parts, minifigs, or bulk pieces may appear on the site, graded separately. If you see a Grade 5 listing, it's because something in there is worth rescuing.",
+    shortDesc: "Lowest grade. Heavy issues, fully disclosed.",
+    longDesc: "The rough end of the condition scale. A Red Card item may be incomplete, heavily worn, boxless, part-built, or otherwise significantly compromised, but it can still be saleable when the listing is clear about what is included and what is wrong. No glossing over it: photos, notes, and pricing must do the honest work.",
     icon: "/grade-5-red.png",
   },
 };
@@ -45,6 +45,7 @@ export const GRADE_OPTIONS = [
   { value: "2", label: "2 — Silver Lining" },
   { value: "3", label: "3 — Bronze Age" },
   { value: "4", label: "4 — Black Sheep" },
+  { value: "5", label: "5 — Red Card" },
 ] as const;
 
 export const GRADE_LABELS_NUMERIC: Record<number, string> = {

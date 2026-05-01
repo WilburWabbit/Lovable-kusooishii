@@ -142,6 +142,20 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     render: (r) => <Mono color="dim">{r.externalPayoutId ?? "—"}</Mono>,
   },
   {
+    key: "qboDepositId",
+    label: "QBO Deposit",
+    defaultVisible: false,
+    sortable: false,
+    render: (r) => <Mono color="dim">{r.qboDepositId ?? "—"}</Mono>,
+  },
+  {
+    key: "qboExpenseId",
+    label: "QBO Expense",
+    defaultVisible: false,
+    sortable: false,
+    render: (r) => <Mono color="dim">{r.qboExpenseId ?? "—"}</Mono>,
+  },
+  {
     key: "createdAt",
     label: "Created",
     defaultVisible: false,
@@ -163,8 +177,8 @@ function csvEscape(value: unknown): string {
   return s;
 }
 
-function downloadCsv(rows: PayoutRow[], visibleColumns: string[]) {
-  const cols = visibleColumns.map((k) => COLUMN_MAP.get(k)).filter(Boolean) as ColumnDef<PayoutRow>[];
+function downloadCsv(rows: PayoutRow[]) {
+  const cols = COLUMNS;
   const headers = cols.map((c) => csvEscape(c.label));
 
   const csvRows = rows.map((row) =>
@@ -210,7 +224,9 @@ export function PayoutView() {
       result = result.filter(
         (r) =>
           r.channel.toLowerCase().includes(term) ||
-          (r.externalPayoutId ?? "").toLowerCase().includes(term),
+          (r.externalPayoutId ?? "").toLowerCase().includes(term) ||
+          (r.qboDepositId ?? "").toLowerCase().includes(term) ||
+          (r.qboExpenseId ?? "").toLowerCase().includes(term),
       );
     }
 
@@ -327,7 +343,7 @@ export function PayoutView() {
             onMoveColumn={moveColumn}
           />
           <button
-            onClick={() => downloadCsv(processedRows, prefs.visibleColumns)}
+            onClick={() => downloadCsv(processedRows)}
             className="h-9 px-3 gap-1.5 inline-flex items-center text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />

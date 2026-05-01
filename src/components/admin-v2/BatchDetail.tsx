@@ -54,7 +54,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
     );
   }, [batch]);
 
-  const ungradedCount = allUnits.filter((u) => u.grade === null).length;
+  const ungradedCount = allUnits.filter((u) => u.grade === null || String(u.status) === "purchased").length;
   const totalUnits = allUnits.length;
   const totalCost = batch
     ? batch.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0) + batch.totalSharedCosts
@@ -78,6 +78,16 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
   };
 
   const handlePushQbo = async () => {
+    if (ungradedCount > 0) {
+      toast({
+        title: "Grade before QBO",
+        description: `${ungradedCount} unit(s) still need final grading. Purchases are only sent to QBO after grading is complete.`,
+        variant: "destructive",
+        duration: 9000,
+      });
+      return;
+    }
+
     try {
       const result = await pushQbo.mutateAsync(batchId);
       toast({
@@ -235,8 +245,8 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
           {(batch.qboSyncStatus === "pending" || batch.qboSyncStatus === "error") && (
             <button
               onClick={handlePushQbo}
-              disabled={pushQbo.isPending}
-              title="Push this batch to QuickBooks as a Cash Purchase"
+              disabled={pushQbo.isPending || ungradedCount > 0}
+              title={ungradedCount > 0 ? "Grade every unit before pushing this purchase to QuickBooks" : "Push this batch to QuickBooks as a Cash Purchase"}
               className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-[13px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw size={14} className={pushQbo.isPending ? "animate-spin" : ""} />

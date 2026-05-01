@@ -58,6 +58,7 @@ export const GRADE_COLORS: Record<ConditionGrade, string> = {
   2: '#C0C0C0', // Silver
   3: '#CD7F32', // Bronze
   4: '#71717A', // Dim
+  5: '#DC2626', // Red
 };
 
 // ─── Condition Flags ────────────────────────────────────────
