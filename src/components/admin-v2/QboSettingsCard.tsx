@@ -1,11 +1,12 @@
 // ============================================================
 // Admin V2 — QBO Settings Card
-// Multi-phase rebuild pipeline: clear → snapshot → wipe → process → replay
+// Land QBO data, process staging, review drift, and queue posting work.
 // ============================================================
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
@@ -25,6 +26,70 @@ function generateMonthList(): string[] {
 }
 
 type QboStatus = { connected: boolean; realm_id?: string; last_updated?: string };
+
+type QboRefreshDriftRow = {
+  id: string;
+  qboRefreshRunId: string;
+  driftType: string;
+  severity: string;
+  status: string;
+  qboEntityType: string;
+  qboEntityId: string | null;
+  qboDocNumber: string | null;
+  localEntityType: string | null;
+  localEntityId: string | null;
+  localReference: string | null;
+  appReference: string | null;
+  targetRoute: string | null;
+  recommendedAction: string | null;
+  createdAt: string;
+  refreshStatus: string | null;
+  refreshStartedAt: string | null;
+  refreshCompletedAt: string | null;
+};
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function mapQboRefreshDriftRow(row: Record<string, unknown>): QboRefreshDriftRow {
+  return {
+    id: String(row.id),
+    qboRefreshRunId: String(row.qbo_refresh_run_id),
+    driftType: String(row.drift_type ?? 'unknown'),
+    severity: String(row.severity ?? 'medium'),
+    status: String(row.status ?? 'open'),
+    qboEntityType: String(row.qbo_entity_type ?? 'qbo_entity'),
+    qboEntityId: optionalString(row.qbo_entity_id),
+    qboDocNumber: optionalString(row.qbo_doc_number),
+    localEntityType: optionalString(row.local_entity_type),
+    localEntityId: optionalString(row.local_entity_id),
+    localReference: optionalString(row.local_reference),
+    appReference: optionalString(row.app_reference),
+    targetRoute: optionalString(row.target_route),
+    recommendedAction: optionalString(row.recommended_action),
+    createdAt: String(row.created_at ?? ''),
+    refreshStatus: optionalString(row.refresh_status),
+    refreshStartedAt: optionalString(row.refresh_started_at),
+    refreshCompletedAt: optionalString(row.refresh_completed_at),
+  };
+}
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function QboSettingsCard() {
   const [status, setStatus] = useState<QboStatus | null>(null);
@@ -46,6 +111,10 @@ export function QboSettingsCard() {
   const [reconcilingEntity, setReconcilingEntity] = useState<string | null>(null);
   const [refreshingQboDryRun, setRefreshingQboDryRun] = useState(false);
   const [qboDryRunPhase, setQboDryRunPhase] = useState('');
+  const [qboRefreshDriftRows, setQboRefreshDriftRows] = useState<QboRefreshDriftRow[]>([]);
+  const [qboRefreshLoading, setQboRefreshLoading] = useState(false);
+  const [qboRefreshApplying, setQboRefreshApplying] = useState(false);
+  const [qboRefreshActionId, setQboRefreshActionId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [cleaningGhosts, setCleaningGhosts] = useState(false);
   const [recalcingCost, setRecalcingCost] = useState(false);
@@ -60,10 +129,10 @@ export function QboSettingsCard() {
   const cancelPurchases = useRef(false);
   const cancelSales = useRef(false);
 
-  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || refreshingQboDryRun || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
+  const anyBusy = syncing || syncingSales || syncingCustomers || syncingItems || syncingVendors || processing || reconciling || reconcilingEntity !== null || refreshingQboDryRun || qboRefreshLoading || qboRefreshApplying || qboRefreshActionId !== null || cleaningGhosts || recalcingCost || retryingPush || syncingDeposits || accountsLoading || accountsSaving;
 
   // ── Fetch status on mount ──
-  useState(() => {
+  useEffect(() => {
     (async () => {
       try {
         const data = await invokeWithAuth<QboStatus>('qbo-auth', { action: 'status' });
@@ -74,7 +143,31 @@ export function QboSettingsCard() {
         setLoading(false);
       }
     })();
-  });
+  }, []);
+
+  const loadQboRefreshDrift = async () => {
+    setQboRefreshLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('v_qbo_refresh_drift' as never)
+        .select('*')
+        .in('status' as never, ['open', 'approved', 'applied', 'ignored'])
+        .order('created_at' as never, { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      setQboRefreshDriftRows(((data ?? []) as unknown as Record<string, unknown>[]).map(mapQboRefreshDriftRow));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load QBO refresh drift');
+    } finally {
+      setQboRefreshLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!status?.connected) return;
+    void loadQboRefreshDrift();
+  }, [status?.connected]);
 
   // ── Helpers ──
 
@@ -369,11 +462,72 @@ export function QboSettingsCard() {
       if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
       const driftRows = Number((data as Record<string, unknown>).drift_rows_and_cases ?? 0);
       toast.success(`QBO dry-run refresh complete — ${driftRows} drift row/case action(s) created`);
+      await loadQboRefreshDrift();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'QBO dry-run refresh failed');
     } finally {
       setRefreshingQboDryRun(false);
       setQboDryRunPhase('');
+    }
+  };
+
+  const approveQboRefreshDrift = async (driftId: string) => {
+    setQboRefreshActionId(driftId);
+    try {
+      const { error } = await supabase.rpc('approve_qbo_refresh_drift' as never, {
+        p_drift_id: driftId,
+      } as never);
+      if (error) throw error;
+      toast.success('QBO drift approved for apply');
+      await loadQboRefreshDrift();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'QBO drift approval failed');
+    } finally {
+      setQboRefreshActionId(null);
+    }
+  };
+
+  const ignoreQboRefreshDrift = async (driftId: string) => {
+    setQboRefreshActionId(driftId);
+    try {
+      const { error } = await supabase
+        .from('qbo_refresh_drift' as never)
+        .update({ status: 'ignored' } as never)
+        .eq('id' as never, driftId);
+      if (error) throw error;
+      toast.success('QBO drift ignored');
+      await loadQboRefreshDrift();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to ignore QBO drift');
+    } finally {
+      setQboRefreshActionId(null);
+    }
+  };
+
+  const applyApprovedQboRefreshDrift = async () => {
+    const approvedCount = qboRefreshDriftRows.filter((row) => row.status === 'approved').length;
+    if (approvedCount === 0) {
+      toast.info('No approved QBO drift rows to apply');
+      return;
+    }
+    if (!confirm(
+      `Apply ${approvedCount} approved QBO drift update(s)?\n\n` +
+      'This only updates approved QBO references and DocNumbers. It does not rewrite website listings, eBay listings, prices, listing IDs, or outbound commands.'
+    )) return;
+
+    setQboRefreshApplying(true);
+    try {
+      const { data, error } = await supabase.rpc('apply_approved_qbo_refresh_drift' as never, {
+        p_run_id: null,
+      } as never);
+      if (error) throw error;
+      const result = data as unknown as Record<string, unknown> | null;
+      toast.success(`Applied ${Number(result?.applied ?? approvedCount)} approved QBO drift update(s)`);
+      await loadQboRefreshDrift();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to apply approved QBO drift');
+    } finally {
+      setQboRefreshApplying(false);
     }
   };
 
@@ -512,6 +666,12 @@ export function QboSettingsCard() {
       </SurfaceCard>
     );
   }
+
+  const qboRefreshCounts = qboRefreshDriftRows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.status] = (acc[row.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const approvedQboRefreshCount = qboRefreshCounts.approved ?? 0;
 
   return (
     <SurfaceCard>
@@ -664,6 +824,119 @@ export function QboSettingsCard() {
               <DangerBtn onClick={runQboDryRunRefresh} busy={refreshingQboDryRun}>Dry-run QBO refresh</DangerBtn>
               <DangerBtn onClick={disconnect} busy={disconnecting}>Disconnect</DangerBtn>
             </div>
+          </div>
+
+          {/* QBO Refresh Drift Review */}
+          <div className="rounded-md border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-[9px] uppercase tracking-wider text-zinc-400">QBO Refresh Drift Review</p>
+                <p className="text-[10px] text-zinc-500 mt-0.5">
+                  Review dry-run differences before applying reference and DocNumber repairs.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Btn onClick={loadQboRefreshDrift} busy={qboRefreshLoading}>Reload drift</Btn>
+                <Btn
+                  onClick={applyApprovedQboRefreshDrift}
+                  disabled={approvedQboRefreshCount === 0}
+                  busy={qboRefreshApplying}
+                >
+                  Apply approved ({approvedQboRefreshCount})
+                </Btn>
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+              <span>Open: <Mono className="text-[10px]">{String(qboRefreshCounts.open ?? 0)}</Mono></span>
+              <span>Approved: <Mono className="text-[10px]">{String(approvedQboRefreshCount)}</Mono></span>
+              <span>Applied: <Mono className="text-[10px]">{String(qboRefreshCounts.applied ?? 0)}</Mono></span>
+              <span>Ignored: <Mono className="text-[10px]">{String(qboRefreshCounts.ignored ?? 0)}</Mono></span>
+            </div>
+
+            {qboRefreshLoading ? (
+              <p className="mt-3 text-[10px] text-zinc-500">Loading QBO drift...</p>
+            ) : qboRefreshDriftRows.length === 0 ? (
+              <p className="mt-3 text-[10px] text-zinc-400 italic">
+                No QBO drift has been found yet. Run a dry-run refresh to compare landed QBO records with app references.
+              </p>
+            ) : (
+              <div className="mt-3 max-h-72 overflow-auto rounded border border-zinc-200 bg-white">
+                <table className="w-full text-[10px]">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b border-zinc-200">
+                      <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">Status</th>
+                      <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">Drift</th>
+                      <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">App Record</th>
+                      <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">QBO Reference</th>
+                      <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">Recommended Fix</th>
+                      <th className="text-right py-1.5 px-2 text-zinc-500 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {qboRefreshDriftRows.map((row) => {
+                      const statusColor =
+                        row.status === 'approved' ? '#3B82F6' :
+                        row.status === 'applied' ? '#22C55E' :
+                        row.status === 'ignored' ? '#71717A' :
+                        row.severity === 'critical' || row.severity === 'high' ? '#EF4444' :
+                        '#F59E0B';
+                      return (
+                        <tr key={row.id} className="border-b border-zinc-100 last:border-b-0">
+                          <td className="py-1.5 px-2 align-top">
+                            <Badge label={formatLabel(row.status)} color={statusColor} small />
+                            <div className="mt-1 text-[9px] text-zinc-400">{formatDateTime(row.createdAt)}</div>
+                          </td>
+                          <td className="py-1.5 px-2 align-top">
+                            <div className="font-medium text-zinc-700">{formatLabel(row.driftType)}</div>
+                            <div className="text-[9px] text-zinc-400">{formatLabel(row.severity)}</div>
+                          </td>
+                          <td className="py-1.5 px-2 align-top">
+                            <div className="text-zinc-700">{row.localEntityType ? formatLabel(row.localEntityType) : 'App record'}</div>
+                            <Mono className="text-[10px]">{row.appReference ?? row.localReference ?? row.localEntityId ?? '—'}</Mono>
+                          </td>
+                          <td className="py-1.5 px-2 align-top">
+                            <div className="text-zinc-700">{formatLabel(row.qboEntityType)}</div>
+                            <Mono className="text-[10px]">{row.qboDocNumber ?? row.qboEntityId ?? '—'}</Mono>
+                          </td>
+                          <td className="py-1.5 px-2 align-top text-zinc-600 max-w-[240px]">
+                            {row.recommendedAction ?? 'Review the QBO value and approve only if it matches the app record.'}
+                          </td>
+                          <td className="py-1.5 px-2 align-top">
+                            <div className="flex justify-end gap-1">
+                              {row.targetRoute && (
+                                <a
+                                  href={row.targetRoute}
+                                  className="rounded border border-zinc-300 px-2 py-1 text-[10px] text-zinc-700 hover:bg-zinc-50"
+                                >
+                                  Open
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => approveQboRefreshDrift(row.id)}
+                                disabled={anyBusy || row.status !== 'open'}
+                                className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+                              >
+                                {qboRefreshActionId === row.id ? 'Working...' : 'Approve'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => ignoreQboRefreshDrift(row.id)}
+                                disabled={anyBusy || row.status !== 'open'}
+                                className="rounded border border-zinc-300 px-2 py-1 text-[10px] text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+                              >
+                                Ignore
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Reconciliation details */}

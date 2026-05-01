@@ -188,7 +188,7 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-[22px] font-bold text-zinc-900">
-              {batch.reference || batch.id}
+              {batch.id}
             </h1>
             {ungradedCount > 0 ? (
               <Badge label={`${ungradedCount} ungraded`} color="#F59E0B" />
@@ -208,12 +208,12 @@ export function BatchDetail({ batchId }: BatchDetailProps) {
               <Badge label="QBO: skipped" color="#71717A" />
             )}
           </div>
-          <div className="flex gap-4 text-zinc-500 text-[13px]">
-            {batch.reference && (
-              <span className="font-mono text-zinc-400">{batch.id}</span>
-            )}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-zinc-500 text-[13px]">
             <span>{batch.supplierName}</span>
             <span>{formattedDate}</span>
+            <span className="font-mono text-[11px] text-zinc-400">App: {batch.id}</span>
+            <span className="font-mono text-[11px] text-zinc-400">Supplier Ref: {batch.reference ?? "—"}</span>
+            <span className="font-mono text-[11px] text-zinc-400">QBO ID: {batch.qboPurchaseId ?? "—"}</span>
             <span>
               Total: <Mono color="teal">£{totalCost.toFixed(2)}</Mono>
             </span>

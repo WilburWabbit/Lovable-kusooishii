@@ -158,8 +158,12 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
             <h1 className="text-[22px] font-bold text-zinc-900">{product.name}</h1>
             <Mono color="amber" className="text-sm">{product.mpn}</Mono>
           </div>
-          <div className="text-zinc-500 text-[13px]">
-            Theme: {product.theme ?? "\u2014"}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-zinc-500 text-[13px]">
+            <span>Theme: {product.theme ?? "\u2014"}</span>
+            <span>Brand: {product.brand ?? "\u2014"}</span>
+            <span className="font-mono text-[11px] text-zinc-400">App: {product.id}</span>
+            <span className="font-mono text-[11px] text-zinc-400">MPN: {product.mpn}</span>
+            <span className="font-mono text-[11px] text-zinc-400">eBay Category: {product.ebayCategoryId ?? "\u2014"}</span>
           </div>
         </div>
       </div>

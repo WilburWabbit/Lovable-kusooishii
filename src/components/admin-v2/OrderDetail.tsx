@@ -154,7 +154,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         <div>
           <div className="flex items-center gap-3 mb-1 flex-wrap">
             <h1 className="text-[22px] font-bold text-foreground">
-              {order.externalOrderId || order.docNumber || order.orderNumber}
+              {order.orderNumber}
             </h1>
             <OrderStatusBadge status={order.status} />
             <Badge label={qboLabel} color={qboColor} small />
@@ -164,10 +164,11 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
             <span className="capitalize">{order.channel}</span>
             <span>{formattedDate}</span>
             {order.carrier && <span>{order.carrier} {order.trackingNumber ?? ""}</span>}
-            <span className="text-muted-foreground/50 font-mono text-[11px]">{order.orderNumber}</span>
-            {order.externalOrderId && order.docNumber && order.externalOrderId !== order.docNumber && (
-              <span className="text-muted-foreground/50 font-mono text-[11px]">QBO: {order.docNumber}</span>
-            )}
+            <span className="font-mono text-[11px] text-muted-foreground/70">App: {order.orderNumber}</span>
+            <span className="font-mono text-[11px] text-muted-foreground/70">QBO Doc: {order.docNumber ?? "—"}</span>
+            <span className="font-mono text-[11px] text-muted-foreground/70">QBO ID: {order.qboSalesReceiptId ?? "—"}</span>
+            <span className="font-mono text-[11px] text-muted-foreground/70">Channel Ref: {order.externalOrderId ?? "—"}</span>
+            <span className="font-mono text-[11px] text-muted-foreground/70">Payment Ref: {order.paymentReference ?? "—"}</span>
           </div>
           {order.channel === "in_person" && order.notes && (() => {
             const noteMatch = order.notes?.match(/description=([^.]*?)(?:\s+\w+=|\.\s|$)/);

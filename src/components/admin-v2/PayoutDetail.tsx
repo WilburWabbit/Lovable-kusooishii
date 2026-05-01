@@ -127,36 +127,44 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
       </button>
 
       <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <h1 className="text-[22px] font-bold text-zinc-900">Payout Detail</h1>
-          <Badge
-            label={payout.reconciliationStatus === "reconciled" ? "Reconciled" : "Pending"}
-            color={payout.reconciliationStatus === "reconciled" ? "#22C55E" : "#F59E0B"}
-            small
-          />
-          {payout.qboSyncStatus && (
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-[22px] font-bold text-zinc-900">Payout {payout.id.slice(0, 8)}</h1>
             <Badge
-              label={
-                payout.qboSyncStatus === "synced"
-                  ? "QBO Synced"
-                  : payout.qboSyncStatus === "error"
-                    ? "QBO Error"
-                    : payout.qboSyncStatus === "partial"
-                      ? "QBO Partial"
-                      : "QBO Pending"
-              }
-              color={
-                payout.qboSyncStatus === "synced"
-                  ? "#22C55E"
-                  : payout.qboSyncStatus === "error"
-                    ? "#EF4444"
-                    : payout.qboSyncStatus === "partial"
-                      ? "#F97316"
-                      : "#F59E0B"
-              }
+              label={payout.reconciliationStatus === "reconciled" ? "Reconciled" : "Pending"}
+              color={payout.reconciliationStatus === "reconciled" ? "#22C55E" : "#F59E0B"}
               small
             />
-          )}
+            {payout.qboSyncStatus && (
+              <Badge
+                label={
+                  payout.qboSyncStatus === "synced"
+                    ? "QBO Synced"
+                    : payout.qboSyncStatus === "error"
+                      ? "QBO Error"
+                      : payout.qboSyncStatus === "partial"
+                        ? "QBO Partial"
+                        : "QBO Pending"
+                }
+                color={
+                  payout.qboSyncStatus === "synced"
+                    ? "#22C55E"
+                    : payout.qboSyncStatus === "error"
+                      ? "#EF4444"
+                      : payout.qboSyncStatus === "partial"
+                        ? "#F97316"
+                        : "#F59E0B"
+                }
+                small
+              />
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+            <span className="font-mono">App: {payout.id}</span>
+            <span className="font-mono">External: {payout.externalPayoutId ?? "—"}</span>
+            <span className="font-mono">QBO Deposit: {payout.qboDepositId ?? "—"}</span>
+            <span className="font-mono">QBO Expense: {payout.qboExpenseId ?? "—"}</span>
+          </div>
         </div>
       </div>
 
@@ -265,12 +273,22 @@ export function PayoutDetail({ payoutId }: { payoutId: string }) {
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Units</div>
                 <div className="text-zinc-900 text-sm">{txLoading ? "—" : saleCount}</div>
               </div>
-              {payout.externalPayoutId && (
-                <div className="col-span-2 sm:col-span-4">
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External ID</div>
-                  <Mono color="dim" className="text-xs">{payout.externalPayoutId}</Mono>
-                </div>
-              )}
+              <div className="col-span-2">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">App Payout ID</div>
+                <Mono color="dim" className="text-xs">{payout.id}</Mono>
+              </div>
+              <div className="col-span-2">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">External Payout ID</div>
+                <Mono color="dim" className="text-xs">{payout.externalPayoutId ?? "—"}</Mono>
+              </div>
+              <div className="col-span-2">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">QBO Deposit ID</div>
+                <Mono color="dim" className="text-xs">{payout.qboDepositId ?? "—"}</Mono>
+              </div>
+              <div className="col-span-2">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">QBO Expense ID</div>
+                <Mono color="dim" className="text-xs">{payout.qboExpenseId ?? "—"}</Mono>
+              </div>
 
               {/* eBay computed total vs DB net amount */}
               {hasTransactions && (
