@@ -48,6 +48,19 @@ type QboRefreshDriftRow = {
   refreshCompletedAt: string | null;
 };
 
+type QboRefreshRunResponse = {
+  success?: boolean;
+  run_id?: string;
+  status?: string;
+  total_steps?: number;
+  completed_steps?: number;
+  progress_pct?: number;
+  next_step_label?: string | null;
+  last_step_label?: string | null;
+  drift_rows_and_cases?: number;
+  error?: string | null;
+};
+
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -111,6 +124,8 @@ export function QboSettingsCard() {
   const [reconcilingEntity, setReconcilingEntity] = useState<string | null>(null);
   const [refreshingQboDryRun, setRefreshingQboDryRun] = useState(false);
   const [qboDryRunPhase, setQboDryRunPhase] = useState('');
+  const [qboDryRunPct, setQboDryRunPct] = useState(0);
+  const [qboDryRunRunId, setQboDryRunRunId] = useState<string | null>(null);
   const [qboRefreshDriftRows, setQboRefreshDriftRows] = useState<QboRefreshDriftRow[]>([]);
   const [qboRefreshLoading, setQboRefreshLoading] = useState(false);
   const [qboRefreshApplying, setQboRefreshApplying] = useState(false);
@@ -445,22 +460,58 @@ export function QboSettingsCard() {
 
   const runQboDryRunRefresh = async () => {
     if (!confirm(
-      'QBO DRY-RUN REFRESH: This will:\n' +
-      '1. Land a fresh QBO snapshot into staging tables\n' +
+      'QBO DRY-RUN REFRESH: This will run as a resumable chunked job:\n' +
+      '1. Land a fresh QBO snapshot into staging tables, one bounded step at a time\n' +
       '2. Compare QBO references and DocNumbers against app records\n' +
       '3. Create drift cases for review\n\n' +
       'It will not delete or rewrite canonical app data, website listings, eBay listings, prices, listing IDs, or outbound commands. Continue?'
     )) return;
 
     setRefreshingQboDryRun(true);
+    setQboDryRunPct(0);
+    setQboDryRunRunId(null);
     try {
-      setQboDryRunPhase('Landing QBO snapshot and creating drift cases...');
-      const data = await invokeWithAuth<Record<string, unknown>>('qbo-wholesale-refresh', {
+      setQboDryRunPhase('Creating resumable QBO dry-run...');
+      let data = await invokeWithAuth<QboRefreshRunResponse>('qbo-wholesale-refresh', {
+        action: 'start',
         mode: 'dry_run',
         monthsBack: 36,
       });
-      if ((data as Record<string, unknown>)?.error) throw new Error(String((data as Record<string, unknown>).error));
-      const driftRows = Number((data as Record<string, unknown>).drift_rows_and_cases ?? 0);
+
+      const runId = data.run_id;
+      if (!runId) throw new Error('QBO dry-run refresh did not return a run ID');
+      setQboDryRunRunId(runId);
+
+      const maxSteps = Math.max(Number(data.total_steps ?? 0) + 5, 10);
+      for (let i = 0; i < maxSteps; i += 1) {
+        if (data.status === 'completed') break;
+        if (data.status === 'failed' || data.success === false) {
+          throw new Error(data.error ?? 'QBO dry-run refresh failed');
+        }
+
+        const totalSteps = Number(data.total_steps ?? 0);
+        const completedSteps = Number(data.completed_steps ?? 0);
+        const nextLabel = data.next_step_label ?? `Step ${completedSteps + 1}`;
+        setQboDryRunPhase(
+          totalSteps > 0
+            ? `Step ${completedSteps + 1}/${totalSteps}: ${nextLabel}`
+            : nextLabel,
+        );
+        setQboDryRunPct(Number(data.progress_pct ?? 0));
+
+        data = await invokeWithAuth<QboRefreshRunResponse>('qbo-wholesale-refresh', {
+          action: 'step',
+          run_id: runId,
+          mode: 'dry_run',
+        });
+        setQboDryRunPct(Number(data.progress_pct ?? 0));
+      }
+
+      if (data.status !== 'completed') {
+        throw new Error('QBO dry-run refresh did not complete before the local step guard stopped it. Re-run the dry-run to resume safely.');
+      }
+
+      const driftRows = Number(data.drift_rows_and_cases ?? 0);
       toast.success(`QBO dry-run refresh complete — ${driftRows} drift row/case action(s) created`);
       await loadQboRefreshDrift();
     } catch (err) {
@@ -468,6 +519,8 @@ export function QboSettingsCard() {
     } finally {
       setRefreshingQboDryRun(false);
       setQboDryRunPhase('');
+      setQboDryRunPct(0);
+      setQboDryRunRunId(null);
     }
   };
 
@@ -719,8 +772,16 @@ export function QboSettingsCard() {
           {qboDryRunPhase && (
             <div className="space-y-1">
               <p className="text-[10px] text-amber-600 font-medium">{qboDryRunPhase}</p>
+              {qboDryRunRunId && (
+                <p className="text-[9px] text-zinc-400">
+                  Run: <Mono className="text-[9px]">{qboDryRunRunId}</Mono>
+                </p>
+              )}
               <div className="h-1.5 bg-amber-100 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-400 animate-pulse" style={{ width: '100%' }} />
+                <div
+                  className="h-full bg-amber-400 transition-all"
+                  style={{ width: `${Math.max(4, qboDryRunPct)}%` }}
+                />
               </div>
             </div>
           )}
