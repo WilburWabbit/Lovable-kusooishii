@@ -192,20 +192,32 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Probe functions by calling them with deliberately bad args and
-    // distinguishing "function missing" (PGRST202 / 42883) from
-    // "function present but rejected the args".
+    // Probe functions by calling them with realistic stub args so
+    // PostgREST resolves the named overload. We then distinguish:
+    //   - PGRST202 / 42883 with "Could not find the function": MISSING
+    //   - Any other outcome (success, validation error, runtime error,
+    //     permission denied): PRESENT
+    // Stub args are chosen to match the known signatures; if the RPC
+    // signature changes, this probe degrades to "missing", which is a
+    // safe-fail (it surfaces a warning rather than hiding a real gap).
+    const FN_STUBS: Record<string, Record<string, unknown>> = {
+      rebuild_qbo_refresh_drift: { p_run_id: "00000000-0000-0000-0000-000000000000" },
+      approve_qbo_refresh_drift: { p_drift_ids: [], p_approver: "00000000-0000-0000-0000-000000000000" },
+      apply_approved_qbo_refresh_drift: { p_run_id: "00000000-0000-0000-0000-000000000000" },
+      has_role: { _user_id: "00000000-0000-0000-0000-000000000000", _role: "admin" },
+    };
+
     for (const name of fnNames) {
       try {
-        const { error } = await admin.rpc(name, {});
+        const args = FN_STUBS[name] ?? {};
+        const { error } = await admin.rpc(name, args);
         if (!error) {
           existing.push({ name, kind: "function" });
         } else {
           const code = (error as { code?: string }).code ?? "";
           const msg = error.message ?? "";
           const isMissing =
-            code === "PGRST202" ||
-            code === "42883" ||
+            (code === "PGRST202" || code === "42883") &&
             /Could not find the function|does not exist/i.test(msg);
           if (!isMissing) {
             existing.push({ name, kind: "function" });
