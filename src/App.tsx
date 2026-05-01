@@ -59,6 +59,7 @@ const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));
 const ChannelMappingsSettingsPage = lazy(() => import("./pages/admin-v2/ChannelMappingsSettingsPage"));
+const AppHealthPage = lazy(() => import("./pages/admin-v2/AppHealthPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
@@ -127,6 +128,7 @@ const App = () => (
             <Route path="/admin/intake" element={<RequireAdmin><IntakePage /></RequireAdmin>} />
             <Route path="/admin/operations" element={<RequireAdmin><OperationsPage /></RequireAdmin>} />
             <Route path="/admin/settings/channel-mappings" element={<RequireAdmin><ChannelMappingsSettingsPage /></RequireAdmin>} />
+            <Route path="/admin/settings/app-health" element={<RequireAdmin><AppHealthPage /></RequireAdmin>} />
             <Route path="/admin/qbo-callback" element={<RequireAdmin><QboCallbackPage /></RequireAdmin>} />
             <Route path="/admin/ebay-callback" element={<RequireAdmin><EbayCallbackPage /></RequireAdmin>} />
             <Route path="/admin/gmc-callback" element={<RequireAdmin><GmcCallbackPage /></RequireAdmin>} />
