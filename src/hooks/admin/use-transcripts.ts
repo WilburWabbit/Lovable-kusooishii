@@ -23,22 +23,16 @@ export interface TranscriptFilters {
   pageSize?: number;
 }
 
-const ORDER_SQL = "occurred_at.desc.nullslast,message_index.desc";
-
-function applyFilters<T extends ReturnType<typeof supabase.from>>(
-  q: ReturnType<typeof supabase.from<"lovable_agent_transcripts">>["select"] extends never ? never : any,
-  filters: TranscriptFilters,
-) {
-  let query = q;
+function applyFilters(query: any, filters: TranscriptFilters) {
+  let q = query;
   if (filters.role && filters.role !== "all") {
-    query = query.eq("role", filters.role);
+    q = q.eq("role", filters.role);
   }
   if (filters.search && filters.search.trim()) {
     const term = filters.search.trim().replace(/%/g, "");
-    // ilike on body OR title — use .or() to combine
-    query = query.or(`body.ilike.%${term}%,title.ilike.%${term}%`);
+    q = q.or(`body.ilike.%${term}%,title.ilike.%${term}%`);
   }
-  return query;
+  return q;
 }
 
 export function useTranscripts(filters: TranscriptFilters = {}) {
