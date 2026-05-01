@@ -1,35 +1,48 @@
 ## Goal
 
-Unblock the failing `qbo-wholesale-refresh` edge function by creating the `qbo_refresh_run` and `qbo_refresh_drift` tables (plus their RLS, indexes, trigger, RPCs, and view) that section 5 of `20260501010000_rolling_operations_reference_grading_qbo_refresh.sql` defines but which were never applied to the database.
+Add a preflight **QBO Health Check** panel at the top of `/admin/data-sync` (the Admin V2 `DataSyncPage`) that verifies the required database objects exist (e.g. `qbo_refresh_run`, `qbo_refresh_drift`, plus other QBO-critical tables) and clearly reports any missing migrations, so staff can detect schema gaps before invoking QBO edge functions like `qbo-wholesale-refresh`.
 
-## Why a new, smaller migration
+## What gets built
 
-The original file `20260501010000_rolling_operations_reference_grading_qbo_refresh.sql` is 2,043 lines and bundles four other large concerns (G5 saleability, mandatory product gates, reference normalization, reconciliation views). Re-running it now would conflict with later migrations that already touched the same objects. We therefore extract only the QBO refresh section (lines 1551–2030) into a new, idempotent migration.
+### 1. Edge function: `qbo-health-check`
 
-## Migration to create
+A new read-only Deno edge function at `supabase/functions/qbo-health-check/index.ts`.
 
-File: `supabase/migrations/20260501120000_qbo_wholesale_refresh_foundation.sql`
+- Uses the service-role client to query `information_schema.tables` and `pg_proc` for a curated allowlist of expected QBO objects.
+- Returns a structured JSON report: `{ ok: boolean, checks: [{ name, kind: 'table'|'function'|'view', present, severity: 'critical'|'warn', migration_hint }], missing_count, generated_at }`.
+- Also reports recent applied migration versions from `supabase_migrations.schema_migrations` (most recent 10) so staff can see whether a known migration ID is present.
+- No mutations, no third-party calls. CORS handled per project conventions; uses `verify_jwt = false` default plus an in-code admin role check via `has_role(auth.uid(), 'admin')` against the caller's JWT, returning 401/403 if not authorised.
 
-Creates:
+### 2. Allowlist of required QBO objects (initial set)
 
-- **`public.qbo_refresh_run`** — tracks each wholesale refresh execution (mode, status, requested scope, result summary, timing).
-- **`public.qbo_refresh_drift`** — per-row drift findings (entity type, severity, status, current vs QBO values, recommended action).
-- **RLS** — enabled on both tables. Single staff/admin policy on each (`subledger_staff_read_policy`) for FOR ALL.
-- **Trigger** — `set_qbo_refresh_run_updated_at` keeps `updated_at` current.
-- **Indexes** on `qbo_refresh_drift` for `(run, status, severity)`, `(qbo_entity_type, qbo_entity_id)`, and `(local_entity_type, local_entity_id)`.
-- **Functions**:
-  - `rebuild_qbo_refresh_drift(uuid)` — populates drift rows by comparing app data against `landing_raw_qbo_*` (items, sales receipts, purchases, customers) and opens reconciliation cases.
-  - `approve_qbo_refresh_drift(uuid, uuid)` — staff approval of a drift row.
-  - `apply_approved_qbo_refresh_drift(uuid, uuid)` — applies approved corrections to `sku.qbo_item_id`, `sales_order.qbo_sales_receipt_id`/`doc_number`, `purchase_batches.qbo_purchase_id`, `customer.qbo_customer_id`, with audit events.
-- **View** `v_qbo_refresh_drift` — drift rows joined with parent run mode/status/timing.
-- **Grants** — SELECT to `authenticated` on tables/view; EXECUTE to `authenticated, service_role` on the three functions.
+Tables: `qbo_refresh_run`, `qbo_refresh_drift`, `qbo_sync_state`, `qbo_posting_intents`, `landing_raw_qbo_*` family (items, customers, vendors, sales, purchases), `qbo_account_mappings`.
+Functions: `rebuild_qbo_refresh_drift`, `approve_qbo_refresh_drift`, `apply_approved_qbo_refresh_drift`, `has_role`.
+View: `v_qbo_refresh_drift`.
+Each entry carries the migration filename that introduces it as `migration_hint` so the UI can tell staff exactly which migration to apply.
 
-All `CREATE TABLE`/`CREATE INDEX`/`DROP POLICY IF EXISTS`/`CREATE OR REPLACE` make the migration safely re-runnable. PL/pgSQL bodies use single-quoted strings with doubled internal quotes (Lovable SQL runner safe).
+### 3. UI: `QboHealthCheckCard` component
 
-## After applying
+New component at `src/components/admin-v2/QboHealthCheckCard.tsx`, rendered as the first item in `DataSyncPage` (above `StagingErrorsPanel`).
 
-No edge function or frontend code change required — `qbo-wholesale-refresh` already references these objects. A simple test invocation should succeed once the migration runs.
+- On mount and via a "Re-run check" button, calls `qbo-health-check` through `invokeWithAuth`.
+- Shows an overall status badge: green "Healthy", amber "Warnings", red "Missing migrations".
+- Lists each missing object with its kind, severity, and the migration filename to apply.
+- When critical objects are missing, renders a non-blocking warning banner advising staff not to run QBO sync/refresh actions until migrations are applied. Does not disable the other cards (so staff can still triage), but the QBO action cards read a shared `useQboHealth()` hook (new, in `src/hooks/admin/useQboHealth.ts`) and visibly disable destructive actions (refresh, process-pending) when `missing_count > 0` for critical entries, with a tooltip explaining why.
+- Shows the latest 10 applied migration versions in a collapsible section for fast diagnosis.
+
+### 4. Wiring
+
+- `DataSyncPage.tsx` imports and renders `<QboHealthCheckCard />` first.
+- `QboSettingsCard.tsx` consumes `useQboHealth()` and disables the QBO Wholesale Refresh, Process Pending, and Replay buttons when critical checks fail, with an inline message linking to the health card.
+
+## Technical notes
+
+- Health-check function uses a single SQL round-trip: one query against `information_schema.tables` filtered by the allowlist names, one against `pg_proc` joined to `pg_namespace = 'public'`, one against `information_schema.views`, and one against `supabase_migrations.schema_migrations`. Results merged in-memory.
+- Allowlist lives in a shared constant file so both the edge function and the UI can render the same list (edge owns the source of truth; UI just renders the response).
+- No new tables or migrations are required — this is a pure inspection feature.
+- Follows project rules: read-only receiver pattern, no inline business logic, parameterised queries only, admin role enforced server-side.
 
 ## Out of scope
 
-The other four sections of `20260501010000_*` (G5 saleability, posting-intent gates, reference normalization, reconciliation views) are not included here. Most of the RPCs they define (e.g., `queue_qbo_item_posting_intent`) are already present from later catch-up migrations. If a separate audit shows specific objects from those sections are still missing, we can extract them similarly in follow-up migrations.
+- Auto-applying missing migrations (staff still apply via existing migration flow).
+- Health checks for non-QBO integrations (eBay, Stripe, BrickEconomy) — can be added later using the same pattern.
