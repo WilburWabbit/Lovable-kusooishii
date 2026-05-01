@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
     // safe-fail (it surfaces a warning rather than hiding a real gap).
     const FN_STUBS: Record<string, Record<string, unknown>> = {
       rebuild_qbo_refresh_drift: { p_run_id: "00000000-0000-0000-0000-000000000000" },
-      approve_qbo_refresh_drift: { p_drift_ids: [], p_approver: "00000000-0000-0000-0000-000000000000" },
+      approve_qbo_refresh_drift: { p_drift_id: "00000000-0000-0000-0000-000000000000" },
       apply_approved_qbo_refresh_drift: { p_run_id: "00000000-0000-0000-0000-000000000000" },
       has_role: { _user_id: "00000000-0000-0000-0000-000000000000", _role: "admin" },
     };
