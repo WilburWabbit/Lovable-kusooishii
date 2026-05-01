@@ -6,12 +6,14 @@ import { invokeWithAuth } from "@/lib/invokeWithAuth";
 type DiagnosticsSnapshot = {
   generated_at: string;
   schema: { tables: Array<{ table_schema: string; table_name: string }>; routines: Array<{ routine_schema: string; routine_name: string }>; table_error?: string | null; routine_error?: string | null };
-  health: { app_settings_keys: number; user_role_counts: Record<string, number>; pending_or_error_qbo_landing: number };
+  health: { app_settings_rows: number;
+    settings_error?: string | null;
+    roles_error?: string | null; user_role_counts: Record<string, number>; pending_or_error_qbo_landing: number };
   logs: { audit_events: Array<Record<string, unknown>>; landing_qbo_errors: Array<Record<string, unknown>>; audit_error?: string | null; landing_error?: string | null };
 };
 
 export default function AppHealthPage() {
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["admin", "app-health"],
     queryFn: () => invokeWithAuth<DiagnosticsSnapshot>("admin-data", { action: "diagnostics-snapshot", limit: 200 }),
   });
@@ -22,6 +24,7 @@ export default function AppHealthPage() {
         <SectionHead title="App Health" subtitle="Live diagnostics snapshot of schema, operational signals, and recent logs." />
         <button className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground" onClick={() => refetch()}>Refresh snapshot</button>
         {isLoading ? <SurfaceCard>Loading…</SurfaceCard> : null}
+        {error ? <SurfaceCard><p className="text-sm text-destructive">Failed to load diagnostics: {(error as Error).message}</p></SurfaceCard> : null}
         {data ? (
           <>
             <SurfaceCard>
@@ -29,6 +32,11 @@ export default function AppHealthPage() {
               <p className="text-sm">Tables discovered: {data.schema.tables.length}</p>
               <p className="text-sm">Public routines discovered: {data.schema.routines.length}</p>
               <p className="text-sm">Pending/Error QBO landing rows: {data.health.pending_or_error_qbo_landing}</p>
+              <p className="text-sm">App settings rows: {data.health.app_settings_rows}</p>
+              {data.health.settings_error ? <p className="text-sm text-destructive">Settings error: {data.health.settings_error}</p> : null}
+              {data.health.roles_error ? <p className="text-sm text-destructive">Role error: {data.health.roles_error}</p> : null}
+              {data.schema.table_error ? <p className="text-sm text-destructive">Schema table discovery error: {data.schema.table_error}</p> : null}
+              {data.schema.routine_error ? <p className="text-sm text-destructive">Schema routine discovery error: {data.schema.routine_error}</p> : null}
             </SurfaceCard>
             <SurfaceCard>
               <h3 className="mb-2 font-medium">Recent Audit Events</h3>

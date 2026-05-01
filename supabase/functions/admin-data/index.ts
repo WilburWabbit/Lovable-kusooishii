@@ -2983,12 +2983,12 @@ Deno.serve(async (req) => {
         { data: landingRows, error: landingErr },
         { data: auditRows, error: auditErr }
       ] = await Promise.all([
-        admin.from("information_schema.tables").select("table_schema, table_name").in("table_schema", ["public", "auth", "storage"]).order("table_schema").order("table_name"),
-        admin.from("information_schema.routines").select("routine_schema, routine_name").eq("routine_schema", "public").order("routine_name"),
-        admin.from("app_settings").select("key, value, updated_at").limit(500),
+        admin.schema("information_schema").from("tables").select("table_schema, table_name").in("table_schema", ["public"]).order("table_schema").order("table_name"),
+        admin.schema("information_schema").from("routines").select("routine_schema, routine_name").eq("routine_schema", "public").order("routine_name"),
+        admin.from("app_settings").select("id, stripe_test_mode, updated_at, updated_by").limit(200),
         admin.from("user_roles").select("role"),
-        admin.from("landing_raw_qbo_purchase").select("id, source_event_id, status, error_message, received_at, created_at").in("status", ["error", "pending"]).order("created_at", { ascending: false }).limit(safeLimit),
-        admin.from("audit_event").select("id, event_type, source_system, source_record_id, severity, created_at, details").order("created_at", { ascending: false }).limit(safeLimit)
+        admin.from("landing_raw_qbo_purchase").select("id, external_id, status, error_message, received_at, processed_at").in("status", ["error", "pending"]).order("received_at", { ascending: false }).limit(safeLimit),
+        admin.from("audit_event").select("id, entity_type, entity_id, source_system, trigger_type, occurred_at, actor_id").order("occurred_at", { ascending: false }).limit(safeLimit)
       ]);
 
       const roleCounts: Record<string, number> = {};
@@ -3003,9 +3003,11 @@ Deno.serve(async (req) => {
           routine_error: rpcErr?.message ?? null,
         },
         health: {
-          app_settings_keys: settingsRows?.length ?? 0,
+          app_settings_rows: settingsRows?.length ?? 0,
           user_role_counts: roleCounts,
           pending_or_error_qbo_landing: landingRows?.length ?? 0,
+          settings_error: settingsErr?.message ?? null,
+          roles_error: rolesErr?.message ?? null,
         },
         logs: {
           audit_events: auditErr ? [] : (auditRows ?? []),
