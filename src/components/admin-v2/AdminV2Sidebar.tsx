@@ -13,6 +13,7 @@ import {
   Truck,
   Settings,
   Activity,
+  MessageSquare,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -223,6 +224,13 @@ export function AdminV2Sidebar({
           label="App Health"
           to="/admin/settings/app-health"
           active={isActive("/admin/settings/app-health")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={MessageSquare}
+          label="Transcripts"
+          to="/admin/system/transcripts"
+          active={isActive("/admin/system/transcripts")}
           onNavigate={onClose}
         />
       </div>
