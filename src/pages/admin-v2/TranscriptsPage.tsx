@@ -142,8 +142,8 @@ export default function TranscriptsPage() {
               </span>
             </SectionHead>
             <p className="text-sm text-muted-foreground">
-              Verbatim Lovable chat history, parsed from <code>docs/transcript/</code>. Reverse chronological. Token counts are
-              estimated (chars ÷ 4).
+              Verbatim Lovable chat history, parsed from <code>docs/transcript/</code>. Reverse chronological. Token counts use
+              OpenAI <code>cl100k_base</code> (tiktoken) for exact accuracy.
             </p>
           </div>
           <div className="flex gap-2">
