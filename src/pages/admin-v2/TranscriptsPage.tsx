@@ -1,22 +1,19 @@
 import { useMemo, useState } from "react";
-import { Download, RefreshCw, MessageSquare, Search } from "lucide-react";
+import { Download, RefreshCw, MessageSquare } from "lucide-react";
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { SurfaceCard, SectionHead, Mono } from "@/components/admin-v2/ui-primitives";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { TableFilterInput } from "@/components/admin-v2/TableFilterInput";
+import { SortableTableHead } from "@/components/admin/SortableTableHead";
+import { useSimpleTableFilters } from "@/hooks/useSimpleTableFilters";
 import {
   fetchAllTranscripts,
-  useTranscripts,
-  type TranscriptFilters,
   type TranscriptRow,
 } from "@/hooks/admin/use-transcripts";
+import { useQuery } from "@tanstack/react-query";
 import { downloadCsv } from "@/lib/csv-sync/csv-utils";
 import { toast } from "sonner";
-
-const PAGE_SIZE = 50;
 
 const ROLE_COLORS: Record<TranscriptRow["role"], string> = {
   user: "bg-blue-500/10 text-blue-600 border-blue-500/30",
@@ -69,28 +66,66 @@ function preview(body: string, n = 160): string {
   return trimmed.length > n ? trimmed.slice(0, n) + "…" : trimmed;
 }
 
+const PAGE_SIZE = 100;
+
+// Accessor that exposes a unified "index" value (start of range) for sorting/filtering.
+function accessor(row: TranscriptRow, key: string): unknown {
+  switch (key) {
+    case "when":
+      return row.occurred_at ?? "";
+    case "index_label":
+      return row.message_index_end ?? row.message_index;
+    case "title_preview":
+      return row.title ?? row.body;
+    default:
+      return (row as unknown as Record<string, unknown>)[key];
+  }
+}
+
+const COLUMNS: Array<{
+  key: string;
+  label: string;
+  align?: "left" | "right" | "center";
+  sortable?: boolean;
+  width?: string;
+}> = [
+  { key: "when", label: "When", width: "w-[170px]" },
+  { key: "part_number", label: "Part", width: "w-[60px]" },
+  { key: "index_label", label: "#", width: "w-[90px]" },
+  { key: "role", label: "Role", width: "w-[110px]" },
+  { key: "title_preview", label: "Title / Preview" },
+  { key: "source_file", label: "Source", width: "w-[200px]" },
+  { key: "token_count", label: "Tokens", align: "right", width: "w-[90px]" },
+  { key: "char_count", label: "Chars", align: "right", width: "w-[90px]" },
+];
+
 export default function TranscriptsPage() {
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [role, setRole] = useState<TranscriptFilters["role"]>("all");
-  const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [page, setPage] = useState(0);
 
-  const filters: TranscriptFilters = useMemo(
-    () => ({ role, search, page, pageSize: PAGE_SIZE }),
-    [role, search, page],
-  );
+  const { data: allRows = [], isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ["lovable-transcripts-all"],
+    queryFn: () => fetchAllTranscripts(),
+  });
 
-  const { data, isLoading, error, refetch } = useTranscripts(filters);
+  const { filters, setFilter, sort, toggleSort, clearFilters, processedRows } =
+    useSimpleTableFilters<TranscriptRow>(allRows, {
+      accessor,
+      initialSort: { key: "index_label", dir: "desc" },
+    });
 
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
-
-  const onSearch = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Reset to page 0 when filters/sort change
+  const filtersKey = JSON.stringify(filters) + (sort ? `${sort.key}:${sort.dir}` : "");
+  useMemo(() => {
     setPage(0);
-    setSearch(searchInput.trim());
-  };
+  }, [filtersKey]);
+
+  const totalPages = Math.max(1, Math.ceil(processedRows.length / PAGE_SIZE));
+  const pageRows = useMemo(
+    () => processedRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [processedRows, page],
+  );
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -101,23 +136,23 @@ export default function TranscriptsPage() {
     });
   };
 
-  const exportPage = () => {
-    if (!data?.rows.length) {
-      toast.message("Nothing to export on this page");
+  const exportFiltered = () => {
+    if (!processedRows.length) {
+      toast.message("No matching rows to export");
       return;
     }
-    const csv = rowsToCsv(data.rows);
+    const csv = rowsToCsv(processedRows);
     const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(csv, `lovable_agent_transcripts_page${page + 1}_${date}.csv`);
-    toast.success(`Exported ${data.rows.length} rows`);
+    downloadCsv(csv, `lovable_agent_transcripts_filtered_${date}.csv`);
+    toast.success(`Exported ${processedRows.length} rows`);
   };
 
   const exportAll = async () => {
     setExporting(true);
     try {
-      const all = await fetchAllTranscripts({ role, search });
+      const all = await fetchAllTranscripts();
       if (!all.length) {
-        toast.message("No matching rows to export");
+        toast.message("Nothing to export");
         return;
       }
       const csv = rowsToCsv(all);
@@ -131,6 +166,8 @@ export default function TranscriptsPage() {
     }
   };
 
+  const hasActiveFilters = Object.values(filters).some((v) => v.length > 0);
+
   return (
     <AdminV2Layout>
       <div className="space-y-4">
@@ -142,77 +179,40 @@ export default function TranscriptsPage() {
               </span>
             </SectionHead>
             <p className="text-sm text-muted-foreground">
-              Verbatim Lovable chat history, parsed from <code>docs/transcript/</code>. Reverse chronological. Token counts use
-              OpenAI <code>cl100k_base</code> (tiktoken) for exact accuracy.
+              Verbatim Lovable chat history, parsed from <code>docs/transcript/</code>. Per-column
+              filters; click headers to sort. Tokens use OpenAI <code>cl100k_base</code> (tiktoken).
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              className="gap-1.5"
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={exportPage} className="gap-1.5">
-              <Download className="h-3.5 w-3.5" /> Export page
+            {hasActiveFilters ? (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            ) : null}
+            <Button variant="outline" size="sm" onClick={exportFiltered} className="gap-1.5">
+              <Download className="h-3.5 w-3.5" /> Export filtered
             </Button>
-            <Button variant="default" size="sm" onClick={exportAll} disabled={exporting} className="gap-1.5">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={exportAll}
+              disabled={exporting}
+              className="gap-1.5"
+            >
               <Download className="h-3.5 w-3.5" />
               {exporting ? "Exporting…" : "Export full CSV"}
             </Button>
           </div>
         </div>
-
-        <SurfaceCard>
-          <div className="flex flex-wrap items-center gap-3">
-            <form onSubmit={onSearch} className="flex flex-1 min-w-[260px] items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Search title or body…"
-                  className="pl-8 h-9"
-                />
-              </div>
-              <Button type="submit" size="sm" variant="secondary">Search</Button>
-              {search ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setSearchInput("");
-                    setSearch("");
-                    setPage(0);
-                  }}
-                >
-                  Clear
-                </Button>
-              ) : null}
-            </form>
-
-            <Select
-              value={role ?? "all"}
-              onValueChange={(v) => {
-                setRole(v as TranscriptFilters["role"]);
-                setPage(0);
-              }}
-            >
-              <SelectTrigger className="w-[160px] h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All roles</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="assistant">Assistant</SelectItem>
-                <SelectItem value="range">Range summary</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="text-xs text-muted-foreground ml-auto">
-              {data ? <>{data.total.toLocaleString()} messages</> : null}
-            </div>
-          </div>
-        </SurfaceCard>
 
         <SurfaceCard noPadding>
           {isLoading ? (
@@ -221,83 +221,119 @@ export default function TranscriptsPage() {
             <div className="p-6 text-sm text-destructive">
               Failed to load transcripts: {(error as Error).message}
             </div>
-          ) : !data || data.rows.length === 0 ? (
-            <div className="p-6 text-sm text-muted-foreground">No messages match.</div>
+          ) : !allRows.length ? (
+            <div className="p-6 text-sm text-muted-foreground">No transcripts found.</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[160px]">When</TableHead>
-                  <TableHead className="w-[60px]">Part</TableHead>
-                  <TableHead className="w-[80px]">#</TableHead>
-                  <TableHead className="w-[110px]">Role</TableHead>
-                  <TableHead>Title / Preview</TableHead>
-                  <TableHead className="w-[80px] text-right">Tokens</TableHead>
-                  <TableHead className="w-[80px] text-right">Chars</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.rows.map((r) => {
-                  const isOpen = expanded.has(r.id);
-                  const idxLabel = r.message_index_end
-                    ? `${r.message_index}–${r.message_index_end}`
-                    : `${r.message_index}`;
-                  return (
-                    <>
-                      <TableRow
-                        key={r.id}
-                        className="cursor-pointer"
-                        onClick={() => toggleExpanded(r.id)}
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]">
+                <thead>
+                  <tr className="border-b border-zinc-200">
+                    {COLUMNS.map((col) => (
+                      <SortableTableHead
+                        key={col.key}
+                        columnKey={col.key}
+                        label={col.label}
+                        sortKey={sort?.key ?? ""}
+                        sortDir={sort?.dir ?? "asc"}
+                        onToggleSort={toggleSort}
+                        sortable={col.sortable !== false}
+                        align={col.align}
+                        className={`px-3 py-2.5 text-[10px] uppercase tracking-wider font-medium ${col.width ?? ""}`}
+                      />
+                    ))}
+                  </tr>
+                  <tr className="border-b border-zinc-200 bg-zinc-50">
+                    {COLUMNS.map((col) => (
+                      <th key={col.key} className="px-3 py-1">
+                        <TableFilterInput
+                          value={filters[col.key] ?? ""}
+                          onChange={(v) => setFilter(col.key, v)}
+                        />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((r) => {
+                    const isOpen = expanded.has(r.id);
+                    const idxLabel = r.message_index_end
+                      ? `${r.message_index}–${r.message_index_end}`
+                      : `${r.message_index}`;
+                    return (
+                      <>
+                        <tr
+                          key={r.id}
+                          className="border-b border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors"
+                          onClick={() => toggleExpanded(r.id)}
+                        >
+                          <td className="px-3 py-2.5">
+                            <Mono color="dim">{formatWhen(r)}</Mono>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Mono>P{r.part_number}</Mono>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Mono>{idxLabel}</Mono>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Badge variant="outline" className={ROLE_COLORS[r.role]}>
+                              {r.role}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2.5 max-w-[600px]">
+                            {r.title ? (
+                              <span className="font-medium text-sm">{r.title}</span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">{preview(r.body)}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Mono color="dim">{r.source_file}</Mono>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <Mono>{r.token_count.toLocaleString()}</Mono>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <Mono color="dim">{r.char_count.toLocaleString()}</Mono>
+                          </td>
+                        </tr>
+                        {isOpen ? (
+                          <tr key={r.id + ":body"} className="bg-zinc-50">
+                            <td colSpan={COLUMNS.length} className="px-4 py-3">
+                              <div className="text-[11px] text-muted-foreground mb-2">
+                                {r.source_file}
+                              </div>
+                              <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-700 max-h-[480px] overflow-auto">
+                                {r.body || "(empty)"}
+                              </pre>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </>
+                    );
+                  })}
+                  {pageRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={COLUMNS.length}
+                        className="px-3 py-8 text-center text-zinc-500 text-sm"
                       >
-                        <TableCell>
-                          <Mono color="dim">{formatWhen(r)}</Mono>
-                        </TableCell>
-                        <TableCell><Mono>P{r.part_number}</Mono></TableCell>
-                        <TableCell><Mono>{idxLabel}</Mono></TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={ROLE_COLORS[r.role]}>
-                            {r.role}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-[600px]">
-                          {r.title ? (
-                            <span className="font-medium text-sm">{r.title}</span>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">{preview(r.body)}</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Mono>{r.token_count.toLocaleString()}</Mono>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Mono color="dim">{r.char_count.toLocaleString()}</Mono>
-                        </TableCell>
-                      </TableRow>
-                      {isOpen ? (
-                        <TableRow key={r.id + ":body"} className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="bg-zinc-50">
-                            <div className="text-[11px] text-muted-foreground mb-2">
-                              {r.source_file}
-                            </div>
-                            <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-700 max-h-[480px] overflow-auto">
-                              {r.body || "(empty)"}
-                            </pre>
-                          </TableCell>
-                        </TableRow>
-                      ) : null}
-                    </>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        No messages match your filters.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
           )}
         </SurfaceCard>
 
-        {data && data.total > PAGE_SIZE ? (
-          <div className="flex items-center justify-between text-sm">
-            <div className="text-muted-foreground">
-              Page {page + 1} of {totalPages}
-            </div>
+        <div className="flex items-center justify-between text-sm">
+          <div className="text-muted-foreground">
+            {processedRows.length.toLocaleString()} of {allRows.length.toLocaleString()} messages
+            {totalPages > 1 ? <> · Page {page + 1} of {totalPages}</> : null}
+          </div>
+          {totalPages > 1 ? (
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -316,8 +352,8 @@ export default function TranscriptsPage() {
                 Next
               </Button>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </AdminV2Layout>
   );
