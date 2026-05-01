@@ -2956,6 +2956,51 @@ Deno.serve(async (req) => {
         }
       }
       result = { success: true, upserted: upserts.length, deleted: deletes.length };
+    } else if (action === "diagnostics-snapshot") {
+      const limit = Number(params.limit ?? 200);
+      const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 10), 1000) : 200;
+
+      const [
+        { data: tableRows, error: tableErr },
+        { data: rpcRows, error: rpcErr },
+        { data: settingsRows, error: settingsErr },
+        { data: rolesRows, error: rolesErr },
+        { data: landingRows, error: landingErr },
+        { data: auditRows, error: auditErr }
+      ] = await Promise.all([
+        admin.schema("information_schema").from("tables").select("table_schema, table_name").in("table_schema", ["public"]).order("table_schema").order("table_name"),
+        admin.schema("information_schema").from("routines").select("routine_schema, routine_name").eq("routine_schema", "public").order("routine_name"),
+        admin.from("app_settings").select("id, stripe_test_mode, updated_at, updated_by").limit(200),
+        admin.from("user_roles").select("role"),
+        admin.from("landing_raw_qbo_purchase").select("id, external_id, status, error_message, received_at, processed_at").in("status", ["error", "pending"]).order("received_at", { ascending: false }).limit(safeLimit),
+        admin.from("audit_event").select("id, entity_type, entity_id, source_system, trigger_type, occurred_at, actor_id").order("occurred_at", { ascending: false }).limit(safeLimit)
+      ]);
+
+      const roleCounts: Record<string, number> = {};
+      for (const row of rolesRows ?? []) roleCounts[row.role] = (roleCounts[row.role] ?? 0) + 1;
+
+      result = {
+        generated_at: new Date().toISOString(),
+        schema: {
+          tables: tableErr ? [] : (tableRows ?? []),
+          table_error: tableErr?.message ?? null,
+          routines: rpcErr ? [] : (rpcRows ?? []),
+          routine_error: rpcErr?.message ?? null,
+        },
+        health: {
+          app_settings_rows: settingsRows?.length ?? 0,
+          user_role_counts: roleCounts,
+          pending_or_error_qbo_landing: landingRows?.length ?? 0,
+          settings_error: settingsErr?.message ?? null,
+          roles_error: rolesErr?.message ?? null,
+        },
+        logs: {
+          audit_events: auditErr ? [] : (auditRows ?? []),
+          audit_error: auditErr?.message ?? null,
+          landing_qbo_errors: landingErr ? [] : (landingRows ?? []),
+          landing_error: landingErr?.message ?? null,
+        },
+      };
     } else if (action === "set-product-channel-category") {
       // params: { product_id, channel, category_id, marketplace? }
       const productId = params.product_id;

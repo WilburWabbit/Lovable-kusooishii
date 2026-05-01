@@ -12,6 +12,7 @@ import {
   Receipt,
   Truck,
   Settings,
+  Activity,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -215,6 +216,13 @@ export function AdminV2Sidebar({
           label="Channel Mappings"
           to="/admin/settings/channel-mappings"
           active={isActive("/admin/settings/channel-mappings")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={Activity}
+          label="App Health"
+          to="/admin/settings/app-health"
+          active={isActive("/admin/settings/app-health")}
           onNavigate={onClose}
         />
       </div>
