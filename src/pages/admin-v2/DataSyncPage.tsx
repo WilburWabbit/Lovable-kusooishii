@@ -1,4 +1,5 @@
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
+import { QboHealthCheckCard } from "@/components/admin-v2/QboHealthCheckCard";
 import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
 import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
 import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
