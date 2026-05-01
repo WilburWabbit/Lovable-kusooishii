@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Clock, Download, FileText, Play, RefreshCcw, X } from "lucide-react";
+import { Activity, AlertTriangle, Check, Clock, Download, FileText, Play, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   useBlueBellOpenAccruals,
@@ -18,13 +18,14 @@ import {
   useReconciliationCaseOwners,
   useReconciliationInbox,
   useResolveReconciliationCase,
-  useRunListingCommandNow,
   useRetryPostingIntent,
   useRetryListingCommand,
+  useRunListingCommandNow,
   useRunPostingIntentNow,
-  useRunListingCommandProcessor,
-  useRunPostingIntentProcessor,
   useSettlementPeriodClose,
+  useSubledgerCloseoutHealth,
+  useSubledgerJobRuns,
+  useRunSubledgerScheduledJobs,
   useUpdateReconciliationCaseWorkflow,
   useUpdateReconciliationCaseStatus,
   type BlueBellStatementRow,
@@ -32,6 +33,8 @@ import {
   type PostingIntentRow,
   type ReconciliationInboxCase,
   type SettlementPeriodCloseRow,
+  type SubledgerCloseoutHealthRow,
+  type SubledgerJobRunRow,
 } from "@/hooks/admin/use-operations";
 import { useAuth } from "@/hooks/useAuth";
 import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "./ui-primitives";
@@ -59,6 +62,7 @@ const statusColors: Record<string, string> = {
   blocked: "#DC2626",
   review: "#D97706",
   ready: "#16A34A",
+  warning: "#D97706",
 };
 
 const slaColors: Record<string, string> = {
@@ -330,8 +334,19 @@ function SettlementPeriodStatus({ row }: { row: SettlementPeriodCloseRow }) {
   return <Badge label={row.closeStatus} color={statusColors[row.closeStatus] ?? "#71717A"} small />;
 }
 
+function CloseoutHealthStatus({ row }: { row: SubledgerCloseoutHealthRow }) {
+  return <Badge label={humanizeToken(row.healthStatus)} color={statusColors[row.healthStatus] ?? "#71717A"} small />;
+}
+
+function JobRunStatus({ row }: { row: SubledgerJobRunRow }) {
+  const status = row.jobSuccess === false ? "failed" : row.jobSuccess === true ? "ready" : "skipped";
+  return <Badge label={row.jobSuccess === false ? "failed" : row.jobSuccess === true ? "success" : "unknown"} color={statusColors[status] ?? "#71717A"} small />;
+}
+
 export function OperationsView() {
   const { user } = useAuth();
+  const { data: closeoutHealth = [], isLoading: closeoutHealthLoading } = useSubledgerCloseoutHealth();
+  const { data: jobRuns = [], isLoading: jobRunsLoading } = useSubledgerJobRuns();
   const { data: cases = [], isLoading: casesLoading } = useReconciliationInbox();
   const { data: owners = [] } = useReconciliationCaseOwners();
   const { data: intents = [], isLoading: intentsLoading } = usePostingIntents();
@@ -344,9 +359,8 @@ export function OperationsView() {
   const bulkUpdateCases = useBulkUpdateReconciliationCases();
   const resolveCase = useResolveReconciliationCase();
   const refreshActualSettlements = useRefreshActualSettlements();
-  const runProcessor = useRunPostingIntentProcessor();
+  const runScheduledJobs = useRunSubledgerScheduledJobs();
   const runPostingIntentNow = useRunPostingIntentNow();
-  const runListingProcessor = useRunListingCommandProcessor();
   const runListingCommandNow = useRunListingCommandNow();
   const refreshReconciliation = useRefreshReconciliationCases();
   const retryListingCommand = useRetryListingCommand();
@@ -359,6 +373,9 @@ export function OperationsView() {
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
 
+  const blockedHealthAreas = closeoutHealth.filter((row) => row.healthStatus === "blocked").length;
+  const warningHealthAreas = closeoutHealth.filter((row) => row.healthStatus === "warning").length;
+  const overallHealth = blockedHealthAreas > 0 ? "blocked" : warningHealthAreas > 0 ? "warning" : "ready";
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
   const pendingIntents = intents.filter((i) => i.status === "pending").length;
@@ -514,18 +531,33 @@ export function OperationsView() {
     );
   };
 
-  const handleRunProcessor = () => {
-    runProcessor.mutate(undefined, {
-      onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} posting intent(s)`),
-      onError: (err) => toast.error(err instanceof Error ? err.message : "Posting processor failed"),
+  const handleRunScheduledJob = (
+    job: "all" | "listing_outbox" | "qbo_posting_outbox",
+    successMessage: string,
+  ) => {
+    runScheduledJobs.mutate(job, {
+      onSuccess: (data) => {
+        const failed = (data.results ?? []).filter((result) => result.success === false).length;
+        if (failed > 0) {
+          toast.warning(`Automation finished with ${failed} failed job(s)`);
+        } else {
+          toast.success(successMessage);
+        }
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Subledger automation failed"),
     });
   };
 
+  const handleRunProcessor = () => {
+    handleRunScheduledJob("qbo_posting_outbox", "QBO posting outbox run completed");
+  };
+
+  const handleRunScheduledJobs = () => {
+    handleRunScheduledJob("all", "Subledger automation run completed");
+  };
+
   const handleRunListingProcessor = () => {
-    runListingProcessor.mutate(undefined, {
-      onSuccess: (data) => toast.success(`Processed ${data?.processed ?? 0} listing command(s)`),
-      onError: (err) => toast.error(err instanceof Error ? err.message : "Listing command processor failed"),
-    });
+    handleRunScheduledJob("listing_outbox", "Listing command outbox run completed");
   };
 
   const handleRunListingCommandNow = (id: string) => {
@@ -602,6 +634,15 @@ export function OperationsView() {
           <p className="text-xs text-zinc-500">Listing commands, finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleRunScheduledJobs}
+            disabled={runScheduledJobs.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Activity className="h-3.5 w-3.5" />
+            {runScheduledJobs.isPending ? "Running..." : "Run All Automation"}
+          </button>
           <ExportButton
             label="Profit CSV"
             onClick={() => handleExport("margin-profit", "Margin/profit report")}
@@ -633,25 +674,26 @@ export function OperationsView() {
           <button
             type="button"
             onClick={handleRunListingProcessor}
-            disabled={runListingProcessor.isPending}
+            disabled={runScheduledJobs.isPending}
             className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
           >
             <Play className="h-3.5 w-3.5" />
-            {runListingProcessor.isPending ? "Running..." : "Run Listing Outbox"}
+            {runScheduledJobs.isPending ? "Running..." : "Run Listing Outbox"}
           </button>
           <button
             type="button"
             onClick={handleRunProcessor}
-            disabled={runProcessor.isPending}
+            disabled={runScheduledJobs.isPending}
             className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
           >
             <Play className="h-3.5 w-3.5" />
-            {runProcessor.isPending ? "Running..." : "Run QBO Outbox"}
+            {runScheduledJobs.isPending ? "Running..." : "Run QBO Outbox"}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-9">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-10">
+        <SummaryCard label="Closeout" value={humanizeToken(overallHealth)} color={statusColors[overallHealth] ?? "#71717A"} />
         <SummaryCard label="Open Cases" value={openCases} color={openCases > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="High Severity" value={criticalCases} color={criticalCases > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Blocked Periods" value={blockedPeriods} color={blockedPeriods > 0 ? "#DC2626" : "#16A34A"} />
@@ -662,6 +704,98 @@ export function OperationsView() {
         <SummaryCard label="Failed QBO Posts" value={failedIntents} color={failedIntents > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Blue Bell Owed" value={formatMoney(blueBellOutstanding)} color={blueBellOutstanding > 0 ? "#D97706" : "#16A34A"} />
       </div>
+
+      <SurfaceCard noPadding>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Close-Out Health</SectionHead>
+            <p className="text-xs text-zinc-500">Single view of the remaining blockers before this commerce subledger branch can settle down.</p>
+          </div>
+          <div className="text-xs text-zinc-500">
+            {blockedHealthAreas} blocked / {warningHealthAreas} warning
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Area</th>
+                <th className="px-3 py-2 text-right font-semibold">Open</th>
+                <th className="px-3 py-2 text-right font-semibold">Pending</th>
+                <th className="px-3 py-2 text-right font-semibold">Failed</th>
+                <th className="px-3 py-2 text-right font-semibold">Overdue</th>
+                <th className="px-3 py-2 font-semibold">Last Success</th>
+                <th className="px-3 py-2 font-semibold">Oldest Item</th>
+                <th className="px-4 py-2 font-semibold">Next Step</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {closeoutHealthLoading ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">Loading close-out health...</td></tr>
+              ) : closeoutHealth.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No close-out health data yet. Run the latest migration first.</td></tr>
+              ) : (
+                closeoutHealth.map((row) => (
+                  <tr key={row.area} className="align-top hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><CloseoutHealthStatus row={row} /></td>
+                    <td className="px-3 py-3">
+                      <div className="font-medium text-zinc-900">{humanizeToken(row.area)}</div>
+                      <div className="text-[11px] text-zinc-500">Severity: {row.severity}</div>
+                    </td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.openCount > 0 ? "amber" : "dim"}>{row.openCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.pendingCount > 0 ? "amber" : "dim"}>{row.pendingCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.failedCount > 0 ? "red" : "dim"}>{row.failedCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.overdueCount > 0 ? "red" : "dim"}>{row.overdueCount}</Mono></td>
+                    <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(row.lastSuccessAt)}</td>
+                    <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(row.oldestPendingAt)}</td>
+                    <td className="max-w-[360px] px-4 py-3 text-xs text-zinc-600">{row.recommendation}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
+
+      <SurfaceCard noPadding>
+        <div className="border-b border-zinc-200 px-4 py-3">
+          <SectionHead>Automation Runs</SectionHead>
+          <p className="text-xs text-zinc-500">Recent scheduled/admin-triggered subledger automation evidence from the audit log.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Job</th>
+                <th className="px-3 py-2 font-semibold">Requested</th>
+                <th className="px-3 py-2 text-right font-semibold">Rows</th>
+                <th className="px-3 py-2 font-semibold">Ran At</th>
+                <th className="px-4 py-2 font-semibold">Error</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {jobRunsLoading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-500">Loading automation runs...</td></tr>
+              ) : jobRuns.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-500">No scheduled job audit records yet.</td></tr>
+              ) : (
+                jobRuns.map((row) => (
+                  <tr key={`${row.id}-${row.job ?? "run"}`} className="hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><JobRunStatus row={row} /></td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{humanizeToken(row.job ?? "unknown")}</td>
+                    <td className="px-3 py-3 text-xs text-zinc-500">{humanizeToken(row.requestedJob ?? "unknown")}</td>
+                    <td className="px-3 py-3 text-right"><Mono>{row.rowsProcessed ?? "—"}</Mono></td>
+                    <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(row.occurredAt)}</td>
+                    <td className="max-w-[420px] px-4 py-3 text-xs text-red-600">{row.error ?? "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
 
       <SurfaceCard noPadding>
         <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">

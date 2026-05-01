@@ -33,6 +33,11 @@ no JavaScript-style `//` comments.
 12. `supabase/migrations/20260430235700_queue_qbo_customer_posting_intents.sql`
 13. `supabase/migrations/20260430235800_queue_qbo_purchase_posting_intents.sql`
 14. `supabase/migrations/20260430240000_manage_qbo_posting_intents.sql`
+15. `supabase/migrations/20260430241000_settlement_reconciliation_depth.sql`
+16. `supabase/migrations/20260430242000_subledger_scheduled_jobs.sql`
+17. `supabase/migrations/20260430243000_reporting_exports_and_case_context.sql`
+18. `supabase/migrations/20260430244000_exception_workflow_hardening.sql`
+19. `supabase/migrations/20260501000000_subledger_closeout_health.sql`
 
 ## Smoke Checks
 
@@ -60,8 +65,11 @@ WHERE pg_namespace.nspname = 'public'
     'refresh_sku_cost_rollups',
     'release_stock_allocation_for_order_line',
     'process_order_return',
+    'reconciliation_case_requires_evidence',
     'retry_listing_outbound_command',
-    'retry_qbo_posting_intent'
+    'retry_qbo_posting_intent',
+    'update_reconciliation_case_workflow',
+    'bulk_update_reconciliation_case_workflow'
   )
 ORDER BY proname;
 ```
@@ -69,9 +77,11 @@ ORDER BY proname;
 Expected function names:
 
 ```text
+bulk_update_reconciliation_case_workflow
 cancel_listing_outbound_command
 cancel_qbo_posting_intent
 process_order_return
+reconciliation_case_requires_evidence
 queue_listing_command
 queue_qbo_customer_posting_intent
 queue_qbo_item_posting_intent
@@ -86,6 +96,7 @@ refresh_sku_cost_rollups
 release_stock_allocation_for_order_line
 retry_listing_outbound_command
 retry_qbo_posting_intent
+update_reconciliation_case_workflow
 ```
 
 If the smoke query only returns `cancel_listing_outbound_command` and
