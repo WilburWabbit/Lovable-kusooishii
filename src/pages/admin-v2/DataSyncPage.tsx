@@ -12,6 +12,7 @@ export default function DataSyncPage() {
   return (
     <AdminV2Layout>
       <div className="space-y-6">
+        <QboHealthCheckCard />
         <StagingErrorsPanel />
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
