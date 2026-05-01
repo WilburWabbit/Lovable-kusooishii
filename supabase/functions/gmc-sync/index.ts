@@ -94,7 +94,10 @@ function mapToProductInput(
   siteUrl: string,
 ): ProductInput {
   const mpn = (product.mpn as string) || "";
-  const price = (sku.price as number) || 0;
+  const price = Number(sku.listed_price ?? 0);
+  if (price <= 0) {
+    throw new Error(`Google Merchant SKU ${String(sku.sku_code ?? "")} has no listed price`);
+  }
   const conditionGrade = Number(sku.condition_grade) || 3;
 
   return {
@@ -205,7 +208,7 @@ Deno.serve(async (req) => {
       const { data: skus, error: skuErr } = await supabaseAdmin
         .from("sku")
         .select(
-          "id, sku_code, price, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
+          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
         )
         .eq("active", true);
 
@@ -215,8 +218,18 @@ Deno.serve(async (req) => {
       // Offer status casing is historical; v2_status is preferred where present.
       const { data: webListings } = await supabaseAdmin
         .from("channel_listing")
-        .select("sku_id, offer_status, v2_status")
+        .select("sku_id, offer_status, v2_status, listed_price")
         .eq("channel", "web");
+
+      const webListingBySku = new Map<string, Record<string, unknown>>();
+      for (const listing of (webListings ?? []) as Record<string, unknown>[]) {
+        if (
+          listing.v2_status === "live" ||
+          ["live", "published", "PUBLISHED"].includes(String(listing.offer_status ?? ""))
+        ) {
+          webListingBySku.set(listing.sku_id as string, listing);
+        }
+      }
 
       const webSkuIds = new Set(
         (webListings ?? [])
@@ -264,6 +277,12 @@ Deno.serve(async (req) => {
         }
 
         const stockCount = stockMap.get(sku.id) || 0;
+        const webListing = webListingBySku.get(sku.id);
+        const listedPrice = Number(webListing?.listed_price ?? 0);
+        if (listedPrice <= 0) {
+          skipped++;
+          continue;
+        }
 
         try {
           const { data: listing, error: listingErr } = await supabaseAdmin.from("channel_listing").upsert(
@@ -272,7 +291,7 @@ Deno.serve(async (req) => {
               external_sku: sku.sku_code,
               sku_id: sku.id,
               offer_status: "publish_queued",
-              listed_price: sku.price,
+              listed_price: listedPrice,
               listed_quantity: stockCount,
               synced_at: new Date().toISOString(),
             },
@@ -284,7 +303,7 @@ Deno.serve(async (req) => {
             p_sku_id: sku.id,
             p_channel: "google_shopping",
             p_channel_listing_id: listing.id,
-            p_candidate_price: sku.price,
+            p_candidate_price: listedPrice,
           });
           if (snapshotErr) throw snapshotErr;
 

@@ -81,11 +81,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "accounting_event_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "accounting_event_sales_order_line_id_fkey"
@@ -113,6 +127,13 @@ export type Database = {
             columns: ["stock_unit_id"]
             isOneToOne: false
             referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
             referencedColumns: ["stock_unit_id"]
           },
           {
@@ -201,6 +222,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
         ]
       }
@@ -1842,11 +1870,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "expected_settlement_line_sales_order_line_id_fkey"
@@ -3153,6 +3195,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "payout_fee_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
@@ -3241,6 +3290,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
         ]
       }
@@ -4712,11 +4768,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
@@ -5013,6 +5083,13 @@ export type Database = {
             foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
             columns: ["cogs_source_unit_id"]
             isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
             referencedRelation: "v_unit_profit_v2"
             referencedColumns: ["stock_unit_id"]
           },
@@ -5029,6 +5106,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
           {
             foreignKeyName: "sales_order_line_sku_id_fkey"
@@ -5063,6 +5147,13 @@ export type Database = {
             columns: ["stock_unit_id"]
             isOneToOne: false
             referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
             referencedColumns: ["stock_unit_id"]
           },
           {
@@ -5195,6 +5286,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "sales_program_accrual_sales_program_id_fkey"
             columns: ["sales_program_id"]
             isOneToOne: false
@@ -5258,6 +5356,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
           {
             foreignKeyName: "sales_program_attribution_sales_program_id_fkey"
@@ -5680,6 +5785,13 @@ export type Database = {
             foreignKeyName: "stock_allocation_requested_stock_unit_id_fkey"
             columns: ["requested_stock_unit_id"]
             isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_requested_stock_unit_id_fkey"
+            columns: ["requested_stock_unit_id"]
+            isOneToOne: false
             referencedRelation: "v_unit_profit_v2"
             referencedColumns: ["stock_unit_id"]
           },
@@ -5691,11 +5803,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "stock_allocation_sales_order_line_id_fkey"
@@ -5723,6 +5849,13 @@ export type Database = {
             columns: ["selected_stock_unit_id"]
             isOneToOne: false
             referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_selected_stock_unit_id_fkey"
+            columns: ["selected_stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
             referencedColumns: ["stock_unit_id"]
           },
           {
@@ -5819,11 +5952,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "stock_cost_event_sales_order_line_id_fkey"
@@ -5858,6 +6005,13 @@ export type Database = {
             columns: ["stock_unit_id"]
             isOneToOne: false
             referencedRelation: "unit_profit_view"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
             referencedColumns: ["stock_unit_id"]
           },
           {
@@ -5970,6 +6124,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
           {
             foreignKeyName: "fk_stock_unit_payout"
@@ -6476,10 +6637,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "stock_unit_batch_id_fkey"
             columns: ["batch_id"]
             isOneToOne: false
             referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_blue_bell_monthly_statement_export: {
+        Row: {
+          accrual_created_at: string | null
+          basis_amount: number | null
+          commission_amount: number | null
+          discount_amount: number | null
+          net_commission_amount: number | null
+          order_date: string | null
+          order_number: string | null
+          origin_channel: string | null
+          period_end: string | null
+          period_start: string | null
+          reversed_amount: number | null
+          settlement_id: string | null
+          settlement_status: string | null
+          settlement_updated_at: string | null
+          status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_accrual_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_settlement"
             referencedColumns: ["id"]
           },
         ]
@@ -6521,6 +6717,62 @@ export type Database = {
           target_price: number | null
         }
         Relationships: []
+      }
+      v_margin_profit_report: {
+        Row: {
+          batch_id: string | null
+          fee_pct: number | null
+          gross_margin_pct: number | null
+          gross_revenue: number | null
+          landed_cost: number | null
+          mpn: string | null
+          net_margin_pct: number | null
+          net_profit: number | null
+          order_date: string | null
+          order_number: string | null
+          origin_channel: string | null
+          payout_id: string | null
+          period_start: string | null
+          product_name: string | null
+          program_commission_amount: number | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          sku: string | null
+          stock_unit_id: string | null
+          total_fee_amount: number | null
+          uid: string | null
+          v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_stock_unit_payout"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_unit_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_batches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       v_order_line_economics: {
         Row: {
@@ -6566,6 +6818,13 @@ export type Database = {
             foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
             columns: ["cogs_source_unit_id"]
             isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_cogs_source_unit_id_fkey"
+            columns: ["cogs_source_unit_id"]
+            isOneToOne: false
             referencedRelation: "v_unit_profit_v2"
             referencedColumns: ["stock_unit_id"]
           },
@@ -6575,6 +6834,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
           {
             foreignKeyName: "sales_order_line_sku_id_fkey"
@@ -6615,21 +6881,35 @@ export type Database = {
             foreignKeyName: "sales_order_line_stock_unit_id_fkey"
             columns: ["stock_unit_id"]
             isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["stock_unit_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_stock_unit_id_fkey"
+            columns: ["stock_unit_id"]
+            isOneToOne: false
             referencedRelation: "v_unit_profit_v2"
             referencedColumns: ["stock_unit_id"]
           },
         ]
       }
-      v_reconciliation_inbox: {
+      v_reconciliation_case_export: {
         Row: {
           amount_actual: number | null
           amount_expected: number | null
           case_type: string | null
+          close_code: string | null
+          closed_at: string | null
           created_at: string | null
+          diagnosis: string | null
           due_at: string | null
+          evidence_json: string | null
+          external_payout_id: string | null
           id: string | null
+          next_step: string | null
           order_number: string | null
-          owner_id: string | null
+          origin_channel: string | null
+          payout_channel: string | null
           payout_id: string | null
           recommended_action: string | null
           related_entity_id: string | null
@@ -6637,6 +6917,7 @@ export type Database = {
           sales_order_id: string | null
           sales_order_line_id: string | null
           severity: string | null
+          sku_code: string | null
           status: string | null
           suspected_root_cause: string | null
           updated_at: string | null
@@ -6658,11 +6939,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
             foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
             columns: ["sales_order_line_id"]
             isOneToOne: false
             referencedRelation: "sales_order_line"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
           },
           {
             foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
@@ -6679,6 +6974,216 @@ export type Database = {
             referencedColumns: ["sales_order_line_id"]
           },
         ]
+      }
+      v_reconciliation_inbox: {
+        Row: {
+          amount_actual: number | null
+          amount_expected: number | null
+          case_type: string | null
+          created_at: string | null
+          diagnosis: string | null
+          due_at: string | null
+          evidence: Json | null
+          external_payout_id: string | null
+          id: string | null
+          next_step: string | null
+          order_number: string | null
+          origin_channel: string | null
+          owner_id: string | null
+          payout_channel: string | null
+          payout_id: string | null
+          recommended_action: string | null
+          related_entity_id: string | null
+          related_entity_type: string | null
+          sales_order_id: string | null
+          sales_order_line_id: string | null
+          severity: string | null
+          sku_code: string | null
+          sku_id: string | null
+          status: string | null
+          suspected_root_cause: string | null
+          updated_at: string | null
+          variance_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_case_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_line"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_margin_profit_report"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_order_line_economics"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "v_unit_profit_v2"
+            referencedColumns: ["sales_order_line_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
+      v_settlement_close_export: {
+        Row: {
+          actual_fees: number | null
+          actual_gross: number | null
+          actual_refunds: number | null
+          actual_shipping: number | null
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          channel: string | null
+          close_status: string | null
+          expected_commission: number | null
+          expected_discount: number | null
+          expected_fees: number | null
+          expected_gross: number | null
+          expected_shipping: number | null
+          expected_tax: number | null
+          expected_total: number | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_count: number | null
+          payout_count: number | null
+          payout_fees: number | null
+          payout_gross: number | null
+          payout_net: number | null
+          period_end: string | null
+          period_start: string | null
+          unreconciled_payout_count: number | null
+          variance_amount: number | null
+        }
+        Relationships: []
+      }
+      v_settlement_order_rollup: {
+        Row: {
+          actual_fees: number | null
+          actual_gross: number | null
+          actual_net_lines: number | null
+          actual_refunds: number | null
+          actual_shipping: number | null
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          expected_commission: number | null
+          expected_discount: number | null
+          expected_fees: number | null
+          expected_gross: number | null
+          expected_shipping: number | null
+          expected_tax: number | null
+          expected_total: number | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_date: string | null
+          order_number: string | null
+          origin_channel: string | null
+          period_end: string | null
+          period_start: string | null
+          sales_order_id: string | null
+          variance_amount: number | null
+        }
+        Relationships: []
+      }
+      v_settlement_period_close: {
+        Row: {
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          channel_count: number | null
+          close_status: string | null
+          expected_total: number | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_count: number | null
+          payout_count: number | null
+          period_end: string | null
+          period_start: string | null
+          unreconciled_payout_count: number | null
+          variance_amount: number | null
+        }
+        Relationships: []
+      }
+      v_settlement_period_summary: {
+        Row: {
+          actual_fees: number | null
+          actual_gross: number | null
+          actual_refunds: number | null
+          actual_shipping: number | null
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          channel: string | null
+          expected_commission: number | null
+          expected_discount: number | null
+          expected_fees: number | null
+          expected_gross: number | null
+          expected_shipping: number | null
+          expected_tax: number | null
+          expected_total: number | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_count: number | null
+          payout_count: number | null
+          payout_fees: number | null
+          payout_gross: number | null
+          payout_net: number | null
+          period_end: string | null
+          period_start: string | null
+          unreconciled_payout_count: number | null
+          variance_amount: number | null
+        }
+        Relationships: []
       }
       v_unit_profit_v2: {
         Row: {
@@ -6713,6 +7218,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_order"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
           },
           {
             foreignKeyName: "stock_unit_batch_id_fkey"
@@ -6902,6 +7414,10 @@ export type Database = {
         Args: { p_outbound_command_id: string }
         Returns: string
       }
+      cancel_qbo_posting_intent: {
+        Args: { p_posting_intent_id: string }
+        Returns: string
+      }
       catalog_filter_options: {
         Args: {
           filter_subtheme?: string
@@ -7028,6 +7544,10 @@ export type Database = {
         Args: { p_name: string }
         Returns: Database["public"]["Enums"]["vendor_type"]
       }
+      invoke_subledger_scheduled_job: {
+        Args: { p_body?: Json; p_job: string }
+        Returns: number
+      }
       move_to_dlq: {
         Args: {
           dlq_name: string
@@ -7143,6 +7663,14 @@ export type Database = {
         }
         Returns: string
       }
+      refresh_actual_settlement_lines: {
+        Args: {
+          p_payout_id?: string
+          p_rebuild_cases?: boolean
+          p_sales_order_id?: string
+        }
+        Returns: number
+      }
       refresh_market_price_snapshots: {
         Args: { p_sku_id?: string }
         Returns: number
@@ -7160,8 +7688,16 @@ export type Database = {
         Args: { p_reason?: string; p_sales_order_line_id: string }
         Returns: Json
       }
+      resolve_reconciliation_case: {
+        Args: { p_case_id: string; p_note?: string; p_resolution: string }
+        Returns: Json
+      }
       retry_listing_outbound_command: {
         Args: { p_outbound_command_id: string }
+        Returns: string
+      }
+      retry_qbo_posting_intent: {
+        Args: { p_posting_intent_id: string }
         Returns: string
       }
       search_catalog_for_wishlist: {

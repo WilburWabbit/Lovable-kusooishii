@@ -83,12 +83,25 @@ Deno.serve(async (req) => {
     // ─── 1. Fetch SKU + product ─────────────────────────────
     const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name)")
+      .select("id, sku_code, condition_grade, qbo_item_id, product:product_id(mpn, name)")
       .eq("sku_code", skuCode)
       .single();
 
     if (skuErr || !sku) throw new Error(`SKU not found: ${skuCode}`);
 
+    const { data: pricingRows } = await admin
+      .from("v_current_sku_pricing")
+      .select("current_price, avg_cost, channel")
+      .eq("sku_code", skuCode)
+      .order("priced_at", { ascending: false, nullsFirst: false })
+      .limit(12);
+
+    const pricing = ((pricingRows ?? []) as Record<string, unknown>[])
+      .sort((a, b) => {
+        const rank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
+        return rank(b.channel) - rank(a.channel);
+      })
+      .find((row) => Number(row.current_price ?? row.avg_cost ?? 0) > 0) ?? null;
     const product = (sku as Record<string, unknown>).product as Record<string, unknown> | null;
     const productName = (product?.name as string) ?? skuCode;
     const grade = (sku as Record<string, unknown>).condition_grade as string;
@@ -140,7 +153,7 @@ Deno.serve(async (req) => {
 
     // ─── 4. Build QBO Item payload ──────────────────────────
     const skuRow = sku as Record<string, unknown>;
-    const salePrice = (skuRow.price as number | null) ?? (skuRow.sale_price as number | null);
+    const salePrice = pricing?.current_price as number | null;
     const description = `${productName} (${skuCode})`;
     const itemName = `${productName} (${skuCode})`;
 
@@ -157,8 +170,8 @@ Deno.serve(async (req) => {
 
     if (typeof purchaseCost === "number" && purchaseCost > 0) {
       itemPayload.PurchaseCost = supplierVatRegistered ? purchaseCost : exVAT(purchaseCost);
-    } else if (skuRow.avg_cost && (skuRow.avg_cost as number) > 0) {
-      itemPayload.PurchaseCost = exVAT(skuRow.avg_cost as number);
+    } else if (pricing?.avg_cost && (pricing.avg_cost as number) > 0) {
+      itemPayload.PurchaseCost = exVAT(pricing.avg_cost as number);
     }
 
     if (existingQboItemId && syncToken) {

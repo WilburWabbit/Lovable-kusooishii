@@ -177,7 +177,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin
         .from("sales_order")
         .select(
-          "id, order_number, doc_number, origin_channel, origin_reference, status, merchandise_subtotal, discount_total, club_discount_amount, tax_total, gross_total, currency, guest_name, guest_email, created_at, txn_date, notes, customer:customer_id(id, display_name, email), sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, product:product_id(name, mpn)))"
+          "id, order_number, doc_number, origin_channel, origin_reference, status, merchandise_subtotal, discount_total, tax_total, gross_total, currency, guest_name, guest_email, created_at, txn_date, notes, customer:customer_id(id, display_name, email), sales_order_line(id, quantity, unit_price, line_total, tax_code:tax_code_id(sales_tax_rate:sales_tax_rate_id(rate_percent)), sku:sku_id(sku_code, name, product:product_id(name, mpn)))"
         )
         .order("created_at", { ascending: false })
         .limit(1000);
@@ -490,13 +490,28 @@ Deno.serve(async (req) => {
       // Fetch SKU details
       const { data: sku, error: skuErr } = await admin
         .from("sku")
-        .select("id, sku_code, price")
+        .select("id, sku_code")
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
+      const { data: pricingRows } = await admin
+        .from("v_current_sku_pricing")
+        .select("current_price, channel")
+        .eq("sku_id", sku_id)
+        .order("priced_at", { ascending: false, nullsFirst: false })
+        .limit(12);
+      const webPriceRow = ((pricingRows ?? []) as Record<string, unknown>[])
+        .sort((a, b) => {
+          const rank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
+          return rank(b.channel) - rank(a.channel);
+        })
+        .find((row) => Number(row.current_price ?? 0) > 0);
+
       // Resolve price: caller-supplied > database
-      let finalPrice = (typeof listed_price === "number" && listed_price > 0) ? listed_price : sku.price;
+      let finalPrice = (typeof listed_price === "number" && listed_price > 0)
+        ? listed_price
+        : Number(webPriceRow?.current_price ?? 0);
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
 
       // Validate against the domain quote floor, not legacy listing columns.

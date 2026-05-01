@@ -1,28 +1,39 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Clock, FileText, Play, RefreshCcw, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Download, FileText, Play, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   useBlueBellOpenAccruals,
   useBlueBellStatement,
+  useBulkUpdateReconciliationCases,
   useCancelPostingIntent,
   useCreateBlueBellSettlement,
   useCancelListingCommand,
   useListingCommands,
+  useOperationsExport,
   usePostingIntents,
+  useRefreshActualSettlements,
   useRefreshReconciliationCases,
+  useReconciliationCaseNotes,
+  useReconciliationCaseOwners,
   useReconciliationInbox,
+  useResolveReconciliationCase,
   useRunListingCommandNow,
   useRetryPostingIntent,
   useRetryListingCommand,
   useRunPostingIntentNow,
   useRunListingCommandProcessor,
   useRunPostingIntentProcessor,
+  useSettlementPeriodClose,
+  useUpdateReconciliationCaseWorkflow,
   useUpdateReconciliationCaseStatus,
   type BlueBellStatementRow,
   type ListingCommandRow,
   type PostingIntentRow,
   type ReconciliationInboxCase,
+  type SettlementPeriodCloseRow,
 } from "@/hooks/admin/use-operations";
+import { useAuth } from "@/hooks/useAuth";
 import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "./ui-primitives";
 
 const severityColors: Record<string, string> = {
@@ -45,6 +56,16 @@ const statusColors: Record<string, string> = {
   in_progress: "#2563EB",
   resolved: "#16A34A",
   ignored: "#71717A",
+  blocked: "#DC2626",
+  review: "#D97706",
+  ready: "#16A34A",
+};
+
+const slaColors: Record<string, string> = {
+  overdue: "#DC2626",
+  due_soon: "#D97706",
+  scheduled: "#2563EB",
+  no_due_date: "#71717A",
 };
 
 function formatMoney(value: number | null): string {
@@ -71,12 +92,41 @@ function formatDate(value: string | null): string {
   });
 }
 
+function dueInDays(days: number): string {
+  const due = new Date();
+  due.setDate(due.getDate() + days);
+  due.setHours(17, 0, 0, 0);
+  return due.toISOString();
+}
+
+function promptForEvidence(caseRow: ReconciliationInboxCase, actionLabel: string): string | null {
+  const message = caseRow.requiresEvidence
+    ? `${actionLabel} requires evidence for ${humanizeToken(caseRow.caseType)}. Add the evidence or resolution note:`
+    : `${actionLabel}. Add an optional note:`;
+  const note = window.prompt(message, "");
+  if (note === null) return null;
+  if (caseRow.requiresEvidence && !note.trim()) {
+    toast.error("This finance-sensitive case requires evidence or a resolution note.");
+    return null;
+  }
+  return note.trim();
+}
+
 function shortId(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
 
 function humanizeToken(value: string): string {
   return value.replace(/_/g, " ");
+}
+
+function evidenceSummary(evidence: Record<string, unknown>): string {
+  const entries = Object.entries(evidence).filter(([, value]) => value != null && value !== "");
+  if (entries.length === 0) return "No structured evidence was recorded for this case.";
+  return entries
+    .slice(0, 4)
+    .map(([key, value]) => `${humanizeToken(key)}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`)
+    .join(" · ");
 }
 
 function reconciliationTarget(caseRow: ReconciliationInboxCase) {
@@ -129,13 +179,171 @@ function BlueBellStatementActions({ row, canCreate }: { row: BlueBellStatementRo
   );
 }
 
+function ExportButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+    >
+      <Download className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function CaseDiagnosis({ caseRow }: { caseRow: ReconciliationInboxCase }) {
+  return (
+    <div className="max-w-[420px] space-y-2 text-xs">
+      <div>
+        <div className="font-semibold text-zinc-700">Likely cause</div>
+        <div className="text-zinc-600">{caseRow.diagnosis ?? caseRow.suspectedRootCause ?? "No diagnosis recorded yet."}</div>
+      </div>
+      <div>
+        <div className="font-semibold text-zinc-700">Fix next</div>
+        <div className="text-zinc-600">{caseRow.nextStep ?? caseRow.recommendedAction ?? "Review the related records, then resolve with a note."}</div>
+      </div>
+      <div className="rounded-md bg-zinc-50 px-2 py-1.5 text-[11px] text-zinc-500">
+        {evidenceSummary(caseRow.evidence)}
+      </div>
+    </div>
+  );
+}
+
+function CaseNotesPanel({
+  caseId,
+  onAddNote,
+  disabled,
+}: {
+  caseId: string | null;
+  onAddNote: (caseId: string) => void;
+  disabled: boolean;
+}) {
+  const { data: notes = [], isLoading } = useReconciliationCaseNotes(caseId);
+  if (!caseId) return null;
+
+  return (
+    <SurfaceCard noPadding>
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <div>
+          <SectionHead>Case Notes</SectionHead>
+          <p className="text-xs text-zinc-500">Audit history and operator evidence for {shortId(caseId)}.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onAddNote(caseId)}
+          disabled={disabled}
+          className="rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          Add Note
+        </button>
+      </div>
+      <div className="max-h-72 overflow-y-auto divide-y divide-zinc-100">
+        {isLoading ? (
+          <div className="px-4 py-6 text-sm text-zinc-500">Loading notes...</div>
+        ) : notes.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-zinc-500">No notes recorded yet.</div>
+        ) : (
+          notes.map((note) => (
+            <div key={note.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                <Badge label={humanizeToken(note.noteType)} color={statusColors[note.noteType] ?? "#71717A"} small />
+                <span>{note.actorName ?? "System"}</span>
+                <span>{formatDateTime(note.createdAt)}</span>
+              </div>
+              <p className="mt-1 text-sm text-zinc-700">{note.note ?? "Workflow update"}</p>
+              {Object.keys(note.evidence).length > 0 && (
+                <p className="mt-1 rounded-md bg-zinc-50 px-2 py-1 text-[11px] text-zinc-500">
+                  {evidenceSummary(note.evidence)}
+                </p>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </SurfaceCard>
+  );
+}
+
+function ReconciliationSmartActions({
+  caseRow,
+  onAction,
+  disabled,
+}: {
+  caseRow: ReconciliationInboxCase;
+  onAction: (id: string, resolution: string) => void;
+  disabled: boolean;
+}) {
+  const actions: Array<{ label: string; resolution: string; title: string }> = [];
+
+  if (caseRow.caseType === "unmatched_payout_fee") {
+    actions.push({
+      label: "Link",
+      resolution: "link_payout_fee_by_external_order",
+      title: "Match this fee to a sales order by external order ID",
+    });
+  }
+  if (caseRow.caseType === "missing_payout" || caseRow.caseType === "amount_mismatch" || caseRow.caseType === "duplicate_candidate") {
+    actions.push({
+      label: "Refresh",
+      resolution: "refresh_settlement",
+      title: "Refresh expected and actual settlement evidence",
+    });
+  }
+  if (caseRow.caseType === "qbo_posting_gap" && caseRow.salesOrderId) {
+    actions.push({
+      label: "Queue QBO",
+      resolution: "queue_qbo_order_posting",
+      title: "Queue QBO posting for this order",
+    });
+  }
+  if (actions.length === 0) return null;
+
+  return (
+    <>
+      {actions.map((action) => (
+        <button
+          key={action.resolution}
+          type="button"
+          onClick={() => onAction(caseRow.id, action.resolution)}
+          disabled={disabled}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 px-2 text-[11px] font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+          title={action.title}
+        >
+          {action.label}
+        </button>
+      ))}
+    </>
+  );
+}
+
+function SettlementPeriodStatus({ row }: { row: SettlementPeriodCloseRow }) {
+  return <Badge label={row.closeStatus} color={statusColors[row.closeStatus] ?? "#71717A"} small />;
+}
+
 export function OperationsView() {
+  const { user } = useAuth();
   const { data: cases = [], isLoading: casesLoading } = useReconciliationInbox();
+  const { data: owners = [] } = useReconciliationCaseOwners();
   const { data: intents = [], isLoading: intentsLoading } = usePostingIntents();
   const { data: listingCommands = [], isLoading: listingCommandsLoading } = useListingCommands();
+  const { data: settlementPeriods = [], isLoading: settlementPeriodsLoading } = useSettlementPeriodClose();
   const { data: blueBellStatement = [], isLoading: blueBellStatementLoading } = useBlueBellStatement();
   const { data: blueBellAccruals = [], isLoading: blueBellAccrualsLoading } = useBlueBellOpenAccruals();
   const updateCase = useUpdateReconciliationCaseStatus();
+  const updateCaseWorkflow = useUpdateReconciliationCaseWorkflow();
+  const bulkUpdateCases = useBulkUpdateReconciliationCases();
+  const resolveCase = useResolveReconciliationCase();
+  const refreshActualSettlements = useRefreshActualSettlements();
   const runProcessor = useRunPostingIntentProcessor();
   const runPostingIntentNow = useRunPostingIntentNow();
   const runListingProcessor = useRunListingCommandProcessor();
@@ -145,6 +353,11 @@ export function OperationsView() {
   const cancelListingCommand = useCancelListingCommand();
   const retryPostingIntent = useRetryPostingIntent();
   const cancelPostingIntent = useCancelPostingIntent();
+  const exportReport = useOperationsExport();
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [slaFilter, setSlaFilter] = useState("all");
+  const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
+  const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
 
   const openCases = cases.length;
   const criticalCases = cases.filter((c) => c.severity === "critical" || c.severity === "high").length;
@@ -153,18 +366,150 @@ export function OperationsView() {
   const pendingListingCommands = listingCommands.filter((c) => c.status === "pending").length;
   const failedListingCommands = listingCommands.filter((c) => c.status === "failed").length;
   const blueBellOutstanding = blueBellStatement.reduce((sum, row) => sum + row.commissionOutstanding, 0);
+  const blockedPeriods = settlementPeriods.filter((row) => row.closeStatus === "blocked").length;
+  const settlementVariance = settlementPeriods.slice(0, 3).reduce((sum, row) => sum + row.varianceAmount, 0);
   const unsettledBlueBellPeriods = new Set(
     blueBellAccruals
       .filter((accrual) => accrual.status === "open" && !accrual.settlementId)
       .map((accrual) => accrual.createdAt.slice(0, 7)),
   );
+  const visibleCases = useMemo(() => {
+    return cases.filter((caseRow) => {
+      const ownerMatch =
+        ownerFilter === "all" ||
+        (ownerFilter === "mine" && !!user?.id && caseRow.ownerId === user.id) ||
+        (ownerFilter === "unassigned" && !caseRow.ownerId) ||
+        caseRow.ownerId === ownerFilter;
+      const slaMatch = slaFilter === "all" || caseRow.slaStatus === slaFilter;
+      return ownerMatch && slaMatch;
+    });
+  }, [cases, ownerFilter, slaFilter, user?.id]);
+  const selectedCases = visibleCases.filter((caseRow) => selectedCaseIds.includes(caseRow.id));
+  const allVisibleSelected = visibleCases.length > 0 && selectedCaseIds.length > 0 && visibleCases.every((caseRow) => selectedCaseIds.includes(caseRow.id));
 
   const handleCaseStatus = (id: string, status: "resolved" | "ignored" | "in_progress") => {
+    const caseRow = cases.find((row) => row.id === id);
+    const note = caseRow && (status === "resolved" || status === "ignored")
+      ? promptForEvidence(caseRow, status === "resolved" ? "Resolve case" : "Ignore case")
+      : null;
+    if ((status === "resolved" || status === "ignored") && note === null) return;
+
     updateCase.mutate(
-      { id, status },
+      {
+        id,
+        status,
+        note,
+        evidence: note ? { resolution_note: note } : {},
+      },
       {
         onSuccess: () => toast.success(status === "in_progress" ? "Case marked in progress" : `Case ${status}`),
         onError: (err) => toast.error(err instanceof Error ? err.message : "Case update failed"),
+      },
+    );
+  };
+
+  const handleAssignCase = (id: string, ownerId: string | null) => {
+    updateCaseWorkflow.mutate(
+      {
+        id,
+        ownerId,
+        clearOwner: ownerId == null,
+        note: ownerId ? "Assigned from Operations dashboard" : "Owner cleared from Operations dashboard",
+      },
+      {
+        onSuccess: () => toast.success(ownerId ? "Case assigned" : "Case unassigned"),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Assignment failed"),
+      },
+    );
+  };
+
+  const handleSetDueDate = (id: string, dueAt: string | null) => {
+    updateCaseWorkflow.mutate(
+      {
+        id,
+        dueAt,
+        clearDueAt: dueAt == null,
+        note: dueAt ? `Due date set to ${formatDateTime(dueAt)}` : "Due date cleared",
+      },
+      {
+        onSuccess: () => toast.success(dueAt ? "Due date set" : "Due date cleared"),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Due date update failed"),
+      },
+    );
+  };
+
+  const handleAddCaseNote = (id: string) => {
+    const note = window.prompt("Add a case note or evidence:");
+    if (note === null) return;
+    if (!note.trim()) {
+      toast.error("Note cannot be blank");
+      return;
+    }
+
+    updateCaseWorkflow.mutate(
+      { id, note: note.trim(), evidence: { operator_note: note.trim() } },
+      {
+        onSuccess: () => toast.success("Case note added"),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Note update failed"),
+      },
+    );
+  };
+
+  const handleToggleCase = (id: string, checked: boolean) => {
+    setSelectedCaseIds((current) => checked ? [...new Set([...current, id])] : current.filter((caseId) => caseId !== id));
+  };
+
+  const handleToggleAllVisible = (checked: boolean) => {
+    setSelectedCaseIds(checked ? visibleCases.map((caseRow) => caseRow.id) : []);
+  };
+
+  const handleBulkUpdate = (
+    status: "in_progress" | "resolved" | "ignored" | null,
+    actionLabel: string,
+    extra?: { ownerId?: string | null; dueAt?: string | null; clearOwner?: boolean; clearDueAt?: boolean },
+  ) => {
+    if (selectedCases.length === 0) {
+      toast.error("Select at least one case first");
+      return;
+    }
+
+    const needsEvidence = selectedCases.some((caseRow) => caseRow.requiresEvidence && (status === "resolved" || status === "ignored"));
+    const note = needsEvidence || status === "resolved" || status === "ignored"
+      ? window.prompt(`${actionLabel}. Add evidence/note for the selected case(s):`, "")
+      : window.prompt(`${actionLabel}. Optional note:`, "");
+    if (note === null) return;
+    if (needsEvidence && !note.trim()) {
+      toast.error("Finance-sensitive cases require evidence or a resolution note.");
+      return;
+    }
+
+    bulkUpdateCases.mutate(
+      {
+        ids: selectedCases.map((caseRow) => caseRow.id),
+        status,
+        ownerId: extra?.ownerId,
+        dueAt: extra?.dueAt,
+        clearOwner: extra?.clearOwner,
+        clearDueAt: extra?.clearDueAt,
+        note: note.trim() || `${actionLabel} from Operations dashboard`,
+        evidence: note.trim() ? { bulk_note: note.trim(), bulk_action: actionLabel } : { bulk_action: actionLabel },
+      },
+      {
+        onSuccess: (result) => {
+          setSelectedCaseIds([]);
+          toast.success(`Updated ${result.updated ?? selectedCases.length} case(s)`);
+        },
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Bulk update failed"),
+      },
+    );
+  };
+
+  const handleSmartCaseAction = (id: string, resolution: string) => {
+    resolveCase.mutate(
+      { id, resolution, note: "Run from Operations dashboard" },
+      {
+        onSuccess: () => toast.success("Reconciliation action completed"),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Reconciliation action failed"),
       },
     );
   };
@@ -232,6 +577,23 @@ export function OperationsView() {
     });
   };
 
+  const handleRefreshActualSettlements = () => {
+    refreshActualSettlements.mutate(undefined, {
+      onSuccess: (count) => toast.success(`Refreshed ${count} actual settlement line(s)`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Actual settlement refresh failed"),
+    });
+  };
+
+  const handleExport = (
+    kind: "settlement-close" | "blue-bell-statement" | "reconciliation-cases" | "margin-profit",
+    label: string,
+  ) => {
+    exportReport.mutate(kind, {
+      onSuccess: (count) => toast.success(`${label} exported (${count} row${count === 1 ? "" : "s"})`),
+      onError: (err) => toast.error(err instanceof Error ? err.message : `${label} export failed`),
+    });
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -240,6 +602,16 @@ export function OperationsView() {
           <p className="text-xs text-zinc-500">Listing commands, finance exceptions, settlement mismatches, and QBO posting outbox health.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ExportButton
+            label="Profit CSV"
+            onClick={() => handleExport("margin-profit", "Margin/profit report")}
+            disabled={exportReport.isPending}
+          />
+          <ExportButton
+            label="Cases CSV"
+            onClick={() => handleExport("reconciliation-cases", "Reconciliation cases")}
+            disabled={exportReport.isPending}
+          />
           <button
             type="button"
             onClick={handleRefreshReconciliation}
@@ -248,6 +620,15 @@ export function OperationsView() {
           >
             <RefreshCcw className="h-3.5 w-3.5" />
             {refreshReconciliation.isPending ? "Refreshing..." : "Refresh Cases"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRefreshActualSettlements}
+            disabled={refreshActualSettlements.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" />
+            {refreshActualSettlements.isPending ? "Refreshing..." : "Refresh Settlements"}
           </button>
           <button
             type="button"
@@ -270,15 +651,74 @@ export function OperationsView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-9">
         <SummaryCard label="Open Cases" value={openCases} color={openCases > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="High Severity" value={criticalCases} color={criticalCases > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="Blocked Periods" value={blockedPeriods} color={blockedPeriods > 0 ? "#DC2626" : "#16A34A"} />
+        <SummaryCard label="3mo Variance" value={formatMoney(settlementVariance)} color={Math.abs(settlementVariance) > 0.05 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Pending Listings" value={pendingListingCommands} color={pendingListingCommands > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed Listings" value={failedListingCommands} color={failedListingCommands > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Pending QBO Posts" value={pendingIntents} color={pendingIntents > 0 ? "#D97706" : "#16A34A"} />
         <SummaryCard label="Failed QBO Posts" value={failedIntents} color={failedIntents > 0 ? "#DC2626" : "#16A34A"} />
         <SummaryCard label="Blue Bell Owed" value={formatMoney(blueBellOutstanding)} color={blueBellOutstanding > 0 ? "#D97706" : "#16A34A"} />
       </div>
+
+      <SurfaceCard noPadding>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Settlement Period Close</SectionHead>
+            <p className="text-xs text-zinc-500">Monthly close readiness from expected settlement, actual payout evidence, variance, and open cases.</p>
+          </div>
+          <ExportButton
+            label="Export Close"
+            onClick={() => handleExport("settlement-close", "Settlement close")}
+            disabled={exportReport.isPending}
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Period</th>
+                <th className="px-3 py-2 text-right font-semibold">Orders</th>
+                <th className="px-3 py-2 text-right font-semibold">Expected</th>
+                <th className="px-3 py-2 text-right font-semibold">Actual</th>
+                <th className="px-3 py-2 text-right font-semibold">Variance</th>
+                <th className="px-3 py-2 text-right font-semibold">Payouts</th>
+                <th className="px-3 py-2 text-right font-semibold">Open Cases</th>
+                <th className="px-4 py-2 text-right font-semibold">Mismatch / Missing</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {settlementPeriodsLoading ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">Loading settlement close periods...</td></tr>
+              ) : settlementPeriods.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No settlement period data yet.</td></tr>
+              ) : (
+                settlementPeriods.map((row) => (
+                  <tr key={row.periodStart} className="hover:bg-zinc-50/70">
+                    <td className="px-4 py-3"><SettlementPeriodStatus row={row} /></td>
+                    <td className="px-3 py-3 text-xs text-zinc-700">{formatDate(row.periodStart)} - {formatDate(row.periodEnd)}</td>
+                    <td className="px-3 py-3 text-right"><Mono>{row.orderCount}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(row.expectedTotal)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono>{formatMoney(row.actualTotal)}</Mono></td>
+                    <td className="px-3 py-3 text-right"><Mono color={Math.abs(row.varianceAmount) > 0.05 ? "amber" : "green"}>{formatMoney(row.varianceAmount)}</Mono></td>
+                    <td className="px-3 py-3 text-right">
+                      <div><Mono>{row.payoutCount}</Mono></div>
+                      {row.unreconciledPayoutCount > 0 && <div className="text-[11px] text-red-600">{row.unreconciledPayoutCount} unreconciled</div>}
+                    </td>
+                    <td className="px-3 py-3 text-right"><Mono color={row.openCaseCount > 0 ? "red" : "green"}>{row.openCaseCount}</Mono></td>
+                    <td className="px-4 py-3 text-right text-[11px] text-zinc-500">
+                      {row.amountMismatchCaseCount} mismatch / {row.missingPayoutCaseCount} missing
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SurfaceCard>
 
       <SurfaceCard noPadding>
         <div className="border-b border-zinc-200 px-4 py-3">
@@ -357,9 +797,16 @@ export function OperationsView() {
       </SurfaceCard>
 
       <SurfaceCard noPadding>
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <SectionHead>Blue Bell Statement</SectionHead>
-          <p className="text-xs text-zinc-500">Monthly commission accruals from the sales-program ledger.</p>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Blue Bell Statement</SectionHead>
+            <p className="text-xs text-zinc-500">Monthly commission accruals from the sales-program ledger.</p>
+          </div>
+          <ExportButton
+            label="Export Statement"
+            onClick={() => handleExport("blue-bell-statement", "Blue Bell statement")}
+            disabled={exportReport.isPending}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-left text-sm">
@@ -452,18 +899,96 @@ export function OperationsView() {
       </SurfaceCard>
 
       <SurfaceCard noPadding>
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <SectionHead>Reconciliation Inbox</SectionHead>
-          <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, programme, and QBO posting exceptions.</p>
+        <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <SectionHead>Reconciliation Inbox</SectionHead>
+            <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, programme, and QBO posting exceptions with diagnosis and next action.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={ownerFilter}
+              onChange={(event) => setOwnerFilter(event.target.value)}
+              className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700"
+              aria-label="Filter by owner"
+            >
+              <option value="all">All owners</option>
+              <option value="mine">Mine</option>
+              <option value="unassigned">Unassigned</option>
+              {owners.map((owner) => (
+                <option key={owner.userId} value={owner.userId}>{owner.displayName}</option>
+              ))}
+            </select>
+            <select
+              value={slaFilter}
+              onChange={(event) => setSlaFilter(event.target.value)}
+              className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700"
+              aria-label="Filter by SLA"
+            >
+              <option value="all">All SLA</option>
+              <option value="overdue">Overdue</option>
+              <option value="due_soon">Due soon</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="no_due_date">No due date</option>
+            </select>
+            <ExportButton
+              label="Export Cases"
+              onClick={() => handleExport("reconciliation-cases", "Reconciliation cases")}
+              disabled={exportReport.isPending}
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2">
+          <span className="text-xs font-medium text-zinc-600">{selectedCases.length} selected</span>
+          <button
+            type="button"
+            onClick={() => handleBulkUpdate("in_progress", "Mark selected cases in progress")}
+            disabled={selectedCases.length === 0 || bulkUpdateCases.isPending}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Bulk In Progress
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBulkUpdate(null, "Assign selected cases to me", { ownerId: user?.id ?? null })}
+            disabled={selectedCases.length === 0 || !user?.id || bulkUpdateCases.isPending}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Assign To Me
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBulkUpdate(null, "Set selected cases due in 3 days", { dueAt: dueInDays(3) })}
+            disabled={selectedCases.length === 0 || bulkUpdateCases.isPending}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Due +3 Days
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBulkUpdate("resolved", "Resolve selected cases")}
+            disabled={selectedCases.length === 0 || bulkUpdateCases.isPending}
+            className="rounded-md border border-green-200 bg-white px-2 py-1 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50"
+          >
+            Resolve Selected
+          </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1220px] text-left text-sm">
             <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
               <tr>
+                <th className="px-4 py-2 font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={(event) => handleToggleAllVisible(event.target.checked)}
+                    aria-label="Select all visible cases"
+                  />
+                </th>
                 <th className="px-4 py-2 font-semibold">Severity</th>
                 <th className="px-3 py-2 font-semibold">Case</th>
                 <th className="px-3 py-2 font-semibold">Target</th>
                 <th className="px-3 py-2 font-semibold">Variance</th>
+                <th className="px-3 py-2 font-semibold">Owner / SLA</th>
                 <th className="px-3 py-2 font-semibold">Root Cause</th>
                 <th className="px-3 py-2 font-semibold">Created</th>
                 <th className="px-4 py-2 text-right font-semibold">Actions</th>
@@ -471,12 +996,20 @@ export function OperationsView() {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {casesLoading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Loading cases...</td></tr>
-              ) : cases.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No open reconciliation cases.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">Loading cases...</td></tr>
+              ) : visibleCases.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No reconciliation cases match the current filters.</td></tr>
               ) : (
-                cases.map((caseRow) => (
+                visibleCases.map((caseRow) => (
                   <tr key={caseRow.id} className="align-top hover:bg-zinc-50/70">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedCaseIds.includes(caseRow.id)}
+                        onChange={(event) => handleToggleCase(caseRow.id, event.target.checked)}
+                        aria-label={`Select case ${shortId(caseRow.id)}`}
+                      />
+                    </td>
                     <td className="px-4 py-3"><Badge label={caseRow.severity} color={severityColors[caseRow.severity] ?? "#71717A"} small /></td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
@@ -490,13 +1023,55 @@ export function OperationsView() {
                       <div className="text-zinc-900">{formatMoney(caseRow.varianceAmount)}</div>
                       <div className="text-[11px] text-zinc-500">{formatMoney(caseRow.amountExpected)} exp / {formatMoney(caseRow.amountActual)} act</div>
                     </td>
-                    <td className="max-w-[300px] px-3 py-3 text-xs text-zinc-600">
-                      <div>{caseRow.suspectedRootCause ?? "—"}</div>
-                      {caseRow.recommendedAction && <div className="mt-1 text-zinc-400">{caseRow.recommendedAction}</div>}
+                    <td className="px-3 py-3 text-xs">
+                      <div className="text-zinc-700">{caseRow.ownerName ?? "Unassigned"}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Badge label={humanizeToken(caseRow.slaStatus)} color={slaColors[caseRow.slaStatus] ?? "#71717A"} small />
+                        <span className="text-zinc-500">{formatDateTime(caseRow.dueAt)}</span>
+                      </div>
+                      {caseRow.latestNote && (
+                        <div className="mt-1 max-w-[180px] truncate text-[11px] text-zinc-500" title={caseRow.latestNote}>
+                          {caseRow.noteCount} note{caseRow.noteCount === 1 ? "" : "s"} · {caseRow.latestNote}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <CaseDiagnosis caseRow={caseRow} />
                     </td>
                     <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(caseRow.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1.5">
+                        <ReconciliationSmartActions
+                          caseRow={caseRow}
+                          onAction={handleSmartCaseAction}
+                          disabled={resolveCase.isPending}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setActiveCaseId(activeCaseId === caseRow.id ? null : caseRow.id)}
+                          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
+                          title="View notes"
+                        >
+                          Notes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAssignCase(caseRow.id, user?.id ?? null)}
+                          disabled={!user?.id || updateCaseWorkflow.isPending}
+                          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Assign to me"
+                        >
+                          Mine
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSetDueDate(caseRow.id, dueInDays(3))}
+                          disabled={updateCaseWorkflow.isPending}
+                          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                          title="Set due date to three days from now"
+                        >
+                          Due
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleCaseStatus(caseRow.id, "in_progress")}
@@ -530,6 +1105,12 @@ export function OperationsView() {
           </table>
         </div>
       </SurfaceCard>
+
+      <CaseNotesPanel
+        caseId={activeCaseId}
+        onAddNote={handleAddCaseNote}
+        disabled={updateCaseWorkflow.isPending}
+      />
 
       <SurfaceCard noPadding>
         <div className="border-b border-zinc-200 px-4 py-3">

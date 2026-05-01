@@ -537,7 +537,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     }
 
     // ── Resolve VAT from shipping country ──
-    // Storefront prices (sku.price) are GROSS (VAT-inclusive per UK consumer law).
+    // Storefront prices from v_current_sku_pricing are GROSS (VAT-inclusive per UK consumer law).
     // Convert to NET for consistent storage across all channels.
     // Falls back to UK 20% if the required tax code isn't synced yet.
     let vatResolution: VatResolution;
@@ -568,7 +568,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
     const vatMultiplier = 1 + vatResolution.ratePercent / 100;
     console.log(`VAT resolution: country=${shippingCountry}, destination=${vatResolution.destination}, rate=${vatResolution.ratePercent}%, fallback=${vatResolutionFallback}`);
 
-    // ── Pre-compute NET line data from SKU prices ──
+    // ── Pre-compute NET line data from the pricing view ──
     // This must happen before the order insert so merchandise_subtotal is NET.
     interface PreparedLine {
       skuId: string;
@@ -590,12 +590,32 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
       const skuIds = skuItems.map((i: { skuId: string; quantity: number }) => i.skuId);
       const { data: skuRows } = await supabase
         .from("sku")
-        .select("id, sku_code, price")
+        .select("id, sku_code")
         .in("id", skuIds);
 
-      const skuMap = new Map<string, { id: string; sku_code: string; price: number }>();
+      const skuMap = new Map<string, { id: string; sku_code: string }>();
       for (const row of skuRows ?? []) {
         skuMap.set(row.id, row);
+      }
+
+      const { data: pricingRows, error: pricingErr } = await supabase
+        .from("v_current_sku_pricing")
+        .select("sku_id, current_price, channel")
+        .in("sku_id", skuIds);
+      if (pricingErr) throw pricingErr;
+
+      const priceRank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
+      const priceBySku = new Map<string, number>();
+      const rankedBySku = new Map<string, number>();
+      for (const row of (pricingRows ?? []) as Record<string, unknown>[]) {
+        const skuId = row.sku_id as string;
+        const price = Number(row.current_price ?? 0);
+        const rank = priceRank(row.channel);
+        if (price <= 0) continue;
+        if (!rankedBySku.has(skuId) || rank > (rankedBySku.get(skuId) ?? 0)) {
+          priceBySku.set(skuId, price);
+          rankedBySku.set(skuId, rank);
+        }
       }
 
       for (const item of skuItems) {
@@ -604,7 +624,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe:
           console.warn(`SKU ${item.skuId} not found, skipping order line`);
           continue;
         }
-        const grossPrice = Number(sku.price) || 0;
+        const grossPrice = priceBySku.get(item.skuId) ?? 0;
+        if (grossPrice <= 0) {
+          console.warn(`SKU ${item.skuId} has no pricing snapshot/view price, skipping order line`);
+          continue;
+        }
         const netUnitPrice = Math.round((grossPrice / vatMultiplier) * 100) / 100;
         const lineTax = Math.round((grossPrice - netUnitPrice) * 100) / 100;
 

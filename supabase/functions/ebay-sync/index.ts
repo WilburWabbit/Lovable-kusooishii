@@ -871,11 +871,24 @@ Deno.serve(async (req) => {
       // Fetch SKU + product data
       const { data: sku, error: skuErr } = await admin
         .from("sku")
-        .select("id, sku_code, price, name, product:product_id(id, mpn, name, description)")
+        .select("id, sku_code, name, product:product_id(id, mpn, name, description)")
         .eq("id", sku_id)
         .single();
       if (skuErr || !sku) throw new Error("SKU not found");
       const prod = (sku as any).product;
+
+      const { data: pricingRows } = await admin
+        .from("v_current_sku_pricing")
+        .select("current_price, channel")
+        .eq("sku_id", sku_id)
+        .order("priced_at", { ascending: false, nullsFirst: false })
+        .limit(12);
+      const ebayPriceRow = ((pricingRows ?? []) as Record<string, unknown>[])
+        .sort((a, b) => {
+          const rank = (channel: unknown) => channel === "ebay" ? 4 : channel === "all" ? 2 : 1;
+          return rank(b.channel) - rank(a.channel);
+        })
+        .find((row) => Number(row.current_price ?? 0) > 0);
 
       // Count available stock
       const { count: stockCount } = await admin
@@ -889,7 +902,7 @@ Deno.serve(async (req) => {
 
       const finalPrice = typeof listed_price === "number" && listed_price > 0
         ? listed_price
-        : sku.price;
+        : Number(ebayPriceRow?.current_price ?? 0);
       if (!finalPrice || finalPrice <= 0) {
         throw new Error(`Cannot queue eBay listing for ${sku.sku_code}: no valid listing price`);
       }
