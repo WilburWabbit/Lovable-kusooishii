@@ -7230,6 +7230,38 @@ export type Database = {
         }
         Relationships: []
       }
+      v_subledger_job_run: {
+        Row: {
+          actor_id: string | null
+          actor_type: string | null
+          error: string | null
+          id: string | null
+          job: string | null
+          job_success: boolean | null
+          occurred_at: string | null
+          requested_job: string | null
+          response: Json | null
+          rows_processed: number | null
+          run_success: boolean | null
+        }
+        Relationships: []
+      }
+      v_subledger_operations_health: {
+        Row: {
+          area: string | null
+          failed_count: number | null
+          health_status: string | null
+          last_failure_at: string | null
+          last_success_at: string | null
+          oldest_pending_at: string | null
+          open_count: number | null
+          overdue_count: number | null
+          pending_count: number | null
+          recommendation: string | null
+          severity: string | null
+        }
+        Relationships: []
+      }
       v_unit_profit_v2: {
         Row: {
           batch_id: string | null
