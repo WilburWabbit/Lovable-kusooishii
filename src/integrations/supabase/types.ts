@@ -4645,6 +4645,125 @@ export type Database = {
           },
         ]
       }
+      qbo_refresh_drift: {
+        Row: {
+          app_reference: string | null
+          applied_at: string | null
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          current_values: Json
+          drift_type: string
+          id: string
+          local_entity_id: string | null
+          local_entity_type: string | null
+          local_reference: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_entity_type: string
+          qbo_refresh_run_id: string
+          qbo_values: Json
+          recommended_action: string | null
+          severity: string
+          status: string
+          target_route: string | null
+        }
+        Insert: {
+          app_reference?: string | null
+          applied_at?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          current_values?: Json
+          drift_type: string
+          id?: string
+          local_entity_id?: string | null
+          local_entity_type?: string | null
+          local_reference?: string | null
+          qbo_doc_number?: string | null
+          qbo_entity_id?: string | null
+          qbo_entity_type: string
+          qbo_refresh_run_id: string
+          qbo_values?: Json
+          recommended_action?: string | null
+          severity?: string
+          status?: string
+          target_route?: string | null
+        }
+        Update: {
+          app_reference?: string | null
+          applied_at?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          current_values?: Json
+          drift_type?: string
+          id?: string
+          local_entity_id?: string | null
+          local_entity_type?: string | null
+          local_reference?: string | null
+          qbo_doc_number?: string | null
+          qbo_entity_id?: string | null
+          qbo_entity_type?: string
+          qbo_refresh_run_id?: string
+          qbo_values?: Json
+          recommended_action?: string | null
+          severity?: string
+          status?: string
+          target_route?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_refresh_drift_qbo_refresh_run_id_fkey"
+            columns: ["qbo_refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "qbo_refresh_run"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qbo_refresh_run: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          mode: string
+          requested_by: string | null
+          requested_scope: Json
+          result_summary: Json
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          mode?: string
+          requested_by?: string | null
+          requested_scope?: Json
+          result_summary?: Json
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          mode?: string
+          requested_by?: string | null
+          requested_scope?: Json
+          result_summary?: Json
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       rebrickable_inventories: {
         Row: {
           id: number
@@ -6990,6 +7109,43 @@ export type Database = {
           },
         ]
       }
+      v_qbo_refresh_drift: {
+        Row: {
+          app_reference: string | null
+          applied_at: string | null
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string | null
+          current_values: Json | null
+          drift_type: string | null
+          id: string | null
+          local_entity_id: string | null
+          local_entity_type: string | null
+          local_reference: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_entity_type: string | null
+          qbo_refresh_run_id: string | null
+          qbo_values: Json | null
+          recommended_action: string | null
+          refresh_completed_at: string | null
+          refresh_mode: string | null
+          refresh_started_at: string | null
+          refresh_status: string | null
+          severity: string | null
+          status: string | null
+          target_route: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_refresh_drift_qbo_refresh_run_id_fkey"
+            columns: ["qbo_refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "qbo_refresh_run"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_reconciliation_case_export: {
         Row: {
           amount_actual: number | null
@@ -7565,6 +7721,14 @@ export type Database = {
         Args: { p_order_id?: string; p_quantity: number; p_sku_id: string }
         Returns: string[]
       }
+      apply_approved_qbo_refresh_drift: {
+        Args: { p_actor_id?: string; p_run_id?: string }
+        Returns: number
+      }
+      approve_qbo_refresh_drift: {
+        Args: { p_actor_id?: string; p_drift_id: string }
+        Returns: Json
+      }
       browse_catalog: {
         Args: {
           filter_grade?: string
@@ -7832,6 +7996,7 @@ export type Database = {
         Args: never
         Returns: number
       }
+      rebuild_qbo_refresh_drift: { Args: { p_run_id: string }; Returns: number }
       rebuild_reconciliation_cases: {
         Args: { p_sales_order_id?: string }
         Returns: number

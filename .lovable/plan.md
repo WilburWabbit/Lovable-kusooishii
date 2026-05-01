@@ -1,109 +1,35 @@
-# Lovable Agent Transcripts: DB import + Admin viewer + CSV export
+## Goal
 
-## Overview
+Unblock the failing `qbo-wholesale-refresh` edge function by creating the `qbo_refresh_run` and `qbo_refresh_drift` tables (plus their RLS, indexes, trigger, RPCs, and view) that section 5 of `20260501010000_rolling_operations_reference_grading_qbo_refresh.sql` defines but which were never applied to the database.
 
-Parse the 10 transcript markdown files in `docs/transcript/`, load them into a new `lovable_agent_transcripts` table (one row per message), and add an admin page at `/admin/system/transcripts` that lists messages in reverse-chronological order with a "Export CSV" button.
+## Why a new, smaller migration
 
-## 1. Database
+The original file `20260501010000_rolling_operations_reference_grading_qbo_refresh.sql` is 2,043 lines and bundles four other large concerns (G5 saleability, mandatory product gates, reference normalization, reconciliation views). Re-running it now would conflict with later migrations that already touched the same objects. We therefore extract only the QBO refresh section (lines 1551–2030) into a new, idempotent migration.
 
-New migration creating:
+## Migration to create
 
-```sql
-create table public.lovable_agent_transcripts (
-  id uuid primary key default gen_random_uuid(),
-  message_index integer not null,            -- e.g. 197 (or first index of a range block)
-  message_index_end integer,                  -- non-null when source is a range block (e.g. 851–870)
-  role text not null check (role in ('user','assistant','system','range')),
-  occurred_at timestamptz,                    -- parsed from header when present
-  source_file text not null,                  -- e.g. PART_02_msgs_197-256.md
-  part_number integer not null,               -- 2
-  title text,                                 -- header tail after the dash if present
-  body text not null,                         -- verbatim message body
-  token_count integer not null,               -- estimated tokens (see §3)
-  char_count integer not null,
-  created_at timestamptz not null default now(),
-  unique (source_file, message_index, role)
-);
+File: `supabase/migrations/20260501120000_qbo_wholesale_refresh_foundation.sql`
 
-create index on public.lovable_agent_transcripts (occurred_at desc nulls last, message_index desc);
-create index on public.lovable_agent_transcripts (role);
+Creates:
 
-alter table public.lovable_agent_transcripts enable row level security;
+- **`public.qbo_refresh_run`** — tracks each wholesale refresh execution (mode, status, requested scope, result summary, timing).
+- **`public.qbo_refresh_drift`** — per-row drift findings (entity type, severity, status, current vs QBO values, recommended action).
+- **RLS** — enabled on both tables. Single staff/admin policy on each (`subledger_staff_read_policy`) for FOR ALL.
+- **Trigger** — `set_qbo_refresh_run_updated_at` keeps `updated_at` current.
+- **Indexes** on `qbo_refresh_drift` for `(run, status, severity)`, `(qbo_entity_type, qbo_entity_id)`, and `(local_entity_type, local_entity_id)`.
+- **Functions**:
+  - `rebuild_qbo_refresh_drift(uuid)` — populates drift rows by comparing app data against `landing_raw_qbo_*` (items, sales receipts, purchases, customers) and opens reconciliation cases.
+  - `approve_qbo_refresh_drift(uuid, uuid)` — staff approval of a drift row.
+  - `apply_approved_qbo_refresh_drift(uuid, uuid)` — applies approved corrections to `sku.qbo_item_id`, `sales_order.qbo_sales_receipt_id`/`doc_number`, `purchase_batches.qbo_purchase_id`, `customer.qbo_customer_id`, with audit events.
+- **View** `v_qbo_refresh_drift` — drift rows joined with parent run mode/status/timing.
+- **Grants** — SELECT to `authenticated` on tables/view; EXECUTE to `authenticated, service_role` on the three functions.
 
-create policy "Admins read transcripts"
-  on public.lovable_agent_transcripts for select
-  to authenticated
-  using (public.has_role(auth.uid(), 'admin') or public.has_role(auth.uid(), 'staff'));
-```
+All `CREATE TABLE`/`CREATE INDEX`/`DROP POLICY IF EXISTS`/`CREATE OR REPLACE` make the migration safely re-runnable. PL/pgSQL bodies use single-quoted strings with doubled internal quotes (Lovable SQL runner safe).
 
-No public/insert policies — only the importer (service role) writes; admins read.
+## After applying
 
-## 2. Importer (one-off seed via Edge Function)
+No edge function or frontend code change required — `qbo-wholesale-refresh` already references these objects. A simple test invocation should succeed once the migration runs.
 
-New edge function `transcripts-import` (admin-only, requires `service_role` JWT):
+## Out of scope
 
-- Reads each `docs/transcript/PART_*.md` shipped with the function as static assets (bundled into the function via `Deno.readTextFile` against files copied into `supabase/functions/transcripts-import/data/`).
-- Parses two header shapes:
-  - Per-message: `^## Message (\d+) — (User|Assistant) — (YYYY-MM-DD HH:MM)?$`
-  - Range block: `^## Messages (\d+)[–-](\d+) — (.+)$` → role `range`, no timestamp, title = tail.
-- Body = lines after the header up to the next header or end of file.
-- Computes `token_count = Math.ceil(char_count / 4)` (cheap heuristic — no external API). `char_count` is exact.
-- Upserts on `(source_file, message_index, role)` so re-running is idempotent.
-- Returns `{ inserted, updated, skipped }`.
-
-Triggered manually from the new admin page via a "Re-import transcripts" button.
-
-## 3. Token counting
-
-We do not have access to the actual Lovable per-message token usage (it's not stored in this repo, and there is no API to fetch it). Two options shown to the user before build:
-
-- **A. Heuristic (default)**: `Math.ceil(chars / 4)`, labelled "Tokens (est.)" in the UI.
-- **B. Exact via tiktoken**: add `js-tiktoken` to the edge function, encode each body with `cl100k_base`. ~30% slower import, but accurate.
-
-I recommend A unless you specifically want exact counts; the heuristic is fine for relative sizing.
-
-## 4. Admin page
-
-New route `/admin/system/transcripts` (lazy-loaded) → `src/pages/admin-v2/TranscriptsPage.tsx`.
-
-- Sidebar: add "Transcripts" item under the existing "System" group in `AdminV2Sidebar.tsx` (icon: `MessageSquare`).
-- Layout: `AdminV2Layout` + `SectionHead` matching `AppHealthPage`.
-- Toolbar:
-  - Role filter: All / User / Assistant / Range
-  - Text search (server-side `ilike` on `body` and `title`)
-  - "Export CSV" button (uses existing `rowsToCsv` / `downloadCsv` from `src/lib/csv-sync/csv-utils.ts` — but with a transcripts-specific header list since transcripts are not a registered csv-sync table).
-  - "Re-import" button (calls `transcripts-import` edge function).
-- Table (shadcn `Table`), reverse-chronological by `occurred_at desc nulls last, message_index desc`:
-  - Columns: When · Part · # · Role · Title/Preview (first ~140 chars of body) · Tokens · Chars
-  - Row click → expands inline to show full `body` in a `<pre>` block.
-- Pagination: 100/page using existing `PaginationControls`.
-
-## 5. CSV export
-
-Two modes via the same button group:
-
-- **Page export**: current filtered/sorted page → client-side CSV from already-loaded rows.
-- **Full export**: queries all matching rows in batches of 1000 (Supabase default limit) via the client, concatenates, and downloads `lovable_agent_transcripts_<YYYY-MM-DD>.csv`.
-
-CSV columns: `message_index, message_index_end, role, occurred_at, source_file, part_number, title, token_count, char_count, body` (body quoted per RFC 4180 — newlines preserved).
-
-## 6. Files touched
-
-```
-supabase/migrations/<ts>_lovable_agent_transcripts.sql        new
-supabase/functions/transcripts-import/index.ts                 new
-supabase/functions/transcripts-import/data/PART_*.md           new (copies of docs/transcript/*.md)
-src/pages/admin-v2/TranscriptsPage.tsx                         new
-src/hooks/admin/use-transcripts.ts                             new
-src/components/admin-v2/AdminV2Sidebar.tsx                     +1 nav item
-src/App.tsx                                                    +1 lazy route
-```
-
-## 7. Out of scope
-
-- Live capture of new chat messages (not possible without a Lovable export API; same limitation noted in `docs/transcript/README.md`).
-- Updating the existing `chat-and-plan` markdown export workflow.
-
-## Open question
-
-Token counting method — heuristic (fast, approximate) or `js-tiktoken` (exact, slower import)? Default is heuristic unless you say otherwise.
+The other four sections of `20260501010000_*` (G5 saleability, posting-intent gates, reference normalization, reconciliation views) are not included here. Most of the RPCs they define (e.g., `queue_qbo_item_posting_intent`) are already present from later catch-up migrations. If a separate audit shows specific objects from those sections are still missing, we can extract them similarly in follow-up migrations.
