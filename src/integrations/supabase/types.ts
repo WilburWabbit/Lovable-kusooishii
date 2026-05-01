@@ -4849,6 +4849,58 @@ export type Database = {
           },
         ]
       }
+      reconciliation_case_note: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          evidence: Json
+          id: string
+          note: string | null
+          note_type: string
+          reconciliation_case_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          evidence?: Json
+          id?: string
+          note?: string | null
+          note_type?: string
+          reconciliation_case_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          evidence?: Json
+          id?: string
+          note?: string | null
+          note_type?: string
+          reconciliation_case_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "reconciliation_case"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "v_reconciliation_case_export"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "v_reconciliation_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sales_order: {
         Row: {
           blue_bell_club: boolean
@@ -6951,18 +7003,25 @@ export type Database = {
           evidence_json: string | null
           external_payout_id: string | null
           id: string | null
+          latest_note: string | null
+          latest_note_at: string | null
           next_step: string | null
+          note_count: number | null
           order_number: string | null
           origin_channel: string | null
+          owner_id: string | null
+          owner_name: string | null
           payout_channel: string | null
           payout_id: string | null
           recommended_action: string | null
           related_entity_id: string | null
           related_entity_type: string | null
+          requires_evidence: boolean | null
           sales_order_id: string | null
           sales_order_line_id: string | null
           severity: string | null
           sku_code: string | null
+          sla_status: string | null
           status: string | null
           suspected_root_cause: string | null
           updated_at: string | null
@@ -7020,6 +7079,49 @@ export type Database = {
           },
         ]
       }
+      v_reconciliation_case_note: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          created_at: string | null
+          evidence: Json | null
+          id: string | null
+          note: string | null
+          note_type: string | null
+          reconciliation_case_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "reconciliation_case"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "v_reconciliation_case_export"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_note_reconciliation_case_id_fkey"
+            columns: ["reconciliation_case_id"]
+            isOneToOne: false
+            referencedRelation: "v_reconciliation_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_reconciliation_case_owner: {
+        Row: {
+          display_name: string | null
+          roles: Database["public"]["Enums"]["app_role"][] | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       v_reconciliation_inbox: {
         Row: {
           amount_actual: number | null
@@ -7031,20 +7133,26 @@ export type Database = {
           evidence: Json | null
           external_payout_id: string | null
           id: string | null
+          latest_note: string | null
+          latest_note_at: string | null
           next_step: string | null
+          note_count: number | null
           order_number: string | null
           origin_channel: string | null
           owner_id: string | null
+          owner_name: string | null
           payout_channel: string | null
           payout_id: string | null
           recommended_action: string | null
           related_entity_id: string | null
           related_entity_type: string | null
+          requires_evidence: boolean | null
           sales_order_id: string | null
           sales_order_line_id: string | null
           severity: string | null
           sku_code: string | null
           sku_id: string | null
+          sla_status: string | null
           status: string | null
           suspected_root_cause: string | null
           updated_at: string | null
@@ -7487,6 +7595,19 @@ export type Database = {
         }
         Returns: number
       }
+      bulk_update_reconciliation_case_workflow: {
+        Args: {
+          p_case_ids: string[]
+          p_clear_due_at?: boolean
+          p_clear_owner?: boolean
+          p_due_at?: string
+          p_evidence?: Json
+          p_note?: string
+          p_owner_id?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
       cancel_listing_outbound_command: {
         Args: { p_outbound_command_id: string }
         Returns: string
@@ -7715,6 +7836,10 @@ export type Database = {
         Args: { p_sales_order_id?: string }
         Returns: number
       }
+      reconciliation_case_requires_evidence: {
+        Args: { p_case_type: string }
+        Returns: boolean
+      }
       record_order_accounting_events: {
         Args: { p_sales_order_id: string; p_source?: string }
         Returns: number
@@ -7795,6 +7920,19 @@ export type Database = {
         }[]
       }
       subledger_staff_read_policy: { Args: never; Returns: boolean }
+      update_reconciliation_case_workflow: {
+        Args: {
+          p_case_id: string
+          p_clear_due_at?: boolean
+          p_clear_owner?: boolean
+          p_due_at?: string
+          p_evidence?: Json
+          p_note?: string
+          p_owner_id?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
       v2_calculate_apportioned_costs: {
         Args: { p_batch_id: string }
         Returns: undefined
