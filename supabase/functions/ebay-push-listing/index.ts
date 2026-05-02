@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     // There is no `upc` column, and the hook column is `product_hook` (not `hook`).
     const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name, description, ean, product_hook)")
+      .select("*, product:product_id(mpn, name, description, ean, product_hook, highlights, call_to_action)")
       .eq("id", l.sku_id)
       .single();
     if (skuErr) throw new Error(`SKU lookup failed: ${skuErr.message}`);
@@ -252,17 +252,34 @@ Deno.serve(async (req) => {
     // Pull free-text condition notes — prefer the unit's notes (most
     // specific), fall back to SKU-level notes.
     const conditionDescription = ebayCondition.allowsConditionDescription
+    // Prefer the SKU-level condition_notes (curated per-grade copy) over the
+    // stock_unit.notes field, which is typically a short operator label like
+    // "Mint" rather than the customer-facing condition write-up.
+    const conditionDescription = ebayCondition.allowsConditionDescription
       ? sanitiseConditionDescription(
-          (firstUnit?.notes as string | null) ??
-            (skuRow?.condition_notes as string | null),
+          (skuRow?.condition_notes as string | null) ??
+            (firstUnit?.notes as string | null),
         )
       : null;
+
+    // Build the rich, customer-facing listing description from the product
+    // copy fields (hook, description, highlights, CTA). Hook and CTA are
+    // bolded. Highlights are rendered as a bulleted list. The operator-edited
+    // listing_description on channel_listing wins if present.
+    const richDescription = buildListingDescription({
+      override: l.listing_description as string | null | undefined,
+      hook: product?.product_hook as string | null | undefined,
+      description: product?.description as string | null | undefined,
+      highlights: product?.highlights as string | null | undefined,
+      cta: product?.call_to_action as string | null | undefined,
+      fallbackTitle: (product?.name as string) ?? effectiveSku,
+    });
 
     // ─── Step 1: Create/Update Inventory Item ──────────────
     const inventoryItemPayload: Record<string, unknown> = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
-        description: (l.listing_description as string) ?? (product?.description as string) ?? "",
+        description: richDescription,
         aspects,
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
@@ -301,7 +318,7 @@ Deno.serve(async (req) => {
       format: "FIXED_PRICE",
       availableQuantity: onHandCount,
       categoryId: ebayCategoryId,
-      listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
+      listingDescription: richDescription,
       pricingSummary: {
         price: {
           value: String((l.listed_price as number) ?? 0),
@@ -469,6 +486,67 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   const text = await res.text();
   if (!text?.trim()) return null;
   return JSON.parse(text);
+}
+
+// ─── Listing description builder ─────────────────────────────
+// Produces the rich HTML body that goes into the eBay listing. Combines:
+//   • Hook         (bold lead line)
+//   • Description  (main body)
+//   • Highlights   (bulleted list — accepts newline- or bullet-separated text)
+//   • CTA          (bold closing line)
+// If the operator has manually edited channel_listing.listing_description we
+// use that verbatim — never override their explicit override.
+function buildListingDescription(input: {
+  override?: string | null;
+  hook?: string | null;
+  description?: string | null;
+  highlights?: string | null;
+  cta?: string | null;
+  fallbackTitle: string;
+}): string {
+  const override = (input.override ?? "").trim();
+  if (override) return override;
+
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const paragraphs = (s: string) =>
+    s
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`)
+      .join("");
+
+  const parts: string[] = [];
+
+  const hook = (input.hook ?? "").trim();
+  if (hook) parts.push(`<p><strong>${escape(hook)}</strong></p>`);
+
+  const description = (input.description ?? "").trim();
+  if (description) parts.push(paragraphs(description));
+
+  const highlightsRaw = (input.highlights ?? "").trim();
+  if (highlightsRaw) {
+    const items = highlightsRaw
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+      .filter(Boolean);
+    if (items.length > 0) {
+      parts.push(
+        `<ul>${items.map((i) => `<li>${escape(i)}</li>`).join("")}</ul>`,
+      );
+    }
+  }
+
+  const cta = (input.cta ?? "").trim();
+  if (cta) parts.push(`<p><strong>${escape(cta)}</strong></p>`);
+
+  if (parts.length === 0) return escape(input.fallbackTitle);
+
+  return `<div>${parts.join("")}</div>`;
 }
 
 // ─── Stock availability lookup ───────────────────────────────
