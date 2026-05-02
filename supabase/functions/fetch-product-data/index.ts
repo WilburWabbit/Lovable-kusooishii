@@ -355,9 +355,12 @@ async function fetchBrickEconomy(setNumber: string, admin: ReturnType<typeof cre
     ?? setData[retailKey]
     ?? setData.retail_price_uk
     ?? null;
-  const retiredDate = setData.retired_date
-    ?? setData.retiredDate
-    ?? setData.released_date && setData.availability === "retired" ? setData.released_date : null;
+  const retiredDateRaw = setData.retired_date ?? setData.retiredDate ?? null;
+  const retiredDate = typeof retiredDateRaw === "string"
+    ? retiredDateRaw
+    : (setData.availability === "retired" && typeof setData.released_date === "string"
+        ? setData.released_date
+        : null);
 
   return {
     current_value: currentValue,
