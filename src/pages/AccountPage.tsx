@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
+import { usePageSeo } from "@/hooks/use-page-seo";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +13,7 @@ import AddressesTab from "@/components/account/AddressesTab";
 import OrdersTab from "@/components/account/OrdersTab";
 
 export default function AccountPage() {
+  usePageSeo({ title: 'My Account', description: 'Manage your account profile, wishlist, and orders.', path: '/account', noIndex: true });
   const { user, profile, loading, signOut, isStaffOrAdmin, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

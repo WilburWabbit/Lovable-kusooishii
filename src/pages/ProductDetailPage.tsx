@@ -12,6 +12,7 @@ import { useStore, type Product } from "@/lib/store";
 import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 interface ProductDetailRow {
   id: string;
@@ -166,6 +167,33 @@ export default function ProductDetailPage() {
   const primaryImageUrl = displayMedia.find(m => m.is_primary)?.url ?? displayMedia[0]?.url ?? null;
   const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
+
+  usePageSeo({
+    title: product ? `${product.name} (${product.mpn})` : 'LEGO® Set',
+    description: product?.description ?? `Shop ${product?.name ?? 'LEGO® sets'} with graded condition options and fast UK shipping from Kuso Oishii.`,
+    path: mpn ? `/sets/${mpn}` : '/sets',
+    imageUrl: primaryImageUrl ?? undefined,
+    imageAlt: product ? `${product.name} product image` : undefined,
+    keywords: product ? [product.mpn, product.name, 'LEGO resale', 'graded LEGO sets', 'UK LEGO store'] : undefined,
+    geo: { region: 'GB', placename: 'United Kingdom' },
+    jsonLd: product ? {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: product.name,
+      sku: product.mpn,
+      mpn: product.mpn,
+      description: product.description ?? undefined,
+      image: allImageUrls.length ? allImageUrls : (primaryImageUrl ? [primaryImageUrl] : undefined),
+      brand: { '@type': 'Brand', name: 'LEGO' },
+      offers: offers?.map((offer) => ({
+        '@type': 'Offer',
+        priceCurrency: 'GBP',
+        price: offer.price ?? 0,
+        availability: offer.stock_count > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+        url: `https://kusooishii.com/sets/${product.mpn}`
+      }))
+    } : undefined
+  });
 
   // Fire view_item event once per product load
   const viewItemFired = useRef<string | null>(null);

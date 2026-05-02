@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePageSeo } from "@/hooks/use-page-seo";
 import { Link } from 'react-router-dom';
 import { Minus, Plus, Trash2, ShoppingBag, Loader2, Truck, Store, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ function BeerIcon() {
 
 
 export default function CartPage() {
+  usePageSeo({ title: 'Cart', description: 'Review your LEGO® basket before checkout.', path: '/cart', noIndex: true });
   const { cart, updateQuantity, removeFromCart, cartTotal } = useStore();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [selectedShipping, setSelectedShipping] = useState('standard');

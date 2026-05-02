@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -82,7 +82,11 @@ const App = () => (
             {/* Storefront */}
             <Route path="/" element={<Index />} />
             <Route path="/browse" element={<BrowsePage />} />
+            <Route path="/themes" element={<Navigate to="/browse?view=themes" replace />} />
+            <Route path="/new-arrivals" element={<Navigate to="/browse?new=true" replace />} />
+            <Route path="/deals" element={<Navigate to="/browse?deals=true" replace />} />
             <Route path="/sets/:mpn" element={<ProductDetailPage />} />
+            <Route path="/shop/p/:mpn" element={<Navigate to="/sets/:mpn" replace />} />
             <Route path="/cart" element={<CartPage />} />
             <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
 
