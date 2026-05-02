@@ -270,7 +270,7 @@ export default function ProductDetailPage() {
       stock: offer.stock_count,
       retired: p.retired_flag,
       yearReleased: p.release_year,
-      subtheme: p.subtheme_name ?? undefined,
+      subtheme: subthemeName ?? undefined,
       weightKg: p.weight_kg ?? undefined,
     };
   }
