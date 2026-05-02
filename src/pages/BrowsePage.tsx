@@ -240,24 +240,6 @@ export default function BrowsePage() {
     );
   }
 
-  const seoTitle = viewMode === "themes" ? "Browse Themes" : isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse LEGO® Sets";
-  const seoDescription = viewMode === "themes"
-    ? "Browse LEGO® sets by theme at Kuso Oishii."
-    : isNewMode
-    ? "See the latest graded LEGO® stock newly added to Kuso Oishii."
-    : isDealsMode
-    ? "Explore graded LEGO® deals with clear condition details and fair UK pricing."
-    : "Browse graded LEGO® sets and minifigures with clear condition data at Kuso Oishii.";
-  const canonicalPath = location.pathname === "/themes"
-    ? "/themes"
-    : location.pathname === "/new-arrivals"
-    ? "/new-arrivals"
-    : location.pathname === "/deals"
-    ? "/deals"
-    : "/browse";
-
-  usePageSeo({ title: seoTitle, description: seoDescription, path: canonicalPath });
-
   const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Stock";
   const pageSubtitle = isNewMode
     ? "Newest arrivals, sorted by release year"
