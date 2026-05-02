@@ -6581,6 +6581,63 @@ export type Database = {
         }
         Relationships: []
       }
+      vat_semantics_audit: {
+        Row: {
+          classification: string
+          created_at: string
+          id: string
+          original_header: Json
+          original_lines: Json
+          qbo_snapshot: Json | null
+          reason: string
+          repair_status: string
+          repaired_at: string | null
+          sales_order_id: string
+          updated_at: string
+        }
+        Insert: {
+          classification: string
+          created_at?: string
+          id?: string
+          original_header?: Json
+          original_lines?: Json
+          qbo_snapshot?: Json | null
+          reason: string
+          repair_status?: string
+          repaired_at?: string | null
+          sales_order_id: string
+          updated_at?: string
+        }
+        Update: {
+          classification?: string
+          created_at?: string
+          id?: string
+          original_header?: Json
+          original_lines?: Json
+          qbo_snapshot?: Json | null
+          reason?: string
+          repair_status?: string
+          repaired_at?: string | null
+          sales_order_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "sales_order"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+        ]
+      }
       vendor: {
         Row: {
           company_name: string | null
