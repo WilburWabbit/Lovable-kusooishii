@@ -16,6 +16,9 @@ import { PaginationControls } from "@/components/PaginationControls";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
 import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
 import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
+import { pageBreadcrumbJsonLd } from "@/lib/seo-jsonld";
+import { Switch } from "@/components/ui/switch";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
