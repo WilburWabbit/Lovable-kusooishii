@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Switch } from "@/components/ui/switch";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -16,15 +15,14 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
 import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
-import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
-import { pageBreadcrumbJsonLd } from "@/lib/seo-jsonld";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const viewMode = location.pathname === "/themes" ? "themes" : searchParams.get("view");
-  const isNewMode = location.pathname === "/new-arrivals" || searchParams.get("new") === "true";
-  const isDealsMode = location.pathname === "/deals" || searchParams.get("deals") === "true";
+  const viewMode = searchParams.get("view");
+  const isNewMode = searchParams.get("new") === "true";
+  const isDealsMode = searchParams.get("deals") === "true";
 
   const selectedThemeId = searchParams.get("theme");
   const selectedGrade = searchParams.get("grade");
@@ -241,6 +239,24 @@ export default function BrowsePage() {
       </StorefrontLayout>
     );
   }
+
+  const seoTitle = viewMode === "themes" ? "Browse Themes" : isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse LEGO® Sets";
+  const seoDescription = viewMode === "themes"
+    ? "Browse LEGO® sets by theme at Kuso Oishii."
+    : isNewMode
+    ? "See the latest graded LEGO® stock newly added to Kuso Oishii."
+    : isDealsMode
+    ? "Explore graded LEGO® deals with clear condition details and fair UK pricing."
+    : "Browse graded LEGO® sets and minifigures with clear condition data at Kuso Oishii.";
+  const canonicalPath = location.pathname === "/themes"
+    ? "/themes"
+    : location.pathname === "/new-arrivals"
+    ? "/new-arrivals"
+    : location.pathname === "/deals"
+    ? "/deals"
+    : "/browse";
+
+  usePageSeo({ title: seoTitle, description: seoDescription, path: canonicalPath });
 
   const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Stock";
   const pageSubtitle = isNewMode
