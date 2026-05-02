@@ -81,6 +81,52 @@ export default function ProductDetailPage() {
     enabled: !!mpn,
   });
 
+  // Fetch resolved canonical theme/subtheme from product_attribute (fallback when
+  // product.theme_id / subtheme_name aren't projected yet).
+  const { data: canonicalThemeAttrs } = useQuery({
+    queryKey: ["product_canonical_theme_attrs", product?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_attribute")
+        .select("key, chosen_source, custom_value, source_values_jsonb")
+        .eq("product_id", product!.id)
+        .eq("namespace", "core")
+        .is("channel", null)
+        .is("marketplace", null)
+        .is("category_id", null)
+        .in("key", ["theme", "subtheme"]);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        key: string;
+        chosen_source: string | null;
+        custom_value: string | null;
+        source_values_jsonb: Record<string, { value: string | null }> | null;
+      }>;
+    },
+    enabled: !!product?.id,
+  });
+
+  function resolveCanonicalAttr(key: "theme" | "subtheme"): string | null {
+    const row = canonicalThemeAttrs?.find((r) => r.key === key);
+    if (!row) return null;
+    if (row.chosen_source === "custom" && row.custom_value) return row.custom_value;
+    if (row.chosen_source && row.chosen_source !== "none") {
+      const v = row.source_values_jsonb?.[row.chosen_source]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    if (row.chosen_source === "none") return null;
+    // auto-priority fallback
+    const priority = ["brickeconomy", "brickset", "bricklink", "brickowl"];
+    for (const s of priority) {
+      const v = row.source_values_jsonb?.[s]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    return null;
+  }
+
+  const resolvedThemeName = resolveCanonicalAttr("theme");
+  const resolvedSubthemeName = resolveCanonicalAttr("subtheme");
+
   // Fetch BrickEconomy enrichment data
   const { data: beData } = useQuery({
     queryKey: ["brickeconomy_enrichment", mpn],
