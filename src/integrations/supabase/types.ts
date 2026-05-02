@@ -9131,6 +9131,7 @@ export type Database = {
           filter_grade?: string
           filter_retired?: boolean
           filter_theme_id?: string
+          include_out_of_stock?: boolean
           search_term?: string
         }
         Returns: {
