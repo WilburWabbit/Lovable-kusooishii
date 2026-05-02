@@ -488,6 +488,67 @@ async function ebayFetch(token: string, path: string, options: RequestInit = {})
   return JSON.parse(text);
 }
 
+// ─── Listing description builder ─────────────────────────────
+// Produces the rich HTML body that goes into the eBay listing. Combines:
+//   • Hook         (bold lead line)
+//   • Description  (main body)
+//   • Highlights   (bulleted list — accepts newline- or bullet-separated text)
+//   • CTA          (bold closing line)
+// If the operator has manually edited channel_listing.listing_description we
+// use that verbatim — never override their explicit override.
+function buildListingDescription(input: {
+  override?: string | null;
+  hook?: string | null;
+  description?: string | null;
+  highlights?: string | null;
+  cta?: string | null;
+  fallbackTitle: string;
+}): string {
+  const override = (input.override ?? "").trim();
+  if (override) return override;
+
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const paragraphs = (s: string) =>
+    s
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`)
+      .join("");
+
+  const parts: string[] = [];
+
+  const hook = (input.hook ?? "").trim();
+  if (hook) parts.push(`<p><strong>${escape(hook)}</strong></p>`);
+
+  const description = (input.description ?? "").trim();
+  if (description) parts.push(paragraphs(description));
+
+  const highlightsRaw = (input.highlights ?? "").trim();
+  if (highlightsRaw) {
+    const items = highlightsRaw
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+      .filter(Boolean);
+    if (items.length > 0) {
+      parts.push(
+        `<ul>${items.map((i) => `<li>${escape(i)}</li>`).join("")}</ul>`,
+      );
+    }
+  }
+
+  const cta = (input.cta ?? "").trim();
+  if (cta) parts.push(`<p><strong>${escape(cta)}</strong></p>`);
+
+  if (parts.length === 0) return escape(input.fallbackTitle);
+
+  return `<div>${parts.join("")}</div>`;
+}
+
 // ─── Stock availability lookup ───────────────────────────────
 
 async function findAvailableStockUnits(
