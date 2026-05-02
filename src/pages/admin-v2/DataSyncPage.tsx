@@ -23,6 +23,7 @@ export default function DataSyncPage() {
           <StripeSettingsCard />
           <EbaySettingsCard />
           <BrickEconomySettingsCard />
+          <AiProviderSettingsCard />
         </div>
         <RebrickableImportCard />
         <CsvSyncPage />
