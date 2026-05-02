@@ -69,14 +69,9 @@ Rules:
 
       const userPrompt = `Write alt text for this image of ${product_name ?? "a LEGO product"}${mpn ? ` (set ${mpn})` : ""}.`;
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
+      let altResult;
+      try {
+        altResult = await callChatCompletion({
           messages: [
             { role: "system", content: systemPrompt },
             {
@@ -88,17 +83,17 @@ Rules:
             },
           ],
           max_tokens: 100,
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("OpenAI error:", response.status, text);
-        throw new Error(`OpenAI returned ${response.status}`);
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) {
+          return new Response(
+            JSON.stringify({ error: e.userMessage }),
+            { status: e.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        throw e;
       }
-
-      const data = await response.json();
-      const altText = data.choices?.[0]?.message?.content?.trim() ?? "";
+      const altText = altResult.data.choices?.[0]?.message?.content?.trim() ?? "";
 
       return new Response(JSON.stringify({ alt_text: altText }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
