@@ -1,5 +1,6 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-05-02 — switched to shared AI provider (Lovable AI primary, OpenAI fallback)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -92,9 +93,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
-
+    // Provider key validation happens inside the shared helper.
     // Auth check
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -227,14 +226,9 @@ Deno.serve(async (req) => {
         ]
       : userPrompt;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
+    let aiResult;
+    try {
+      aiResult = await callChatCompletion({
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userMessageContent },
@@ -266,23 +260,21 @@ Deno.serve(async (req) => {
           },
         ],
         tool_choice: { type: "function", function: { name: "generate_copy" } },
-      }),
-    });
-
-    if (!response.ok) {
-      const status = response.status;
-      if (status === 429) {
+      }, { admin });
+    } catch (e) {
+      if (e instanceof AiProviderError) {
         return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: e.userMessage }),
+          { status: e.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      const text = await response.text();
-      console.error("OpenAI error:", status, text);
-      throw new Error(`OpenAI returned ${status}`);
+      throw e;
     }
 
-    const data = await response.json();
+    const data = aiResult.data;
+    if (aiResult.fellBack) {
+      console.log(`generate-product-copy: served via OpenAI fallback (model=${aiResult.modelUsed})`);
+    }
 
     // Extract tool call arguments
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
@@ -319,7 +311,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ copy }), {
+    return new Response(JSON.stringify({ copy, provider_used: aiResult.providerUsed, fell_back: aiResult.fellBack }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
