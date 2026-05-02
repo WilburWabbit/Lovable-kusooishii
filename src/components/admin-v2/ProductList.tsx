@@ -31,7 +31,7 @@ function getValue(row: ProductRow, key: string): unknown {
     case "variants":
       return row.variants.length;
     case "status":
-      return row.variants.length === 0 ? "Ungraded" : `${row.variants.length} active`;
+      return row.variants.length === 0 ? "Ungraded" : "Active";
     default:
       return (row as unknown as Record<string, unknown>)[key];
   }
