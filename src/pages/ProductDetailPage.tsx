@@ -18,6 +18,9 @@ interface ProductDetailRow {
   mpn: string;
   name: string;
   description: string | null;
+  product_hook: string | null;
+  highlights: string | null;
+  call_to_action: string | null;
   piece_count: number | null;
   release_year: number | null;
   retired_flag: boolean;
@@ -57,7 +60,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
+        .select("id, mpn, name, description, product_hook, highlights, call_to_action, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -344,9 +347,36 @@ export default function ProductDetailPage() {
                   {product.name}
                 </h1>
 
+                {product.product_hook && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.product_hook}
+                  </p>
+                )}
+
                 {product.description && (
-                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground whitespace-pre-line">
                     {product.description}
+                  </p>
+                )}
+
+                {product.highlights && (() => {
+                  const items = product.highlights
+                    .split(/\r?\n+/)
+                    .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+                    .filter(Boolean);
+                  if (items.length === 0) return null;
+                  return (
+                    <ul className="mt-4 list-disc pl-5 font-body text-sm leading-relaxed text-muted-foreground space-y-1">
+                      {items.map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+
+                {product.call_to_action && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.call_to_action}
                   </p>
                 )}
 
