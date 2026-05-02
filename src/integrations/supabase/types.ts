@@ -332,18 +332,21 @@ export type Database = {
       }
       app_settings: {
         Row: {
+          ai_provider: string
           id: string
           stripe_test_mode: boolean
           updated_at: string
           updated_by: string | null
         }
         Insert: {
+          ai_provider?: string
           id?: string
           stripe_test_mode?: boolean
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
+          ai_provider?: string
           id?: string
           stripe_test_mode?: boolean
           updated_at?: string
