@@ -84,7 +84,56 @@ export type Database = {
             foreignKeyName: "accounting_event_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "accounting_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -227,7 +276,56 @@ export type Database = {
             foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "actual_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
         ]
@@ -1873,7 +1971,56 @@ export type Database = {
             foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -1910,6 +2057,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sales_program_accrual"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_program_accrual_id_fkey"
+            columns: ["sales_program_accrual_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["accrual_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_program_accrual_id_fkey"
+            columns: ["sales_program_accrual_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["accrual_id"]
+          },
+          {
+            foreignKeyName: "expected_settlement_line_sales_program_accrual_id_fkey"
+            columns: ["sales_program_accrual_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["accrual_id"]
           },
         ]
       }
@@ -3243,7 +3411,56 @@ export type Database = {
             foreignKeyName: "payout_fee_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_fee_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -3340,7 +3557,56 @@ export type Database = {
             foreignKeyName: "payout_orders_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "payout_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
         ]
@@ -4643,6 +4909,13 @@ export type Database = {
             referencedRelation: "posting_intent"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "qbo_posting_reference_posting_intent_id_fkey"
+            columns: ["posting_intent_id"]
+            isOneToOne: false
+            referencedRelation: "v_posting_intent_with_references"
+            referencedColumns: ["id"]
+          },
         ]
       }
       qbo_refresh_drift: {
@@ -4935,7 +5208,56 @@ export type Database = {
             foreignKeyName: "reconciliation_case_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -5327,7 +5649,56 @@ export type Database = {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -5505,7 +5876,56 @@ export type Database = {
             foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_accrual_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -5577,7 +5997,56 @@ export type Database = {
             foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_program_attribution_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -6022,7 +6491,56 @@ export type Database = {
             foreignKeyName: "stock_allocation_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -6171,7 +6689,56 @@ export type Database = {
             foreignKeyName: "stock_cost_event_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "stock_cost_event_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -6345,7 +6912,56 @@ export type Database = {
             foreignKeyName: "fk_stock_unit_order"
             columns: ["order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "fk_stock_unit_order"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -6633,7 +7249,56 @@ export type Database = {
             foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: true
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "vat_semantics_audit_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: true
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
         ]
@@ -6913,7 +7578,56 @@ export type Database = {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -6925,23 +7639,67 @@ export type Database = {
           },
         ]
       }
-      v_blue_bell_monthly_statement_export: {
+      v_blue_bell_accrual_ledger: {
         Row: {
-          accrual_created_at: string | null
+          accrual_id: string | null
+          app_reference: string | null
           basis_amount: number | null
           commission_amount: number | null
+          commission_outstanding: number | null
+          created_at: string | null
           discount_amount: number | null
-          net_commission_amount: number | null
-          order_date: string | null
+          ebay_reference: string | null
+          external_reference: string | null
+          order_created_at: string | null
           order_number: string | null
           origin_channel: string | null
-          period_end: string | null
-          period_start: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_expense_id: string | null
+          qbo_payment_reference: string | null
           reversed_amount: number | null
+          sales_order_id: string | null
           settlement_id: string | null
           settlement_status: string | null
-          settlement_updated_at: string | null
           status: string | null
+          stripe_reference: string | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_accrual_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_settlement"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_blue_bell_monthly_statement_export: {
+        Row: {
+          accrual_id: string | null
+          app_reference: string | null
+          basis_amount: number | null
+          commission_amount: number | null
+          commission_outstanding: number | null
+          created_at: string | null
+          discount_amount: number | null
+          ebay_reference: string | null
+          external_reference: string | null
+          order_created_at: string | null
+          order_number: string | null
+          origin_channel: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_expense_id: string | null
+          qbo_payment_reference: string | null
+          reversed_amount: number | null
+          sales_order_id: string | null
+          settlement_id: string | null
+          settlement_status: string | null
+          status: string | null
+          stripe_reference: string | null
+          updated_at: string | null
         }
         Relationships: [
           {
@@ -6967,6 +7725,42 @@ export type Database = {
         }
         Relationships: []
       }
+      v_blue_bell_statement_export: {
+        Row: {
+          accrual_id: string | null
+          app_reference: string | null
+          basis_amount: number | null
+          commission_amount: number | null
+          commission_outstanding: number | null
+          created_at: string | null
+          discount_amount: number | null
+          ebay_reference: string | null
+          external_reference: string | null
+          order_created_at: string | null
+          order_number: string | null
+          origin_channel: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_expense_id: string | null
+          qbo_payment_reference: string | null
+          reversed_amount: number | null
+          sales_order_id: string | null
+          settlement_id: string | null
+          settlement_status: string | null
+          status: string | null
+          stripe_reference: string | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_program_accrual_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "sales_program_settlement"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_current_sku_pricing: {
         Row: {
           avg_cost: number | null
@@ -6991,9 +7785,28 @@ export type Database = {
         }
         Relationships: []
       }
+      v_entity_reference_columns: {
+        Row: {
+          app_reference: string | null
+          created_at: string | null
+          ebay_reference: string | null
+          entity_id: string | null
+          entity_reference: string | null
+          entity_type: string | null
+          external_reference: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          stripe_reference: string | null
+          uuid_reference: string | null
+        }
+        Relationships: []
+      }
       v_margin_profit_report: {
         Row: {
+          app_reference: string | null
           batch_id: string | null
+          ebay_reference: string | null
+          external_reference: string | null
           fee_pct: number | null
           gross_margin_pct: number | null
           gross_revenue: number | null
@@ -7005,13 +7818,15 @@ export type Database = {
           order_number: string | null
           origin_channel: string | null
           payout_id: string | null
-          period_start: string | null
           product_name: string | null
           program_commission_amount: number | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
           sales_order_id: string | null
           sales_order_line_id: string | null
           sku: string | null
           stock_unit_id: string | null
+          stripe_reference: string | null
           total_fee_amount: number | null
           uid: string | null
           v2_status: Database["public"]["Enums"]["v2_unit_status"] | null
@@ -7035,7 +7850,56 @@ export type Database = {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -7112,7 +7976,56 @@ export type Database = {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -7166,6 +8079,54 @@ export type Database = {
           },
         ]
       }
+      v_outbound_command_with_references: {
+        Row: {
+          app_reference: string | null
+          channel: string | null
+          command_type: string | null
+          created_at: string | null
+          entity_id: string | null
+          entity_type: string | null
+          external_listing_id: string | null
+          id: string | null
+          last_error: string | null
+          mpn: string | null
+          next_attempt_at: string | null
+          payload: Json | null
+          retry_count: number | null
+          sent_at: string | null
+          sku_code: string | null
+          status: string | null
+          target_system: string | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
+      v_posting_intent_with_references: {
+        Row: {
+          action: string | null
+          app_reference: string | null
+          created_at: string | null
+          ebay_reference: string | null
+          entity_id: string | null
+          entity_type: string | null
+          external_reference: string | null
+          id: string | null
+          last_error: string | null
+          next_attempt_at: string | null
+          payload: Json | null
+          posted_at: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          qbo_reference_id: string | null
+          retry_count: number | null
+          status: string | null
+          stripe_reference: string | null
+          target_system: string | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
       v_qbo_refresh_drift: {
         Row: {
           app_reference: string | null
@@ -7207,14 +8168,16 @@ export type Database = {
         Row: {
           amount_actual: number | null
           amount_expected: number | null
+          app_reference: string | null
           case_type: string | null
           close_code: string | null
           closed_at: string | null
           created_at: string | null
           diagnosis: string | null
-          due_at: string | null
+          ebay_reference: string | null
           evidence_json: string | null
           external_payout_id: string | null
+          external_reference: string | null
           id: string | null
           latest_note: string | null
           latest_note_at: string | null
@@ -7222,10 +8185,10 @@ export type Database = {
           note_count: number | null
           order_number: string | null
           origin_channel: string | null
-          owner_id: string | null
-          owner_name: string | null
           payout_channel: string | null
           payout_id: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
           recommended_action: string | null
           related_entity_id: string | null
           related_entity_type: string | null
@@ -7234,9 +8197,11 @@ export type Database = {
           sales_order_line_id: string | null
           severity: string | null
           sku_code: string | null
-          sla_status: string | null
           status: string | null
+          stripe_reference: string | null
           suspected_root_cause: string | null
+          target_label: string | null
+          target_route: string | null
           updated_at: string | null
           variance_amount: number | null
         }
@@ -7259,7 +8224,56 @@ export type Database = {
             foreignKeyName: "reconciliation_case_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -7339,12 +8353,15 @@ export type Database = {
         Row: {
           amount_actual: number | null
           amount_expected: number | null
+          app_reference: string | null
           case_type: string | null
           created_at: string | null
           diagnosis: string | null
           due_at: string | null
+          ebay_reference: string | null
           evidence: Json | null
           external_payout_id: string | null
+          external_reference: string | null
           id: string | null
           latest_note: string | null
           latest_note_at: string | null
@@ -7356,6 +8373,8 @@ export type Database = {
           owner_name: string | null
           payout_channel: string | null
           payout_id: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
           recommended_action: string | null
           related_entity_id: string | null
           related_entity_type: string | null
@@ -7367,7 +8386,10 @@ export type Database = {
           sku_id: string | null
           sla_status: string | null
           status: string | null
+          stripe_reference: string | null
           suspected_root_cause: string | null
+          target_label: string | null
+          target_route: string | null
           updated_at: string | null
           variance_amount: number | null
         }
@@ -7390,7 +8412,56 @@ export type Database = {
             foreignKeyName: "reconciliation_case_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "reconciliation_case_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -7444,33 +8515,77 @@ export type Database = {
           },
         ]
       }
-      v_settlement_close_export: {
+      v_rolling_settlement_export: {
         Row: {
-          actual_fees: number | null
-          actual_gross: number | null
-          actual_refunds: number | null
-          actual_shipping: number | null
           actual_total: number | null
           amount_mismatch_case_count: number | null
-          channel: string | null
-          close_status: string | null
-          expected_commission: number | null
-          expected_discount: number | null
-          expected_fees: number | null
-          expected_gross: number | null
-          expected_shipping: number | null
-          expected_tax: number | null
+          app_reference: string | null
+          ebay_reference: string | null
           expected_total: number | null
+          external_reference: string | null
+          latest_actual_at: string | null
           missing_payout_case_count: number | null
           open_case_count: number | null
-          order_count: number | null
-          payout_count: number | null
-          payout_fees: number | null
-          payout_gross: number | null
-          payout_net: number | null
-          period_end: string | null
-          period_start: string | null
-          unreconciled_payout_count: number | null
+          order_created_at: string | null
+          order_number: string | null
+          order_status: string | null
+          origin_channel: string | null
+          payment_method: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          sales_order_id: string | null
+          settlement_status: string | null
+          stripe_reference: string | null
+          variance_amount: number | null
+        }
+        Relationships: []
+      }
+      v_rolling_settlement_monitor: {
+        Row: {
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          app_reference: string | null
+          ebay_reference: string | null
+          expected_total: number | null
+          external_reference: string | null
+          latest_actual_at: string | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_created_at: string | null
+          order_number: string | null
+          order_status: string | null
+          origin_channel: string | null
+          payment_method: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          sales_order_id: string | null
+          settlement_status: string | null
+          stripe_reference: string | null
+          variance_amount: number | null
+        }
+        Relationships: []
+      }
+      v_settlement_close_export: {
+        Row: {
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          app_reference: string | null
+          ebay_reference: string | null
+          expected_total: number | null
+          external_reference: string | null
+          latest_actual_at: string | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_created_at: string | null
+          order_number: string | null
+          order_status: string | null
+          origin_channel: string | null
+          payment_method: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          sales_order_id: string | null
+          settlement_status: string | null
+          stripe_reference: string | null
           variance_amount: number | null
         }
         Relationships: []
@@ -7621,7 +8736,56 @@ export type Database = {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
+            referencedRelation: "v_blue_bell_accrual_ledger"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_monthly_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_blue_bell_statement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_rolling_settlement_monitor"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_close_export"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
             referencedRelation: "v_settlement_order_rollup"
+            referencedColumns: ["sales_order_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_withheld_payout_monitor"
             referencedColumns: ["sales_order_id"]
           },
           {
@@ -7632,6 +8796,31 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_withheld_payout_monitor: {
+        Row: {
+          actual_total: number | null
+          amount_mismatch_case_count: number | null
+          app_reference: string | null
+          ebay_reference: string | null
+          expected_total: number | null
+          external_reference: string | null
+          latest_actual_at: string | null
+          missing_payout_case_count: number | null
+          open_case_count: number | null
+          order_created_at: string | null
+          order_number: string | null
+          order_status: string | null
+          origin_channel: string | null
+          payment_method: string | null
+          qbo_doc_number: string | null
+          qbo_entity_id: string | null
+          sales_order_id: string | null
+          settlement_status: string | null
+          stripe_reference: string | null
+          variance_amount: number | null
+        }
+        Relationships: []
       }
       v2_variant_stock_summary: {
         Row: {
@@ -8140,6 +9329,15 @@ export type Database = {
           subtheme_name: string
           theme_name: string
         }[]
+      }
+      settle_sales_program_accruals: {
+        Args: {
+          p_accrual_ids: string[]
+          p_actor_id?: string
+          p_notes?: string
+          p_program_code: string
+        }
+        Returns: string
       }
       subledger_staff_read_policy: { Args: never; Returns: boolean }
       update_reconciliation_case_workflow: {
