@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RequireAdmin } from "./components/RequireAdmin";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
 
 // Eagerly load homepage (LCP-critical)
 import Index from "./pages/Index";
@@ -75,11 +75,12 @@ interface NoIndexRouteProps {
   title: string;
   description: string;
   path: string;
+  documentKey?: string;
   children: ReactNode;
 }
 
-function NoIndexRoute({ title, description, path, children }: NoIndexRouteProps) {
-  usePageSeo({ title, description, path, noIndex: true });
+function NoIndexRoute({ title, description, path, documentKey, children }: NoIndexRouteProps) {
+  useSeoDocumentPageSeo(documentKey ?? `route:${path}`, { title, description, path, noIndex: true });
   return <>{children}</>;
 }
 
@@ -89,6 +90,7 @@ function AdminRoute({ path, children }: Pick<NoIndexRouteProps, "path" | "childr
       title="Admin"
       description="Private Kuso Oishii administration area."
       path={path}
+      documentKey="route:/admin"
     >
       <RequireAdmin>{children}</RequireAdmin>
     </NoIndexRoute>

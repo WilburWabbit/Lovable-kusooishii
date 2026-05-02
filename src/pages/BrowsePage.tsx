@@ -15,7 +15,8 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/PaginationControls";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
 import { fetchBrowsableCollectibleMinifigsTheme } from "@/lib/collectible-minifigs-theme";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
+import { pageBreadcrumbJsonLd } from "@/lib/seo-jsonld";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -218,12 +219,14 @@ export default function BrowsePage() {
   const canonicalPath = viewMode === "themes" ? "/themes" : isNewMode ? "/new-arrivals" : isDealsMode ? "/deals" : "/browse";
   const cleanBrowsePaths = new Set(["/browse", "/themes", "/new-arrivals", "/deals"]);
   const isCleanPublicBrowsePage = cleanBrowsePaths.has(location.pathname) && Array.from(searchParams.keys()).length === 0;
+  const seoDocumentKey = isCleanPublicBrowsePage ? `route:${canonicalPath}` : undefined;
 
-  usePageSeo({
+  useSeoDocumentPageSeo(seoDocumentKey, {
     title: seoTitle,
     description: seoDescription,
     path: canonicalPath,
     noIndex: !isCleanPublicBrowsePage,
+    jsonLd: isCleanPublicBrowsePage ? pageBreadcrumbJsonLd(seoTitle, canonicalPath) : undefined,
   });
 
   if (viewMode === "themes") {

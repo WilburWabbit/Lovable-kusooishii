@@ -2,12 +2,11 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
 import { GRADE_DETAILS } from '@/lib/grades';
+import { combineJsonLd, faqPageJsonLd, pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function FAQPage() {
-  usePageSeo({ title: 'Frequently Asked Questions', description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.', path: '/faq' });
-
   const gradeItems = Object.entries(GRADE_DETAILS).map(([key, g]) => ({
     id: `grade-${key}`,
     q: `Grade ${key} — ${g.label}`,
@@ -54,6 +53,22 @@ export default function FAQPage() {
       ],
     },
   ];
+  const faqSchemaItems = [
+    ...sections.flatMap((section) =>
+      section.items.map((item) => ({ question: item.q, answer: item.a }))
+    ),
+    ...gradeItems.map((item) => ({ question: item.q, answer: item.shortDesc })),
+  ];
+
+  useSeoDocumentPageSeo('route:/faq', {
+    title: 'Frequently Asked Questions',
+    description: 'Answers to common questions about LEGO® set conditions, ordering, shipping, and returns at Kuso Oishii.',
+    path: '/faq',
+    jsonLd: combineJsonLd(
+      pageBreadcrumbJsonLd('Frequently Asked Questions', '/faq'),
+      faqPageJsonLd(faqSchemaItems)
+    ),
+  });
 
   return (
     <StorefrontLayout>

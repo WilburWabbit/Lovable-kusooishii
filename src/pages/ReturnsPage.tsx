@@ -1,8 +1,14 @@
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function ReturnsPage() {
-  usePageSeo({ title: 'Returns & Exchanges', description: 'Return policy for Kuso Oishii LEGO® sets. 14-day returns, missing pieces policy, and how to start a return.', path: '/returns-exchanges' });
+  useSeoDocumentPageSeo('route:/returns-exchanges', {
+    title: 'Returns & Exchanges',
+    description: 'Return policy for Kuso Oishii LEGO® sets. 14-day returns, missing pieces policy, and how to start a return.',
+    path: '/returns-exchanges',
+    jsonLd: pageBreadcrumbJsonLd('Returns & Exchanges', '/returns-exchanges'),
+  });
 
   return (
     <StorefrontLayout>

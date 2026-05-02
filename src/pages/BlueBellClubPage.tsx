@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Bell, Heart, Users, Percent } from "lucide-react";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
+import { pageBreadcrumbJsonLd } from "@/lib/seo-jsonld";
 
 export default function BlueBellClubPage() {
   useEffect(() => {
@@ -41,11 +42,12 @@ export default function BlueBellClubPage() {
     };
   }, []);
 
-  usePageSeo({
+  useSeoDocumentPageSeo("route:/bluebell", {
     title: "Blue Bell LEGO® Club",
     description:
     "Join the Blue Bell LEGO® Club and enjoy 5% off every order, with a matching 5% donated to the club. Supporting your local LEGO® community.",
-    path: "/bluebell"
+    path: "/bluebell",
+    jsonLd: pageBreadcrumbJsonLd("Blue Bell LEGO® Club", "/bluebell"),
   });
 
   return (

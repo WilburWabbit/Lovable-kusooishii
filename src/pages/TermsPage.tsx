@@ -1,8 +1,14 @@
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function TermsPage() {
-  usePageSeo({ title: 'Terms of Service', description: 'Terms and conditions for using the Kuso Oishii website and purchasing LEGO® sets.', path: '/terms' });
+  useSeoDocumentPageSeo('route:/terms', {
+    title: 'Terms of Service',
+    description: 'Terms and conditions for using the Kuso Oishii website and purchasing LEGO® sets.',
+    path: '/terms',
+    jsonLd: pageBreadcrumbJsonLd('Terms of Service', '/terms'),
+  });
 
   return (
     <StorefrontLayout>
