@@ -779,7 +779,7 @@ export function OperationsView() {
         <div className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <SectionHead>Reconciliation Inbox</SectionHead>
-            <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, programme, listing, QBO posting, and QBO refresh exceptions.</p>
+            <p className="text-xs text-zinc-500">Open settlement, COGS, allocation, listing, QBO posting, and QBO refresh exceptions.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
