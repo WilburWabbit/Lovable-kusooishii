@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     // There is no `upc` column, and the hook column is `product_hook` (not `hook`).
     const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("*, product:product_id(mpn, name, description, ean, product_hook)")
+      .select("*, product:product_id(mpn, name, description, ean, product_hook, highlights, call_to_action)")
       .eq("id", l.sku_id)
       .single();
     if (skuErr) throw new Error(`SKU lookup failed: ${skuErr.message}`);
