@@ -222,14 +222,9 @@ Rules:
         image_url: { url: imgUrl, detail: "high" as const },
       }));
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
+      let ageResult;
+      try {
+        ageResult = await callChatCompletion({
           messages: [
             { role: "system", content: systemPrompt },
             {
@@ -241,23 +236,17 @@ Rules:
             },
           ],
           max_tokens: 20,
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("OpenAI error:", response.status, text);
-        if (response.status === 429) {
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) {
           return new Response(
-            JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            JSON.stringify({ error: e.userMessage }),
+            { status: e.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
-        throw new Error(`OpenAI returned ${response.status}`);
+        throw e;
       }
-
-      const data = await response.json();
-      const rawResponse = data.choices?.[0]?.message?.content?.trim() ?? "";
+      const rawResponse = ageResult.data.choices?.[0]?.message?.content?.trim() ?? "";
 
       // Validate against known age marks
       let ageRange: string | null = null;
