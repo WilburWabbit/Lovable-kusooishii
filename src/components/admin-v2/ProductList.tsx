@@ -110,12 +110,12 @@ const COLUMNS: ColumnDef<ProductRow>[] = [
     key: "status",
     label: "Status",
     defaultVisible: true,
-    sortable: false,
+    sortable: true,
     render: (r) =>
       r.variants.length === 0 ? (
         <Badge label="Ungraded" color="#F59E0B" small />
       ) : (
-        <Badge label={`${r.variants.length} active`} color="#22C55E" small />
+        <Badge label="Active" color="#22C55E" small />
       ),
   },
   {
