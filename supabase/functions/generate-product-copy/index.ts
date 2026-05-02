@@ -1,5 +1,6 @@
-// Redeployed: 2026-03-23
+// Redeployed: 2026-05-02 — switched to shared AI provider (Lovable AI primary, OpenAI fallback)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
