@@ -252,17 +252,34 @@ Deno.serve(async (req) => {
     // Pull free-text condition notes — prefer the unit's notes (most
     // specific), fall back to SKU-level notes.
     const conditionDescription = ebayCondition.allowsConditionDescription
+    // Prefer the SKU-level condition_notes (curated per-grade copy) over the
+    // stock_unit.notes field, which is typically a short operator label like
+    // "Mint" rather than the customer-facing condition write-up.
+    const conditionDescription = ebayCondition.allowsConditionDescription
       ? sanitiseConditionDescription(
-          (firstUnit?.notes as string | null) ??
-            (skuRow?.condition_notes as string | null),
+          (skuRow?.condition_notes as string | null) ??
+            (firstUnit?.notes as string | null),
         )
       : null;
+
+    // Build the rich, customer-facing listing description from the product
+    // copy fields (hook, description, highlights, CTA). Hook and CTA are
+    // bolded. Highlights are rendered as a bulleted list. The operator-edited
+    // listing_description on channel_listing wins if present.
+    const richDescription = buildListingDescription({
+      override: l.listing_description as string | null | undefined,
+      hook: product?.product_hook as string | null | undefined,
+      description: product?.description as string | null | undefined,
+      highlights: product?.highlights as string | null | undefined,
+      cta: product?.call_to_action as string | null | undefined,
+      fallbackTitle: (product?.name as string) ?? effectiveSku,
+    });
 
     // ─── Step 1: Create/Update Inventory Item ──────────────
     const inventoryItemPayload: Record<string, unknown> = {
       product: {
         title: (l.listing_title as string) ?? (product?.name as string) ?? effectiveSku,
-        description: (l.listing_description as string) ?? (product?.description as string) ?? "",
+        description: richDescription,
         aspects,
         imageUrls: cappedImages,
         ...(product?.ean ? { ean: [product.ean] } : {}),
