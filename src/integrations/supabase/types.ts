@@ -6203,6 +6203,154 @@ export type Database = {
         }
         Relationships: []
       }
+      seo_document: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          document_key: string
+          document_type: string
+          entity_id: string | null
+          entity_reference: string | null
+          entity_type: string | null
+          id: string
+          metadata: Json
+          published_revision_id: string | null
+          route_path: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          document_key: string
+          document_type: string
+          entity_id?: string | null
+          entity_reference?: string | null
+          entity_type?: string | null
+          id?: string
+          metadata?: Json
+          published_revision_id?: string | null
+          route_path?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          document_key?: string
+          document_type?: string
+          entity_id?: string | null
+          entity_reference?: string | null
+          entity_type?: string | null
+          id?: string
+          metadata?: Json
+          published_revision_id?: string | null
+          route_path?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seo_document_published_revision_id_fkey"
+            columns: ["published_revision_id"]
+            isOneToOne: false
+            referencedRelation: "seo_revision"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seo_revision: {
+        Row: {
+          breadcrumbs: Json
+          canonical_path: string
+          canonical_url: string
+          change_summary: string | null
+          created_at: string
+          created_by: string | null
+          geo: Json
+          id: string
+          image_metadata: Json
+          indexation_policy: string
+          keywords: string[]
+          meta_description: string
+          metadata: Json
+          open_graph: Json
+          published_at: string | null
+          revision_number: number
+          robots_directive: string
+          seo_document_id: string
+          sitemap: Json
+          source: string
+          status: string
+          structured_data: Json
+          title_tag: string
+          twitter_card: Json
+        }
+        Insert: {
+          breadcrumbs?: Json
+          canonical_path: string
+          canonical_url: string
+          change_summary?: string | null
+          created_at?: string
+          created_by?: string | null
+          geo?: Json
+          id?: string
+          image_metadata?: Json
+          indexation_policy?: string
+          keywords?: string[]
+          meta_description: string
+          metadata?: Json
+          open_graph?: Json
+          published_at?: string | null
+          revision_number: number
+          robots_directive?: string
+          seo_document_id: string
+          sitemap?: Json
+          source?: string
+          status?: string
+          structured_data?: Json
+          title_tag: string
+          twitter_card?: Json
+        }
+        Update: {
+          breadcrumbs?: Json
+          canonical_path?: string
+          canonical_url?: string
+          change_summary?: string | null
+          created_at?: string
+          created_by?: string | null
+          geo?: Json
+          id?: string
+          image_metadata?: Json
+          indexation_policy?: string
+          keywords?: string[]
+          meta_description?: string
+          metadata?: Json
+          open_graph?: Json
+          published_at?: string | null
+          revision_number?: number
+          robots_directive?: string
+          seo_document_id?: string
+          sitemap?: Json
+          source?: string
+          status?: string
+          structured_data?: Json
+          title_tag?: string
+          twitter_card?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seo_revision_seo_document_id_fkey"
+            columns: ["seo_document_id"]
+            isOneToOne: false
+            referencedRelation: "seo_document"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shipping_rate_table: {
         Row: {
           active: boolean
