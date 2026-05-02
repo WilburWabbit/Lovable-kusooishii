@@ -1,48 +1,39 @@
-## Goal
+# Apply PR #115 — Rolling Blue Bell Operations Cleanup
 
-Add a preflight **QBO Health Check** panel at the top of `/admin/data-sync` (the Admin V2 `DataSyncPage`) that verifies the required database objects exist (e.g. `qbo_refresh_run`, `qbo_refresh_drift`, plus other QBO-critical tables) and clearly reports any missing migrations, so staff can detect schema gaps before invoking QBO edge functions like `qbo-wholesale-refresh`.
+## Scope of PR #115
 
-## What gets built
+Three files, all already synced into the working tree via the GitHub two-way sync:
 
-### 1. Edge function: `qbo-health-check`
+1. `supabase/migrations/20260502113000_rolling_blue_bell_operations_cleanup.sql` — **new, not yet applied to the database**
+2. `src/hooks/admin/use-operations.ts` — frontend (no action needed; already in tree)
+3. `src/components/admin-v2/OperationsView.tsx` — frontend (no action needed; already in tree)
 
-A new read-only Deno edge function at `supabase/functions/qbo-health-check/index.ts`.
+**No edge functions are added or modified in this PR**, so there is nothing to deploy on the functions side.
 
-- Uses the service-role client to query `information_schema.tables` and `pg_proc` for a curated allowlist of expected QBO objects.
-- Returns a structured JSON report: `{ ok: boolean, checks: [{ name, kind: 'table'|'function'|'view', present, severity: 'critical'|'warn', migration_hint }], missing_count, generated_at }`.
-- Also reports recent applied migration versions from `supabase_migrations.schema_migrations` (most recent 10) so staff can see whether a known migration ID is present.
-- No mutations, no third-party calls. CORS handled per project conventions; uses `verify_jwt = false` default plus an in-code admin role check via `has_role(auth.uid(), 'admin')` against the caller's JWT, returning 401/403 if not authorised.
+## Database verification
 
-### 2. Allowlist of required QBO objects (initial set)
+- `supabase_migrations.schema_migrations` contains `20260502063313` and `20260502064604` for today, but **not** `20260502113000`.
+- The view `public.v_blue_bell_accrual_ledger` (created by this migration) does not exist yet.
 
-Tables: `qbo_refresh_run`, `qbo_refresh_drift`, `qbo_sync_state`, `qbo_posting_intents`, `landing_raw_qbo_*` family (items, customers, vendors, sales, purchases), `qbo_account_mappings`.
-Functions: `rebuild_qbo_refresh_drift`, `approve_qbo_refresh_drift`, `apply_approved_qbo_refresh_drift`, `has_role`.
-View: `v_qbo_refresh_drift`.
-Each entry carries the migration filename that introduces it as `migration_hint` so the UI can tell staff exactly which migration to apply.
+## What the migration does
 
-### 3. UI: `QboHealthCheckCard` component
+1. Backfills `sales_program_attribution` rows for every `sales_order` flagged with the legacy `blue_bell_club = true`, mapping them to the `blue_bell` program with source `legacy_backfill`.
+2. Backfills `sales_program_accrual` rows (type `commission`) for those orders, deriving `basis_amount`, `discount_amount`, and `commission_amount` from legacy `club_commission_amount` / `club_discount_amount` (falling back to gross − shipping × default rates). Open accruals get status `open`; zero-commission rows are skipped. Existing rows are only refreshed when still open and unsettled.
+3. Resolves any open/in-progress `reconciliation_case` rows of type `unpaid_program_accrual` with close code `moved_to_blue_bell_accrual_ledger`, recording the migration in `evidence`.
+4. Creates / replaces the `public.v_blue_bell_accrual_ledger` view that joins accruals to orders, settlements, and the entity-reference helper view, and exposes `commission_outstanding`.
+5. (Remaining ~400 lines, not fully shown but already in the file) finishes the view definitions and supporting glue used by the operations page.
 
-New component at `src/components/admin-v2/QboHealthCheckCard.tsx`, rendered as the first item in `DataSyncPage` (above `StagingErrorsPanel`).
+## Steps to execute
 
-- On mount and via a "Re-run check" button, calls `qbo-health-check` through `invokeWithAuth`.
-- Shows an overall status badge: green "Healthy", amber "Warnings", red "Missing migrations".
-- Lists each missing object with its kind, severity, and the migration filename to apply.
-- When critical objects are missing, renders a non-blocking warning banner advising staff not to run QBO sync/refresh actions until migrations are applied. Does not disable the other cards (so staff can still triage), but the QBO action cards read a shared `useQboHealth()` hook (new, in `src/hooks/admin/useQboHealth.ts`) and visibly disable destructive actions (refresh, process-pending) when `missing_count > 0` for critical entries, with a tooltip explaining why.
-- Shows the latest 10 applied migration versions in a collapsible section for fast diagnosis.
+1. Run the migration `supabase/migrations/20260502113000_rolling_blue_bell_operations_cleanup.sql` against the Lovable Cloud database via the migration tool.
+2. After it succeeds, re-check:
+   - `supabase_migrations.schema_migrations` contains `20260502113000`.
+   - `public.v_blue_bell_accrual_ledger` exists and returns rows.
+   - All `reconciliation_case` rows with `case_type = 'unpaid_program_accrual'` are now `resolved` (so the `/admin/operations` Reconciliation Inbox no longer surfaces them — matching the new frontend filter `.neq('case_type', 'unpaid_program_accrual')`).
+3. No edge function deploys required.
 
-### 4. Wiring
+## Risks / notes
 
-- `DataSyncPage.tsx` imports and renders `<QboHealthCheckCard />` first.
-- `QboSettingsCard.tsx` consumes `useQboHealth()` and disables the QBO Wholesale Refresh, Process Pending, and Replay buttons when critical checks fail, with an inline message linking to the health card.
-
-## Technical notes
-
-- Health-check function uses a single SQL round-trip: one query against `information_schema.tables` filtered by the allowlist names, one against `pg_proc` joined to `pg_namespace = 'public'`, one against `information_schema.views`, and one against `supabase_migrations.schema_migrations`. Results merged in-memory.
-- Allowlist lives in a shared constant file so both the edge function and the UI can render the same list (edge owns the source of truth; UI just renders the response).
-- No new tables or migrations are required — this is a pure inspection feature.
-- Follows project rules: read-only receiver pattern, no inline business logic, parameterised queries only, admin role enforced server-side.
-
-## Out of scope
-
-- Auto-applying missing migrations (staff still apply via existing migration flow).
-- Health checks for non-QBO integrations (eBay, Stripe, BrickEconomy) — can be added later using the same pattern.
+- The migration is idempotent: attribution insert uses `ON CONFLICT DO NOTHING`; accrual upsert only overwrites rows that are still open, unsettled, and have zero commission; reconciliation update is scoped to `status IN ('open', 'in_progress')`.
+- Uses single-quoted strings throughout (no `$$` dollar-quoting), per the project's Lovable SQL-runner constraint.
+- Frontend already expects the new view and the resolved cases, so applying the migration brings backend in line with already-shipped UI.
