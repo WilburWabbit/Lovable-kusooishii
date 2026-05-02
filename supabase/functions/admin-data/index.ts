@@ -2138,7 +2138,8 @@ Deno.serve(async (req) => {
         trigger_type: "ai_provider_changed",
         actor_type: "user",
         actor_id: userId,
-        payload: { ai_provider: provider },
+        source_system: "admin-data",
+        output_json: { ai_provider: provider },
       });
       result = { ai_provider: provider };
 
