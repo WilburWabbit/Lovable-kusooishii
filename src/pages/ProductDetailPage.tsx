@@ -13,6 +13,10 @@ import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
 import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
+import { absoluteUrl, breadcrumbJsonLd } from "@/lib/seo-jsonld";
+
+const UK_GEO_META = { region: 'GB', placename: 'United Kingdom' } as const;
 
 interface ProductDetailRow {
   id: string;
