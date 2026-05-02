@@ -433,7 +433,7 @@ export default function ProductDetailPage() {
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
                     if (themeName) specs.push({ label: "Theme", value: themeName });
-                    if (product.subtheme_name) specs.push({ label: "Subtheme", value: product.subtheme_name });
+                    if (subthemeName) specs.push({ label: "Subtheme", value: subthemeName });
                     if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
                     if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
                     if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
