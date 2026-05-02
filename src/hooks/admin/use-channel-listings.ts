@@ -289,6 +289,10 @@ export function usePublishListing() {
         channel: legacyChannel,
         v2_channel: v2Channel,
         v2_status: wasLive ? 'live' : 'draft',
+        // external_sku is NOT NULL on channel_listing; default to the SKU code
+        // so first-time publishes don't fail. Marketplace sync may later
+        // overwrite this with a marketplace-assigned SKU.
+        external_sku: skuCode,
         listing_title: listingTitle.trim(),
         listing_description: listingDescription?.trim() ?? null,
         listed_price: listingPrice,

@@ -1,60 +1,46 @@
-# Add AI Provider Setting (Lovable AI primary, OpenAI fallback)
+## Root cause
 
-## Why
-The Copy & SEO generator currently calls OpenAI directly. The OpenAI API key is returning **HTTP 429 `insufficient_quota`** (out of billing credits), which the function reports as "Rate limit exceeded." This will keep happening until billing is topped up. We'll switch the default to Lovable AI (uses the auto-provisioned `LOVABLE_API_KEY`, no separate billing) and keep OpenAI as a fallback.
+Both publish attempts (web + ebay) for product `eee4c676-f29a-40fb-9d45-a41c4301ed5b` (SKU `31157-1.1`) failed at the INSERT into `channel_listing` with the Postgres error:
 
-## Behaviour
-- **Default provider**: Lovable AI (configurable).
-- **Automatic fallback**: when the primary provider is Lovable AI and it returns `429` (rate limit) or `402` (out of credits), the request is retried against OpenAI if `OPENAI_API_KEY` exists. The user gets the result, not an error.
-- **No fallback when OpenAI is primary** — if you've explicitly chosen OpenAI you probably want to know it's broken, not silently spend Lovable credits.
-- **Clear error messages** when both fail: distinguish "rate-limited" vs "credits exhausted" and suggest the right remediation.
-- **UI toggle** in Data Sync settings showing which provider is active and recent fallback events.
-
-## Changes
-
-### 1. Database migration
-Add a single column to `app_settings`:
-
-```sql
-ALTER TABLE app_settings
-  ADD COLUMN IF NOT EXISTS ai_provider text NOT NULL DEFAULT 'lovable';
-ALTER TABLE app_settings
-  ADD CONSTRAINT app_settings_ai_provider_check
-  CHECK (ai_provider IN ('lovable', 'openai'));
+```
+null value in column "external_sku" of relation "channel_listing"
+violates not-null constraint
 ```
 
-### 2. Shared edge-function helper — `supabase/functions/_shared/ai-provider.ts` (new)
-- `getConfiguredProvider(admin)` reads `app_settings.ai_provider`, defaults to `'lovable'`.
-- `callChatCompletion(body, options)` — single entry point used by all AI-calling functions.
-  - Picks endpoint + key per provider:
-    - Lovable → `https://ai.gateway.lovable.dev/v1/chat/completions` with `LOVABLE_API_KEY`, model `openai/gpt-5` (gpt-4o-equivalent, supports vision + tool calling).
-    - OpenAI → `https://api.openai.com/v1/chat/completions` with `OPENAI_API_KEY`, model `gpt-4o`.
-  - On 429/402 from Lovable, transparently retries against OpenAI (when key present) and surfaces the result with a `fellBack: true` flag.
-  - Returns user-friendly error messages keyed off the actual upstream status.
+(Confirmed in postgres logs at 2026-05-02 08:15:14 and 08:15:16 UTC.)
 
-### 3. Update edge functions
-- **`generate-product-copy/index.ts`** — replace direct `fetch("https://api.openai.com/...")` with `callChatCompletion(...)`. Drop the hand-rolled 429 handler (helper handles it). Tool-calling shape stays identical.
-- **`chatgpt/index.ts`** — same swap for the age-mark vision call. Use the helper with `max_tokens: 20`.
+### Why
 
-### 4. admin-data router — new actions
-- `get-ai-provider` → `{ ai_provider: 'lovable' | 'openai' }`.
-- `set-ai-provider` → updates `app_settings.ai_provider`, writes an audit event, validates input.
+- `channel_listing.external_sku` is declared `NOT NULL` with no default.
+- The publish hook `usePublishListing` (`src/hooks/admin/use-channel-listings.ts`) builds an INSERT payload that omits `external_sku`.
+- The hook's UPDATE branch works because it never touches the column, but this product had **no pre-existing `channel_listing` row**, so both publish attempts went through the INSERT branch and were rejected.
+- No `outbound_command` rows were ever created — the failure happens before the snapshot/queue RPCs run.
 
-### 5. UI — `src/components/admin-v2/AiProviderSettingsCard.tsx` (new)
-- Reads the current provider via `admin-data` and renders a two-button segmented control: **Lovable AI** / **OpenAI**.
-- Shows a small badge ("Active" / "Fallback available") and a one-line description of behaviour.
-- Mounts on `src/pages/admin-v2/DataSyncPage.tsx` next to the other integration settings cards.
+This is a generic bug: any first-time publish for any (sku, channel) pair will fail the same way.
 
-### 6. Toast messaging
-Frontend callers (e.g. the Copy & SEO generator) keep their existing error display, but now the message comes from the helper and reads, e.g.:
-- "Lovable AI is rate-limited. Please try again in a moment."
-- "Lovable AI workspace credits are exhausted. Add funds in Settings → Workspace → Usage, or switch the AI provider to OpenAI."
+## Fix
 
-## Out of scope
-- Migrating non-chat features (image generation, embeddings) — none currently use OpenAI in this codebase.
-- Per-user provider preference — single setting for the whole workspace, matching the other admin settings.
+Populate `external_sku` on the INSERT payload in `usePublishListing`. The natural value is the SKU code we already looked up (e.g. `31157-1.1`), which is what the eBay/sync code uses elsewhere as the external SKU identifier.
 
-## Acceptance
-- A Copy & SEO generation succeeds against Lovable AI by default.
-- Setting `ai_provider = 'openai'` (via the UI) and triggering generation routes to OpenAI directly (and surfaces the current quota error verbatim).
-- Setting `ai_provider = 'lovable'` while Lovable AI is intentionally rate-limited produces a successful response via the OpenAI fallback (with a log line `ai-provider: Lovable AI returned 429; falling back to OpenAI`).
+### Change
+
+In `src/hooks/admin/use-channel-listings.ts` (around lines 240–299):
+
+1. Extend the SKU lookup to also select `sku_code` (we already have it from the input as `skuCode`, but read from DB for safety so we use the canonical value).
+2. Add `external_sku: skuCode` to the `payload` object so it is set on INSERT.
+3. Leave the UPDATE branch as-is (don't overwrite an existing `external_sku` that may have been set by a prior eBay/web sync to a marketplace-assigned value).
+
+To prevent this whole class of bug, also relax the column to allow a default fallback at the DB level:
+
+- New migration: alter `channel_listing.external_sku` to default to the related `sku.sku_code` via a `BEFORE INSERT` trigger when the caller doesn't supply one. (Keep `NOT NULL`, but populate it automatically.)
+
+### After deployment
+
+Manually retry the publish for SKU `31157-1.1` on both `web` and `ebay` from `/admin/products/<id>` → Channels tab. The fix will create the `channel_listing` rows, generate price decision snapshots, and enqueue `publish` commands into `outbound_command` for the `listing-command-process` worker to pick up.
+
+## Files touched
+
+- `src/hooks/admin/use-channel-listings.ts` — add `external_sku: skuCode` to insert payload.
+- `supabase/migrations/<new>.sql` — `BEFORE INSERT` trigger on `channel_listing` defaulting `external_sku` from `sku.sku_code` when null.
+
+No other components, RPCs, or edge functions need changes.
