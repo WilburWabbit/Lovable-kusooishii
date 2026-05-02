@@ -318,7 +318,7 @@ Deno.serve(async (req) => {
       format: "FIXED_PRICE",
       availableQuantity: onHandCount,
       categoryId: ebayCategoryId,
-      listingDescription: (l.listing_description as string) ?? (product?.description as string) ?? "",
+      listingDescription: richDescription,
       pricingSummary: {
         price: {
           value: String((l.listed_price as number) ?? 0),
