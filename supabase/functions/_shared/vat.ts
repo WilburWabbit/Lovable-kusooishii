@@ -79,6 +79,21 @@ export function distributeLinesByGrossPence(
 
 // ─── Legacy £ API (kept for backward compatibility) ─────────
 
+export function splitGrossToNetVat(gross: number, ratePercent = 20): { net: number; vat: number } {
+  const divisor = 1 + ratePercent / 100;
+  const grossPence = toPence(gross);
+  const netPence = Math.round(grossPence / divisor);
+  return { net: fromPence(netPence), vat: fromPence(grossPence - netPence) };
+}
+
+export function netToGross(net: number, ratePercent = 20): number {
+  return round2(net * (1 + ratePercent / 100));
+}
+
+export function deriveLineVatFromNet(net: number, ratePercent = 20): number {
+  return round2(netToGross(net, ratePercent) - net);
+}
+
 /** Compute net and VAT from a gross (VAT-inclusive) amount at 20%. */
 export function calculateVAT(gross: number): { net: number; vat: number } {
   const { netPence, vatPence } = splitGrossPence(toPence(gross));
@@ -88,6 +103,10 @@ export function calculateVAT(gross: number): { net: number; vat: number } {
 /** Calculate ex-VAT amount. */
 export function exVAT(amount: number): number {
   return fromPence(splitGrossPence(toPence(amount)).netPence);
+}
+
+export function qboTotalAmtIsGross(): true {
+  return true;
 }
 
 /**

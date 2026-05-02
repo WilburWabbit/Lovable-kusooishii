@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
+import { splitGrossToNetVat } from "@/lib/utils/vat";
 import { Mono, SectionHead } from "./ui-primitives";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
@@ -363,7 +364,8 @@ export function CompleteOrderModal({
       let allAllocated = true;
 
       for (const line of prepared) {
-        const unitPrice = parseCurrency(line.unitPrice);
+        const unitGrossPrice = parseCurrency(line.unitPrice);
+        const unitNetPrice = splitGrossToNetVat(unitGrossPrice).net;
         const qty = Math.max(1, Math.floor(line.quantity));
 
         for (let i = 0; i < qty; i++) {
@@ -373,9 +375,9 @@ export function CompleteOrderModal({
               sales_order_id: orderId,
               sku_id: line.skuId!,
               quantity: 1,
-              unit_price: unitPrice,
+              unit_price: unitNetPrice,
               line_discount: 0,
-              line_total: unitPrice,
+              line_total: unitNetPrice,
             } as never)
             .select("id")
             .single();
@@ -421,9 +423,10 @@ export function CompleteOrderModal({
           gross_total: saleGross,
           merchandise_subtotal: merchandiseSubtotal,
           tax_total: taxTotal,
-          net_amount: merchandiseSubtotal,
-          discount_total: discountAmount > 0 ? discountAmount : 0,
-          payment_method: hasCashPortion ? "split" : (paymentMethod ?? "card"),
+	          net_amount: merchandiseSubtotal,
+	          discount_total: discountAmount > 0 ? discountAmount : 0,
+	          global_tax_calculation: "TaxExcluded",
+	          payment_method: hasCashPortion ? "split" : (paymentMethod ?? "card"),
           notes: updatedNotes || null,
           v2_status: allAllocated ? "new" : "needs_allocation",
           qbo_sync_status: allAllocated ? "pending" : "needs_manual_review",

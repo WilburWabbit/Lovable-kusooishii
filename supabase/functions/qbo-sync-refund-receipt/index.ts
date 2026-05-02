@@ -16,7 +16,6 @@ import {
   jsonResponse,
   errorResponse,
 } from "../_shared/qbo-helpers.ts";
-import { exVAT } from "../_shared/vat.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -62,13 +61,17 @@ Deno.serve(async (req) => {
     // Build QBO RefundReceipt payload
     const qboLines = ((lineItems ?? []) as Record<string, unknown>[]).map((li) => {
       const sku = li.sku as Record<string, unknown> | null;
-      const unitPrice = exVAT((li.unit_price as number) ?? 0);
+      const qty = Number(li.quantity ?? 1) || 1;
+      const netLineTotal = typeof li.line_total === "number"
+        ? (li.line_total as number)
+        : ((li.unit_price as number) ?? 0) * qty;
+      const unitPrice = Math.round((netLineTotal / qty) * 100) / 100;
 
       const line: Record<string, unknown> = {
         DetailType: "SalesItemLineDetail",
-        Amount: unitPrice,
+        Amount: Math.round(netLineTotal * 100) / 100,
         SalesItemLineDetail: {
-          Qty: 1,
+          Qty: qty,
           UnitPrice: unitPrice,
           TaxCodeRef: { value: "20.0 S" },
         },
@@ -85,6 +88,7 @@ Deno.serve(async (req) => {
 
     const refundPayload: Record<string, unknown> = {
       Line: qboLines,
+      GlobalTaxCalculation: "TaxExcluded",
       TxnTaxDetail: {
         TotalTax: qboLines.reduce((sum, l) => {
           const amount = (l.Amount as number) ?? 0;

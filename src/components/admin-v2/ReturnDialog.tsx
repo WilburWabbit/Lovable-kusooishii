@@ -131,7 +131,7 @@ export function ReturnDialog({ open, onClose, orderId, lineItems }: ReturnDialog
                     className="accent-amber-500"
                   />
                   <Mono color="amber">{li.sku ?? "—"}</Mono>
-                  <Mono color="teal">£{li.unitPrice.toFixed(2)}</Mono>
+                  <Mono color="teal">£{li.lineGross.toFixed(2)}</Mono>
                 </label>
               ))}
               {allocatedLines.length === 0 && (
