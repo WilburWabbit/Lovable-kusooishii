@@ -159,11 +159,13 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
 
   if (revisionsError) throw revisionsError;
 
-  const revisionsById = new Map((revisions ?? []).map((revision: SeoRevisionRow) => [revision.id, revision]));
+  const revisionsById = new Map<string, SeoRevisionRow>(
+    ((revisions ?? []) as SeoRevisionRow[]).map((revision) => [revision.id, revision]),
+  );
   return rows.map((row) => ({
     ...row,
     revision: row.published_revision_id ? revisionsById.get(row.published_revision_id) ?? null : null,
-  }));
+  })) as SeoDocumentWithRevision[];
 }
 
 async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEditorState) {
