@@ -14,6 +14,7 @@ import {
   Settings,
   Activity,
   MessageSquare,
+  FileSearch,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -217,6 +218,13 @@ export function AdminV2Sidebar({
           label="Channel Mappings"
           to="/admin/settings/channel-mappings"
           active={isActive("/admin/settings/channel-mappings")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={FileSearch}
+          label="SEO/GEO"
+          to="/admin/settings/seo-geo"
+          active={isActive("/admin/settings/seo-geo")}
           onNavigate={onClose}
         />
         <SidebarItem

@@ -102,6 +102,13 @@ Deno.serve(async (req) => {
         .eq("id", order.customer_id)
         .single();
       qboCustomerRef = customer?.qbo_customer_id ?? null;
+      if (qboCustomerRef) {
+        await admin
+          .from("sales_order")
+          .update({ qbo_customer_id: qboCustomerRef } as never)
+          .eq("id", orderId)
+          .is("qbo_customer_id", null);
+      }
     }
 
     // ─── 3. Build QBO-stable line distribution ──────────────
@@ -193,9 +200,20 @@ Deno.serve(async (req) => {
       return row?.Id ? String(row.Id) : null;
     }
 
-    // If still no customer ref (no order.qbo_customer_id, no linked customer
-    // record), fall back to QBO "Cash Sales" by NAME — id is realm-specific
-    // and must NEVER be hardcoded.
+    // Linked customer orders must use that customer's QBO id. If it is not
+    // available yet, the posting-intent processor should create the customer
+    // first rather than letting this receipt fall through to Cash Sales.
+    if (!qboCustomerRef && order.customer_id) {
+      return jsonResponse({
+        success: false,
+        qbo_error: "Linked customer has not been created in QBO yet. Queue or process the customer upsert before creating the sales receipt.",
+        orderId,
+        customer_id: order.customer_id,
+      });
+    }
+
+    // If still no customer ref (no linked customer record), fall back to QBO
+    // "Cash Sales" by NAME — id is realm-specific and must NEVER be hardcoded.
     if (!qboCustomerRef) {
       qboCustomerRef = await lookupQboRef("Customer", "Cash Sales");
       if (!qboCustomerRef) {

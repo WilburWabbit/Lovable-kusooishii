@@ -542,7 +542,7 @@ export default function ProductDetailPage() {
                             disabled={offer.price == null || offer.stock_count === 0}
                             onClick={() => handleAddToCart(offer)}
                           >
-                            <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> Add
+                            <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> {offer.stock_count === 0 ? "Sold Out" : "Add"}
                           </Button>
                         </div>
                       </div>
