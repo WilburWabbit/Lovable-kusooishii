@@ -9,7 +9,7 @@ import { usePageSeo } from '@/hooks/use-page-seo';
 import { Link } from 'react-router-dom';
 
 export default function OrderTrackingPage() {
-  usePageSeo({ title: 'Track Your Order', description: 'Track your Kuso Oishii LEGO® order with your order number and email address.', path: '/order-tracking' });
+  usePageSeo({ title: 'Track Your Order', description: 'Track your Kuso Oishii LEGO® order with your order number and email address.', path: '/order-tracking', noIndex: true });
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderEmail, setOrderEmail] = useState('');
   const [trackingResult, setTrackingResult] = useState<any>(null);
