@@ -7,8 +7,14 @@ import heroImage from "@/assets/hero-lego.jpg";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 export default function HomePage() {
+  usePageSeo({
+    title: "Kuso Oishii — LEGO® for Obsessive Grown-Ups",
+    description: "Graded LEGO® sets and minifigures for adult collectors in the UK with clear condition grading and fair pricing.",
+    path: "/"
+  });
   const { data: featuredSets, isLoading } = useQuery({
     queryKey: ["featured_sets"],
     queryFn: async () => {

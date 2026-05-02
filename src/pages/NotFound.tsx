@@ -1,9 +1,17 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
+import { usePageSeo } from "@/hooks/use-page-seo";
 
 const NotFound = () => {
   const location = useLocation();
+
+  usePageSeo({
+    title: "Page Not Found",
+    description: "This Kuso Oishii page could not be found.",
+    path: location.pathname,
+    noIndex: true,
+  });
 
   useEffect(() => {
     console.error("404 Error: User attempted to access non-existent route:", location.pathname);
