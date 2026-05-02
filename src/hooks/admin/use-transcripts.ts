@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
 
 export type TranscriptRow = {
   id: string;
@@ -23,16 +23,18 @@ export interface TranscriptFilters {
   pageSize?: number;
 }
 
-function applyFilters(query: any, filters: TranscriptFilters) {
-  let q = query;
-  if (filters.role && filters.role !== "all") {
-    q = q.eq("role", filters.role);
-  }
-  if (filters.search && filters.search.trim()) {
-    const term = filters.search.trim().replace(/%/g, "");
-    q = q.or(`body.ilike.%${term}%,title.ilike.%${term}%`);
-  }
-  return q;
+type ListResponse = { rows: TranscriptRow[]; total: number };
+
+async function listTranscripts(params: {
+  role?: string;
+  search?: string;
+  from: number;
+  to: number;
+}): Promise<ListResponse> {
+  return invokeWithAuth<ListResponse>("admin-data", {
+    action: "list-transcripts",
+    ...params,
+  });
 }
 
 export function useTranscripts(filters: TranscriptFilters = {}) {
@@ -43,38 +45,28 @@ export function useTranscripts(filters: TranscriptFilters = {}) {
 
   return useQuery({
     queryKey: ["lovable-transcripts", filters],
-    queryFn: async () => {
-      let q = supabase
-        .from("lovable_agent_transcripts")
-        .select("*", { count: "exact" })
-        .order("occurred_at", { ascending: false, nullsFirst: false })
-        .order("message_index", { ascending: false })
-        .range(from, to);
-      q = applyFilters(q, filters);
-      const { data, error, count } = await q;
-      if (error) throw error;
-      return { rows: (data ?? []) as TranscriptRow[], total: count ?? 0 };
-    },
+    queryFn: () =>
+      listTranscripts({ role: filters.role, search: filters.search, from, to }),
   });
 }
 
-export async function fetchAllTranscripts(filters: TranscriptFilters = {}): Promise<TranscriptRow[]> {
+export async function fetchAllTranscripts(
+  filters: TranscriptFilters = {},
+): Promise<TranscriptRow[]> {
   const pageSize = 1000;
   let page = 0;
   const all: TranscriptRow[] = [];
   while (true) {
-    let q = supabase
-      .from("lovable_agent_transcripts")
-      .select("*")
-      .order("occurred_at", { ascending: false, nullsFirst: false })
-      .order("message_index", { ascending: false })
-      .range(page * pageSize, page * pageSize + pageSize - 1);
-    q = applyFilters(q, filters);
-    const { data, error } = await q;
-    if (error) throw error;
-    const batch = (data ?? []) as TranscriptRow[];
-    all.push(...batch);
-    if (batch.length < pageSize) break;
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { rows } = await listTranscripts({
+      role: filters.role,
+      search: filters.search,
+      from,
+      to,
+    });
+    all.push(...rows);
+    if (rows.length < pageSize) break;
     page++;
   }
   return all;

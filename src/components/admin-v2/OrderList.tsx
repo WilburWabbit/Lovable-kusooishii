@@ -11,6 +11,7 @@ import { SurfaceCard, Mono, OrderStatusBadge, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { CashSaleForm } from "./CashSaleForm";
 import { CompleteOrderModal } from "./CompleteOrderModal";
+import { StatusFilterDropdown } from "./StatusFilterDropdown";
 import { Download, Search } from "lucide-react";
 
 // ─── Row type ────────────────────────────────────────────────
@@ -451,7 +452,12 @@ export function OrderList() {
             <tr className="border-b border-zinc-200 bg-zinc-50">
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
-                  {col.sortable !== false ? (
+                  {col.key === "status" ? (
+                    <StatusFilterDropdown
+                      value={prefs.filters[col.key] ?? ""}
+                      onChange={(v) => setFilter(col.key, v)}
+                    />
+                  ) : col.sortable !== false ? (
                     <TableFilterInput
                       value={prefs.filters[col.key] ?? ""}
                       onChange={(v) => setFilter(col.key, v)}

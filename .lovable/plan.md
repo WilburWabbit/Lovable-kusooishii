@@ -1,109 +1,46 @@
-# Lovable Agent Transcripts: DB import + Admin viewer + CSV export
+## Root cause
 
-## Overview
-
-Parse the 10 transcript markdown files in `docs/transcript/`, load them into a new `lovable_agent_transcripts` table (one row per message), and add an admin page at `/admin/system/transcripts` that lists messages in reverse-chronological order with a "Export CSV" button.
-
-## 1. Database
-
-New migration creating:
-
-```sql
-create table public.lovable_agent_transcripts (
-  id uuid primary key default gen_random_uuid(),
-  message_index integer not null,            -- e.g. 197 (or first index of a range block)
-  message_index_end integer,                  -- non-null when source is a range block (e.g. 851–870)
-  role text not null check (role in ('user','assistant','system','range')),
-  occurred_at timestamptz,                    -- parsed from header when present
-  source_file text not null,                  -- e.g. PART_02_msgs_197-256.md
-  part_number integer not null,               -- 2
-  title text,                                 -- header tail after the dash if present
-  body text not null,                         -- verbatim message body
-  token_count integer not null,               -- estimated tokens (see §3)
-  char_count integer not null,
-  created_at timestamptz not null default now(),
-  unique (source_file, message_index, role)
-);
-
-create index on public.lovable_agent_transcripts (occurred_at desc nulls last, message_index desc);
-create index on public.lovable_agent_transcripts (role);
-
-alter table public.lovable_agent_transcripts enable row level security;
-
-create policy "Admins read transcripts"
-  on public.lovable_agent_transcripts for select
-  to authenticated
-  using (public.has_role(auth.uid(), 'admin') or public.has_role(auth.uid(), 'staff'));
-```
-
-No public/insert policies — only the importer (service role) writes; admins read.
-
-## 2. Importer (one-off seed via Edge Function)
-
-New edge function `transcripts-import` (admin-only, requires `service_role` JWT):
-
-- Reads each `docs/transcript/PART_*.md` shipped with the function as static assets (bundled into the function via `Deno.readTextFile` against files copied into `supabase/functions/transcripts-import/data/`).
-- Parses two header shapes:
-  - Per-message: `^## Message (\d+) — (User|Assistant) — (YYYY-MM-DD HH:MM)?$`
-  - Range block: `^## Messages (\d+)[–-](\d+) — (.+)$` → role `range`, no timestamp, title = tail.
-- Body = lines after the header up to the next header or end of file.
-- Computes `token_count = Math.ceil(char_count / 4)` (cheap heuristic — no external API). `char_count` is exact.
-- Upserts on `(source_file, message_index, role)` so re-running is idempotent.
-- Returns `{ inserted, updated, skipped }`.
-
-Triggered manually from the new admin page via a "Re-import transcripts" button.
-
-## 3. Token counting
-
-We do not have access to the actual Lovable per-message token usage (it's not stored in this repo, and there is no API to fetch it). Two options shown to the user before build:
-
-- **A. Heuristic (default)**: `Math.ceil(chars / 4)`, labelled "Tokens (est.)" in the UI.
-- **B. Exact via tiktoken**: add `js-tiktoken` to the edge function, encode each body with `cl100k_base`. ~30% slower import, but accurate.
-
-I recommend A unless you specifically want exact counts; the heuristic is fine for relative sizing.
-
-## 4. Admin page
-
-New route `/admin/system/transcripts` (lazy-loaded) → `src/pages/admin-v2/TranscriptsPage.tsx`.
-
-- Sidebar: add "Transcripts" item under the existing "System" group in `AdminV2Sidebar.tsx` (icon: `MessageSquare`).
-- Layout: `AdminV2Layout` + `SectionHead` matching `AppHealthPage`.
-- Toolbar:
-  - Role filter: All / User / Assistant / Range
-  - Text search (server-side `ilike` on `body` and `title`)
-  - "Export CSV" button (uses existing `rowsToCsv` / `downloadCsv` from `src/lib/csv-sync/csv-utils.ts` — but with a transcripts-specific header list since transcripts are not a registered csv-sync table).
-  - "Re-import" button (calls `transcripts-import` edge function).
-- Table (shadcn `Table`), reverse-chronological by `occurred_at desc nulls last, message_index desc`:
-  - Columns: When · Part · # · Role · Title/Preview (first ~140 chars of body) · Tokens · Chars
-  - Row click → expands inline to show full `body` in a `<pre>` block.
-- Pagination: 100/page using existing `PaginationControls`.
-
-## 5. CSV export
-
-Two modes via the same button group:
-
-- **Page export**: current filtered/sorted page → client-side CSV from already-loaded rows.
-- **Full export**: queries all matching rows in batches of 1000 (Supabase default limit) via the client, concatenates, and downloads `lovable_agent_transcripts_<YYYY-MM-DD>.csv`.
-
-CSV columns: `message_index, message_index_end, role, occurred_at, source_file, part_number, title, token_count, char_count, body` (body quoted per RFC 4180 — newlines preserved).
-
-## 6. Files touched
+Both publish attempts (web + ebay) for product `eee4c676-f29a-40fb-9d45-a41c4301ed5b` (SKU `31157-1.1`) failed at the INSERT into `channel_listing` with the Postgres error:
 
 ```
-supabase/migrations/<ts>_lovable_agent_transcripts.sql        new
-supabase/functions/transcripts-import/index.ts                 new
-supabase/functions/transcripts-import/data/PART_*.md           new (copies of docs/transcript/*.md)
-src/pages/admin-v2/TranscriptsPage.tsx                         new
-src/hooks/admin/use-transcripts.ts                             new
-src/components/admin-v2/AdminV2Sidebar.tsx                     +1 nav item
-src/App.tsx                                                    +1 lazy route
+null value in column "external_sku" of relation "channel_listing"
+violates not-null constraint
 ```
 
-## 7. Out of scope
+(Confirmed in postgres logs at 2026-05-02 08:15:14 and 08:15:16 UTC.)
 
-- Live capture of new chat messages (not possible without a Lovable export API; same limitation noted in `docs/transcript/README.md`).
-- Updating the existing `chat-and-plan` markdown export workflow.
+### Why
 
-## Open question
+- `channel_listing.external_sku` is declared `NOT NULL` with no default.
+- The publish hook `usePublishListing` (`src/hooks/admin/use-channel-listings.ts`) builds an INSERT payload that omits `external_sku`.
+- The hook's UPDATE branch works because it never touches the column, but this product had **no pre-existing `channel_listing` row**, so both publish attempts went through the INSERT branch and were rejected.
+- No `outbound_command` rows were ever created — the failure happens before the snapshot/queue RPCs run.
 
-Token counting method — heuristic (fast, approximate) or `js-tiktoken` (exact, slower import)? Default is heuristic unless you say otherwise.
+This is a generic bug: any first-time publish for any (sku, channel) pair will fail the same way.
+
+## Fix
+
+Populate `external_sku` on the INSERT payload in `usePublishListing`. The natural value is the SKU code we already looked up (e.g. `31157-1.1`), which is what the eBay/sync code uses elsewhere as the external SKU identifier.
+
+### Change
+
+In `src/hooks/admin/use-channel-listings.ts` (around lines 240–299):
+
+1. Extend the SKU lookup to also select `sku_code` (we already have it from the input as `skuCode`, but read from DB for safety so we use the canonical value).
+2. Add `external_sku: skuCode` to the `payload` object so it is set on INSERT.
+3. Leave the UPDATE branch as-is (don't overwrite an existing `external_sku` that may have been set by a prior eBay/web sync to a marketplace-assigned value).
+
+To prevent this whole class of bug, also relax the column to allow a default fallback at the DB level:
+
+- New migration: alter `channel_listing.external_sku` to default to the related `sku.sku_code` via a `BEFORE INSERT` trigger when the caller doesn't supply one. (Keep `NOT NULL`, but populate it automatically.)
+
+### After deployment
+
+Manually retry the publish for SKU `31157-1.1` on both `web` and `ebay` from `/admin/products/<id>` → Channels tab. The fix will create the `channel_listing` rows, generate price decision snapshots, and enqueue `publish` commands into `outbound_command` for the `listing-command-process` worker to pick up.
+
+## Files touched
+
+- `src/hooks/admin/use-channel-listings.ts` — add `external_sku: skuCode` to insert payload.
+- `supabase/migrations/<new>.sql` — `BEFORE INSERT` trigger on `channel_listing` defaulting `external_sku` from `sku.sku_code` when null.
+
+No other components, RPCs, or edge functions need changes.

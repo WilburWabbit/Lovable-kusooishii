@@ -22,6 +22,9 @@ interface ProductDetailRow {
   mpn: string;
   name: string;
   description: string | null;
+  product_hook: string | null;
+  highlights: string | null;
+  call_to_action: string | null;
   piece_count: number | null;
   release_year: number | null;
   retired_flag: boolean;
@@ -61,7 +64,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
+        .select("id, mpn, name, description, product_hook, highlights, call_to_action, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -81,6 +84,52 @@ export default function ProductDetailPage() {
     },
     enabled: !!mpn,
   });
+
+  // Fetch resolved canonical theme/subtheme from product_attribute (fallback when
+  // product.theme_id / subtheme_name aren't projected yet).
+  const { data: canonicalThemeAttrs } = useQuery({
+    queryKey: ["product_canonical_theme_attrs", product?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_attribute")
+        .select("key, chosen_source, custom_value, source_values_jsonb")
+        .eq("product_id", product!.id)
+        .eq("namespace", "core")
+        .is("channel", null)
+        .is("marketplace", null)
+        .is("category_id", null)
+        .in("key", ["theme", "subtheme"]);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        key: string;
+        chosen_source: string | null;
+        custom_value: string | null;
+        source_values_jsonb: Record<string, { value: string | null }> | null;
+      }>;
+    },
+    enabled: !!product?.id,
+  });
+
+  function resolveCanonicalAttr(key: "theme" | "subtheme"): string | null {
+    const row = canonicalThemeAttrs?.find((r) => r.key === key);
+    if (!row) return null;
+    if (row.chosen_source === "custom" && row.custom_value) return row.custom_value;
+    if (row.chosen_source && row.chosen_source !== "none") {
+      const v = row.source_values_jsonb?.[row.chosen_source]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    if (row.chosen_source === "none") return null;
+    // auto-priority fallback
+    const priority = ["brickeconomy", "brickset", "bricklink", "brickowl"];
+    for (const s of priority) {
+      const v = row.source_values_jsonb?.[s]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    return null;
+  }
+
+  const resolvedThemeName = resolveCanonicalAttr("theme");
+  const resolvedSubthemeName = resolveCanonicalAttr("subtheme");
 
   // Fetch BrickEconomy enrichment data
   const { data: beData } = useQuery({
@@ -151,7 +200,10 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null);
+  const themeName =
+    getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null) ??
+    resolvedThemeName;
+  const subthemeName = product?.subtheme_name ?? resolvedSubthemeName;
 
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
@@ -256,7 +308,7 @@ export default function ProductDetailPage() {
       stock: offer.stock_count,
       retired: p.retired_flag,
       yearReleased: p.release_year,
-      subtheme: p.subtheme_name ?? undefined,
+      subtheme: subthemeName ?? undefined,
       weightKg: p.weight_kg ?? undefined,
     };
   }
@@ -382,9 +434,36 @@ export default function ProductDetailPage() {
                   {product.name}
                 </h1>
 
+                {product.product_hook && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.product_hook}
+                  </p>
+                )}
+
                 {product.description && (
-                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground whitespace-pre-line">
                     {product.description}
+                  </p>
+                )}
+
+                {product.highlights && (() => {
+                  const items = product.highlights
+                    .split(/\r?\n+/)
+                    .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+                    .filter(Boolean);
+                  if (items.length === 0) return null;
+                  return (
+                    <ul className="mt-4 list-disc pl-5 font-body text-sm leading-relaxed text-muted-foreground space-y-1">
+                      {items.map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+
+                {product.call_to_action && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.call_to_action}
                   </p>
                 )}
 
@@ -392,7 +471,7 @@ export default function ProductDetailPage() {
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
                     if (themeName) specs.push({ label: "Theme", value: themeName });
-                    if (product.subtheme_name) specs.push({ label: "Subtheme", value: product.subtheme_name });
+                    if (subthemeName) specs.push({ label: "Subtheme", value: subthemeName });
                     if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
                     if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
                     if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });

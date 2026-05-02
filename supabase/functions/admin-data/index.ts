@@ -2112,6 +2112,37 @@ Deno.serve(async (req) => {
         .select("stripe_test_mode").single();
       result = { stripe_test_mode: data?.stripe_test_mode ?? false };
 
+    } else if (action === "get-ai-provider") {
+      const { data } = await admin.from("app_settings")
+        .select("ai_provider").single();
+      const provider = (data as { ai_provider?: string } | null)?.ai_provider;
+      result = { ai_provider: provider === "openai" ? "openai" : "lovable" };
+
+    } else if (action === "set-ai-provider") {
+      const { provider } = params;
+      if (provider !== "lovable" && provider !== "openai") {
+        throw new ValidationError("'provider' must be 'lovable' or 'openai'");
+      }
+      const { error: updErr } = await admin.from("app_settings")
+        .update({
+          ai_provider: provider,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        })
+        .eq("id", "00000000-0000-0000-0000-000000000001");
+      if (updErr) throw new Error(`Failed to update ai_provider: ${updErr.message}`);
+
+      await admin.from("audit_event").insert({
+        entity_type: "system",
+        entity_id: "00000000-0000-0000-0000-000000000001",
+        trigger_type: "ai_provider_changed",
+        actor_type: "user",
+        actor_id: userId,
+        source_system: "admin-data",
+        output_json: { ai_provider: provider },
+      });
+      result = { ai_provider: provider };
+
     } else if (action === "get-test-order-count") {
       const { count } = await admin.from("sales_order")
         .select("id", { count: "exact", head: true })
@@ -3104,6 +3135,25 @@ Deno.serve(async (req) => {
           landing_error: landingErrRes.error?.message ?? null,
         },
       };
+    } else if (action === "list-transcripts") {
+      const role = (params as { role?: string }).role;
+      const search = (params as { search?: string }).search?.trim();
+      const from = Number((params as { from?: number }).from ?? 0);
+      const to = Number((params as { to?: number }).to ?? 49);
+      let q = admin
+        .from("lovable_agent_transcripts")
+        .select("*", { count: "exact" })
+        .order("occurred_at", { ascending: false, nullsFirst: false })
+        .order("message_index", { ascending: false })
+        .range(from, to);
+      if (role && role !== "all") q = q.eq("role", role);
+      if (search) {
+        const term = search.replace(/%/g, "");
+        q = q.or(`body.ilike.%${term}%,title.ilike.%${term}%`);
+      }
+      const { data, error, count } = await q;
+      if (error) throw error;
+      result = { rows: data ?? [], total: count ?? 0 };
     } else {
       return new Response(
         JSON.stringify({ error: `Unknown action: ${action}` }),
