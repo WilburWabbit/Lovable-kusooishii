@@ -61,6 +61,7 @@ const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));
 const ChannelMappingsSettingsPage = lazy(() => import("./pages/admin-v2/ChannelMappingsSettingsPage"));
 const AppHealthPage = lazy(() => import("./pages/admin-v2/AppHealthPage"));
+const SeoGeoPage = lazy(() => import("./pages/admin-v2/SeoGeoPage"));
 const TranscriptsPage = lazy(() => import("./pages/admin-v2/TranscriptsPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
@@ -165,6 +166,7 @@ const App = () => (
             <Route path="/admin/intake" element={<AdminRoute path="/admin/intake"><IntakePage /></AdminRoute>} />
             <Route path="/admin/operations" element={<AdminRoute path="/admin/operations"><OperationsPage /></AdminRoute>} />
             <Route path="/admin/settings/channel-mappings" element={<AdminRoute path="/admin/settings/channel-mappings"><ChannelMappingsSettingsPage /></AdminRoute>} />
+            <Route path="/admin/settings/seo-geo" element={<AdminRoute path="/admin/settings/seo-geo"><SeoGeoPage /></AdminRoute>} />
             <Route path="/admin/settings/app-health" element={<AdminRoute path="/admin/settings/app-health"><AppHealthPage /></AdminRoute>} />
             <Route path="/admin/qbo-callback" element={<AdminRoute path="/admin/qbo-callback"><QboCallbackPage /></AdminRoute>} />
             <Route path="/admin/ebay-callback" element={<AdminRoute path="/admin/ebay-callback"><EbayCallbackPage /></AdminRoute>} />
