@@ -333,10 +333,39 @@ async function fetchBrickEconomy(setNumber: string, admin: ReturnType<typeof cre
   const data = await res.json();
   const setData = data.data ?? data;
 
+  // BrickEconomy /set/{id} returns per-locale retail prices and condition-tagged
+  // current values (current_value_new, current_value_used). Map to the simple
+  // current_value / retail_price shape the rest of the code expects, preferring
+  // GBP retail and the "new" current value (matches our G1 baseline).
+  const currency = (setData.currency ?? "GBP") as string;
+  const retailKey = currency === "GBP" ? "retail_price_uk"
+    : currency === "USD" ? "retail_price_us"
+    : currency === "EUR" ? "retail_price_eu"
+    : currency === "CAD" ? "retail_price_ca"
+    : currency === "AUD" ? "retail_price_au"
+    : "retail_price_uk";
+
+  const currentValue = setData.current_value
+    ?? setData.currentValue
+    ?? setData.current_value_new
+    ?? setData.current_value_used
+    ?? null;
+  const retailPrice = setData.retail_price
+    ?? setData.retailPrice
+    ?? setData[retailKey]
+    ?? setData.retail_price_uk
+    ?? null;
+  const retiredDateRaw = setData.retired_date ?? setData.retiredDate ?? null;
+  const retiredDate = typeof retiredDateRaw === "string"
+    ? retiredDateRaw
+    : (setData.availability === "retired" && typeof setData.released_date === "string"
+        ? setData.released_date
+        : null);
+
   return {
-    current_value: setData.current_value ?? setData.currentValue ?? null,
-    retail_price: setData.retail_price ?? setData.retailPrice ?? null,
-    retired_date: setData.retired_date ?? setData.retiredDate ?? null,
+    current_value: currentValue,
+    retail_price: retailPrice,
+    retired_date: typeof retiredDate === "string" ? retiredDate : null,
   };
 }
 
