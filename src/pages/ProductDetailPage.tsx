@@ -12,9 +12,9 @@ import { useStore, type Product } from "@/lib/store";
 import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
+import { absoluteUrl, breadcrumbJsonLd } from "@/lib/seo-jsonld";
 
-const SITE_URL = "https://www.kusooishii.com";
 const UK_GEO_META = { region: "GB", placename: "United Kingdom" };
 
 interface ProductDetailRow {
@@ -222,7 +222,8 @@ export default function ProductDetailPage() {
   const primaryImageUrl = displayMedia.find(m => m.is_primary)?.url ?? displayMedia[0]?.url ?? null;
   const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
-  const canonicalProductUrl = product ? `${SITE_URL}/sets/${encodeURIComponent(product.mpn)}` : undefined;
+  const canonicalProductPath = product ? `/sets/${encodeURIComponent(product.mpn)}` : undefined;
+  const canonicalProductUrl = canonicalProductPath ? absoluteUrl(canonicalProductPath) : undefined;
   const structuredOffers = offers
     ?.filter((offer) => {
       const grade = parseInt(offer.condition_grade, 10);
@@ -237,7 +238,7 @@ export default function ProductDetailPage() {
       url: canonicalProductUrl,
     }));
 
-  usePageSeo({
+  useSeoDocumentPageSeo(product?.mpn ? `product:${product.mpn}` : undefined, {
     title: product ? `${product.name} (${product.mpn})` : 'LEGO® Set',
     description: product?.description ?? `Shop ${product?.name ?? 'LEGO® sets'} with graded condition options and fast UK shipping from Kuso Oishii.`,
     path: mpn ? `/sets/${mpn}` : '/sets',
@@ -245,16 +246,23 @@ export default function ProductDetailPage() {
     imageAlt: product ? `${product.name} product image` : undefined,
     keywords: product ? [product.mpn, product.name, 'LEGO resale', 'graded LEGO sets', 'UK LEGO store'] : undefined,
     geo: UK_GEO_META,
-    jsonLd: product ? {
-      '@context': 'https://schema.org',
-      '@type': 'Product',
-      name: product.name,
-      mpn: product.mpn,
-      description: product.description ?? undefined,
-      image: allImageUrls.length ? allImageUrls : (primaryImageUrl ? [primaryImageUrl] : undefined),
-      brand: { '@type': 'Brand', name: 'LEGO' },
-      offers: structuredOffers,
-    } : undefined
+    jsonLd: product ? [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        name: product.name,
+        mpn: product.mpn,
+        description: product.description ?? undefined,
+        image: allImageUrls.length ? allImageUrls : (primaryImageUrl ? [primaryImageUrl] : undefined),
+        brand: { '@type': 'Brand', name: 'LEGO' },
+        offers: structuredOffers,
+      },
+      breadcrumbJsonLd([
+        { name: 'Home', path: '/' },
+        { name: 'Browse LEGO Sets', path: '/browse' },
+        { name: product.name, path: canonicalProductPath ?? `/sets/${product.mpn}` },
+      ]),
+    ] : undefined
   });
 
   // Fire view_item event once per product load

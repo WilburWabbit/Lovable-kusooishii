@@ -1,12 +1,12 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
 
 const NotFound = () => {
   const location = useLocation();
 
-  usePageSeo({
+  useSeoDocumentPageSeo("route:/404", {
     title: "Page Not Found",
     description: "This Kuso Oishii page could not be found.",
     path: location.pathname,

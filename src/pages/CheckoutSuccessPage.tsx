@@ -4,11 +4,11 @@ import { CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { useStore } from '@/lib/store';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
 import { trackPurchase } from '@/lib/gtm-ecommerce';
 
 export default function CheckoutSuccessPage() {
-  usePageSeo({ title: 'Order Confirmed', description: 'Your Kuso Oishii order has been placed successfully.', path: '/checkout/success', noIndex: true });
+  useSeoDocumentPageSeo('route:/checkout/success', { title: 'Order Confirmed', description: 'Your Kuso Oishii order has been placed successfully.', path: '/checkout/success', noIndex: true });
   const clearCart = useStore(state => state.clearCart);
   const [params] = useSearchParams();
   const sessionId = params.get('session_id');

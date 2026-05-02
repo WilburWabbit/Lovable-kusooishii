@@ -5,11 +5,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Package, Truck, MapPin, CheckCircle } from 'lucide-react';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
 import { Link } from 'react-router-dom';
 
 export default function OrderTrackingPage() {
-  usePageSeo({ title: 'Track Your Order', description: 'Track your Kuso Oishii LEGO® order with your order number and email address.', path: '/order-tracking', noIndex: true });
+  useSeoDocumentPageSeo('route:/order-tracking', { title: 'Track Your Order', description: 'Track your Kuso Oishii LEGO® order with your order number and email address.', path: '/order-tracking', noIndex: true });
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderEmail, setOrderEmail] = useState('');
   const [trackingResult, setTrackingResult] = useState<any>(null);

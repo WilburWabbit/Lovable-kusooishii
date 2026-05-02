@@ -1,8 +1,14 @@
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function ShippingPolicyPage() {
-  usePageSeo({ title: 'Shipping Policy', description: 'UK shipping options, processing times, and packaging info for Kuso Oishii LEGO® orders.', path: '/shipping-policy' });
+  useSeoDocumentPageSeo('route:/shipping-policy', {
+    title: 'Shipping Policy',
+    description: 'UK shipping options, processing times, and packaging info for Kuso Oishii LEGO® orders.',
+    path: '/shipping-policy',
+    jsonLd: pageBreadcrumbJsonLd('Shipping Policy', '/shipping-policy'),
+  });
 
   return (
     <StorefrontLayout>

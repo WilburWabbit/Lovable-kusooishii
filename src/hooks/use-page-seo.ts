@@ -4,7 +4,7 @@ const SITE_NAME = 'Kuso Oishii';
 const BASE_URL = 'https://www.kusooishii.com';
 const SEO_OWNER = 'usePageSeo';
 
-interface PageSeoOptions {
+export interface PageSeoOptions {
   title: string;
   description: string;
   path: string;
