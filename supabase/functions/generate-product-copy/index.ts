@@ -311,7 +311,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ copy }), {
+    return new Response(JSON.stringify({ copy, provider_used: aiResult.providerUsed, fell_back: aiResult.fellBack }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
