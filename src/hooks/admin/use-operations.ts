@@ -270,18 +270,25 @@ const mapCaseNote = (row: Record<string, unknown>): ReconciliationCaseNote => ({
   createdAt: row.created_at as string,
 });
 
-const mapHealth = (row: Record<string, unknown>): OperationsHealthRow => ({
-  area: row.area as string,
-  healthStatus: row.health_status as string,
-  severity: row.severity as string,
-  openCount: Number(row.open_count ?? 0),
-  failedCount: Number(row.failed_count ?? 0),
-  pendingCount: Number(row.pending_count ?? 0),
-  lastSuccessAt: (row.last_success_at as string | null) ?? null,
-  lastFailureAt: (row.last_failure_at as string | null) ?? null,
-  oldestPendingAt: (row.oldest_pending_at as string | null) ?? null,
-  recommendation: (row.recommendation as string | null) ?? "Review this area.",
-});
+const mapHealth = (row: Record<string, unknown>): OperationsHealthRow => {
+  const area = row.area as string;
+  const recommendation = (row.recommendation as string | null) ?? "Review this area.";
+
+  return {
+    area,
+    healthStatus: row.health_status as string,
+    severity: row.severity as string,
+    openCount: Number(row.open_count ?? 0),
+    failedCount: Number(row.failed_count ?? 0),
+    pendingCount: Number(row.pending_count ?? 0),
+    lastSuccessAt: (row.last_success_at as string | null) ?? null,
+    lastFailureAt: (row.last_failure_at as string | null) ?? null,
+    oldestPendingAt: (row.oldest_pending_at as string | null) ?? null,
+    recommendation: area === "blue_bell_accruals" && /period/i.test(recommendation)
+      ? "Settle unpaid Blue Bell commissions from the rolling accrual ledger."
+      : recommendation,
+  };
+};
 
 const mapJobRun = (row: Record<string, unknown>): SubledgerJobRunRow => ({
   id: row.id as string,
@@ -385,6 +392,7 @@ export function useReconciliationInbox() {
       const { data, error } = await supabase
         .from("v_reconciliation_inbox" as never)
         .select("*")
+        .neq("case_type" as never, "unpaid_program_accrual")
         .limit(250);
 
       if (error) throw error;
@@ -420,7 +428,9 @@ export function useOperationsHealth() {
         .select("*");
 
       if (error) throw error;
-      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapHealth);
+      return ((data ?? []) as unknown as Record<string, unknown>[])
+        .filter((row) => row.area !== "settlement_close")
+        .map(mapHealth);
     },
   });
 }
@@ -498,7 +508,7 @@ export function useBlueBellOpenAccruals() {
       const { data, error } = await supabase
         .from("v_blue_bell_accrual_ledger" as never)
         .select("*")
-        .in("status" as never, ["open", "partially_settled"])
+        .gt("commission_outstanding" as never, 0)
         .order("order_created_at" as never, { ascending: false })
         .limit(200);
 
