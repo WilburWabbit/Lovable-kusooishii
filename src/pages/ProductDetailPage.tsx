@@ -196,7 +196,10 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null);
+  const themeName =
+    getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null) ??
+    resolvedThemeName;
+  const subthemeName = product?.subtheme_name ?? resolvedSubthemeName;
 
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
