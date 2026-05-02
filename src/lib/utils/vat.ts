@@ -12,14 +12,31 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/**
- * Compute net and VAT from a gross (VAT-inclusive) amount.
- * net = gross / 1.2, vat = gross - net (avoids floating-point drift).
- */
-export function calculateVAT(gross: number): { net: number; vat: number } {
-  const net = round2(gross / VAT_DIVISOR);
+export function splitGrossToNetVat(gross: number, ratePercent = 20): { net: number; vat: number } {
+  const divisor = 1 + ratePercent / 100;
+  const net = round2(gross / divisor);
   const vat = round2(gross - net);
   return { net, vat };
+}
+
+export function netToGross(net: number, ratePercent = 20): number {
+  return round2(net * (1 + ratePercent / 100));
+}
+
+export function deriveLineVatFromNet(net: number, ratePercent = 20): number {
+  return round2(netToGross(net, ratePercent) - net);
+}
+
+/**
+ * Compute net and VAT from a gross (VAT-inclusive) amount.
+ * Kept for compatibility; prefer splitGrossToNetVat when writing new code.
+ */
+export function calculateVAT(gross: number): { net: number; vat: number } {
+  return splitGrossToNetVat(gross);
+}
+
+export function qboTotalAmtIsGross(): true {
+  return true;
 }
 
 /**

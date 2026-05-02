@@ -1122,14 +1122,11 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
       const globalTaxCalc = receipt.GlobalTaxCalculation ?? null;
       const taxTotal = receipt.TxnTaxDetail?.TotalTax ?? 0;
 
-      let merchandiseSubtotal: number, grossTotal: number;
-      if (globalTaxCalc === "TaxInclusive") {
-        merchandiseSubtotal = totalAmount - taxTotal;
-        grossTotal = totalAmount;
-      } else {
-        merchandiseSubtotal = totalAmount;
-        grossTotal = totalAmount + taxTotal;
-      }
+      // QBO TotalAmt is the document total including VAT in the UK realm, even
+      // when GlobalTaxCalculation is TaxExcluded. The app stores that as gross
+      // and stores the ex-VAT split separately.
+      const grossTotal = Math.round(totalAmount * 100) / 100;
+      const merchandiseSubtotal = Math.round((grossTotal - taxTotal) * 100) / 100;
 
       let customerId: string | null = null;
       if (customerRefValue) {
@@ -1137,7 +1134,7 @@ async function processSalesReceipts(admin: any, batchSize: number): Promise<{ pr
         customerId = cust?.id ?? null;
       }
 
-      const netAmount = Math.round((grossTotal - taxTotal) * 100) / 100;
+      const netAmount = merchandiseSubtotal;
 
       const headerPayload: Record<string, any> = {
         merchandise_subtotal: merchandiseSubtotal,

@@ -114,7 +114,7 @@ export function ProcessReturnDialog({ open, onClose, orderId, lineItems }: Proce
               >
                 <div className="flex items-center gap-2 text-xs">
                   <Mono color="amber">{li.sku ?? "—"}</Mono>
-                  <Mono color="teal">£{li.unitPrice.toFixed(2)}</Mono>
+                  <Mono color="teal">£{li.lineGross.toFixed(2)}</Mono>
                 </div>
                 <div className="flex gap-1.5">
                   <button

@@ -105,26 +105,47 @@ Deno.serve(async (req) => {
     }
 
     // ─── 3. Build QBO-stable line distribution ──────────────
-    // Each sales_order_line is VAT-inclusive (gross). Convert per-line gross
-    // to integer pence and let the distributor pre-solve for QBO's per-line
-    // VAT recompute. Any unavoidable ±1p residual is absorbed by an injected
-    // "Rounding adjustment" zero-tax line.
-    // sales_order_line.unit_price and line_total are stored EX-VAT (NET) by all
-    // ingestion paths (ebay-process-order, stripe-webhook, qbo-process-pending).
-    // Convert NET → GROSS pence here so the per-line balancer + QBO ex-VAT
-    // posting (UnitPrice = net, TaxCodeRef = 20%) lands on the correct
-    // customer-facing gross total.
-    const sourceLines = (lineItems ?? []).map((li: Record<string, unknown>) => {
+    // sales_order_line.unit_price and line_total are canonical EX-VAT values.
+    // Rebuild per-line gross from stored net plus the order VAT split where
+    // the order header reconciles to the merchandise lines. This preserves
+    // values like net £20.83 + VAT £4.16 = gross £24.99 instead of re-inflating
+    // £20.83 at 20% to £25.00.
+    const rawSourceLines = (lineItems ?? []).map((li: Record<string, unknown>) => {
       const qty = (li.quantity as number) ?? 1;
       const netLineTotal =
         typeof li.line_total === "number"
           ? (li.line_total as number)
           : ((li.unit_price as number) ?? 0) * qty;
-      const grossPence = Math.round(netLineTotal * 1.2 * 100);
       return {
-        gross: grossPence / 100,
+        netPence: toPence(netLineTotal),
         qty,
         sku: li.sku as Record<string, unknown> | null,
+      };
+    });
+    const totalNetPence = rawSourceLines.reduce((sum, line) => sum + line.netPence, 0);
+    const headerTaxPence = toPence(Number(order.tax_total ?? 0));
+    const headerGrossPence = toPence(Number(order.gross_total ?? 0));
+    const headerNetPence = toPence(Number(order.net_amount ?? order.merchandise_subtotal ?? 0));
+    const canUseHeaderVat =
+      rawSourceLines.length > 0 &&
+      totalNetPence > 0 &&
+      headerTaxPence >= 0 &&
+      Math.abs(totalNetPence - headerNetPence) <= 1 &&
+      Math.abs(totalNetPence + headerTaxPence - headerGrossPence) <= 1;
+    const targetTaxPence = canUseHeaderVat ? headerGrossPence - totalNetPence : headerTaxPence;
+
+    let allocatedTaxPence = 0;
+    const sourceLines = rawSourceLines.map((line, index) => {
+      const taxPence = canUseHeaderVat
+        ? (index === rawSourceLines.length - 1
+          ? targetTaxPence - allocatedTaxPence
+          : Math.round(targetTaxPence * (line.netPence / totalNetPence)))
+        : Math.round(line.netPence * 0.2);
+      allocatedTaxPence += taxPence;
+      return {
+        gross: fromPence(line.netPence + taxPence),
+        qty: line.qty,
+        sku: line.sku,
       };
     });
     const grossPenceLines = sourceLines.map((l) => toPence(l.gross));

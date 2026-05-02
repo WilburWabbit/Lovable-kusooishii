@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { orderKeys } from "@/hooks/admin/use-orders";
 import { stockUnitKeys } from "@/hooks/admin/use-stock-units";
+import { splitGrossToNetVat } from "@/lib/utils/vat";
 import { Mono, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 
@@ -500,7 +501,7 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
           payment_method: paymentMethod,
           qbo_sync_status: "pending",
           v2_status: "new",
-          global_tax_calculation: "TaxInclusive",
+          global_tax_calculation: "TaxExcluded",
           notes: isBlueBellSale
             ? "Recorded manually in Admin V2 cash sale modal. Blue Bell sale selected by staff."
             : "Recorded manually in Admin V2 cash sale modal.",
@@ -541,8 +542,10 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
         );
 
         for (let index = 0; index < line.totals.quantity; index += 1) {
-          const unitDiscount = perUnitDiscounts[index] ?? 0;
-          const finalUnitPrice = roundCurrency(line.totals.unitPrice - unitDiscount);
+          const unitDiscountGross = perUnitDiscounts[index] ?? 0;
+          const finalUnitGrossPrice = roundCurrency(line.totals.unitPrice - unitDiscountGross);
+          const finalUnitNetPrice = splitGrossToNetVat(finalUnitGrossPrice).net;
+          const unitDiscountNet = splitGrossToNetVat(unitDiscountGross).net;
 
           const { data: insertedLine, error: lineInsertError } = await supabase
             .from("sales_order_line")
@@ -550,9 +553,9 @@ export function CashSaleForm({ open, onClose }: CashSaleFormProps) {
               sales_order_id: orderId,
               sku_id: line.skuId!,
               quantity: 1,
-              unit_price: finalUnitPrice,
-              line_discount: unitDiscount,
-              line_total: finalUnitPrice,
+              unit_price: finalUnitNetPrice,
+              line_discount: unitDiscountNet,
+              line_total: finalUnitNetPrice,
             } as never)
             .select("id")
             .single();

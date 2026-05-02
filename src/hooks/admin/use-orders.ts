@@ -13,7 +13,7 @@ import type {
   Channel,
   QBOSyncStatus,
 } from '@/lib/types/admin';
-import { calculateVAT } from '@/lib/utils/vat';
+import { calculateVAT, deriveLineVatFromNet, netToGross } from '@/lib/utils/vat';
 import { stockUnitKeys } from './use-stock-units';
 
 // ─── Query Keys ─────────────────────────────────────────────
@@ -128,9 +128,10 @@ function mapLineItem(
   const sku = row.sku as Record<string, unknown> | null;
   const vatRateRow = row.vat_rate as Record<string, unknown> | null;
   const ratePct = vatRateRow ? ((vatRateRow.rate_percent as number) ?? 20) : 20;
-  const unitPrice = (row.unit_price as number) ?? 0;
-  const net = unitPrice / (1 + ratePct / 100);
-  const lineVat = Math.round((unitPrice - net) * 100) / 100;
+  const quantity = Number(row.quantity ?? 1) || 1;
+  const unitPriceExVat = Number(row.unit_price ?? 0);
+  const lineNet = Number(row.line_total ?? unitPriceExVat * quantity);
+  const lineVat = deriveLineVatFromNet(lineNet, ratePct);
   const source = economics ?? row;
 
   return {
@@ -139,10 +140,14 @@ function mapLineItem(
     stockUnitId: (row.stock_unit_id as string) ?? null,
     sku: sku ? (sku.sku_code as string) : null,
     name: sku ? ((sku.name as string) ?? null) : null,
-    unitPrice,
+    quantity,
+    unitPrice: unitPriceExVat,
+    unitPriceExVat,
+    lineNet,
     cogs: ((source.cogs_amount as number) ?? (row.cogs_amount as number)) ?? null,
     vatRate: ratePct,
     lineVat,
+    lineGross: netToGross(lineNet, ratePct),
     costingMethod: (source.costing_method as string) ?? null,
     economicsStatus: (source.economics_status as string) ?? null,
     totalFees: (source.total_fee_amount as number) ?? null,
@@ -152,6 +157,35 @@ function mapLineItem(
     netMarginAmount: (source.net_margin_amount as number) ?? null,
     netMarginRate: (source.net_margin_rate as number) ?? null,
   };
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function applyHeaderVatToLines(lines: OrderLineItem[], order: Order): OrderLineItem[] {
+  const headerVatPence = Math.round((order.vatAmount ?? 0) * 100);
+  const lineNetTotal = roundCurrency(lines.reduce((sum, line) => sum + line.lineNet, 0));
+  const orderNetTotal = roundCurrency(order.netAmount ?? 0);
+
+  if (headerVatPence <= 0 || lineNetTotal <= 0 || Math.abs(lineNetTotal - orderNetTotal) > 0.02) {
+    return lines;
+  }
+
+  let allocatedVatPence = 0;
+
+  return lines.map((line, index) => {
+    const lineVatPence = index === lines.length - 1
+      ? headerVatPence - allocatedVatPence
+      : Math.round(headerVatPence * (line.lineNet / lineNetTotal));
+    allocatedVatPence += lineVatPence;
+    const lineVat = lineVatPence / 100;
+    return {
+      ...line,
+      lineVat,
+      lineGross: roundCurrency(line.lineNet + lineVat),
+    };
+  });
 }
 
 async function fetchLineEconomics(lineIds: string[]) {
@@ -194,7 +228,7 @@ export function useOrders() {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs_amount,
+            id, sales_order_id, stock_unit_id, quantity, unit_price, line_total, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )
@@ -215,8 +249,11 @@ export function useOrders() {
 
       return orderRows.map((row) => {
         const order = mapOrder(row, blueBellOrderIds);
-        const lines = ((row.sales_order_line as Record<string, unknown>[]) ?? []).map((line) =>
-          mapLineItem(line, economicsByLine.get(line.id as string)),
+        const lines = applyHeaderVatToLines(
+          ((row.sales_order_line as Record<string, unknown>[]) ?? []).map((line) =>
+            mapLineItem(line, economicsByLine.get(line.id as string)),
+          ),
+          order,
         );
         const customerRow = row.customer as Record<string, unknown> | null;
         return {
@@ -253,7 +290,7 @@ export function useOrder(orderId: string | undefined) {
           *,
           customer:customer_id(id, display_name, email),
           sales_order_line(
-            id, sales_order_id, stock_unit_id, unit_price, cogs_amount,
+            id, sales_order_id, stock_unit_id, quantity, unit_price, line_total, cogs_amount,
             sku:sku_id(sku_code, name),
             vat_rate:vat_rate_id(rate_percent)
           )
@@ -269,7 +306,10 @@ export function useOrder(orderId: string | undefined) {
       const economicsByLine = await fetchLineEconomics(
         rawLines.map((line) => line.id as string).filter(Boolean),
       );
-      const lines = rawLines.map((line) => mapLineItem(line, economicsByLine.get(line.id as string)));
+      const lines = applyHeaderVatToLines(
+        rawLines.map((line) => mapLineItem(line, economicsByLine.get(line.id as string))),
+        order,
+      );
 
       // Fetch stock unit statuses for allocated line items
       const allocatedUnitIds = lines

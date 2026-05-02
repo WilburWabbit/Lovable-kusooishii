@@ -123,12 +123,13 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const qboColor = order.qboSyncStatus === "synced" ? "#22C55E" : order.qboSyncStatus === "error" ? "#EF4444" : "#F59E0B";
 
   // Invoice totals
-  const subtotalExVat = order.lineItems.reduce((s, li) => s + (li.unitPrice - li.lineVat), 0);
-  const totalVat = order.lineItems.reduce((s, li) => s + li.lineVat, 0);
+  const lineSubtotalExVat = order.lineItems.reduce((s, li) => s + li.lineNet, 0);
+  const subtotalExVat = lineSubtotalExVat > 0 ? lineSubtotalExVat : order.netAmount;
+  const totalVat = order.vatAmount || order.lineItems.reduce((s, li) => s + li.lineVat, 0);
   const grossTotal = order.total;
 
   // P&L (ex-VAT)
-  const netRevenue = subtotalExVat;
+  const netRevenue = lineSubtotalExVat > 0 ? lineSubtotalExVat : order.netAmount;
   // COGS is already stored ex-VAT — use as-is
   const netCogs = totalCogs;
   const economicsFees = totalLineFees > 0 ? totalLineFees : totalOrderFees;
@@ -259,7 +260,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   ? "needs_allocation"
                   : ((itemAny._unitStatus as StockUnitStatus) ?? "sold");
                 const unitUid = (itemAny._unitUid as string) ?? item.stockUnitId?.slice(0, 10);
-                const unitExVat = item.unitPrice - item.lineVat;
+                const unitExVat = item.unitPriceExVat;
 
                 const payoutStatus = isUnallocated
                   ? undefined
@@ -284,7 +285,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                       <Mono color={item.sku ? "amber" : "dim"}>{item.sku ?? "—"}</Mono>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className="text-foreground">1</span>
+                      <span className="text-foreground">{item.quantity}</span>
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <Mono>{fmt(unitExVat)}</Mono>
@@ -293,7 +294,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                       <Mono color="dim">{fmt(item.lineVat)}</Mono>
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <Mono color="teal">{fmt(item.unitPrice)}</Mono>
+                      <Mono color="teal">{fmt(item.lineGross)}</Mono>
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <Mono color={item.cogs ? "default" : "dim"}>
