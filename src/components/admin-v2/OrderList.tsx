@@ -11,6 +11,7 @@ import { SurfaceCard, Mono, OrderStatusBadge, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { CashSaleForm } from "./CashSaleForm";
 import { CompleteOrderModal } from "./CompleteOrderModal";
+import { StatusFilterDropdown } from "./StatusFilterDropdown";
 import { Download, Search } from "lucide-react";
 
 // ─── Row type ────────────────────────────────────────────────
