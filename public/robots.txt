@@ -6,6 +6,17 @@ Allow: /
 
 User-agent: ChatGPT-User
 Allow: /
+Disallow: /admin/
+Disallow: /account
+Disallow: /cart
+Disallow: /checkout/
+Disallow: /login
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /welcome/
+Disallow: /unsubscribe
+Disallow: /order-tracking
 
 User-agent: GPTBot
 Disallow: /

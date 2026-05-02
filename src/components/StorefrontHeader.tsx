@@ -41,9 +41,9 @@ export function StorefrontHeader() {
   const navItems = useMemo(() => {
     const items = [
       { name: 'Shop', path: '/browse' },
-      { name: 'Themes', path: '/browse?view=themes' },
-      { name: 'Just Landed', path: '/browse?new=true' },
-      ...(hasDeals ? [{ name: 'Deals', path: '/browse?deals=true' }] : []),
+      { name: 'Themes', path: '/themes' },
+      { name: 'Just Landed', path: '/new-arrivals' },
+      ...(hasDeals ? [{ name: 'Deals', path: '/deals' }] : []),
       { name: 'About', path: '/about' },
       { name: 'Blue Bell', path: '/bluebell', className: 'text-blue-600 hover:text-blue-700' },
     ];

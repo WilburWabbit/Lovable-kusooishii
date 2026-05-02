@@ -1,8 +1,14 @@
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function PrivacyPage() {
-  usePageSeo({ title: 'Privacy Policy', description: 'How Kuso Oishii collects, uses, and protects your personal data under UK GDPR.', path: '/privacy' });
+  useSeoDocumentPageSeo('route:/privacy', {
+    title: 'Privacy Policy',
+    description: 'How Kuso Oishii collects, uses, and protects your personal data under UK GDPR.',
+    path: '/privacy',
+    jsonLd: pageBreadcrumbJsonLd('Privacy Policy', '/privacy'),
+  });
 
   return (
     <StorefrontLayout>

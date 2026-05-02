@@ -28,6 +28,7 @@ export default function BrowsePage() {
   const selectedGrade = searchParams.get("grade");
   const retiredParam = searchParams.get("retired");
   const retiredFilter = retiredParam === "true" ? true : retiredParam === "false" ? false : null;
+  const includeOutOfStock = searchParams.get("includeSoldOut") === "true";
   const yearMinParam = searchParams.get("yearMin");
   const yearMaxParam = searchParams.get("yearMax");
 
@@ -54,6 +55,7 @@ export default function BrowsePage() {
   const setSelectedThemeId = useCallback((v: string | null) => setParam("theme", v), [setParam]);
   const setSelectedGrade = useCallback((v: string | null) => setParam("grade", v), [setParam]);
   const setRetiredFilter = useCallback((v: boolean | null) => setParam("retired", v == null ? null : String(v)), [setParam]);
+  const setIncludeOutOfStock = useCallback((v: boolean) => setParam("includeSoldOut", v ? "true" : null), [setParam]);
 
   const yearRange: [number, number] | null = yearMinParam && yearMaxParam
     ? [parseInt(yearMinParam, 10), parseInt(yearMaxParam, 10)]
@@ -84,13 +86,14 @@ export default function BrowsePage() {
 
   // Fetch themes and year range from in-stock products
   const { data: filterMeta } = useQuery({
-    queryKey: ["browse_filter_meta"],
+    queryKey: ["browse_filter_meta", includeOutOfStock],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("browse_catalog", {
+      const { data, error } = await (supabase as any).rpc("browse_catalog", {
         search_term: null,
         filter_theme_id: null,
         filter_grade: null,
         filter_retired: null,
+        include_out_of_stock: includeOutOfStock,
       });
       if (error) throw error;
       const rows = data as any[];
@@ -127,13 +130,14 @@ export default function BrowsePage() {
 
   // Fetch browse data
   const { data: products, isLoading } = useQuery({
-    queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter, isDealsMode],
+    queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter, includeOutOfStock, isDealsMode],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("browse_catalog", {
+      const { data, error } = await (supabase as any).rpc("browse_catalog", {
         search_term: debouncedSearch || null,
         filter_theme_id: selectedThemeId || null,
         filter_grade: selectedGrade || null,
         filter_retired: retiredFilter,
+        include_out_of_stock: includeOutOfStock,
       });
       if (error) throw error;
       return data as BrowseCatalogItem[];
@@ -207,6 +211,27 @@ export default function BrowsePage() {
     pageSizeOptions,
   } = usePagination(filteredProducts);
 
+  const seoTitle = viewMode === "themes" ? "Browse Themes" : isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse LEGO® Sets";
+  const seoDescription = viewMode === "themes"
+    ? "Browse LEGO® sets by theme at Kuso Oishii."
+    : isNewMode
+    ? "See the latest graded LEGO® stock newly added to Kuso Oishii."
+    : isDealsMode
+    ? "Explore graded LEGO® deals with clear condition details and fair UK pricing."
+    : "Browse graded LEGO® sets and minifigures with clear condition data at Kuso Oishii.";
+  const canonicalPath = viewMode === "themes" ? "/themes" : isNewMode ? "/new-arrivals" : isDealsMode ? "/deals" : "/browse";
+  const cleanBrowsePaths = new Set(["/browse", "/themes", "/new-arrivals", "/deals"]);
+  const isCleanPublicBrowsePage = cleanBrowsePaths.has(location.pathname) && Array.from(searchParams.keys()).length === 0;
+  const seoDocumentKey = isCleanPublicBrowsePage ? `route:${canonicalPath}` : undefined;
+
+  useSeoDocumentPageSeo(seoDocumentKey, {
+    title: seoTitle,
+    description: seoDescription,
+    path: canonicalPath,
+    noIndex: !isCleanPublicBrowsePage,
+    jsonLd: isCleanPublicBrowsePage ? pageBreadcrumbJsonLd(seoTitle, canonicalPath) : undefined,
+  });
+
   if (viewMode === "themes") {
     return (
       <StorefrontLayout>
@@ -238,7 +263,7 @@ export default function BrowsePage() {
     ? "Newest arrivals, sorted by release year"
     : isDealsMode
     ? "Retired sets and minifigs - collectible bargains"
-    : `${filteredProducts?.length ?? 0} items · graded · priced · ready to ship`;
+    : `${filteredProducts?.length ?? 0} items · graded · priced${includeOutOfStock ? "" : " · ready to ship"}`;
 
   const filterContent = (
     <div className="space-y-6">
@@ -309,6 +334,24 @@ export default function BrowsePage() {
               {g.label}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Availability toggle */}
+      <div>
+        <label className="font-display text-xs font-semibold uppercase tracking-widest text-foreground">
+          Availability
+        </label>
+        <div className="mt-2 flex items-center justify-between gap-3 rounded border border-border px-3 py-2">
+          <div>
+            <p className="font-body text-sm font-medium text-foreground">In stock only</p>
+            <p className="font-body text-xs text-muted-foreground">Hide previously listed sold-out items</p>
+          </div>
+          <Switch
+            checked={!includeOutOfStock}
+            onCheckedChange={(checked) => setIncludeOutOfStock(!checked)}
+            aria-label="Show in-stock items only"
+          />
         </div>
       </div>
 

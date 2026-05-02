@@ -3,10 +3,16 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 
 export default function AboutPage() {
-  usePageSeo({ title: 'About Us', description: 'Learn how Kuso Oishii rescues returned and damaged-box LEGO® sets from UK retailers and sells them at fair prices.', path: '/about' });
+  useSeoDocumentPageSeo('route:/about', {
+    title: 'About Us',
+    description: 'Learn how Kuso Oishii rescues returned and damaged-box LEGO® sets from UK retailers and sells them at fair prices.',
+    path: '/about',
+    jsonLd: pageBreadcrumbJsonLd('About Us', '/about'),
+  });
 
   return (
     <StorefrontLayout>

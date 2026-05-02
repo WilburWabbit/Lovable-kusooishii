@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight, Shield, Truck, Bell } from "lucide-react";
 import heroImage from "@/assets/hero-lego.jpg";
+import logoImage from "@/assets/kuso-logo.png";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { BrowseCatalogCard, type BrowseCatalogItem } from "@/components/BrowseCatalogCard";

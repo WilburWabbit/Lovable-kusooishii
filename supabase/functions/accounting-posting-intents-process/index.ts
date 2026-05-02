@@ -27,6 +27,32 @@ type PostingIntent = {
   payload: Record<string, unknown> | null;
 };
 
+type SupabaseQueryResult = {
+  data: unknown;
+  error: Error | null;
+};
+
+type SupabaseQueryBuilder = PromiseLike<unknown> & {
+  select(columns: string): SupabaseQueryBuilder;
+  eq(column: string, value: unknown): SupabaseQueryBuilder;
+  is(column: string, value: unknown): SupabaseQueryBuilder;
+  maybeSingle(): Promise<SupabaseQueryResult>;
+  update(values: Record<string, unknown>): SupabaseQueryBuilder;
+  upsert(values: Record<string, unknown>, options?: Record<string, unknown>): SupabaseQueryBuilder;
+};
+
+type SupabaseAdminClient = {
+  from(table: string): SupabaseQueryBuilder;
+};
+
+function actionPriority(action: string): number {
+  if (action === "upsert_customer" || action === "upsert_item") return 10;
+  if (action === "create_purchase" || action === "update_purchase" || action === "delete_purchase") return 20;
+  if (action === "create_sales_receipt" || action === "create_refund_receipt") return 30;
+  if (action === "create_payout_deposit") return 40;
+  return 100;
+}
+
 function clampBatchSize(value: unknown): number {
   const parsed = Number(value ?? DEFAULT_BATCH_SIZE);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_BATCH_SIZE;
@@ -84,6 +110,115 @@ function getEntityIdForIntent(intent: PostingIntent): string | null {
     return getPurchaseBatchId(intent);
   }
   return getSalesOrderId(intent);
+}
+
+async function ensureSalesReceiptCustomerReady(
+  admin: SupabaseAdminClient,
+  orderId: string,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<string | null> {
+  const { data: order, error: orderErr } = await admin
+    .from("sales_order")
+    .select("id, customer_id, qbo_customer_id")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (orderErr) throw orderErr;
+  if (!order) throw new Error(`Order not found: ${orderId}`);
+
+  const orderRow = order as Record<string, unknown>;
+  const orderQboCustomerId = orderRow.qbo_customer_id;
+  if (typeof orderQboCustomerId === "string" && orderQboCustomerId.length > 0) {
+    return orderQboCustomerId;
+  }
+
+  const customerId = orderRow.customer_id;
+  if (typeof customerId !== "string" || customerId.length === 0) {
+    return null;
+  }
+
+  const { data: customer, error: customerErr } = await admin
+    .from("customer")
+    .select("id, qbo_customer_id")
+    .eq("id", customerId)
+    .maybeSingle();
+
+  if (customerErr) throw customerErr;
+  if (!customer) {
+    throw new Error(`Order ${orderId} references missing customer ${customerId}`);
+  }
+
+  const customerRow = customer as Record<string, unknown>;
+  const customerQboId = customerRow.qbo_customer_id;
+  if (typeof customerQboId === "string" && customerQboId.length > 0) {
+    await admin
+      .from("sales_order")
+      .update({ qbo_customer_id: customerQboId } as never)
+      .eq("id", orderId)
+      .is("qbo_customer_id", null);
+    return customerQboId;
+  }
+
+  const customerRes = await fetchWithTimeout(`${supabaseUrl}/functions/v1/qbo-upsert-customer`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      customer_id: customerId,
+      dependency_for: "create_sales_receipt",
+      sales_order_id: orderId,
+    }),
+  }, 60_000);
+
+  const responseText = await customerRes.text();
+  let responsePayload: Record<string, unknown> = {};
+  try {
+    responsePayload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    responsePayload = { raw_response: responseText };
+  }
+
+  if (!customerRes.ok || responsePayload.success === false) {
+    const message = String(
+      responsePayload.qbo_error
+        ?? responsePayload.error
+        ?? `qbo-upsert-customer failed [${customerRes.status}]`,
+    ).slice(0, 1000);
+    throw new Error(`QBO customer dependency failed for order ${orderId}: ${message}`);
+  }
+
+  const qboCustomerId = String(responsePayload.qbo_customer_id ?? "");
+  if (!qboCustomerId) {
+    throw new Error(`QBO customer dependency for order ${orderId} did not return qbo_customer_id`);
+  }
+
+  await admin
+    .from("sales_order")
+    .update({ qbo_customer_id: qboCustomerId } as never)
+    .eq("id", orderId)
+    .is("qbo_customer_id", null);
+
+  await admin
+    .from("qbo_posting_reference")
+    .upsert({
+      local_entity_type: "customer",
+      local_entity_id: customerId,
+      qbo_entity_type: "Customer",
+      qbo_entity_id: qboCustomerId,
+      qbo_doc_number: null,
+      source_column: "customer.qbo_customer_id",
+      synced_at: new Date().toISOString(),
+      metadata: {
+        processor: "accounting-posting-intents-process",
+        dependency_for: "create_sales_receipt",
+        sales_order_id: orderId,
+      },
+    } as never, { onConflict: "local_entity_type,local_entity_id,qbo_entity_type,qbo_entity_id" as never });
+
+  return qboCustomerId;
 }
 
 function qboActionConfig(intent: PostingIntent, entityId: string) {
@@ -234,7 +369,10 @@ Deno.serve(async (req) => {
 
     const results: Array<Record<string, unknown>> = [];
 
-    for (const intent of (intents ?? []) as PostingIntent[]) {
+    const sortedIntents = [...((intents ?? []) as PostingIntent[])]
+      .sort((a, b) => actionPriority(a.action) - actionPriority(b.action));
+
+    for (const intent of sortedIntents) {
       const entityId = getEntityIdForIntent(intent);
       const retryCount = (intent.retry_count ?? 0) + 1;
 
@@ -277,6 +415,10 @@ Deno.serve(async (req) => {
       }
 
       try {
+        if (intent.action === "create_sales_receipt") {
+          await ensureSalesReceiptCustomerReady(admin, entityId, supabaseUrl, serviceRoleKey);
+        }
+
         const actionConfig = qboActionConfig(intent, entityId);
         const syncRes = await fetchWithTimeout(`${supabaseUrl}/functions/v1/${actionConfig.functionName}`, {
           method: "POST",

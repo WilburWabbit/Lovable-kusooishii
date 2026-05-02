@@ -19,6 +19,9 @@ interface ProductDetailRow {
   mpn: string;
   name: string;
   description: string | null;
+  product_hook: string | null;
+  highlights: string | null;
+  call_to_action: string | null;
   piece_count: number | null;
   release_year: number | null;
   retired_flag: boolean;
@@ -58,7 +61,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product")
-        .select("id, mpn, name, description, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
+        .select("id, mpn, name, description, product_hook, highlights, call_to_action, piece_count, release_year, retired_flag, product_type, age_range, subtheme_name, length_cm, width_cm, height_cm, weight_kg, img_url, theme:theme_id(name)")
         .eq("mpn", mpn!)
         .eq("status", "active")
         .maybeSingle();
@@ -78,6 +81,52 @@ export default function ProductDetailPage() {
     },
     enabled: !!mpn,
   });
+
+  // Fetch resolved canonical theme/subtheme from product_attribute (fallback when
+  // product.theme_id / subtheme_name aren't projected yet).
+  const { data: canonicalThemeAttrs } = useQuery({
+    queryKey: ["product_canonical_theme_attrs", product?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_attribute")
+        .select("key, chosen_source, custom_value, source_values_jsonb")
+        .eq("product_id", product!.id)
+        .eq("namespace", "core")
+        .is("channel", null)
+        .is("marketplace", null)
+        .is("category_id", null)
+        .in("key", ["theme", "subtheme"]);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        key: string;
+        chosen_source: string | null;
+        custom_value: string | null;
+        source_values_jsonb: Record<string, { value: string | null }> | null;
+      }>;
+    },
+    enabled: !!product?.id,
+  });
+
+  function resolveCanonicalAttr(key: "theme" | "subtheme"): string | null {
+    const row = canonicalThemeAttrs?.find((r) => r.key === key);
+    if (!row) return null;
+    if (row.chosen_source === "custom" && row.custom_value) return row.custom_value;
+    if (row.chosen_source && row.chosen_source !== "none") {
+      const v = row.source_values_jsonb?.[row.chosen_source]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    if (row.chosen_source === "none") return null;
+    // auto-priority fallback
+    const priority = ["brickeconomy", "brickset", "bricklink", "brickowl"];
+    for (const s of priority) {
+      const v = row.source_values_jsonb?.[s]?.value;
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    return null;
+  }
+
+  const resolvedThemeName = resolveCanonicalAttr("theme");
+  const resolvedSubthemeName = resolveCanonicalAttr("subtheme");
 
   // Fetch BrickEconomy enrichment data
   const { data: beData } = useQuery({
@@ -148,7 +197,10 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
 
   const isLoading = productLoading || offersLoading;
-  const themeName = getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null);
+  const themeName =
+    getStorefrontThemeName(product?.theme?.name ?? null, product?.product_type ?? null) ??
+    resolvedThemeName;
+  const subthemeName = product?.subtheme_name ?? resolvedSubthemeName;
 
   // Append catalog image as the final gallery item when include_catalog_img is enabled
   const displayMedia: MediaItem[] = (() => {
@@ -167,6 +219,48 @@ export default function ProductDetailPage() {
   const primaryImageUrl = displayMedia.find(m => m.is_primary)?.url ?? displayMedia[0]?.url ?? null;
   const allImageUrls = displayMedia.map(m => m.url).filter(Boolean);
   const inWishlist = product ? isInWishlist(product.id) : false;
+  const canonicalProductPath = product ? `/sets/${encodeURIComponent(product.mpn)}` : undefined;
+  const canonicalProductUrl = canonicalProductPath ? absoluteUrl(canonicalProductPath) : undefined;
+  const structuredOffers = offers
+    ?.filter((offer) => {
+      const grade = parseInt(offer.condition_grade, 10);
+      return offer.price != null && grade >= 1 && grade <= 5;
+    })
+    .map((offer) => ({
+      '@type': 'Offer',
+      sku: offer.sku_code,
+      priceCurrency: 'GBP',
+      price: offer.price,
+      availability: offer.stock_count > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      url: canonicalProductUrl,
+    }));
+
+  useSeoDocumentPageSeo(product?.mpn ? `product:${product.mpn}` : undefined, {
+    title: product ? `${product.name} (${product.mpn})` : 'LEGO® Set',
+    description: product?.description ?? `Shop ${product?.name ?? 'LEGO® sets'} with graded condition options and fast UK shipping from Kuso Oishii.`,
+    path: mpn ? `/sets/${mpn}` : '/sets',
+    imageUrl: primaryImageUrl ?? undefined,
+    imageAlt: product ? `${product.name} product image` : undefined,
+    keywords: product ? [product.mpn, product.name, 'LEGO resale', 'graded LEGO sets', 'UK LEGO store'] : undefined,
+    geo: UK_GEO_META,
+    jsonLd: product ? [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        name: product.name,
+        mpn: product.mpn,
+        description: product.description ?? undefined,
+        image: allImageUrls.length ? allImageUrls : (primaryImageUrl ? [primaryImageUrl] : undefined),
+        brand: { '@type': 'Brand', name: 'LEGO' },
+        offers: structuredOffers,
+      },
+      breadcrumbJsonLd([
+        { name: 'Home', path: '/' },
+        { name: 'Browse LEGO Sets', path: '/browse' },
+        { name: product.name, path: canonicalProductPath ?? `/sets/${product.mpn}` },
+      ]),
+    ] : undefined
+  });
 
   usePageSeo({
     title: product ? `${product.name} (${product.mpn})` : 'LEGO® Set',
@@ -246,7 +340,7 @@ export default function ProductDetailPage() {
       stock: offer.stock_count,
       retired: p.retired_flag,
       yearReleased: p.release_year,
-      subtheme: p.subtheme_name ?? undefined,
+      subtheme: subthemeName ?? undefined,
       weightKg: p.weight_kg ?? undefined,
     };
   }
@@ -372,9 +466,36 @@ export default function ProductDetailPage() {
                   {product.name}
                 </h1>
 
+                {product.product_hook && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.product_hook}
+                  </p>
+                )}
+
                 {product.description && (
-                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-4 font-body text-sm leading-relaxed text-muted-foreground whitespace-pre-line">
                     {product.description}
+                  </p>
+                )}
+
+                {product.highlights && (() => {
+                  const items = product.highlights
+                    .split(/\r?\n+/)
+                    .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+                    .filter(Boolean);
+                  if (items.length === 0) return null;
+                  return (
+                    <ul className="mt-4 list-disc pl-5 font-body text-sm leading-relaxed text-muted-foreground space-y-1">
+                      {items.map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+
+                {product.call_to_action && (
+                  <p className="mt-4 font-body text-sm leading-relaxed font-bold text-foreground">
+                    {product.call_to_action}
                   </p>
                 )}
 
@@ -382,7 +503,7 @@ export default function ProductDetailPage() {
                   {(() => {
                     const specs: { label: string; value: string }[] = [];
                     if (themeName) specs.push({ label: "Theme", value: themeName });
-                    if (product.subtheme_name) specs.push({ label: "Subtheme", value: product.subtheme_name });
+                    if (subthemeName) specs.push({ label: "Subtheme", value: subthemeName });
                     if (product.release_year) specs.push({ label: "Released", value: String(product.release_year) });
                     if (product.retired_flag && beData?.retired_date) specs.push({ label: "Retired", value: beData.retired_date });
                     if (product.piece_count) specs.push({ label: "Pieces", value: product.piece_count.toLocaleString() });
@@ -445,7 +566,7 @@ export default function ProductDetailPage() {
                             disabled={offer.price == null || offer.stock_count === 0}
                             onClick={() => handleAddToCart(offer)}
                           >
-                            <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> Add
+                            <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> {offer.stock_count === 0 ? "Sold Out" : "Add"}
                           </Button>
                         </div>
                       </div>

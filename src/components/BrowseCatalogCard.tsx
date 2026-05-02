@@ -25,6 +25,7 @@ interface BrowseCatalogCardProps {
 
 export function BrowseCatalogCard({ item, className }: BrowseCatalogCardProps) {
   const gradeLabel = item.best_grade ? (GRADE_LABELS[item.best_grade] ?? `Grade ${item.best_grade}`) : null;
+  const inStock = item.total_stock > 0;
 
   return (
     <Link
@@ -68,6 +69,11 @@ export function BrowseCatalogCard({ item, className }: BrowseCatalogCardProps) {
             Retired
           </span>
         )}
+        {!inStock && (
+          <span className="bg-muted px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+            Out of stock
+          </span>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col p-3">
@@ -87,7 +93,7 @@ export function BrowseCatalogCard({ item, className }: BrowseCatalogCardProps) {
             )}
           </div>
           <span className="font-body text-[11px] text-muted-foreground">
-            {item.total_stock} in stock
+            {inStock ? `${item.total_stock} in stock` : "Sold out"}
           </span>
         </div>
       </div>

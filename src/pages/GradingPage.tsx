@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
 import { Button } from "@/components/ui/button";
-import { usePageSeo } from "@/hooks/use-page-seo";
+import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
 import { GRADE_DETAILS } from "@/lib/grades";
+import { pageBreadcrumbJsonLd } from "@/lib/seo-jsonld";
 import { ArrowRight } from "lucide-react";
 
 const grades = Object.entries(GRADE_DETAILS).map(([key, val]) => ({
@@ -11,10 +12,11 @@ const grades = Object.entries(GRADE_DETAILS).map(([key, val]) => ({
 }));
 
 export default function GradingPage() {
-  usePageSeo({
+  useSeoDocumentPageSeo("route:/grading", {
     title: "How We Grade",
     description: "Our 1–5 grading scale explained. Every LEGO® set is inspected and condition-rated before listing.",
     path: "/grading",
+    jsonLd: pageBreadcrumbJsonLd("How We Grade", "/grading"),
   });
 
   return (

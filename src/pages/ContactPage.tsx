@@ -6,11 +6,20 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StorefrontLayout } from '@/components/StorefrontLayout';
-import { usePageSeo } from '@/hooks/use-page-seo';
+import { useSeoDocumentPageSeo } from '@/hooks/use-seo-document';
+import { combineJsonLd, organizationJsonLd, pageBreadcrumbJsonLd } from '@/lib/seo-jsonld';
 import { toast } from 'sonner';
 
 export default function ContactPage() {
-  usePageSeo({ title: 'Contact Us', description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO® sets?', path: '/contact' });
+  useSeoDocumentPageSeo('route:/contact', {
+    title: 'Contact Us',
+    description: 'Get in touch with Kuso Oishii. Questions about orders, returns, or LEGO® sets?',
+    path: '/contact',
+    jsonLd: combineJsonLd(
+      pageBreadcrumbJsonLd('Contact Us', '/contact'),
+      organizationJsonLd()
+    ),
+  });
   const [submitting, setSubmitting] = useState(false);
   const [subject, setSubject] = useState('');
 
