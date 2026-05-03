@@ -83,6 +83,8 @@ interface SeoProductContext {
 
 interface SeoDocumentWithRevision extends SeoDocumentRow {
   revision: SeoRevisionRow | null;
+  draft_revision: SeoRevisionRow | null;
+  published_revision: SeoRevisionRow | null;
   product: SeoProductContext | null;
 }
 
@@ -304,7 +306,8 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
   const rows = (documents ?? []) as SeoDocumentRow[];
   const documentIds = rows.map((row) => row.id);
 
-  const revisionsByDocument = new Map<string, SeoRevisionRow>();
+  const draftRevisionsByDocument = new Map<string, SeoRevisionRow>();
+  const publishedRevisionsByDocument = new Map<string, SeoRevisionRow>();
   if (documentIds.length) {
     const { data: revisions, error: revisionsError } = await db
       .from("seo_revision")
@@ -315,9 +318,11 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
     if (revisionsError) throw revisionsError;
     const publishedIds = new Set(rows.map((row) => row.published_revision_id).filter(Boolean));
     for (const revision of (revisions ?? []) as SeoRevisionRow[]) {
-      if (revisionsByDocument.has(revision.seo_document_id)) continue;
-      if (revision.status === "draft" || publishedIds.has(revision.id)) {
-        revisionsByDocument.set(revision.seo_document_id, revision);
+      if (revision.status === "draft" && !draftRevisionsByDocument.has(revision.seo_document_id)) {
+        draftRevisionsByDocument.set(revision.seo_document_id, revision);
+      }
+      if (publishedIds.has(revision.id)) {
+        publishedRevisionsByDocument.set(revision.seo_document_id, revision);
       }
     }
   }
@@ -343,7 +348,9 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
 
   return rows.map((row) => ({
     ...row,
-    revision: revisionsByDocument.get(row.id) ?? null,
+    revision: draftRevisionsByDocument.get(row.id) ?? publishedRevisionsByDocument.get(row.id) ?? null,
+    draft_revision: draftRevisionsByDocument.get(row.id) ?? null,
+    published_revision: publishedRevisionsByDocument.get(row.id) ?? null,
     product: row.entity_reference ? productsByMpn.get(row.entity_reference) ?? null : null,
   }));
 }
@@ -430,6 +437,7 @@ async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEdi
 export default function SeoGeoPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [revisionView, setRevisionView] = useState<"draft" | "published">("draft");
   const [typeFilter, setTypeFilter] = useState<SeoDocumentType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<SeoStatusFilter>("all");
   const [query, setQuery] = useState("");
@@ -443,17 +451,32 @@ export default function SeoGeoPage() {
   });
 
   const selected = data.find((record) => record.id === selectedId) ?? data[0] ?? null;
+  const selectedDraftRevisionId = selected?.draft_revision?.id ?? null;
+  const selectedRevision = useMemo(() => (
+    selected
+      ? revisionView === "published"
+        ? selected.published_revision ?? selected.draft_revision
+        : selected.draft_revision ?? selected.published_revision
+      : null
+  ), [revisionView, selected]);
+  const selectedView = useMemo(() => (
+    selected ? { ...selected, revision: selectedRevision } : null
+  ), [selected, selectedRevision]);
 
   useEffect(() => {
     if (selected && selected.id !== selectedId) setSelectedId(selected.id);
   }, [selected, selectedId]);
 
   useEffect(() => {
-    if (selected) {
-      setEditor(editorStateFromRecord(selected));
+    if (selectedId) {
+      setRevisionView(selectedDraftRevisionId ? "draft" : "published");
       setLastGeneration(null);
     }
-  }, [selected]);
+  }, [selectedId, selectedDraftRevisionId]);
+
+  useEffect(() => {
+    if (selectedView) setEditor(editorStateFromRecord(selectedView));
+  }, [selectedView]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -486,8 +509,8 @@ export default function SeoGeoPage() {
 
   const publish = useMutation({
     mutationFn: async () => {
-      if (!selected || !editor) throw new Error("Select an SEO document first");
-      await publishSeoRevision(selected, editor);
+      if (!selectedView || !editor) throw new Error("Select an SEO document first");
+      await publishSeoRevision(selectedView, editor);
     },
     onSuccess: async () => {
       toast.success("SEO/GEO revision published");
@@ -499,8 +522,8 @@ export default function SeoGeoPage() {
 
   const saveDraft = useMutation({
     mutationFn: async () => {
-      if (!selected || !editor) throw new Error("Select an SEO document first");
-      await saveSeoRevisionDraft(selected, editor);
+      if (!selectedView || !editor) throw new Error("Select an SEO document first");
+      await saveSeoRevisionDraft(selectedView, editor);
     },
     onSuccess: async () => {
       toast.success("SEO/GEO draft saved");
@@ -670,24 +693,46 @@ export default function SeoGeoPage() {
           </SurfaceCard>
 
           <SurfaceCard>
-            {!selected || !editor ? (
+            {!selectedView || !editor ? (
               <div className="text-sm text-zinc-500">Select a document to edit.</div>
             ) : (
               <div className="grid gap-5">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate text-base font-bold text-zinc-900">{displayTitle(selected)}</h2>
-                      {statusBadge(selected)}
+                      <h2 className="truncate text-base font-bold text-zinc-900">{displayTitle(selectedView)}</h2>
+                      {statusBadge(selectedView)}
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {displaySubtitle(selected)}
+                      {displaySubtitle(selectedView)}
                     </p>
                     <p className="mt-1 text-[11px] text-zinc-400">
-                      {selected.revision?.status === "draft" ? "Saved draft" : "Published revision"} {selected.revision?.revision_number ?? "none"} · {selected.revision?.source ?? "unpublished"}
+                      {selectedView.revision?.status === "draft" ? "Saved draft" : "Published revision"} {selectedView.revision?.revision_number ?? "none"} · {selectedView.revision?.source ?? "unpublished"}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {selected.draft_revision || selected.published_revision ? (
+                      <div className="flex rounded-md border border-zinc-200 bg-white p-0.5">
+                        <Button
+                          variant={revisionView === "published" ? "default" : "ghost"}
+                          size="sm"
+                          className="h-8 px-2.5"
+                          disabled={!selected.published_revision}
+                          onClick={() => setRevisionView("published")}
+                        >
+                          Published
+                        </Button>
+                        <Button
+                          variant={revisionView === "draft" ? "default" : "ghost"}
+                          size="sm"
+                          className="h-8 px-2.5"
+                          disabled={!selected.draft_revision}
+                          onClick={() => setRevisionView("draft")}
+                        >
+                          Draft
+                        </Button>
+                      </div>
+                    ) : null}
                     {editor.canonical_path ? (
                       <Button variant="outline" size="sm" asChild>
                         <a href={editor.canonical_path} target="_blank" rel="noreferrer">
@@ -708,7 +753,7 @@ export default function SeoGeoPage() {
                   </div>
                 </div>
 
-                <PreviewPanel record={selected} editor={editor} />
+                <PreviewPanel record={selectedView} editor={editor} />
 
                 <Tabs defaultValue="content" className="space-y-4">
                   <TabsList className="bg-zinc-100">

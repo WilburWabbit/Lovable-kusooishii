@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   useUpdateProductCopy,
   useUpdateConditionNotes,
@@ -358,6 +358,8 @@ interface ProductSeoRevision {
 interface ProductSeoRecord {
   document: ProductSeoDocument | null;
   revision: ProductSeoRevision | null;
+  draftRevision: ProductSeoRevision | null;
+  publishedRevision: ProductSeoRevision | null;
 }
 
 interface ProductSeoEditor {
@@ -494,7 +496,7 @@ async function fetchProductSeoRecord(mpn: string): Promise<ProductSeoRecord> {
   const seoDocument = document as ProductSeoDocument | null;
 
   if (!seoDocument?.id) {
-    return { document: seoDocument, revision: null };
+    return { document: seoDocument, revision: null, draftRevision: null, publishedRevision: null };
   }
 
   const { data: revisions, error: revisionError } = await db
@@ -510,6 +512,8 @@ async function fetchProductSeoRecord(mpn: string): Promise<ProductSeoRecord> {
   return {
     document: seoDocument,
     revision: draft ?? published,
+    draftRevision: draft,
+    publishedRevision: published,
   };
 }
 
@@ -631,6 +635,7 @@ export function CopySection({ product }: { product: ProductDetail }) {
   const [highlights, setHighlights] = useState(product.highlights ?? "");
   const [cta, setCta] = useState(product.cta ?? "");
   const [seoEditor, setSeoEditor] = useState<ProductSeoEditor>(() => seoEditorFromRecord(product, undefined));
+  const [seoRevisionView, setSeoRevisionView] = useState<"draft" | "published">("draft");
   const [generating, setGenerating] = useState(false);
 
   const seoQuery = useQuery({
@@ -638,16 +643,31 @@ export function CopySection({ product }: { product: ProductDetail }) {
     queryFn: () => fetchProductSeoRecord(product.mpn),
   });
 
-  const [lastSeoRevisionId, setLastSeoRevisionId] = useState<string | null>(null);
-  const currentSeoRevisionId = seoQuery.data?.revision?.id ?? null;
+  const seoDocumentId = seoQuery.data?.document?.id ?? null;
+  const seoDraftRevisionId = seoQuery.data?.draftRevision?.id ?? null;
+  const selectedSeoRevision = useMemo(() => (
+    seoQuery.data
+      ? seoRevisionView === "published"
+        ? seoQuery.data.publishedRevision ?? seoQuery.data.draftRevision
+        : seoQuery.data.draftRevision ?? seoQuery.data.publishedRevision
+      : null
+  ), [seoQuery.data, seoRevisionView]);
+  const selectedSeoRecord = useMemo(() => (
+    seoQuery.data ? { ...seoQuery.data, revision: selectedSeoRevision } : undefined
+  ), [selectedSeoRevision, seoQuery.data]);
+
   useEffect(() => {
-    if (seoQuery.isLoading || currentSeoRevisionId === lastSeoRevisionId) return;
-    setLastSeoRevisionId(currentSeoRevisionId);
-    setSeoEditor(seoEditorFromRecord(product, seoQuery.data));
-  }, [currentSeoRevisionId, lastSeoRevisionId, product, seoQuery.data, seoQuery.isLoading]);
+    if (seoQuery.isLoading || !seoDocumentId) return;
+    setSeoRevisionView(seoDraftRevisionId ? "draft" : "published");
+  }, [seoDocumentId, seoDraftRevisionId, seoQuery.isLoading]);
+
+  useEffect(() => {
+    if (seoQuery.isLoading) return;
+    setSeoEditor(seoEditorFromRecord(product, selectedSeoRecord));
+  }, [product, selectedSeoRecord, seoQuery.isLoading]);
 
   const publishSeo = useMutation({
-    mutationFn: () => publishProductSeoRevision(product, seoQuery.data, seoEditor),
+    mutationFn: () => publishProductSeoRevision(product, selectedSeoRecord, seoEditor),
     onSuccess: async () => {
       toast.success("Canonical SEO/GEO revision published");
       await queryClient.invalidateQueries({ queryKey: ["admin", "product-seo-document", product.mpn] });
@@ -659,7 +679,7 @@ export function CopySection({ product }: { product: ProductDetail }) {
   });
 
   const saveSeoDraft = useMutation({
-    mutationFn: () => saveProductSeoRevisionDraft(product, seoQuery.data, seoEditor),
+    mutationFn: () => saveProductSeoRevisionDraft(product, selectedSeoRecord, seoEditor),
     onSuccess: async () => {
       toast.success("SEO/GEO draft saved");
       await queryClient.invalidateQueries({ queryKey: ["admin", "product-seo-document", product.mpn] });
@@ -815,9 +835,31 @@ export function CopySection({ product }: { product: ProductDetail }) {
             <p className="mt-1 text-[11px] text-zinc-500">
               Same saved and published metadata used by Settings → SEO/GEO.
             </p>
-            {seoQuery.data?.revision?.status === "draft" ? (
+            <div className="mt-2 flex w-fit rounded-md border border-zinc-200 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setSeoRevisionView("published")}
+                disabled={!seoQuery.data?.publishedRevision}
+                className={`rounded px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  seoRevisionView === "published" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                Published
+              </button>
+              <button
+                type="button"
+                onClick={() => setSeoRevisionView("draft")}
+                disabled={!seoQuery.data?.draftRevision}
+                className={`rounded px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  seoRevisionView === "draft" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                Draft
+              </button>
+            </div>
+            {selectedSeoRecord?.revision?.status === "draft" ? (
               <p className="mt-1 text-[11px] font-semibold text-amber-700">
-                Draft revision {seoQuery.data.revision.revision_number} loaded
+                Draft revision {selectedSeoRecord.revision.revision_number} loaded
               </p>
             ) : null}
           </div>
