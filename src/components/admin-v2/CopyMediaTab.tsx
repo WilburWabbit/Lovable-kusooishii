@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   useUpdateProductCopy,
   useUpdateConditionNotes,
@@ -10,9 +10,11 @@ import type { ProductDetail, ProductVariant, ProductImage } from "@/lib/types/ad
 import { SurfaceCard, SectionHead, Mono, GradeBadge } from "./ui-primitives";
 import { MinifigsCard } from "./MinifigsCard";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, ExternalLink } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { absoluteUrl } from "@/lib/seo-jsonld";
 import {
   DndContext,
   closestCenter,
@@ -318,15 +320,327 @@ function SortableImageThumb({ image, productName, onSetPrimary, onDelete, isBusy
 
 // ─── Copy ───────────────────────────────────────────────────
 
+type SeoIndexationPolicy = "index" | "noindex";
+
+interface ProductSeoDocument {
+  id: string;
+  document_key: string;
+  document_type: "product";
+  entity_reference: string;
+  published_revision_id: string | null;
+  status: string;
+}
+
+interface ProductSeoRevision {
+  id: string;
+  seo_document_id: string;
+  revision_number: number;
+  canonical_path: string;
+  title_tag: string;
+  meta_description: string;
+  indexation_policy: SeoIndexationPolicy;
+  robots_directive: string;
+  breadcrumbs: unknown;
+  structured_data: unknown;
+  image_metadata: unknown;
+  sitemap: {
+    include?: boolean;
+    family?: string;
+    changefreq?: string;
+    priority?: number;
+  };
+  geo: unknown;
+  keywords: string[] | null;
+  source: string;
+}
+
+interface ProductSeoRecord {
+  document: ProductSeoDocument | null;
+  revision: ProductSeoRevision | null;
+}
+
+interface ProductSeoEditor {
+  titleTag: string;
+  metaDescription: string;
+  canonicalPath: string;
+  indexationPolicy: SeoIndexationPolicy;
+  robotsDirective: string;
+  sitemapInclude: boolean;
+  sitemapChangefreq: string;
+  sitemapPriority: string;
+  keywords: string;
+  breadcrumbs: string;
+  structuredData: string;
+  imageMetadata: string;
+  geo: string;
+  changeSummary: string;
+}
+
+interface GeneratedSeoDraft {
+  title_tag: string;
+  meta_description: string;
+  canonical_path?: string;
+  indexation_policy?: SeoIndexationPolicy;
+  robots_directive?: string;
+  sitemap?: {
+    include?: boolean;
+    changefreq?: string;
+    priority?: number;
+  };
+  keywords?: string[];
+  breadcrumbs?: unknown;
+  structured_data?: unknown;
+  image_metadata?: unknown;
+  geo?: unknown;
+  change_summary?: string;
+}
+
+interface DbResponse<T = unknown> {
+  data: T | null;
+  error: { message?: string } | null;
+}
+
+interface QueryBuilder extends PromiseLike<DbResponse> {
+  select(columns: string): QueryBuilder;
+  eq(column: string, value: unknown): QueryBuilder;
+  insert(value: Record<string, unknown>): QueryBuilder;
+  update(value: Record<string, unknown>): QueryBuilder;
+  single(): Promise<DbResponse>;
+  maybeSingle(): Promise<DbResponse>;
+}
+
+const db = supabase as unknown as { from(table: string): QueryBuilder };
+
+function formatJson(value: unknown, fallback: string) {
+  if (value == null) return fallback;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonField(label: string, value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return label === "breadcrumbs" || label === "structured data" ? [] : {};
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+}
+
+function seoEditorFromRecord(product: ProductDetail, record: ProductSeoRecord | undefined): ProductSeoEditor {
+  const revision = record?.revision;
+  return {
+    titleTag: revision?.title_tag ?? product.seoTitle ?? `${product.name} (${product.mpn})`,
+    metaDescription: revision?.meta_description ?? product.seoDescription ?? "",
+    canonicalPath: revision?.canonical_path ?? `/sets/${product.mpn}`,
+    indexationPolicy: revision?.indexation_policy ?? "index",
+    robotsDirective: revision?.robots_directive ?? "index, follow",
+    sitemapInclude: revision?.sitemap?.include ?? true,
+    sitemapChangefreq: revision?.sitemap?.changefreq ?? "weekly",
+    sitemapPriority: String(revision?.sitemap?.priority ?? 0.8),
+    keywords: revision?.keywords?.join(", ") ?? [product.mpn, product.name, product.theme, "LEGO resale", "graded LEGO sets"].filter(Boolean).join(", "),
+    breadcrumbs: formatJson(revision?.breadcrumbs, "[]"),
+    structuredData: formatJson(revision?.structured_data, "[]"),
+    imageMetadata: formatJson(revision?.image_metadata, product.images[0]?.storagePath ? JSON.stringify({ url: product.images[0].storagePath, alt: `${product.name} product image` }, null, 2) : "{}"),
+    geo: formatJson(revision?.geo, JSON.stringify({ region: "GB", audience: "LEGO collectors and resale buyers" }, null, 2)),
+    changeSummary: "",
+  };
+}
+
+function seoEditorFromDraft(current: ProductSeoEditor, draft: GeneratedSeoDraft): ProductSeoEditor {
+  return {
+    ...current,
+    titleTag: draft.title_tag ?? current.titleTag,
+    metaDescription: draft.meta_description ?? current.metaDescription,
+    canonicalPath: draft.canonical_path ?? current.canonicalPath,
+    indexationPolicy: draft.indexation_policy ?? current.indexationPolicy,
+    robotsDirective: draft.robots_directive ?? current.robotsDirective,
+    sitemapInclude: draft.sitemap?.include ?? current.sitemapInclude,
+    sitemapChangefreq: draft.sitemap?.changefreq ?? current.sitemapChangefreq,
+    sitemapPriority: draft.sitemap?.priority != null ? String(draft.sitemap.priority) : current.sitemapPriority,
+    keywords: draft.keywords?.join(", ") ?? current.keywords,
+    breadcrumbs: formatJson(draft.breadcrumbs, current.breadcrumbs),
+    structuredData: formatJson(draft.structured_data, current.structuredData),
+    imageMetadata: formatJson(draft.image_metadata, current.imageMetadata),
+    geo: formatJson(draft.geo, current.geo),
+    changeSummary: draft.change_summary ?? "AI generated SEO/GEO draft reviewed in product admin.",
+  };
+}
+
+function priorityFromInput(value: string) {
+  const priority = Number.parseFloat(value);
+  if (!Number.isFinite(priority) || priority < 0 || priority > 1) {
+    throw new Error("Sitemap priority must be a number between 0 and 1");
+  }
+  return Number(priority.toFixed(1));
+}
+
+async function fetchProductSeoRecord(mpn: string): Promise<ProductSeoRecord> {
+  const { data: document, error: documentError } = await db
+    .from("seo_document")
+    .select("id, document_key, document_type, entity_reference, published_revision_id, status")
+    .eq("document_key", `product:${mpn}`)
+    .maybeSingle();
+
+  if (documentError) throw documentError;
+  const seoDocument = document as ProductSeoDocument | null;
+
+  if (!seoDocument?.published_revision_id) {
+    return { document: seoDocument, revision: null };
+  }
+
+  const { data: revision, error: revisionError } = await db
+    .from("seo_revision")
+    .select("id, seo_document_id, revision_number, canonical_path, title_tag, meta_description, indexation_policy, robots_directive, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, source")
+    .eq("id", seoDocument.published_revision_id)
+    .maybeSingle();
+
+  if (revisionError) throw revisionError;
+  return {
+    document: seoDocument,
+    revision: revision as ProductSeoRevision | null,
+  };
+}
+
+async function ensureProductSeoDocument(product: ProductDetail, existing: ProductSeoDocument | null): Promise<ProductSeoDocument> {
+  if (existing) return existing;
+
+  const { data, error } = await db
+    .from("seo_document")
+    .insert({
+      document_key: `product:${product.mpn}`,
+      document_type: "product",
+      entity_type: "product",
+      entity_id: product.id,
+      entity_reference: product.mpn,
+      status: "draft",
+      metadata: { created_from: "product_copy_seo_tab" },
+    })
+    .select("id, document_key, document_type, entity_reference, published_revision_id, status")
+    .single();
+
+  if (error) throw error;
+  const document = data as ProductSeoDocument | null;
+  if (!document?.id) throw new Error("SEO document was not created");
+  return document;
+}
+
+async function publishProductSeoRevision(product: ProductDetail, record: ProductSeoRecord | undefined, editor: ProductSeoEditor) {
+  const document = await ensureProductSeoDocument(product, record?.document ?? null);
+  const currentRevision = record?.revision;
+  const canonicalPath = editor.canonicalPath.trim();
+  if (!canonicalPath.startsWith("/")) throw new Error("Canonical path must start with /");
+  if (!editor.titleTag.trim()) throw new Error("SEO title is required");
+  if (!editor.metaDescription.trim()) throw new Error("SEO description is required");
+
+  const sitemap = {
+    include: editor.indexationPolicy === "noindex" ? false : editor.sitemapInclude,
+    family: "product",
+    changefreq: editor.sitemapChangefreq,
+    priority: priorityFromInput(editor.sitemapPriority),
+  };
+  const keywords = editor.keywords.split(",").map((keyword) => keyword.trim()).filter(Boolean);
+  const canonicalUrl = absoluteUrl(canonicalPath);
+
+  const { data: revision, error: revisionError } = await db
+    .from("seo_revision")
+    .insert({
+      seo_document_id: document.id,
+      revision_number: (currentRevision?.revision_number ?? 0) + 1,
+      status: "published",
+      canonical_path: canonicalPath,
+      canonical_url: canonicalUrl,
+      title_tag: editor.titleTag.trim(),
+      meta_description: editor.metaDescription.trim(),
+      indexation_policy: editor.indexationPolicy,
+      robots_directive: editor.robotsDirective.trim() || (editor.indexationPolicy === "noindex" ? "noindex, nofollow" : "index, follow"),
+      open_graph: {
+        title: editor.titleTag.trim(),
+        description: editor.metaDescription.trim(),
+        url: canonicalUrl,
+        type: "product",
+        image: product.images[0]?.storagePath ?? product.catalogImageUrl ?? undefined,
+      },
+      twitter_card: {
+        card: product.images[0]?.storagePath || product.catalogImageUrl ? "summary_large_image" : "summary",
+        title: editor.titleTag.trim(),
+        description: editor.metaDescription.trim(),
+      },
+      breadcrumbs: parseJsonField("breadcrumbs", editor.breadcrumbs),
+      structured_data: parseJsonField("structured data", editor.structuredData),
+      image_metadata: parseJsonField("image metadata", editor.imageMetadata),
+      sitemap,
+      geo: parseJsonField("GEO metadata", editor.geo),
+      keywords,
+      source: "product_admin",
+      change_summary: editor.changeSummary.trim() || "Published from product Copy & SEO tab.",
+      published_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (revisionError) throw revisionError;
+  const revisionRow = revision as { id: string } | null;
+  if (!revisionRow?.id) throw new Error("Published SEO revision was not returned");
+
+  const { error: documentError } = await db
+    .from("seo_document")
+    .update({
+      status: "published",
+      published_revision_id: revisionRow.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", document.id);
+
+  if (documentError) throw documentError;
+
+  // Keep legacy product columns aligned for screens/imports that still read them.
+  await supabase
+    .from("product")
+    .update({
+      seo_title: editor.titleTag.trim(),
+      seo_description: editor.metaDescription.trim(),
+    } as never)
+    .eq("mpn", product.mpn);
+}
+
 export function CopySection({ product }: { product: ProductDetail }) {
   const updateCopy = useUpdateProductCopy();
+  const queryClient = useQueryClient();
   const [hook, setHook] = useState(product.hook ?? "");
   const [description, setDescription] = useState(product.description ?? "");
   const [highlights, setHighlights] = useState(product.highlights ?? "");
   const [cta, setCta] = useState(product.cta ?? "");
-  const [seoTitle, setSeoTitle] = useState(product.seoTitle ?? "");
-  const [seoDescription, setSeoDescription] = useState(product.seoDescription ?? "");
+  const [seoEditor, setSeoEditor] = useState<ProductSeoEditor>(() => seoEditorFromRecord(product, undefined));
   const [generating, setGenerating] = useState(false);
+
+  const seoQuery = useQuery({
+    queryKey: ["admin", "product-seo-document", product.mpn],
+    queryFn: () => fetchProductSeoRecord(product.mpn),
+  });
+
+  const [lastSeoRevisionId, setLastSeoRevisionId] = useState<string | null>(null);
+  const currentSeoRevisionId = seoQuery.data?.revision?.id ?? null;
+  useEffect(() => {
+    if (seoQuery.isLoading || currentSeoRevisionId === lastSeoRevisionId) return;
+    setLastSeoRevisionId(currentSeoRevisionId);
+    setSeoEditor(seoEditorFromRecord(product, seoQuery.data));
+  }, [currentSeoRevisionId, lastSeoRevisionId, product, seoQuery.data, seoQuery.isLoading]);
+
+  const publishSeo = useMutation({
+    mutationFn: () => publishProductSeoRevision(product, seoQuery.data, seoEditor),
+    onSuccess: async () => {
+      toast.success("Canonical SEO/GEO revision published");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "product-seo-document", product.mpn] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
+      await queryClient.invalidateQueries({ queryKey: ["seo_document"] });
+      await queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "SEO publish failed"),
+  });
 
   const handleSave = async () => {
     try {
@@ -336,8 +650,6 @@ export function CopySection({ product }: { product: ProductDetail }) {
         description,
         highlights,
         cta,
-        seoTitle,
-        seoDescription,
       });
       toast.success("Product copy saved");
     } catch (err: unknown) {
@@ -384,11 +696,54 @@ export function CopySection({ product }: { product: ProductDetail }) {
       setDescription(c.description ?? "");
       setHighlights(highlightText);
       setCta(c.cta ?? "");
-      setSeoTitle(c.seo_title ?? "");
-      setSeoDescription(c.seo_body ?? "");
-      toast.success("Copy generated — review and save");
+      setSeoEditor((current) => ({
+        ...current,
+        titleTag: c.seo_title ?? current.titleTag,
+        metaDescription: c.seo_body ?? current.metaDescription,
+        changeSummary: "Generated from product copy assistant and reviewed in product admin.",
+      }));
+      toast.success("Copy generated — review copy and publish SEO/GEO if used");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Generation failed";
+      toast.error(message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateSeoGeo = async () => {
+    setGenerating(true);
+    try {
+      const record = seoQuery.data;
+      await ensureProductSeoDocument(product, record?.document ?? null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "product-seo-document", product.mpn] });
+      const refreshed = await fetchProductSeoRecord(product.mpn);
+      if (!refreshed.document?.id) throw new Error("SEO document is not available");
+      const res = await invokeWithAuth<{ draft: GeneratedSeoDraft; provider_used: string; fell_back: boolean }>("generate-seo-geo", {
+        seo_document_id: refreshed.document.id,
+        current: {
+          title_tag: seoEditor.titleTag,
+          meta_description: seoEditor.metaDescription,
+          canonical_path: seoEditor.canonicalPath,
+          indexation_policy: seoEditor.indexationPolicy,
+          robots_directive: seoEditor.robotsDirective,
+          sitemap: {
+            include: seoEditor.sitemapInclude,
+            family: "product",
+            changefreq: seoEditor.sitemapChangefreq,
+            priority: Number(seoEditor.sitemapPriority),
+          },
+          keywords: seoEditor.keywords,
+          breadcrumbs: seoEditor.breadcrumbs,
+          structured_data: seoEditor.structuredData,
+          image_metadata: seoEditor.imageMetadata,
+          geo: seoEditor.geo,
+        },
+      });
+      setSeoEditor((current) => seoEditorFromDraft(current, res.draft));
+      toast.success(res.fell_back ? "SEO/GEO draft generated with OpenAI fallback" : "SEO/GEO draft generated");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "SEO/GEO generation failed";
       toast.error(message);
     } finally {
       setGenerating(false);
@@ -428,30 +783,155 @@ export function CopySection({ product }: { product: ProductDetail }) {
             />
           </div>
         ))}
-        <SectionHead>SEO</SectionHead>
+        <div className="mt-1 flex items-center justify-between">
+          <div>
+            <SectionHead>Canonical SEO/GEO</SectionHead>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Same published metadata used by Settings → SEO/GEO.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleGenerateSeoGeo}
+              disabled={generating || seoQuery.isLoading}
+              className="flex items-center gap-1.5 bg-zinc-900 text-white border-none rounded-md px-3 py-1.5 font-semibold text-[12px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors"
+              title="Generate canonical SEO, GEO, sitemap, and JSON-LD draft"
+            >
+              {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {generating ? "Generating..." : "Generate SEO/GEO"}
+            </button>
+            {seoEditor.canonicalPath ? (
+              <a
+                href={seoEditor.canonicalPath}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 bg-white text-zinc-700 border border-zinc-200 rounded-md px-3 py-1.5 font-semibold text-[12px] hover:bg-zinc-50 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                View
+              </a>
+            ) : null}
+          </div>
+        </div>
+        {seoQuery.error ? (
+          <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+            {seoQuery.error instanceof Error ? seoQuery.error.message : "Unable to load canonical SEO document."}
+          </div>
+        ) : null}
+        <div className="rounded-md border border-zinc-200 bg-white p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Search Preview</div>
+          <div className="mt-2 font-mono text-[11px] text-green-700">www.kusooishii.com{seoEditor.canonicalPath}</div>
+          <div className="mt-1 text-[16px] font-semibold leading-snug text-blue-700">{seoEditor.titleTag || product.name}</div>
+          <p className="mt-1 text-[12px] leading-5 text-zinc-600">{seoEditor.metaDescription || "No SEO description published yet."}</p>
+        </div>
         <div>
           <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
-            SEO Title <span className="text-zinc-600 font-normal">({seoTitle.length}/60)</span>
+            SEO Title <span className="text-zinc-600 font-normal">({seoEditor.titleTag.length}/60)</span>
           </label>
           <input
-            value={seoTitle}
-            onChange={(e) => setSeoTitle(e.target.value)}
-            maxLength={60}
+            value={seoEditor.titleTag}
+            onChange={(e) => setSeoEditor({ ...seoEditor, titleTag: e.target.value })}
+            maxLength={80}
             className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
           />
         </div>
         <div>
           <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">
-            SEO Description <span className="text-zinc-600 font-normal">({seoDescription.length}/160)</span>
+            SEO Description <span className="text-zinc-600 font-normal">({seoEditor.metaDescription.length}/160)</span>
           </label>
           <textarea
             rows={2}
-            value={seoDescription}
-            onChange={(e) => setSeoDescription(e.target.value)}
-            maxLength={160}
+            value={seoEditor.metaDescription}
+            onChange={(e) => setSeoEditor({ ...seoEditor, metaDescription: e.target.value })}
+            maxLength={220}
             className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 resize-y font-sans box-border"
           />
         </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Canonical Path</label>
+            <input
+              value={seoEditor.canonicalPath}
+              onChange={(e) => setSeoEditor({ ...seoEditor, canonicalPath: e.target.value })}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Keywords</label>
+            <input
+              value={seoEditor.keywords}
+              onChange={(e) => setSeoEditor({ ...seoEditor, keywords: e.target.value })}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr]">
+          <div>
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Indexation</label>
+            <select
+              value={seoEditor.indexationPolicy}
+              onChange={(e) => {
+                const next = e.target.value as SeoIndexationPolicy;
+                setSeoEditor({
+                  ...seoEditor,
+                  indexationPolicy: next,
+                  robotsDirective: next === "noindex" ? "noindex, nofollow" : "index, follow",
+                  sitemapInclude: next === "index" ? seoEditor.sitemapInclude : false,
+                });
+              }}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
+            >
+              <option value="index">Index</option>
+              <option value="noindex">Noindex</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Sitemap</label>
+            <button
+              type="button"
+              onClick={() => setSeoEditor({ ...seoEditor, sitemapInclude: !seoEditor.sitemapInclude })}
+              disabled={seoEditor.indexationPolicy === "noindex"}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border text-left disabled:opacity-50"
+            >
+              {seoEditor.sitemapInclude ? "Included" : "Excluded"}
+            </button>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Priority</label>
+            <input
+              value={seoEditor.sitemapPriority}
+              onChange={(e) => setSeoEditor({ ...seoEditor, sitemapPriority: e.target.value })}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
+            />
+          </div>
+        </div>
+        <details className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+            Advanced JSON-LD / GEO payloads
+          </summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <JsonTextarea label="Breadcrumbs JSON" value={seoEditor.breadcrumbs} onChange={(value) => setSeoEditor({ ...seoEditor, breadcrumbs: value })} />
+            <JsonTextarea label="Structured Data JSON-LD" value={seoEditor.structuredData} onChange={(value) => setSeoEditor({ ...seoEditor, structuredData: value })} />
+            <JsonTextarea label="Image Metadata JSON" value={seoEditor.imageMetadata} onChange={(value) => setSeoEditor({ ...seoEditor, imageMetadata: value })} />
+            <JsonTextarea label="GEO Metadata JSON" value={seoEditor.geo} onChange={(value) => setSeoEditor({ ...seoEditor, geo: value })} />
+          </div>
+        </details>
+        <div>
+          <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">SEO Change Summary</label>
+          <input
+            value={seoEditor.changeSummary}
+            onChange={(e) => setSeoEditor({ ...seoEditor, changeSummary: e.target.value })}
+            placeholder="What changed and why?"
+            className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
+          />
+        </div>
+        <button
+          onClick={() => publishSeo.mutate()}
+          disabled={publishSeo.isPending || seoQuery.isLoading}
+          className="bg-zinc-900 text-white border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors w-fit"
+        >
+          {publishSeo.isPending ? "Publishing..." : "Publish SEO/GEO Revision"}
+        </button>
         <button
           onClick={handleSave}
           disabled={updateCopy.isPending}
@@ -461,6 +941,21 @@ export function CopySection({ product }: { product: ProductDetail }) {
         </button>
       </div>
     </SurfaceCard>
+  );
+}
+
+function JsonTextarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div>
+      <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">{label}</label>
+      <textarea
+        rows={8}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        className="w-full bg-white border border-zinc-200 rounded text-zinc-900 text-[12px] p-2.5 resize-y font-mono box-border"
+      />
+    </div>
   );
 }
 
