@@ -45,6 +45,7 @@ export function GmcSettingsCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [merchantId, setMerchantId] = useState('');
   const [dataSource, setDataSource] = useState('');
+  const [lastPublishResult, setLastPublishResult] = useState<Record<string, unknown> | null>(null);
   const [history, setHistory] = useState<PublishHistoryRow[]>([]);
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'createdAt' | 'queued' | 'errors'>('createdAt');
@@ -125,6 +126,7 @@ export function GmcSettingsCard() {
 
   const publishAll = () => run('publish', async () => {
     const d = await invokeWithAuth<Record<string, unknown>>('gmc-sync', { action: 'publish_all' });
+    setLastPublishResult(d);
     const row: PublishHistoryRow = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -227,6 +229,17 @@ export function GmcSettingsCard() {
             </tbody>
           </table>
         </div>
+
+        {lastPublishResult && (
+          <div className="rounded border p-2 text-xs">
+            <div className="font-medium">Latest run summary</div>
+            <div className="mt-1 grid gap-2 sm:grid-cols-3">
+              <div>Queued: <Mono>{String(lastPublishResult.queued ?? 0)}</Mono></div>
+              <div>Skipped: <Mono>{String(lastPublishResult.skipped ?? 0)}</Mono></div>
+              <div>Errors: <Mono>{String(lastPublishResult.errors ?? 0)}</Mono></div>
+            </div>
+          </div>
+        )}
       </div>
     </SurfaceCard>
   );
