@@ -12,7 +12,7 @@ import { MinifigsCard } from "./MinifigsCard";
 import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
-import { Sparkles, Loader2, ExternalLink } from "lucide-react";
+import { Sparkles, Loader2, ExternalLink, Save } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { absoluteUrl } from "@/lib/seo-jsonld";
 import {
@@ -335,6 +335,7 @@ interface ProductSeoRevision {
   id: string;
   seo_document_id: string;
   revision_number: number;
+  status: "draft" | "published" | "archived";
   canonical_path: string;
   title_tag: string;
   meta_description: string;
@@ -402,6 +403,7 @@ interface DbResponse<T = unknown> {
 
 interface QueryBuilder extends PromiseLike<DbResponse> {
   select(columns: string): QueryBuilder;
+  order(column: string, options?: { ascending?: boolean }): QueryBuilder;
   eq(column: string, value: unknown): QueryBuilder;
   insert(value: Record<string, unknown>): QueryBuilder;
   update(value: Record<string, unknown>): QueryBuilder;
@@ -491,20 +493,23 @@ async function fetchProductSeoRecord(mpn: string): Promise<ProductSeoRecord> {
   if (documentError) throw documentError;
   const seoDocument = document as ProductSeoDocument | null;
 
-  if (!seoDocument?.published_revision_id) {
+  if (!seoDocument?.id) {
     return { document: seoDocument, revision: null };
   }
 
-  const { data: revision, error: revisionError } = await db
+  const { data: revisions, error: revisionError } = await db
     .from("seo_revision")
-    .select("id, seo_document_id, revision_number, canonical_path, title_tag, meta_description, indexation_policy, robots_directive, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, source")
-    .eq("id", seoDocument.published_revision_id)
-    .maybeSingle();
+    .select("id, seo_document_id, revision_number, status, canonical_path, title_tag, meta_description, indexation_policy, robots_directive, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, source")
+    .eq("seo_document_id", seoDocument.id)
+    .order("revision_number", { ascending: false });
 
   if (revisionError) throw revisionError;
+  const revisionRows = (revisions ?? []) as ProductSeoRevision[];
+  const draft = revisionRows.find((revision) => revision.status === "draft") ?? null;
+  const published = revisionRows.find((revision) => revision.id === seoDocument.published_revision_id) ?? null;
   return {
     document: seoDocument,
-    revision: revision as ProductSeoRevision | null,
+    revision: draft ?? published,
   };
 }
 
@@ -538,43 +543,9 @@ async function publishProductSeoRevision(product: ProductDetail, record: Product
   if (!editor.titleTag.trim()) throw new Error("SEO title is required");
   if (!editor.metaDescription.trim()) throw new Error("SEO description is required");
 
-  const sitemap = {
-    include: editor.indexationPolicy === "noindex" ? false : editor.sitemapInclude,
-    family: "product",
-    changefreq: editor.sitemapChangefreq,
-    priority: priorityFromInput(editor.sitemapPriority),
-  };
-  const keywords = editor.keywords.split(",").map((keyword) => keyword.trim()).filter(Boolean);
-  const canonicalUrl = absoluteUrl(canonicalPath);
-
   const { data: revision, error: revisionError } = await db
     .rpc("publish_seo_revision", {
-      p_seo_document_id: document.id,
-      p_canonical_path: canonicalPath,
-      p_canonical_url: canonicalUrl,
-      p_title_tag: editor.titleTag.trim(),
-      p_meta_description: editor.metaDescription.trim(),
-      p_indexation_policy: editor.indexationPolicy,
-      p_robots_directive: editor.robotsDirective.trim() || (editor.indexationPolicy === "noindex" ? "noindex, nofollow" : "index, follow"),
-      p_open_graph: {
-        title: editor.titleTag.trim(),
-        description: editor.metaDescription.trim(),
-        url: canonicalUrl,
-        type: "product",
-        image: product.images[0]?.storagePath ?? product.catalogImageUrl ?? undefined,
-      },
-      p_twitter_card: {
-        card: product.images[0]?.storagePath || product.catalogImageUrl ? "summary_large_image" : "summary",
-        title: editor.titleTag.trim(),
-        description: editor.metaDescription.trim(),
-      },
-      p_breadcrumbs: parseJsonField("breadcrumbs", editor.breadcrumbs),
-      p_structured_data: parseJsonField("structured data", editor.structuredData),
-      p_image_metadata: parseJsonField("image metadata", editor.imageMetadata),
-      p_sitemap: sitemap,
-      p_geo: parseJsonField("GEO metadata", editor.geo),
-      p_keywords: keywords,
-      p_source: "product_admin",
+      ...productSeoRevisionRpcArgs(document.id, product, editor),
       p_change_summary: editor.changeSummary.trim() || "Published from product Copy & SEO tab.",
     })
     .single();
@@ -591,6 +562,65 @@ async function publishProductSeoRevision(product: ProductDetail, record: Product
       seo_description: editor.metaDescription.trim(),
     } as never)
     .eq("mpn", product.mpn);
+}
+
+async function saveProductSeoRevisionDraft(product: ProductDetail, record: ProductSeoRecord | undefined, editor: ProductSeoEditor) {
+  const document = await ensureProductSeoDocument(product, record?.document ?? null);
+  const canonicalPath = editor.canonicalPath.trim();
+  if (!canonicalPath.startsWith("/")) throw new Error("Canonical path must start with /");
+
+  const { data: revision, error: revisionError } = await db
+    .rpc("save_seo_revision_draft", {
+      ...productSeoRevisionRpcArgs(document.id, product, editor),
+      p_change_summary: editor.changeSummary.trim() || "Saved from product Copy & SEO tab.",
+    })
+    .single();
+
+  if (revisionError) throw revisionError;
+  const revisionRow = revision as { id: string } | null;
+  if (!revisionRow?.id) throw new Error("Saved SEO draft was not returned");
+}
+
+function productSeoRevisionRpcArgs(documentId: string, product: ProductDetail, editor: ProductSeoEditor) {
+  const canonicalPath = editor.canonicalPath.trim();
+
+  const sitemap = {
+    include: editor.indexationPolicy === "noindex" ? false : editor.sitemapInclude,
+    family: "product",
+    changefreq: editor.sitemapChangefreq,
+    priority: priorityFromInput(editor.sitemapPriority),
+  };
+  const keywords = editor.keywords.split(",").map((keyword) => keyword.trim()).filter(Boolean);
+  const canonicalUrl = absoluteUrl(canonicalPath);
+
+  return {
+    p_seo_document_id: documentId,
+    p_canonical_path: canonicalPath,
+    p_canonical_url: canonicalUrl,
+    p_title_tag: editor.titleTag.trim(),
+    p_meta_description: editor.metaDescription.trim(),
+    p_indexation_policy: editor.indexationPolicy,
+    p_robots_directive: editor.robotsDirective.trim() || (editor.indexationPolicy === "noindex" ? "noindex, nofollow" : "index, follow"),
+    p_open_graph: {
+      title: editor.titleTag.trim(),
+      description: editor.metaDescription.trim(),
+      url: canonicalUrl,
+      type: "product",
+      image: product.images[0]?.storagePath ?? product.catalogImageUrl ?? undefined,
+    },
+    p_twitter_card: {
+      card: product.images[0]?.storagePath || product.catalogImageUrl ? "summary_large_image" : "summary",
+      title: editor.titleTag.trim(),
+      description: editor.metaDescription.trim(),
+    },
+    p_breadcrumbs: parseJsonField("breadcrumbs", editor.breadcrumbs),
+    p_structured_data: parseJsonField("structured data", editor.structuredData),
+    p_image_metadata: parseJsonField("image metadata", editor.imageMetadata),
+    p_sitemap: sitemap,
+    p_geo: parseJsonField("GEO metadata", editor.geo),
+    p_keywords: keywords,
+    p_source: "product_admin",
+  };
 }
 
 export function CopySection({ product }: { product: ProductDetail }) {
@@ -626,6 +656,16 @@ export function CopySection({ product }: { product: ProductDetail }) {
       await queryClient.invalidateQueries({ queryKey: productKeys.detail(product.mpn) });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "SEO publish failed"),
+  });
+
+  const saveSeoDraft = useMutation({
+    mutationFn: () => saveProductSeoRevisionDraft(product, seoQuery.data, seoEditor),
+    onSuccess: async () => {
+      toast.success("SEO/GEO draft saved");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "product-seo-document", product.mpn] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "SEO draft save failed"),
   });
 
   const handleSave = async () => {
@@ -773,8 +813,13 @@ export function CopySection({ product }: { product: ProductDetail }) {
           <div>
             <SectionHead>Canonical SEO/GEO</SectionHead>
             <p className="mt-1 text-[11px] text-zinc-500">
-              Same published metadata used by Settings → SEO/GEO.
+              Same saved and published metadata used by Settings → SEO/GEO.
             </p>
+            {seoQuery.data?.revision?.status === "draft" ? (
+              <p className="mt-1 text-[11px] font-semibold text-amber-700">
+                Draft revision {seoQuery.data.revision.revision_number} loaded
+              </p>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <button
@@ -911,13 +956,23 @@ export function CopySection({ product }: { product: ProductDetail }) {
             className="w-full bg-zinc-50 border border-zinc-200 rounded text-zinc-900 text-[13px] p-2.5 font-sans box-border"
           />
         </div>
-        <button
-          onClick={() => publishSeo.mutate()}
-          disabled={publishSeo.isPending || seoQuery.isLoading}
-          className="bg-zinc-900 text-white border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors w-fit"
-        >
-          {publishSeo.isPending ? "Publishing..." : "Publish SEO/GEO Revision"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => saveSeoDraft.mutate()}
+            disabled={saveSeoDraft.isPending || publishSeo.isPending || seoQuery.isLoading}
+            className="inline-flex items-center gap-1.5 bg-white text-zinc-800 border border-zinc-200 rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer disabled:opacity-50 hover:bg-zinc-50 transition-colors w-fit"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saveSeoDraft.isPending ? "Saving..." : "Save SEO/GEO Draft"}
+          </button>
+          <button
+            onClick={() => publishSeo.mutate()}
+            disabled={publishSeo.isPending || saveSeoDraft.isPending || seoQuery.isLoading}
+            className="bg-zinc-900 text-white border-none rounded-md px-4 py-2 font-bold text-[13px] cursor-pointer disabled:opacity-50 hover:bg-zinc-800 transition-colors w-fit"
+          >
+            {publishSeo.isPending ? "Publishing..." : "Publish SEO/GEO Revision"}
+          </button>
+        </div>
         <button
           onClick={handleSave}
           disabled={updateCopy.isPending}
