@@ -143,7 +143,10 @@ interface QueryBuilder extends PromiseLike<DbResponse> {
   maybeSingle(): Promise<DbResponse>;
 }
 
-const db = supabase as unknown as { from(table: string): QueryBuilder };
+const db = supabase as unknown as {
+  from(table: string): QueryBuilder;
+  rpc(functionName: string, args: Record<string, unknown>): QueryBuilder;
+};
 
 const JSON_PLACEHOLDER = "[]";
 const OBJECT_PLACEHOLDER = "{}";
@@ -341,7 +344,6 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
 
 async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEditorState) {
   const currentRevision = record.revision;
-  const revisionNumber = (currentRevision?.revision_number ?? 0) + 1;
   const canonicalPath = state.canonical_path.trim();
   if (!canonicalPath.startsWith("/")) throw new Error("Canonical path must start with /");
   if (!state.title_tag.trim()) throw new Error("Title tag is required");
@@ -365,55 +367,39 @@ async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEdi
 
   const canonicalUrl = absoluteUrl(canonicalPath);
   const { data: revision, error: revisionError } = await db
-    .from("seo_revision")
-    .insert({
-      seo_document_id: record.id,
-      revision_number: revisionNumber,
-      status: "published",
-      canonical_path: canonicalPath,
-      canonical_url: canonicalUrl,
-      title_tag: state.title_tag.trim(),
-      meta_description: state.meta_description.trim(),
-      indexation_policy: state.indexation_policy,
-      robots_directive: state.robots_directive.trim() || (state.indexation_policy === "noindex" ? "noindex, nofollow" : "index, follow"),
-      open_graph: {
+    .rpc("publish_seo_revision", {
+      p_seo_document_id: record.id,
+      p_canonical_path: canonicalPath,
+      p_canonical_url: canonicalUrl,
+      p_title_tag: state.title_tag.trim(),
+      p_meta_description: state.meta_description.trim(),
+      p_indexation_policy: state.indexation_policy,
+      p_robots_directive: state.robots_directive.trim() || (state.indexation_policy === "noindex" ? "noindex, nofollow" : "index, follow"),
+      p_open_graph: {
         ...(currentRevision?.open_graph ?? {}),
         title: state.title_tag.trim(),
         description: state.meta_description.trim(),
         url: canonicalUrl,
       },
-      twitter_card: {
+      p_twitter_card: {
         ...(currentRevision?.twitter_card ?? {}),
         title: state.title_tag.trim(),
         description: state.meta_description.trim(),
       },
-      breadcrumbs,
-      structured_data: structuredData,
-      image_metadata: imageMetadata,
-      sitemap,
-      geo,
-      keywords,
-      source: "admin_ui",
-      change_summary: state.change_summary.trim() || "Published from SEO/GEO admin.",
-      published_at: new Date().toISOString(),
+      p_breadcrumbs: breadcrumbs,
+      p_structured_data: structuredData,
+      p_image_metadata: imageMetadata,
+      p_sitemap: sitemap,
+      p_geo: geo,
+      p_keywords: keywords,
+      p_source: "admin_ui",
+      p_change_summary: state.change_summary.trim() || "Published from SEO/GEO admin.",
     })
-    .select("id")
     .single();
 
   if (revisionError) throw revisionError;
   const revisionRow = revision as { id: string } | null;
   if (!revisionRow?.id) throw new Error("Published revision was not returned");
-
-  const { error: documentError } = await db
-    .from("seo_document")
-    .update({
-      status: "published",
-      published_revision_id: revisionRow.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", record.id);
-
-  if (documentError) throw documentError;
 }
 
 export default function SeoGeoPage() {
