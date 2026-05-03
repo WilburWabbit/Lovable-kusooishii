@@ -14,6 +14,10 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
+interface BrowseCatalogRow {
+  best_grade?: string | number | null;
+}
+
 export function StorefrontHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -31,8 +35,8 @@ export function StorefrontHeader() {
         search_term: null, filter_theme_id: null, filter_grade: null, filter_retired: null,
       });
       if (error) throw error;
-      return (data as any[]).some(
-        (p) => p.best_grade != null && parseInt(p.best_grade, 10) > 1
+      return ((data ?? []) as BrowseCatalogRow[]).some(
+        (p) => p.best_grade != null && parseInt(String(p.best_grade), 10) > 1
       );
     },
     staleTime: 5 * 60 * 1000,
@@ -155,7 +159,7 @@ export function StorefrontHeader() {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild className="font-body text-sm cursor-pointer">
-                      <Link to="/admin/purchases"><Shield className="mr-2 h-3.5 w-3.5" /> Admin</Link>
+                      <Link to="/admin/work-queue"><Shield className="mr-2 h-3.5 w-3.5" /> Admin</Link>
                     </DropdownMenuItem>
                   </>
                 )}
@@ -203,7 +207,7 @@ export function StorefrontHeader() {
                   Store
                 </Link>
                 {isStaffOrAdmin && (
-                  <Link to="/admin/purchases" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
+                  <Link to="/admin/work-queue" className="font-body text-sm font-medium text-foreground" onClick={() => setIsMenuOpen(false)}>
                     Admin
                   </Link>
                 )}

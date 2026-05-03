@@ -142,9 +142,16 @@ export function jsonResponse(data: unknown, status = 200): Response {
 
 export function errorResponse(err: unknown, status = 400): Response {
   console.error("Edge function error:", err);
+  const message = err instanceof Error
+    ? err.message
+    : typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message?: unknown }).message)
+      : typeof err === "string"
+        ? err
+        : "Unknown error";
   return new Response(
     JSON.stringify({
-      error: err instanceof Error ? err.message : "Unknown error",
+      error: message,
     }),
     {
       status,

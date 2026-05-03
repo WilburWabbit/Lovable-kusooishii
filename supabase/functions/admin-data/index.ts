@@ -905,8 +905,9 @@ Deno.serve(async (req) => {
     /* ── Pricing Engine ── */
 
     } else if (action === "calculate-pricing") {
-      const { sku_id, channel } = params;
-      if (!sku_id || !channel) throw new ValidationError("sku_id and channel are required");
+      const { sku_id, channel: requestedChannel } = params;
+      if (!sku_id || !requestedChannel) throw new ValidationError("sku_id and channel are required");
+      const channel = requestedChannel === "website" ? "web" : requestedChannel;
 
       // 1. Get SKU + product info
       const { data: skuData } = await admin
@@ -929,6 +930,12 @@ Deno.serve(async (req) => {
       const packagingCost = dm["packaging_cost"] ?? 0;
       const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
       const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
+
+      const { data: channelPricingConfig } = await admin
+        .from("channel_pricing_config")
+        .select("*")
+        .eq("channel", channel)
+        .maybeSingle();
 
       // 3. Get carrying value basis for pooled listings. The floor price uses
       // the highest eligible unit value unless a specific unit is reserved.
@@ -1082,6 +1089,25 @@ Deno.serve(async (req) => {
 
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
+      const estimateGrossFees = (grossPrice: number): number => {
+        let totalFeesGross = 0;
+        for (const fee of fees ?? []) {
+          let base = grossPrice;
+          if (fee.applies_to === "sale_plus_shipping") base = grossPrice + shippingCost;
+          else if (fee.applies_to === "sale_price_inc_vat") base = grossPrice * 1.2;
+          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
+          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
+          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
+          totalFeesGross += amount;
+        }
+        return Math.round(totalFeesGross * 100) / 100;
+      };
+
+      const charmDown = (value: number): number => {
+        if (!Number.isFinite(value) || value <= 0) return 0;
+        const candidate = Math.floor(value) + 0.99;
+        return Math.round((candidate <= value ? candidate : candidate - 1) * 100) / 100;
+      };
 
       // VAT-aware floor: revenue = P/1.2, net fees = gross_fees/1.2
       // P >= 1.2 × (costBase + minProfit + fixedFees/1.2) / (1 - margin - feeRate - risk)
@@ -1091,16 +1117,7 @@ Deno.serve(async (req) => {
 
       // Post-check: verify floor covers all fees with min/max clamps (ex-VAT basis)
       for (let i = 0; i < 5; i++) {
-        let totalFeesGross = 0;
-        for (const fee of fees ?? []) {
-          let base = floorPrice;
-          if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
-          else if (fee.applies_to === "sale_price_inc_vat") base = floorPrice * 1.2;
-          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
-          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
-          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
-          totalFeesGross += amount;
-        }
+        const totalFeesGross = estimateGrossFees(floorPrice);
         const netFees = totalFeesGross / 1.2;
         const riskReserve = (floorPrice / 1.2) * riskRate;
         const requiredExVat = costBase + minProfit + netFees + riskReserve;
@@ -1117,14 +1134,43 @@ Deno.serve(async (req) => {
       const ceilingPrice = Math.floor(ceilingBasis) + 0.99;
 
       let targetPrice: number;
+      let preUndercutMarketPrice: number | null = null;
+      let appliedMarketUndercut = 0;
+      let targetFloorClamped = false;
       if (marketConsensus != null) {
-        targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
+        preUndercutMarketPrice = marketConsensus * condMultiplier;
+        const minUndercutPct = Math.max(0, Number(channelPricingConfig?.market_undercut_min_pct ?? 0));
+        const minUndercutAmount = Math.max(0, Number(channelPricingConfig?.market_undercut_min_amount ?? 0));
+        const maxUndercutPct = channelPricingConfig?.market_undercut_max_pct == null
+          ? null
+          : Math.max(0, Number(channelPricingConfig.market_undercut_max_pct));
+        const maxUndercutAmount = channelPricingConfig?.market_undercut_max_amount == null
+          ? null
+          : Math.max(0, Number(channelPricingConfig.market_undercut_max_amount));
+        const minimumUndercut = Math.max(preUndercutMarketPrice * minUndercutPct, minUndercutAmount);
+        const maximumUndercutCandidates = [
+          maxUndercutPct == null ? null : preUndercutMarketPrice * maxUndercutPct,
+          maxUndercutAmount,
+        ].filter((value): value is number => value != null && value > 0);
+        const maximumUndercut = maximumUndercutCandidates.length > 0
+          ? Math.max(...maximumUndercutCandidates)
+          : null;
+        appliedMarketUndercut = maximumUndercut == null
+          ? minimumUndercut
+          : Math.min(minimumUndercut, maximumUndercut);
+        targetPrice = charmDown(preUndercutMarketPrice - appliedMarketUndercut);
         // Ensure target is at least the floor
-        if (targetPrice < floorPrice) targetPrice = floorPrice;
+        if (targetPrice < floorPrice) {
+          targetPrice = floorPrice;
+          targetFloorClamped = true;
+        }
       } else {
         // No market data — default target to ceiling price
         targetPrice = ceilingPrice;
       }
+
+      const estimatedFeesAtTarget = estimateGrossFees(targetPrice);
+      const estimatedNetAtTarget = Math.round((targetPrice - estimatedFeesAtTarget) * 100) / 100;
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
@@ -1140,6 +1186,8 @@ Deno.serve(async (req) => {
         floor_price: floorPrice,
         target_price: targetPrice,
         ceiling_price: ceilingPrice,
+        estimated_fees: estimatedFeesAtTarget,
+        estimated_net: estimatedNetAtTarget,
         cost_base: Math.round(costBase * 100) / 100,
         carrying_value: Math.round(carryingValueBasis * 100) / 100,
         average_carrying_value: Math.round(avgCarrying * 100) / 100,
@@ -1154,17 +1202,28 @@ Deno.serve(async (req) => {
           shipping_cost: shippingCost,
           total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
           fixed_fee_costs: Math.round(fixedFeeCosts * 100) / 100,
+          estimated_fees_at_target: estimatedFeesAtTarget,
+          estimated_net_at_target: estimatedNetAtTarget,
           risk_reserve_rate: riskReserveRate,
           min_profit: minProfit,
           min_margin: minMargin * 100,
           market_confidence: Math.round(marketConfidence * 100) / 100,
+          pre_undercut_market_price: preUndercutMarketPrice == null ? 0 : Math.round(preUndercutMarketPrice * 100) / 100,
+          market_undercut_min_pct: Number(channelPricingConfig?.market_undercut_min_pct ?? 0) * 100,
+          market_undercut_min_amount: Number(channelPricingConfig?.market_undercut_min_amount ?? 0),
+          market_undercut_max_pct: Number(channelPricingConfig?.market_undercut_max_pct ?? 0) * 100,
+          market_undercut_max_amount: Number(channelPricingConfig?.market_undercut_max_amount ?? 0),
+          applied_market_undercut: Math.round(appliedMarketUndercut * 100) / 100,
+          target_floor_clamped: targetFloorClamped ? 1 : 0,
         },
       };
 
     } else if (action === "batch-calculate-pricing") {
       const { channel: batchChannel } = params;
       // Default to "web" channel when not specified or "all"
-      const targetChannel = (batchChannel && batchChannel !== "all") ? batchChannel : "web";
+      const targetChannel = (batchChannel && batchChannel !== "all")
+        ? (batchChannel === "website" ? "web" : batchChannel)
+        : "web";
 
       // 1. Get all active SKUs with a product (orphan SKUs without product_id are excluded)
       const { data: activeSkus, error: skuErr } = await admin
@@ -1335,15 +1394,30 @@ Deno.serve(async (req) => {
       result = data;
 
     } else if (action === "upsert-channel-pricing-config") {
-      const { channel, auto_price_enabled, max_increase_pct, max_increase_amount, max_decrease_pct, max_decrease_amount } = params;
+      const {
+        channel,
+        auto_price_enabled,
+        max_increase_pct,
+        max_increase_amount,
+        max_decrease_pct,
+        max_decrease_amount,
+        market_undercut_min_pct,
+        market_undercut_min_amount,
+        market_undercut_max_pct,
+        market_undercut_max_amount,
+      } = params;
       if (!channel) throw new Error("channel is required");
       const { error } = await admin.from("channel_pricing_config").upsert({
-        channel,
+        channel: channel === "website" ? "web" : channel,
         auto_price_enabled: auto_price_enabled ?? false,
         max_increase_pct: max_increase_pct ?? null,
         max_increase_amount: max_increase_amount ?? null,
         max_decrease_pct: max_decrease_pct ?? null,
         max_decrease_amount: max_decrease_amount ?? null,
+        market_undercut_min_pct: market_undercut_min_pct ?? 0,
+        market_undercut_min_amount: market_undercut_min_amount ?? 0,
+        market_undercut_max_pct: market_undercut_max_pct ?? null,
+        market_undercut_max_amount: market_undercut_max_amount ?? null,
       }, { onConflict: "channel" });
       if (error) throw error;
       result = { success: true };
@@ -3231,7 +3305,11 @@ Deno.serve(async (req) => {
         attrsByProduct.set(attr.product_id, bucket);
       }
 
-      const rows = ((skuRes.data ?? []) as any[]).map((sku) => {
+      const allSkus = (skuRes.data ?? []) as any[];
+      const sourceSkus = allSkus.filter((sku) => webBySku.has(sku.id));
+      const excludedNoWebPage = allSkus.length - sourceSkus.length;
+
+      const rows = sourceSkus.map((sku) => {
         const productRelation = sku.product;
         const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
         const webListing = webBySku.get(sku.id);
@@ -3246,7 +3324,6 @@ Deno.serve(async (req) => {
         if (!connected) blocking.push("Google Merchant is not connected");
         if (!dataSourceConfigured) blocking.push("GMC data source is not configured");
         if (tokenExpired === true) blocking.push("Google Merchant token is expired");
-        if (!webListing) blocking.push("No live web listing");
         if (price <= 0) blocking.push("Missing listed price");
         if (!product?.mpn) blocking.push("Missing MPN");
         if (!product?.name && !product?.seo_title) blocking.push("Missing title");
@@ -3308,7 +3385,7 @@ Deno.serve(async (req) => {
           token_expired: tokenExpired,
           last_updated: conn?.updated_at ?? null,
         },
-        summary: { total: rows.length, ready, warning, blocked },
+        summary: { total: rows.length, ready, warning, blocked, excluded_no_web_page: excludedNoWebPage },
         rows,
       };
     } else if (action === "gmc-publish-events") {

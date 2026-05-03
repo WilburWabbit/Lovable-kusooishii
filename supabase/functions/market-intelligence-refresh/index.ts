@@ -167,6 +167,7 @@ async function ensureSources(admin: SupabaseAdminClient): Promise<Record<SourceC
 async function resolveTargets(admin: SupabaseAdminClient, body: RefreshRequest): Promise<TargetSku[]> {
   const skuId = body.sku_id ?? body.skuId;
   const skuCode = body.sku_code ?? body.skuCode;
+  const mpn = body.mpn?.trim();
   const limit = Math.max(1, Math.min(Number(body.limit ?? 50), 250));
 
   let query = admin
@@ -180,12 +181,29 @@ async function resolveTargets(admin: SupabaseAdminClient, body: RefreshRequest):
   if (skuId) query = query.eq("id", skuId);
   if (skuCode) query = query.eq("sku_code", skuCode.trim());
 
+  if (mpn && !skuId && !skuCode) {
+    const wantedBase = baseMpn(mpn) ?? mpn;
+    const productMpnFilter = wantedBase === mpn
+      ? `mpn.eq.${mpn},mpn.like.${mpn}-%`
+      : `mpn.eq.${mpn},mpn.like.${wantedBase}-%`;
+    const { data: products, error: productError } = await admin
+      .from("product")
+      .select("id, mpn")
+      .or(productMpnFilter)
+      .limit(limit);
+    if (productError) throw productError;
+
+    const productIds = (products ?? []).map((row: { id: string }) => row.id).filter(Boolean);
+    if (productIds.length === 0) return [];
+    query = query.in("product_id", productIds);
+  }
+
   const { data, error } = await query;
   if (error) throw error;
 
   let targets = ((data ?? []) as TargetSku[]).filter((row) => skuMpn(row));
-  if (body.mpn) {
-    const wanted = body.mpn.trim();
+  if (mpn) {
+    const wanted = mpn;
     const wantedBase = baseMpn(wanted);
     targets = targets.filter((row) => {
       const rowMpn = skuMpn(row);
@@ -563,10 +581,12 @@ Deno.serve(async (req) => {
 
     let snapshotRows = 0;
     if (body.refresh_snapshots !== false) {
-      if ((body.sku_id ?? body.skuId ?? body.sku_code ?? body.skuCode) && targets.length === 1) {
-        const { data, error } = await admin.rpc("refresh_market_price_snapshots", { p_sku_id: targets[0].id });
-        if (error) throw error;
-        snapshotRows = Number(data ?? 0);
+      if ((body.sku_id ?? body.skuId ?? body.sku_code ?? body.skuCode ?? body.mpn) && targets.length > 0) {
+        for (const target of targets) {
+          const { data, error } = await admin.rpc("refresh_market_price_snapshots", { p_sku_id: target.id });
+          if (error) throw error;
+          snapshotRows += Number(data ?? 0);
+        }
       } else {
         const { data, error } = await admin.rpc("refresh_market_price_snapshots");
         if (error) throw error;

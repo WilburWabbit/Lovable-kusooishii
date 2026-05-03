@@ -615,18 +615,23 @@ Deno.serve(async (req) => {
       if (!row?.channel || !row?.aspect_key) {
         throw new Error("channel and aspect_key are required");
       }
-      if (!row.canonical_key && !row.constant_value) {
-        throw new Error("Either canonical_key or constant_value must be set");
+      if (!row.canonical_key && !row.constant_value && !row.transform) {
+        throw new Error("Set canonical_key, constant_value, or transform");
       }
       // Use a delete-then-insert to honour the partial unique index that
       // includes COALESCE(...) — Postgres ON CONFLICT can't target it.
-      await admin
+      let deleteQuery = admin
         .from("channel_attribute_mapping")
         .delete()
         .eq("channel", row.channel)
-        .eq("aspect_key", row.aspect_key)
-        .eq("marketplace", row.marketplace ?? null)
-        .eq("category_id", row.category_id ?? null);
+        .eq("aspect_key", row.aspect_key);
+      deleteQuery = row.marketplace == null
+        ? deleteQuery.is("marketplace", null)
+        : deleteQuery.eq("marketplace", row.marketplace);
+      deleteQuery = row.category_id == null
+        ? deleteQuery.is("category_id", null)
+        : deleteQuery.eq("category_id", row.category_id);
+      await deleteQuery;
       const { error } = await admin.from("channel_attribute_mapping").insert(row);
       if (error) throw error;
       return jsonResponse({ success: true });

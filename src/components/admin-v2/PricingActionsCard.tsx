@@ -18,6 +18,8 @@ interface PricingCalculation {
   floor_price: number | null;
   target_price: number | null;
   ceiling_price: number | null;
+  estimated_fees?: number | null;
+  estimated_net?: number | null;
   confidence_score: number | null;
   market_consensus?: number | null;
   breakdown?: Record<string, number>;
@@ -89,6 +91,10 @@ function confidenceTone(value: number | null | undefined): 'teal' | 'amber' | 'r
   return 'red';
 }
 
+function baseMpn(mpn: string) {
+  return mpn.trim().replace(/-\d+$/, '');
+}
+
 export function PricingActionsCard() {
   const [running, setRunning] = useState(false);
   const [channel, setChannel] = useState('ebay');
@@ -97,7 +103,7 @@ export function PricingActionsCard() {
   const [completed, setCompleted] = useState(0);
   const [errors, setErrors] = useState(0);
 
-  const [singleSku, setSingleSku] = useState('');
+  const [singleMpn, setSingleMpn] = useState('');
   const [singleChannel, setSingleChannel] = useState('ebay');
   const [singleRunning, setSingleRunning] = useState(false);
   const [singleResult, setSingleResult] = useState<PricingCalculation | null>(null);
@@ -194,6 +200,42 @@ export function PricingActionsCard() {
     });
   }, []);
 
+  const findFirstSkuForMpn = useCallback(async (mpnInput: string): Promise<{ id: string; sku_code: string } | null> => {
+    const wanted = mpnInput.trim();
+    const wantedBase = baseMpn(wanted);
+    const { data: products, error: productError } = await supabase
+      .from('product')
+      .select('id, mpn' as never)
+      .or(`mpn.eq.${wanted},mpn.like.${wantedBase}-%` as never)
+      .limit(25);
+    if (productError) throw productError;
+
+    const productIds = ((products ?? []) as unknown as Array<{ id: string }>).map((product) => product.id);
+    if (productIds.length > 0) {
+      const { data: sku, error } = await supabase
+        .from('sku')
+        .select('id, sku_code, condition_grade' as never)
+        .in('product_id' as never, productIds as never)
+        .eq('active_flag' as never, true as never)
+        .order('condition_grade' as never, { ascending: true } as never)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (sku) return sku as unknown as { id: string; sku_code: string };
+    }
+
+    const { data: sku, error } = await supabase
+      .from('sku')
+      .select('id, sku_code, condition_grade' as never)
+      .or(`mpn.eq.${wanted},sku_code.like.${wanted}.%` as never)
+      .eq('active_flag' as never, true as never)
+      .order('condition_grade' as never, { ascending: true } as never)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return (sku as unknown as { id: string; sku_code: string } | null) ?? null;
+  }, []);
+
   const refreshMarketSnapshots = useCallback(async () => {
     setMarketRefreshRunning(true);
 
@@ -212,36 +254,36 @@ export function PricingActionsCard() {
     }
   }, [loadMarketSummary]);
 
-  const refreshMarketSignals = useCallback(async (onlySingleSku = false) => {
+  const refreshMarketSignals = useCallback(async (onlySingleMpn = false) => {
     setMarketSignalsRunning(true);
 
     try {
-      const skuCode = onlySingleSku ? singleSku.trim() : '';
-      if (onlySingleSku && !skuCode) {
-        toast.error('Enter a SKU code before refreshing a single SKU');
+      const mpn = onlySingleMpn ? singleMpn.trim() : '';
+      if (onlySingleMpn && !mpn) {
+        toast.error('Enter an MPN before refreshing a single product');
         return;
       }
 
       const result = await invokeWithAuth<MarketRefreshResult>(
         'market-intelligence-refresh',
         {
-          sku_code: skuCode || undefined,
+          mpn: mpn || undefined,
           sources: MARKET_SOURCES.map((source) => source.code),
-          limit: onlySingleSku ? 1 : 75,
+          limit: onlySingleMpn ? 25 : 75,
           refresh_snapshots: true,
         }
       );
 
       setMarketRefreshResult(result);
       setMarketRefreshCount(result.snapshot_rows);
-      if (onlySingleSku && skuCode) {
-        const { data: sku, error } = await supabase
-          .from('sku')
-          .select('id' as never)
-          .eq('sku_code', skuCode)
-          .maybeSingle();
-        if (error) throw error;
-        await loadMarketSummary((sku as unknown as { id: string } | null)?.id);
+      if (onlySingleMpn && result.target_count === 0) {
+        toast.warning(`No active SKU found for MPN "${mpn}"`);
+        await loadMarketSummary();
+        return;
+      }
+      if (onlySingleMpn && mpn) {
+        const sku = await findFirstSkuForMpn(mpn);
+        await loadMarketSummary(sku?.id);
       } else {
         await loadMarketSummary();
       }
@@ -258,7 +300,7 @@ export function PricingActionsCard() {
     } finally {
       setMarketSignalsRunning(false);
     }
-  }, [loadMarketSummary, singleSku]);
+  }, [findFirstSkuForMpn, loadMarketSummary, singleMpn]);
 
   const runAll = useCallback(async () => {
     setRunning(true);
@@ -326,8 +368,8 @@ export function PricingActionsCard() {
   }, [channel]);
 
   const runSingle = useCallback(async () => {
-    if (!singleSku.trim()) {
-      toast.error('Enter a SKU code');
+    if (!singleMpn.trim()) {
+      toast.error('Enter an MPN');
       return;
     }
 
@@ -335,34 +377,27 @@ export function PricingActionsCard() {
     setSingleResult(null);
 
     try {
-      const { data: sku, error } = await supabase
-        .from('sku')
-        .select('id, sku_code' as never)
-        .eq('sku_code', singleSku.trim())
-        .maybeSingle();
-
-      if (error) throw error;
+      const sku = await findFirstSkuForMpn(singleMpn.trim());
       if (!sku) {
-        toast.error(`SKU "${singleSku}" not found`);
+        toast.error(`No active SKU found for MPN "${singleMpn}"`);
         setSingleRunning(false);
         return;
       }
 
-      const skuRow = sku as unknown as { id: string; sku_code: string };
       const pricing = await invokeWithAuth<PricingCalculation>(
         'admin-data',
-        { action: 'calculate-pricing', sku_id: skuRow.id, channel: singleChannel }
+        { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
       );
 
       setSingleResult(pricing);
-      await loadMarketSummary(skuRow.id);
-      toast.success(`Priced ${skuRow.sku_code}`);
+      await loadMarketSummary(sku.id);
+      toast.success(`Priced ${sku.sku_code}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally {
       setSingleRunning(false);
     }
-  }, [singleSku, singleChannel, loadMarketSummary]);
+  }, [findFirstSkuForMpn, singleMpn, singleChannel, loadMarketSummary]);
 
   return (
     <div className="space-y-4">
@@ -373,7 +408,20 @@ export function PricingActionsCard() {
           Refresh real source signals, rebuild weighted consensus, and inspect whether pricing is relying on fresh evidence.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">MPN</label>
+            <input
+              type="text"
+              value={singleMpn}
+              onChange={(e) => setSingleMpn(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && refreshMarketSignals(true)}
+              placeholder="e.g. 10349-1"
+              disabled={marketSignalsRunning || marketRefreshRunning}
+              className="w-36 px-2 py-1.5 text-xs border border-zinc-200 rounded bg-white font-mono"
+            />
+          </div>
+
           <button
             onClick={() => refreshMarketSignals(false)}
             disabled={marketSignalsRunning || marketRefreshRunning}
@@ -385,11 +433,11 @@ export function PricingActionsCard() {
 
           <button
             onClick={() => refreshMarketSignals(true)}
-            disabled={marketSignalsRunning || marketRefreshRunning || !singleSku.trim()}
+            disabled={marketSignalsRunning || marketRefreshRunning || !singleMpn.trim()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
           >
             {marketSignalsRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            Single SKU Signals
+            Single MPN Signals
           </button>
 
           <button
@@ -534,20 +582,20 @@ export function PricingActionsCard() {
 
       {/* Single SKU pricing */}
       <SurfaceCard>
-        <SectionHead>Single SKU Pricing</SectionHead>
+        <SectionHead>Single MPN Pricing</SectionHead>
         <p className="text-xs text-zinc-500 mt-1 mb-4">
-          Calculate pricing for a specific SKU (e.g. 10349-1.1).
+          Calculate pricing for the first active SKU attached to an MPN.
         </p>
 
         <div className="flex items-end gap-3 mb-3">
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">SKU Code</label>
+            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">MPN</label>
             <input
               type="text"
-              value={singleSku}
-              onChange={(e) => setSingleSku(e.target.value)}
+              value={singleMpn}
+              onChange={(e) => setSingleMpn(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSingle()}
-              placeholder="e.g. 10349-1.1"
+              placeholder="e.g. 10349-1"
               disabled={singleRunning}
               className="w-36 px-2 py-1.5 text-xs border border-zinc-200 rounded bg-white font-mono"
             />

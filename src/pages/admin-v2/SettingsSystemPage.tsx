@@ -1,50 +1,8 @@
 import { Link } from "react-router-dom";
-import {
-  Activity,
-  ArrowUpDown,
-  Bot,
-  FileSearch,
-  Map,
-  MessageSquare,
-  Receipt,
-  Settings,
-  Store,
-  Truck,
-} from "lucide-react";
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { AdminPageHeader } from "@/components/admin-v2/admin-patterns";
 import { SurfaceCard } from "@/components/admin-v2/ui-primitives";
-
-const settingsGroups = [
-  {
-    title: "Integration Control",
-    description: "Credentials, connector status, sync tools, staging errors, and replay controls.",
-    items: [
-      { label: "Integrations", to: "/admin/settings/integrations", icon: Settings, detail: "QBO, Stripe, eBay, BrickEconomy, GMC, and AI provider credentials." },
-      { label: "Data Sync", to: "/admin/data-sync", icon: ArrowUpDown, detail: "Staging errors, health checks, imports, and CSV sync controls." },
-      { label: "Google Merchant", to: "/admin/gmc", icon: Store, detail: "Merchant feed readiness and channel operation page." },
-    ],
-  },
-  {
-    title: "Commercial Rules",
-    description: "Pricing, fees, shipping, taxonomy, and channel projection rules.",
-    items: [
-      { label: "Pricing Rules", to: "/admin/settings/pricing", icon: Receipt, detail: "Channel fees, selling-cost defaults, and pricing automation actions." },
-      { label: "Shipping Rates", to: "/admin/settings/shipping-rates", icon: Truck, detail: "Carrier rate tables used by fulfilment and pricing." },
-      { label: "Channel Mappings", to: "/admin/settings/channel-mappings", icon: Map, detail: "Canonical attributes, item specifics, and condition mappings." },
-      { label: "SEO/GEO", to: "/admin/settings/seo-geo", icon: FileSearch, detail: "Search and generative answer optimisation documents." },
-    ],
-  },
-  {
-    title: "System Evidence",
-    description: "Diagnostics, audit visibility, operational transcripts, and system-level inspection.",
-    items: [
-      { label: "App Health", to: "/admin/settings/app-health", icon: Activity, detail: "Schema, roles, settings, recent audit events, and landing errors." },
-      { label: "Transcripts", to: "/admin/settings/transcripts", icon: MessageSquare, detail: "Review and export captured operational transcripts." },
-      { label: "Schedules & Jobs", to: "/admin/operations", icon: Bot, detail: "Scheduled job evidence, posting queues, and reconciliation controls." },
-    ],
-  },
-];
+import { adminSettingsGroups } from "@/lib/admin-settings-navigation";
 
 export default function SettingsSystemPage() {
   return (
@@ -55,7 +13,7 @@ export default function SettingsSystemPage() {
       />
 
       <div className="space-y-6">
-        {settingsGroups.map((group) => (
+        {adminSettingsGroups.map((group) => (
           <section key={group.title}>
             <div className="mb-3">
               <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-zinc-500">{group.title}</h2>

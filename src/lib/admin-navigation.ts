@@ -31,9 +31,9 @@ export const adminSidebarSections: AdminNavSection[] = [
       {
         icon: ClipboardList,
         label: "Work Queue",
-        to: "/admin/purchases",
+        to: "/admin/work-queue",
         description: "Purchases, intake, grading, and daily exceptions.",
-        match: ["/admin/purchases", "/admin/intake"],
+        match: ["/admin/work-queue", "/admin/intake"],
         countKey: "ungraded",
       },
       {

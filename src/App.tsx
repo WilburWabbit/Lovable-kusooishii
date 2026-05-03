@@ -44,6 +44,7 @@ const WelcomePage = lazy(() => import("./pages/WelcomePage"));
 
 // Lazy-load admin pages
 const PurchaseListPage = lazy(() => import("./pages/admin-v2/PurchaseListPage"));
+const WorkQueuePage = lazy(() => import("./pages/admin-v2/WorkQueuePage"));
 const NewPurchaseFormPage = lazy(() => import("./pages/admin-v2/NewPurchaseFormPage"));
 const BatchDetailPage = lazy(() => import("./pages/admin-v2/BatchDetailPage"));
 const ProductListPage = lazy(() => import("./pages/admin-v2/ProductListPage"));
@@ -153,6 +154,8 @@ const App = () => (
             <Route path="/account" element={<NoIndexRoute title="Account" description="Private Kuso Oishii member account area." path="/account"><AccountPage /></NoIndexRoute>} />
 
             {/* Admin */}
+            <Route path="/admin" element={<AdminRoute path="/admin"><Navigate to="/admin/work-queue" replace /></AdminRoute>} />
+            <Route path="/admin/work-queue" element={<AdminRoute path="/admin/work-queue"><WorkQueuePage /></AdminRoute>} />
             <Route path="/admin/purchases" element={<AdminRoute path="/admin/purchases"><PurchaseListPage /></AdminRoute>} />
             <Route path="/admin/purchases/new" element={<AdminRoute path="/admin/purchases/new"><NewPurchaseFormPage /></AdminRoute>} />
             <Route path="/admin/purchases/:batchId" element={<AdminRoute path="/admin/purchases"><BatchDetailPage /></AdminRoute>} />

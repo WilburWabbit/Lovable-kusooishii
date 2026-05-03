@@ -6,6 +6,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import type {
   ChannelListing,
   Channel,
@@ -20,7 +21,21 @@ export const channelListingKeys = {
   all: ['v2', 'channel-listings'] as const,
   byVariant: (sku: string) => ['v2', 'channel-listings', 'variant', sku] as const,
   fees: (channel: string) => ['v2', 'channel-fees', channel] as const,
+  pricingByVariant: (sku: string) => ['v2', 'channel-pricing', 'variant', sku] as const,
 };
+
+export interface ChannelPricingQuote {
+  sku_id: string;
+  channel: string;
+  floor_price: number | null;
+  target_price: number | null;
+  ceiling_price: number | null;
+  estimated_fees: number | null;
+  estimated_net: number | null;
+  market_consensus: number | null;
+  confidence_score: number | null;
+  breakdown?: Record<string, number>;
+}
 
 // ─── Row → Interface Mapper ────────────────────────────────
 
@@ -134,6 +149,44 @@ export function useChannelListings(skuCode: string | undefined) {
       }
 
       return collapsedRows.map((r) => mapListing(r, skuCode!, snapshotsById));
+    },
+  });
+}
+
+export function useVariantChannelPricing(skuCode: string | undefined) {
+  return useQuery({
+    queryKey: channelListingKeys.pricingByVariant(skuCode ?? ''),
+    enabled: !!skuCode,
+    staleTime: 120_000,
+    queryFn: async () => {
+      const { data: skuRow, error: skuErr } = await supabase
+        .from('sku')
+        .select('id' as never)
+        .eq('sku_code', skuCode!)
+        .single();
+
+      if (skuErr) throw skuErr;
+      const skuId = (skuRow as unknown as { id: string }).id;
+
+      const channels: Array<{ key: Channel; pricingChannel: string }> = [
+        { key: 'ebay', pricingChannel: 'ebay' },
+        { key: 'website', pricingChannel: 'web' },
+        { key: 'bricklink', pricingChannel: 'bricklink' },
+        { key: 'brickowl', pricingChannel: 'brickowl' },
+      ];
+
+      const entries = await Promise.all(
+        channels.map(async ({ key, pricingChannel }) => {
+          const quote = await invokeWithAuth<ChannelPricingQuote>('admin-data', {
+            action: 'calculate-pricing',
+            sku_id: skuId,
+            channel: pricingChannel,
+          });
+          return [key, quote] as const;
+        }),
+      );
+
+      return new Map<Channel, ChannelPricingQuote>(entries);
     },
   });
 }
@@ -328,7 +381,7 @@ export function usePublishListing() {
       const { data: snapshotData, error: snapshotError } = await supabase
         .rpc('create_price_decision_snapshot' as never, {
           p_sku_id: skuId,
-          p_channel: channel,
+          p_channel: legacyChannel,
           p_channel_listing_id: listingId,
           p_candidate_price: listingPrice,
         } as never);
@@ -363,6 +416,7 @@ export function usePublishListing() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.pricingByVariant(variables.skuCode) });
       queryClient.invalidateQueries({ queryKey: productKeys.all });
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
     },
