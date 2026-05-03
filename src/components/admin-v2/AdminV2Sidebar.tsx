@@ -1,11 +1,13 @@
+import type { ElementType } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
 import { adminSidebarSections, isAdminNavItemActive, type AdminNavCountKey } from "@/lib/admin-navigation";
+import { adminSettingsGroups } from "@/lib/admin-settings-navigation";
 
 interface SidebarItemProps {
-  icon: React.ElementType;
+  icon: ElementType;
   label: string;
   to: string;
   active: boolean;
@@ -43,6 +45,21 @@ function SidebarItem({ icon: Icon, label, to, active, count, onNavigate }: Sideb
   );
 }
 
+function isSettingsArea(pathname: string) {
+  return (
+    pathname === "/admin/settings" ||
+    pathname.startsWith("/admin/settings/") ||
+    pathname === "/admin/data-sync" ||
+    pathname.startsWith("/admin/data-sync/") ||
+    pathname === "/admin/gmc" ||
+    pathname.startsWith("/admin/gmc/")
+  );
+}
+
+function isSettingsSubItemActive(pathname: string, to: string) {
+  return pathname === to || pathname.startsWith(`${to}/`);
+}
+
 interface AdminV2SidebarProps {
   ungradedCount?: number;
   actionNeededCount?: number;
@@ -77,7 +94,7 @@ export function AdminV2Sidebar({
     >
       {/* Brand */}
       <div className="px-4 py-5 border-b border-zinc-700/80 flex items-center justify-between">
-        <Link to="/admin/purchases" className="flex items-center gap-2" onClick={onClose}>
+        <Link to="/admin/work-queue" className="flex items-center gap-2" onClick={onClose}>
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-sm font-extrabold text-zinc-900">
             K
           </div>
@@ -101,17 +118,55 @@ export function AdminV2Sidebar({
           <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
             {section.label}
           </div>
-          {section.items.map((item) => (
-            <SidebarItem
-              key={item.to}
-              icon={item.icon}
-              label={item.label}
-              to={item.to}
-              active={isAdminNavItemActive(location.pathname, item)}
-              count={countFor(item.countKey)}
-              onNavigate={onClose}
-            />
-          ))}
+          {section.items.map((item) => {
+            const active = isAdminNavItemActive(location.pathname, item);
+            const showSettingsGroups = item.to === "/admin/settings" && isSettingsArea(location.pathname);
+
+            return (
+              <div key={item.to}>
+                <SidebarItem
+                  icon={item.icon}
+                  label={item.label}
+                  to={item.to}
+                  active={active}
+                  count={countFor(item.countKey)}
+                  onNavigate={onClose}
+                />
+                {showSettingsGroups ? (
+                  <div className="ml-4 mt-2 space-y-3 border-l border-zinc-700/80 pl-3">
+                    {adminSettingsGroups.map((group) => (
+                      <div key={group.title}>
+                        <div className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-zinc-600">
+                          {group.title}
+                        </div>
+                        <div className="space-y-0.5">
+                          {group.items.map((subItem) => {
+                            const subActive = isSettingsSubItemActive(location.pathname, subItem.to);
+                            return (
+                              <Link
+                                key={subItem.to}
+                                to={subItem.to}
+                                onClick={onClose}
+                                className={cn(
+                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                                  subActive
+                                    ? "bg-zinc-800 text-amber-300"
+                                    : "text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300",
+                                )}
+                              >
+                                <subItem.icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                <span className="truncate">{subItem.label}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ))}
 

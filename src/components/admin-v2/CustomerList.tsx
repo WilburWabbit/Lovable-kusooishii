@@ -9,6 +9,7 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 import { Download, Search } from "lucide-react";
 
 // ─── Value accessor ──────────────────────────────────────────
@@ -305,10 +306,32 @@ export function CustomerList() {
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.sortable !== false ? (
-                    <TableFilterInput
-                      value={prefs.filters[col.key] ?? ""}
-                      onChange={(v) => setFilter(col.key, v)}
-                    />
+                    col.key === "blueBellMember" ? (
+                      <MultiSelectFilter
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(value) => setFilter(col.key, value)}
+                        placeholder="All"
+                        options={[
+                          { value: "true", label: "Member" },
+                          { value: "false", label: "Not member" },
+                        ]}
+                      />
+                    ) : col.key === "active" ? (
+                      <MultiSelectFilter
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(value) => setFilter(col.key, value)}
+                        placeholder="All"
+                        options={[
+                          { value: "true", label: "Active" },
+                          { value: "false", label: "Inactive" },
+                        ]}
+                      />
+                    ) : (
+                      <TableFilterInput
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(v) => setFilter(col.key, v)}
+                      />
+                    )
                   ) : (
                     <span />
                   )}

@@ -3,7 +3,7 @@ import {
   useChannelListings,
   useChannelFees,
   usePublishListing,
-  calculateChannelPrice,
+  useVariantChannelPricing,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
 import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
@@ -45,6 +45,7 @@ function VariantChannelsCard({
   product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
+  const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.sku);
   const publishListing = usePublishListing();
 
   const listingsByChannel = useMemo(() => {
@@ -69,18 +70,15 @@ function VariantChannelsCard({
     }).title;
   }, [product, variant.grade]);
 
-  // Per-channel local state for title, description, price.
+  // Per-channel local state for title and description.
   // Tracks which fields the user has manually edited so async loads of
   // `listings`/`feesMap` don't clobber unsaved typing — but they DO populate
   // fields the user hasn't touched (the previous useState-only init left the
   // form stuck on default-generated values when listings arrived after first
   // render, causing the wrong title to be pushed to eBay).
-  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean; price: boolean }>>({});
+  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean }>>({});
   const [channelState, setChannelState] = useState<
     Record<string, { title: string; description: string; price: string }>
-  >({});
-  const [overrideState, setOverrideState] = useState<
-    Record<string, { approved: boolean; reason: string }>
   >({});
 
   useEffect(() => {
@@ -88,10 +86,8 @@ function VariantChannelsCard({
       const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
       for (const ch of CHANNELS) {
         const existing = listings.find((l) => l.channel === ch.key);
-        const feeInfo = feesMap?.get(ch.key);
-        const basePrice = variant.salePrice ?? 0;
-        const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
-        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false, price: false };
+        const pricing = pricingByChannel?.get(ch.key);
+        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false };
         const current = prev[ch.key];
 
         const defaultTitle = ch.key === "ebay" ? defaultEbayTitle : product.name;
@@ -102,17 +98,15 @@ function VariantChannelsCard({
           description: dirty.description
             ? current?.description ?? ""
             : existing?.listingDescription ?? "",
-          price: dirty.price
-            ? current?.price ?? ""
-            : existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+          price: pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? "",
         };
       }
       return next;
     });
-  }, [listings, feesMap, defaultEbayTitle, product.name, variant.salePrice, variant.floorPrice]);
+  }, [listings, pricingByChannel, defaultEbayTitle, product.name]);
 
-  const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
-    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false, price: false };
+  const updateField = (channel: string, field: "title" | "description", value: string) => {
+    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false };
     dirtyRef.current[channel] = { ...channelDirty, [field]: true };
     setChannelState((prev) => ({
       ...prev,
@@ -125,37 +119,23 @@ function VariantChannelsCard({
     }));
   };
 
-  const updateOverride = (channel: string, patch: Partial<{ approved: boolean; reason: string }>) => {
-    setOverrideState((prev) => ({
-      ...prev,
-      [channel]: {
-        approved: prev[channel]?.approved ?? false,
-        reason: prev[channel]?.reason ?? "",
-        ...patch,
-      },
-    }));
-  };
-
   const handlePublish = async (ch: { key: Channel; label: string }) => {
     const state = channelState[ch.key];
+    const pricing = pricingByChannel?.get(ch.key);
     if (!state?.title?.trim()) {
       toast.error(`${ch.label} listing title is required`);
       return;
     }
 
-    const price = parseFloat(state.price);
+    const price = Number(pricing?.target_price ?? state.price);
     if (isNaN(price) || price <= 0) {
-      toast.error("Invalid price");
+      toast.error("Calculated price is not available");
       return;
     }
 
-    const feeInfo = feesMap?.get(ch.key);
-    const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
-    const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
-    const override = overrideState[ch.key] ?? { approved: false, reason: "" };
-
-    if (belowFloor && (!override.approved || override.reason.trim().length < 5)) {
-      toast.error("Approve the below-floor price and enter a reason");
+    const floorPrice = pricing?.floor_price ?? null;
+    if (floorPrice != null && price < floorPrice) {
+      toast.error(`${ch.label} calculated target is below its channel floor`);
       return;
     }
 
@@ -166,11 +146,9 @@ function VariantChannelsCard({
         listingTitle: state.title.trim(),
         listingDescription: state.description.trim() || undefined,
         listingPrice: price,
-        estimatedFees: feeCalc.estimatedFees,
-        estimatedNet: feeCalc.estimatedNet,
-        allowBelowFloor: belowFloor && override.approved,
-        overrideReasonCode: belowFloor ? "below_floor_staff_approval" : undefined,
-        overrideReasonNote: belowFloor ? override.reason.trim() : undefined,
+        estimatedFees: pricing?.estimated_fees ?? undefined,
+        estimatedNet: pricing?.estimated_net ?? undefined,
+        allowBelowFloor: false,
       });
       toast.success(`Queued ${variant.sku} for ${ch.label}`);
     } catch (err: unknown) {
@@ -186,13 +164,8 @@ function VariantChannelsCard({
           <Mono color="amber" className="text-sm">{variant.sku}</Mono>
           <GradeBadge grade={variant.grade} size="md" />
           <Mono color="teal">
-            {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
+            {pricingLoading ? "Pricing..." : "Channel priced"}
           </Mono>
-          {variant.floorPrice && (
-            <span className="text-[10px] text-zinc-500">
-              Floor: <Mono color="red" className="text-[10px]">£{variant.floorPrice.toFixed(2)}</Mono>
-            </span>
-          )}
         </div>
       </div>
 
@@ -202,18 +175,19 @@ function VariantChannelsCard({
           const status = listing?.status ?? "draft";
           const statusInfo = CHANNEL_LISTING_STATUSES[status];
           const state = channelState[ch.key] ?? { title: "", description: "", price: "0" };
-          const price = parseFloat(state.price) || 0;
-          const feeInfo = feesMap?.get(ch.key);
-          const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
-          const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
-          const override = overrideState[ch.key] ?? { approved: false, reason: "" };
+          const feeInfo = feesMap?.get(ch.key) ?? (ch.key === "website" ? feesMap?.get("web") : undefined);
+          const pricing = pricingByChannel?.get(ch.key);
+          const price = Number(pricing?.target_price ?? state.price) || 0;
+          const floorPrice = pricing?.floor_price ?? null;
+          const estimatedFees = pricing?.estimated_fees ?? listing?.estimatedFees ?? null;
+          const estimatedNet = pricing?.estimated_net ?? listing?.estimatedNet ?? null;
+          const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
-          const overrideReady = !belowFloor || (override.approved && override.reason.trim().length >= 5);
-          const canPublish = !titleEmpty && price > 0 && overrideReady;
+          const canPublish = !pricingLoading && !titleEmpty && price > 0 && !belowFloor;
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
-            && variant.floorPrice != null && listing.listingPrice < variant.floorPrice;
+            && floorPrice != null && listing.listingPrice < floorPrice;
 
           return (
             <div
@@ -271,8 +245,8 @@ function VariantChannelsCard({
                     step="0.01"
                     min="0"
                     value={state.price}
-                    onChange={(e) => updateField(ch.key, "price", e.target.value)}
-                    className={`w-full px-2 py-1.5 bg-white border rounded text-xs font-mono ${
+                    readOnly
+                    className={`w-full px-2 py-1.5 bg-zinc-50 border rounded text-xs font-mono ${
                       belowFloor ? "border-red-500 text-red-400" : "border-zinc-200 text-zinc-900"
                     }`}
                   />
@@ -282,7 +256,7 @@ function VariantChannelsCard({
                     Est. Fees
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-red-400">
-                    £{feeCalc.estimatedFees.toFixed(2)}
+                    {estimatedFees == null ? "—" : `£${Number(estimatedFees).toFixed(2)}`}
                   </div>
                 </div>
                 <div>
@@ -290,29 +264,23 @@ function VariantChannelsCard({
                     Net
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-teal-500">
-                    £{feeCalc.estimatedNet.toFixed(2)}
+                    {estimatedNet == null ? "—" : `£${Number(estimatedNet).toFixed(2)}`}
                   </div>
                 </div>
               </div>
 
               {/* Warnings */}
               {belowFloor && (
-                <div className="mb-2 space-y-2 rounded-md border border-red-200 bg-red-50 p-2">
-                  <label className="flex items-center gap-2 text-[11px] font-medium text-red-700">
-                    <input
-                      type="checkbox"
-                      checked={override.approved}
-                      onChange={(e) => updateOverride(ch.key, { approved: e.target.checked })}
-                      className="h-3.5 w-3.5"
-                    />
-                    Approve below floor price (£{variant.floorPrice!.toFixed(2)})
-                  </label>
-                  <input
-                    value={override.reason}
-                    onChange={(e) => updateOverride(ch.key, { reason: e.target.value })}
-                    placeholder="Reason for pricing override"
-                    className="w-full rounded border border-red-200 bg-white px-2 py-1.5 text-[11px] text-zinc-900"
-                  />
+                <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
+                  Calculated target is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update channel costs or pricing controls before publishing.
+                </div>
+              )}
+
+              {pricing && (
+                <div className="mb-2 grid grid-cols-3 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px]">
+                  <span className="text-zinc-500">Floor <Mono color="red">£{Number(pricing.floor_price ?? 0).toFixed(2)}</Mono></span>
+                  <span className="text-zinc-500">Ceiling <Mono color="amber">£{Number(pricing.ceiling_price ?? 0).toFixed(2)}</Mono></span>
+                  <span className="text-zinc-500">Market <Mono color={pricing.market_consensus == null ? "amber" : "teal"}>{pricing.market_consensus == null ? "n/a" : `£${Number(pricing.market_consensus).toFixed(2)}`}</Mono></span>
                 </div>
               )}
 

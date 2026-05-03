@@ -56,6 +56,7 @@ export interface GmcReadinessResponse {
     ready: number;
     warning: number;
     blocked: number;
+    excluded_no_web_page: number;
   };
   rows: GmcReadinessRow[];
 }
@@ -77,6 +78,17 @@ export interface GmcPublishEvent {
   external_listing_id: string | null;
   channel: string | null;
   response_payload: Record<string, unknown> | null;
+}
+
+export interface GmcPublishResult {
+  queued?: number;
+  published?: number;
+  errors?: number;
+  skipped?: number;
+  processed?: number;
+  processResults?: unknown[];
+  errorDetails?: string[];
+  skippedDetails?: Array<Record<string, unknown>>;
 }
 
 export type GmcStatus = {
@@ -155,11 +167,25 @@ export function useGmcMutations() {
   });
 
   const publishAll = useMutation({
-    mutationFn: async (skuIds?: string[]) =>
-      invokeWithAuth<{ queued?: number; errors?: number; skipped?: number }>("gmc-sync", {
+    mutationFn: async (skuIds?: string[]) => {
+      const queuedResult = await invokeWithAuth<GmcPublishResult>("gmc-sync", {
         action: "publish_all",
         sku_ids: skuIds,
-      }),
+      });
+      const queued = Number(queuedResult.queued ?? 0);
+      if (queued <= 0) return { ...queuedResult, processed: 0 };
+
+      const { data, error } = await supabase.functions.invoke("listing-command-process", {
+        body: { batchSize: Math.min(queued, 10) },
+      });
+      if (error) throw error;
+      const processResult = data as { processed?: number; results?: unknown[] } | null;
+      return {
+        ...queuedResult,
+        processed: Number(processResult?.processed ?? 0),
+        processResults: processResult?.results ?? [],
+      };
+    },
     onSuccess: invalidate,
   });
 

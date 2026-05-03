@@ -14,7 +14,7 @@ import {
   jsonResponse,
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
-import { buildGmcProductInput } from "../_shared/gmc-product-input.ts";
+import { buildGmcProductInput, type GmcMappingRule } from "../_shared/gmc-product-input.ts";
 
 const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 50;
@@ -177,6 +177,175 @@ async function resolveListingCommandFailure(
   }
 }
 
+function isPublishedListing(row: Record<string, unknown>): boolean {
+  return row.v2_status === "live" || ["live", "published", "PUBLISHED"].includes(String(row.offer_status ?? ""));
+}
+
+async function queueGmcPublishAfterWebPublish(
+  admin: ReturnType<typeof createAdminClient>,
+  webListingId: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const { data: webListing, error: webErr } = await admin
+      .from("channel_listing")
+      .select("id, sku_id, external_sku, listed_price, listed_quantity, listing_title, listing_description, offer_status, v2_status")
+      .eq("id" as never, webListingId)
+      .maybeSingle();
+    if (webErr) throw webErr;
+    if (!webListing) return { queued: false, reason: "web_listing_not_found" };
+
+    const webRow = webListing as Record<string, unknown>;
+    if (!isPublishedListing(webRow)) return { queued: false, reason: "web_listing_not_live" };
+
+    const skuId = typeof webRow.sku_id === "string" ? webRow.sku_id : null;
+    if (!skuId) return { queued: false, reason: "missing_sku" };
+
+    const listedPrice = Number(webRow.listed_price ?? 0);
+    if (!Number.isFinite(listedPrice) || listedPrice <= 0) {
+      return { queued: false, reason: "missing_listed_price" };
+    }
+
+    const conn = await getGmcConnection(admin);
+    if (!conn.data_source) return { queued: false, reason: "missing_gmc_data_source" };
+
+    const { data: sku, error: skuErr } = await admin
+      .from("sku")
+      .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)")
+      .eq("id" as never, skuId)
+      .single();
+    if (skuErr) throw skuErr;
+
+    const skuRow = sku as Record<string, unknown>;
+    const skuCode = String(skuRow.sku_code ?? webRow.external_sku ?? "").trim();
+    if (!skuCode) return { queued: false, reason: "missing_sku_code" };
+
+    const productRelation = skuRow.product as Record<string, unknown> | Record<string, unknown>[] | null;
+    const product = Array.isArray(productRelation) ? productRelation[0] ?? null : productRelation;
+    if (!product) return { queued: false, reason: "missing_product" };
+
+    const { count } = await admin
+      .from("stock_unit")
+      .select("id", { count: "exact", head: true })
+      .eq("sku_id" as never, skuId)
+      .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
+    const stockCount = count ?? Number(webRow.listed_quantity ?? 0);
+
+    const gmcMappings = await getGmcMappings(admin);
+    const { warnings } = buildGmcProductInput(
+      {
+        external_sku: skuCode,
+        listing_title: typeof webRow.listing_title === "string" ? webRow.listing_title : null,
+        listing_description: typeof webRow.listing_description === "string" ? webRow.listing_description : null,
+        listed_price: listedPrice,
+      },
+      skuRow,
+      product,
+      stockCount,
+      getSiteUrl(),
+      gmcMappings,
+    );
+
+    const { data: existingListing, error: existingListingErr } = await admin
+      .from("channel_listing")
+      .select("id, channel, offer_status, v2_status")
+      .in("channel" as never, ["google_shopping", "gmc"] as never)
+      .eq("external_sku" as never, skuCode)
+      .order("updated_at" as never, { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingListingErr) throw existingListingErr;
+
+    const existingListingRow = existingListing as Record<string, unknown> | null;
+    const gmcTarget = typeof existingListingRow?.channel === "string" ? existingListingRow.channel : "google_shopping";
+
+    if (existingListingRow && isPublishedListing(existingListingRow)) {
+      return {
+        queued: false,
+        reason: "already_live",
+        listing_id: existingListingRow.id,
+      };
+    }
+
+    const listingPatch = {
+      channel: gmcTarget,
+      external_sku: skuCode,
+      sku_id: skuId,
+      offer_status: "publish_queued",
+      listed_price: listedPrice,
+      listed_quantity: stockCount,
+      raw_data: {
+        gmc_warnings: warnings,
+        auto_queued_from_web_listing_id: webListingId,
+      },
+      synced_at: new Date().toISOString(),
+    };
+
+    const listingMutation = existingListing
+      ? admin
+        .from("channel_listing")
+        .update(listingPatch as never)
+        .eq("id" as never, existingListingRow?.id)
+      : admin
+        .from("channel_listing")
+        .insert(listingPatch as never);
+
+    const { data: gmcListing, error: listingErr } = await listingMutation
+      .select("id")
+      .single();
+    if (listingErr) throw listingErr;
+
+    const gmcListingId = String((gmcListing as Record<string, unknown>).id);
+    const { data: existingCommand, error: existingCommandErr } = await admin
+      .from("outbound_command")
+      .select("id, status")
+      .eq("target_system" as never, gmcTarget)
+      .eq("command_type" as never, "publish")
+      .eq("entity_type" as never, "channel_listing")
+      .eq("entity_id" as never, gmcListingId)
+      .in("status" as never, ["pending", "processing"] as never)
+      .order("created_at" as never, { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingCommandErr) throw existingCommandErr;
+    if (existingCommand) {
+      return {
+        queued: true,
+        already_pending: true,
+        listing_id: gmcListingId,
+        command_id: (existingCommand as Record<string, unknown>).id,
+        warnings,
+      };
+    }
+
+    const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+      p_sku_id: skuId,
+      p_channel: "google_shopping",
+      p_channel_listing_id: gmcListingId,
+      p_candidate_price: listedPrice,
+    });
+    if (snapshotErr) throw snapshotErr;
+
+    const { data: commandId, error: commandErr } = await admin.rpc("queue_listing_command", {
+      p_channel_listing_id: gmcListingId,
+      p_command_type: "publish",
+    });
+    if (commandErr) throw commandErr;
+
+    return {
+      queued: true,
+      listing_id: gmcListingId,
+      command_id: commandId,
+      warnings,
+    };
+  } catch (err) {
+    console.warn("Failed to auto-queue GMC publish after website publish", err);
+    return {
+      queued: false,
+      reason: err instanceof Error ? err.message : "unknown_error",
+    };
+  }
+}
+
 async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>, command: ListingCommand) {
   if (command.entity_type !== "channel_listing" || !command.entity_id) {
     throw new Error("Website listing command must target a channel_listing");
@@ -220,10 +389,15 @@ async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>
 
   if (error) throw error;
 
+  const gmcAutoPublish = command.command_type === "publish"
+    ? await queueGmcPublishAfterWebPublish(admin, command.entity_id)
+    : null;
+
   return {
     channel_listing_id: command.entity_id,
     applied_locally: true,
     patch: statusPatch,
+    gmc_auto_publish: gmcAutoPublish,
   };
 }
 
@@ -475,6 +649,18 @@ async function getGmcConnection(admin: ReturnType<typeof createAdminClient>): Pr
   };
 }
 
+async function getGmcMappings(admin: ReturnType<typeof createAdminClient>): Promise<GmcMappingRule[]> {
+  const { data, error } = await admin
+    .from("channel_attribute_mapping")
+    .select("aspect_key, canonical_key, constant_value, transform")
+    .eq("channel" as never, "gmc")
+    .or("marketplace.eq.GB,marketplace.is.null")
+    .is("category_id" as never, null);
+
+  if (error) throw error;
+  return (data ?? []) as unknown as GmcMappingRule[];
+}
+
 async function ensureGmcToken(
   admin: ReturnType<typeof createAdminClient>,
   conn: GmcConnection,
@@ -599,7 +785,8 @@ async function processGoogleShoppingCommand(
     .eq("sku_id" as never, skuId)
     .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
   const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
-  const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, product, stockCount, getSiteUrl());
+  const gmcMappings = await getGmcMappings(admin);
+  const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, product, stockCount, getSiteUrl(), gmcMappings);
 
   const insertRes = await fetchWithTimeout(
     `${GMC_API_BASE}/accounts/${conn.merchant_id}/productInputs:insert?dataSource=${encodeURIComponent(conn.data_source ?? "")}`,

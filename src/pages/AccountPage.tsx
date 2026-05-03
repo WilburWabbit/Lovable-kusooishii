@@ -74,7 +74,7 @@ export default function AccountPage() {
                 <Package className="mr-1.5 h-3.5 w-3.5" /> Orders
               </TabsTrigger>
               {isStaffOrAdmin && (
-                <TabsTrigger value="admin" className="font-display text-xs" onClick={() => navigate("/admin/purchases")}>
+                <TabsTrigger value="admin" className="font-display text-xs" onClick={() => navigate("/admin/work-queue")}>
                   <Shield className="mr-1.5 h-3.5 w-3.5" /> Admin
                 </TabsTrigger>
               )}

@@ -15,6 +15,22 @@ export interface TablePrefs {
   visibleColumns: string[];
 }
 
+const MULTI_FILTER_PREFIX = "__multi__:";
+
+export function encodeMultiFilter(values: string[]): string {
+  const clean = Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  return clean.length > 0 ? `${MULTI_FILTER_PREFIX}${clean.join("||")}` : "";
+}
+
+export function decodeMultiFilter(value: string): string[] {
+  if (!value.startsWith(MULTI_FILTER_PREFIX)) return [];
+  return value
+    .slice(MULTI_FILTER_PREFIX.length)
+    .split("||")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 /**
  * Returns true if a value is considered "null/empty" for filtering purposes:
  * null, undefined, empty string, empty array.
@@ -35,9 +51,17 @@ export function filterRows<T>(
   if (active.length === 0) return rows;
   return rows.filter((row) =>
     active.every(([key, term]) => {
-      const val = accessor ? accessor(row, key) : (row as any)[key];
+      const val = accessor ? accessor(row, key) : (row as Record<string, unknown>)[key];
       const trimmed = term.trim();
       const upper = trimmed.toUpperCase();
+      const multiValues = decodeMultiFilter(trimmed);
+
+      if (multiValues.length > 0) {
+        if (isNullish(val)) return false;
+        const candidates = Array.isArray(val) ? val : [val];
+        const normalizedValues = new Set(multiValues.map((item) => item.toLowerCase()));
+        return candidates.some((candidate) => normalizedValues.has(String(candidate).toLowerCase()));
+      }
 
       // Sentinel: NULL → field must be null/empty
       if (upper === "NULL") return isNullish(val);
@@ -53,8 +77,8 @@ export function filterRows<T>(
 export function sortRows<T>(rows: T[], key: string, dir: SortDir, accessor?: (row: T, key: string) => unknown): T[] {
   return [...rows].sort((a, b) => {
     const d = dir === "asc" ? 1 : -1;
-    const av = accessor ? accessor(a, key) : (a as any)[key];
-    const bv = accessor ? accessor(b, key) : (b as any)[key];
+    const av = accessor ? accessor(a, key) : (a as Record<string, unknown>)[key];
+    const bv = accessor ? accessor(b, key) : (b as Record<string, unknown>)[key];
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;

@@ -1,6 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { buildGmcProductInput } from "../_shared/gmc-product-input.ts";
+import { buildGmcProductInput, type GmcMappingRule } from "../_shared/gmc-product-input.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -184,6 +184,15 @@ Deno.serve(async (req) => {
         stockMap.set(skuId, (stockMap.get(skuId) || 0) + 1);
       }
 
+      const { data: mappingRows, error: mappingErr } = await supabaseAdmin
+        .from("channel_attribute_mapping")
+        .select("aspect_key, canonical_key, constant_value, transform")
+        .eq("channel", "gmc")
+        .or("marketplace.eq.GB,marketplace.is.null")
+        .is("category_id", null);
+      if (mappingErr) throw new Error(`Failed to fetch GMC mappings: ${mappingErr.message}`);
+      const gmcMappings = (mappingRows ?? []) as GmcMappingRule[];
+
       let queued = 0;
       let errors = 0;
       let skipped = 0;
@@ -192,10 +201,11 @@ Deno.serve(async (req) => {
 
       for (const sku of skus ?? []) {
         if (skuIds && !skuIds.has(String(sku.id))) continue;
-        // Only publish SKUs with active web listing
+        // GMC requires a published product page. Excluded SKUs are auto-queued
+        // when their website listing publish command is acknowledged live.
         if (!webSkuIds.has(sku.id)) {
           skipped++;
-          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_product" });
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_live_web_page" });
           continue;
         }
 
@@ -231,6 +241,7 @@ Deno.serve(async (req) => {
             product,
             stockCount,
             siteUrl,
+            gmcMappings,
           );
           const { data: listing, error: listingErr } = await supabaseAdmin.from("channel_listing").upsert(
             {
