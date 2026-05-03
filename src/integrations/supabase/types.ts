@@ -1360,6 +1360,10 @@ export type Database = {
           auto_price_enabled: boolean
           channel: string
           id: string
+          market_undercut_max_amount: number | null
+          market_undercut_max_pct: number | null
+          market_undercut_min_amount: number | null
+          market_undercut_min_pct: number | null
           max_decrease_amount: number | null
           max_decrease_pct: number | null
           max_increase_amount: number | null
@@ -1370,6 +1374,10 @@ export type Database = {
           auto_price_enabled?: boolean
           channel: string
           id?: string
+          market_undercut_max_amount?: number | null
+          market_undercut_max_pct?: number | null
+          market_undercut_min_amount?: number | null
+          market_undercut_min_pct?: number | null
           max_decrease_amount?: number | null
           max_decrease_pct?: number | null
           max_increase_amount?: number | null
@@ -1380,6 +1388,10 @@ export type Database = {
           auto_price_enabled?: boolean
           channel?: string
           id?: string
+          market_undercut_max_amount?: number | null
+          market_undercut_max_pct?: number | null
+          market_undercut_min_amount?: number | null
+          market_undercut_min_pct?: number | null
           max_decrease_amount?: number | null
           max_decrease_pct?: number | null
           max_increase_amount?: number | null
