@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
@@ -35,6 +35,7 @@ export function GmcSettingsCard() {
   const [history, setHistory] = useState<PublishHistoryRow[]>([]);
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'createdAt' | 'queued' | 'errors'>('createdAt');
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem(PUBLISH_HISTORY_KEY);
@@ -74,6 +75,22 @@ export function GmcSettingsCard() {
       return b.errors - a.errors;
     });
   }, [history, query, sortBy]);
+
+
+
+  const detailRows = (rows: unknown[]) => (rows as Record<string, unknown>[]).map((row, idx) => {
+    const productHint = String(row.mpn ?? row.sku ?? row.offerId ?? row.offer_id ?? row.productId ?? row.product_id ?? '');
+    const message = String(row.message ?? row.reason ?? row.error ?? row.code ?? 'No message');
+    return (
+      <tr key={`${productHint}-${idx}`} className="border-t">
+        <td className="px-2 py-1">{productHint || '—'}</td>
+        <td className="px-2 py-1">{message}</td>
+        <td className="px-2 py-1">
+          {productHint ? <a className="text-amber-700 underline" href={`/admin/products/${encodeURIComponent(productHint)}`}>Open</a> : '—'}
+        </td>
+      </tr>
+    );
+  });
 
   const saveConfig = () => run('save', async () => {
     if (!merchantId.trim()) throw new Error('Merchant ID is required');
@@ -151,10 +168,40 @@ export function GmcSettingsCard() {
             </div>
           </div>
           <table className="w-full text-left text-xs">
-            <thead><tr><th>When</th><th>Queued</th><th>Skipped</th><th>Errors</th></tr></thead>
+            <thead><tr><th>When</th><th>Queued</th><th>Skipped</th><th>Errors</th><th>Details</th></tr></thead>
             <tbody>
-              {publishRows.map((row) => <tr key={row.id} className="border-t"><td>{new Date(row.createdAt).toLocaleString()}</td><td><Mono>{row.queued}</Mono></td><td><Mono>{row.skipped}</Mono></td><td><Mono>{row.errors}</Mono></td></tr>)}
-              {publishRows.length === 0 && <tr><td colSpan={4} className="py-3 text-zinc-500">No publish events.</td></tr>}
+              {publishRows.map((row) => (
+                <>
+                  <tr key={row.id} className="border-t">
+                    <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td><Mono>{row.queued}</Mono></td>
+                    <td><Mono>{row.skipped}</Mono></td>
+                    <td><Mono>{row.errors}</Mono></td>
+                    <td>
+                      <button onClick={() => setExpandedRunId(expandedRunId === row.id ? null : row.id)} className="rounded border px-2 py-1">
+                        {expandedRunId === row.id ? <ChevronUp className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />} Details
+                      </button>
+                    </td>
+                  </tr>
+                  {expandedRunId === row.id && (
+                    <tr className="bg-zinc-50">
+                      <td colSpan={5} className="p-2">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <div className="font-medium">Error details ({row.errorDetails.length})</div>
+                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Issue</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.errorDetails)}</tbody></table>
+                          </div>
+                          <div>
+                            <div className="font-medium">Skipped details ({row.skippedDetails.length})</div>
+                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Reason</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.skippedDetails)}</tbody></table>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+              {publishRows.length === 0 && <tr><td colSpan={5} className="py-3 text-zinc-500">No publish events.</td></tr>}
             </tbody>
           </table>
         </div>
