@@ -1,0 +1,1 @@
+ALTER TABLE public.ebay_payout_transactions ADD COLUMN IF NOT EXISTS ebay_item_id text;

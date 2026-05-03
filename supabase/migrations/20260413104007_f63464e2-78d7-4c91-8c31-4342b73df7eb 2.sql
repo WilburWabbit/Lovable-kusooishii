@@ -1,0 +1,1 @@
+UPDATE payouts SET qbo_sync_status = 'pending', qbo_sync_error = NULL, sync_attempted_at = NULL WHERE id = '78f4224e-6eca-426d-9315-77a8391500d0'
