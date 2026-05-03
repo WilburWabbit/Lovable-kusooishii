@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     if (action === "status") {
       const { data: conn } = await supabaseAdmin
         .from("google_merchant_connection")
-        .select("id, merchant_id, token_expires_at, updated_at")
+        .select("id, merchant_id, data_source, token_expires_at, updated_at")
         .limit(1)
         .maybeSingle();
 
@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
           connected: !!conn,
           expired: conn ? conn.token_expires_at < now : null,
           merchant_id: conn?.merchant_id ?? null,
+          data_source: conn?.data_source ?? null,
           token_expires_at: conn?.token_expires_at ?? null,
           last_updated: conn?.updated_at ?? null,
         }),
@@ -67,6 +68,47 @@ Deno.serve(async (req) => {
       );
     }
 
+
+    // --- Save merchant config (without touching tokens) ---
+    if (action === "set_config") {
+      const { merchant_id, data_source } = body;
+      if (!merchant_id) throw new Error("Missing merchant_id");
+
+      const { data: existing } = await supabaseAdmin
+        .from("google_merchant_connection")
+        .select("id")
+        .limit(1)
+        .maybeSingle();
+
+      if (!existing?.id) {
+        const { error: insertError } = await supabaseAdmin
+          .from("google_merchant_connection")
+          .insert({
+            merchant_id,
+            data_source: data_source ?? null,
+            access_token: "",
+            refresh_token: "",
+            token_expires_at: new Date(0).toISOString(),
+          });
+        if (insertError) throw new Error(`Failed to save config: ${insertError.message}`);
+
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const { error } = await supabaseAdmin
+        .from("google_merchant_connection")
+        .update({ merchant_id, data_source: data_source ?? null })
+        .eq("id", existing.id);
+      if (error) throw new Error(`Failed to update config: ${error.message}`);
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     // --- Generate consent URL ---
     if (action === "authorize_url") {
       if (!redirectUri) throw new Error("GMC_REDIRECT_URI not configured");
@@ -129,6 +171,7 @@ Deno.serve(async (req) => {
         .from("google_merchant_connection")
         .insert({
           merchant_id,
+          data_source: body.data_source ?? null,
           access_token: tokenData.access_token,
           refresh_token: tokenData.refresh_token ?? "",
           token_expires_at: expiresAt,

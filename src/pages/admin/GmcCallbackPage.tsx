@@ -28,8 +28,10 @@ export default function GmcCallbackPage() {
         const merchantId = localStorage.getItem("gmc_merchant_id") || "";
         if (!merchantId) throw new Error("Missing Merchant ID. Please try connecting again.");
 
+        const dataSource = localStorage.getItem("gmc_data_source") || null;
+
         const { data, error } = await supabase.functions.invoke("gmc-auth", {
-          body: { action: "exchange", code, merchant_id: merchantId },
+          body: { action: "exchange", code, merchant_id: merchantId, data_source: dataSource },
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
 
@@ -37,6 +39,7 @@ export default function GmcCallbackPage() {
         if (data?.error) throw new Error(data.error);
 
         localStorage.removeItem("gmc_merchant_id");
+        localStorage.removeItem("gmc_data_source");
         setStatus("success");
         setMessage("Successfully connected to Google Merchant Centre!");
         setTimeout(() => navigate("/admin/settings/integrations"), 2000);
