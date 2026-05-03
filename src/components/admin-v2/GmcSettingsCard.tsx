@@ -1,221 +1,177 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { invokeWithAuth } from '@/lib/invokeWithAuth';
-import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ExternalLink, Loader2, RefreshCcw, Unplug } from "lucide-react";
+import { toast } from "sonner";
+import { invokeWithAuth } from "@/lib/invokeWithAuth";
+import { useGmcMutations, useGmcStatus } from "@/hooks/admin/use-gmc";
+import { Badge, Mono, SectionHead, SurfaceCard } from "./ui-primitives";
 
-type GmcStatus = {
-  connected: boolean;
-  expired?: boolean | null;
-  merchant_id?: string | null;
-  data_source?: string | null;
-  token_expires_at?: string | null;
-  last_updated?: string | null;
-};
+function formatDateTime(value?: string | null): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-type PublishHistoryRow = {
-  id: string;
-  createdAt: string;
-  queued: number;
-  skipped: number;
-  errors: number;
-  errorDetails: unknown[];
-  skippedDetails: unknown[];
-};
-
-const PUBLISH_HISTORY_KEY = 'gmc_publish_history_v1';
-
-export function GmcSettingsCard() {
-  const [status, setStatus] = useState<GmcStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [merchantId, setMerchantId] = useState('');
-  const [dataSource, setDataSource] = useState('');
-  const [lastPublishResult, setLastPublishResult] = useState<Record<string, unknown> | null>(null);
-  const [history, setHistory] = useState<PublishHistoryRow[]>([]);
-  const [query, setQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'createdAt' | 'queued' | 'errors'>('createdAt');
-  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+export function GmcSettingsCard({ showOpenLink = true }: { showOpenLink?: boolean }) {
+  const { data: status, isLoading } = useGmcStatus();
+  const mutations = useGmcMutations();
+  const [merchantId, setMerchantId] = useState("");
+  const [dataSource, setDataSource] = useState("");
 
   useEffect(() => {
-    const stored = localStorage.getItem(PUBLISH_HISTORY_KEY);
-    if (!stored) return;
-    try { setHistory(JSON.parse(stored) as PublishHistoryRow[]); } catch { setHistory([]); }
-  }, []);
+    setMerchantId(status?.merchant_id ?? "");
+    setDataSource(status?.data_source ?? "");
+  }, [status?.merchant_id, status?.data_source]);
 
-  useEffect(() => {
-    localStorage.setItem(PUBLISH_HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
-  }, [history]);
+  const busy =
+    mutations.saveConfig.isPending ||
+    mutations.disconnect.isPending ||
+    mutations.refreshToken.isPending;
 
-  const loadStatus = async () => {
-    const data = await invokeWithAuth<GmcStatus>('gmc-auth', { action: 'status' });
-    const next = data && !('error' in data) ? data : { connected: false };
-    setStatus(next);
-    setMerchantId(next.merchant_id ?? '');
-    setDataSource(next.data_source ?? '');
+  const saveConfig = async () => {
+    if (!merchantId.trim()) {
+      toast.error("Merchant ID is required");
+      return;
+    }
+    try {
+      await mutations.saveConfig.mutateAsync({
+        merchantId: merchantId.trim(),
+        dataSource: dataSource.trim() || null,
+      });
+      toast.success("Google Merchant config saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    }
   };
 
-  useEffect(() => {
-    (async () => {
-      try { await loadStatus(); } catch { setStatus({ connected: false }); } finally { setLoading(false); }
-    })();
-  }, []);
-
-  const run = async (label: string, fn: () => Promise<void>) => {
-    setBusy(label);
-    try { await fn(); } catch (error) { toast.error(error instanceof Error ? error.message : 'Request failed'); } finally { setBusy(null); }
+  const connect = async () => {
+    if (!merchantId.trim()) {
+      toast.error("Enter Merchant ID first");
+      return;
+    }
+    localStorage.setItem("gmc_merchant_id", merchantId.trim());
+    localStorage.setItem("gmc_data_source", dataSource.trim());
+    try {
+      const data = await invokeWithAuth<{ url: string }>("gmc-auth", { action: "authorize_url" });
+      window.location.href = data.url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Connect failed");
+    }
   };
 
-  const publishRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = history.filter((row) => !q || row.id.toLowerCase().includes(q) || row.createdAt.toLowerCase().includes(q) || String(row.errors).includes(q));
-    return filtered.sort((a, b) => {
-      if (sortBy === 'createdAt') return b.createdAt.localeCompare(a.createdAt);
-      if (sortBy === 'queued') return b.queued - a.queued;
-      return b.errors - a.errors;
-    });
-  }, [history, query, sortBy]);
+  const disconnect = async () => {
+    try {
+      await mutations.disconnect.mutateAsync();
+      toast.success("Disconnected from Google Merchant Centre");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Disconnect failed");
+    }
+  };
 
+  const refresh = async () => {
+    try {
+      await mutations.refreshToken.mutateAsync();
+      toast.success("Token refreshed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Refresh failed");
+    }
+  };
 
-
-  const detailRows = (rows: unknown[]) => (rows as Record<string, unknown>[]).map((row, idx) => {
-    const productHint = String(row.mpn ?? row.sku ?? row.offerId ?? row.offer_id ?? row.productId ?? row.product_id ?? '');
-    const message = String(row.message ?? row.reason ?? row.error ?? row.code ?? 'No message');
+  if (isLoading) {
     return (
-      <tr key={`${productHint}-${idx}`} className="border-t">
-        <td className="px-2 py-1">{productHint || '—'}</td>
-        <td className="px-2 py-1">{message}</td>
-        <td className="px-2 py-1">
-          {productHint ? <a className="text-amber-700 underline" href={`/admin/products/${encodeURIComponent(productHint)}`}>Open</a> : '—'}
-        </td>
-      </tr>
+      <SurfaceCard>
+        <SectionHead>Google Merchant Centre</SectionHead>
+        <p className="py-4 text-xs text-zinc-500">Checking connection...</p>
+      </SurfaceCard>
     );
-  });
-
-  const saveConfig = () => run('save', async () => {
-    if (!merchantId.trim()) throw new Error('Merchant ID is required');
-    await invokeWithAuth('gmc-auth', { action: 'set_config', merchant_id: merchantId.trim(), data_source: dataSource.trim() || null });
-    toast.success('Google Merchant config saved');
-    await loadStatus();
-  });
-
-  const connect = () => run('connect', async () => {
-    if (!merchantId.trim()) throw new Error('Enter Merchant ID first');
-    localStorage.setItem('gmc_merchant_id', merchantId.trim());
-    localStorage.setItem('gmc_data_source', dataSource.trim());
-    const d = await invokeWithAuth<{ url: string }>('gmc-auth', { action: 'authorize_url' });
-    window.location.href = d.url;
-  });
-
-  const disconnect = () => run('disconnect', async () => {
-    await invokeWithAuth('gmc-auth', { action: 'disconnect' });
-    toast.success('Disconnected from Google Merchant Centre');
-    await loadStatus();
-  });
-
-  const publishAll = () => run('publish', async () => {
-    const d = await invokeWithAuth<Record<string, unknown>>('gmc-sync', { action: 'publish_all' });
-    setLastPublishResult(d);
-    const row: PublishHistoryRow = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      queued: Number(d?.queued ?? 0),
-      skipped: Number(d?.skipped ?? 0),
-      errors: Number(d?.errors ?? 0),
-      errorDetails: (d?.errorDetails as unknown[]) ?? [],
-      skippedDetails: (d?.skippedDetails as unknown[]) ?? [],
-    };
-    setHistory((current) => [row, ...current].slice(0, 50));
-    toast.success(`Queued ${row.queued} products (${row.skipped} skipped, ${row.errors} errors)`);
-  });
-
-  const syncStatus = () => run('sync-status', async () => {
-    const d = await invokeWithAuth<{ synced?: number }>('gmc-sync', { action: 'sync_status' });
-    toast.success(`Synced ${d.synced ?? 0} listing statuses`);
-  });
-
-  if (loading) return <SurfaceCard><SectionHead>Google Merchant Centre</SectionHead><p className="text-xs text-zinc-500 py-4">Checking connection...</p></SurfaceCard>;
+  }
 
   return (
     <SurfaceCard>
-      <div className="flex items-center justify-between">
-        <SectionHead>Google Merchant Centre</SectionHead>
-        <Badge label={status?.connected ? 'Connected' : 'Disconnected'} color={status?.connected ? '#22C55E' : '#EF4444'} small />
-      </div>
-      <div className="mt-3 space-y-3">
-        <div className="grid gap-2 md:grid-cols-2">
-          <input value={merchantId} onChange={(e) => setMerchantId(e.target.value)} placeholder="Merchant ID" className="h-9 rounded border px-2 text-xs" />
-          <input value={dataSource} onChange={(e) => setDataSource(e.target.value)} placeholder="Data Source (optional)" className="h-9 rounded border px-2 text-xs" />
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <button onClick={saveConfig} disabled={!!busy} className="px-3 py-1.5 rounded text-xs font-medium border">{busy === 'save' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}Save Config</button>
-          <button onClick={connect} disabled={!!busy} className="px-3 py-1.5 rounded text-xs font-medium border">{busy === 'connect' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}Connect</button>
-          <button onClick={publishAll} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border">Publish All</button>
-          <button onClick={syncStatus} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border">Sync Status</button>
-          <button onClick={disconnect} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border border-red-300 text-red-700">Disconnect</button>
-        </div>
-
-        <div className="rounded border p-2 text-xs space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-medium">Publish history</div>
-            <div className="flex gap-2">
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter" className="h-8 rounded border px-2" />
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'createdAt'|'queued'|'errors')} className="h-8 rounded border px-2">
-                <option value="createdAt">Newest</option>
-                <option value="queued">Most queued</option>
-                <option value="errors">Most errors</option>
-              </select>
-            </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <SectionHead>Google Merchant Centre</SectionHead>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              label={status?.connected ? (status.expired ? "Expired" : "Connected") : "Disconnected"}
+              color={status?.connected ? (status.expired ? "#D97706" : "#16A34A") : "#DC2626"}
+              small
+            />
+            <span className="text-xs text-zinc-500">
+              Token <Mono>{formatDateTime(status?.token_expires_at)}</Mono>
+            </span>
           </div>
-          <table className="w-full text-left text-xs">
-            <thead><tr><th>When</th><th>Queued</th><th>Skipped</th><th>Errors</th><th>Details</th></tr></thead>
-            <tbody>
-              {publishRows.map((row) => (
-                <>
-                  <tr key={row.id} className="border-t">
-                    <td>{new Date(row.createdAt).toLocaleString()}</td>
-                    <td><Mono>{row.queued}</Mono></td>
-                    <td><Mono>{row.skipped}</Mono></td>
-                    <td><Mono>{row.errors}</Mono></td>
-                    <td>
-                      <button onClick={() => setExpandedRunId(expandedRunId === row.id ? null : row.id)} className="rounded border px-2 py-1">
-                        {expandedRunId === row.id ? <ChevronUp className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />} Details
-                      </button>
-                    </td>
-                  </tr>
-                  {expandedRunId === row.id && (
-                    <tr className="bg-zinc-50">
-                      <td colSpan={5} className="p-2">
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <div className="font-medium">Error details ({row.errorDetails.length})</div>
-                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Issue</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.errorDetails)}</tbody></table>
-                          </div>
-                          <div>
-                            <div className="font-medium">Skipped details ({row.skippedDetails.length})</div>
-                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Reason</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.skippedDetails)}</tbody></table>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-              {publishRows.length === 0 && <tr><td colSpan={5} className="py-3 text-zinc-500">No publish events.</td></tr>}
-            </tbody>
-          </table>
         </div>
-
-        {lastPublishResult && (
-          <div className="rounded border p-2 text-xs space-y-2">
-            <div className="font-medium">Last publish diagnostics</div>
-            <div className="grid gap-1 sm:grid-cols-3">
-              <div>Queued: <Mono>{String(lastPublishResult.queued ?? 0)}</Mono></div>
-              <div>Skipped: <Mono>{String(lastPublishResult.skipped ?? 0)}</Mono></div>
-              <div>Errors: <Mono>{String(lastPublishResult.errors ?? 0)}</Mono></div>
-            </div>
-          </div>
+        {showOpenLink && (
+          <Link
+            to="/admin/gmc"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Open Cockpit
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
         )}
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2">
+        <label className="grid gap-1 text-[11px] font-medium text-zinc-500">
+          Merchant ID
+          <input
+            value={merchantId}
+            onChange={(event) => setMerchantId(event.target.value)}
+            className="h-9 rounded-md border border-zinc-200 px-2 text-xs text-zinc-900"
+          />
+        </label>
+        <label className="grid gap-1 text-[11px] font-medium text-zinc-500">
+          Data Source
+          <input
+            value={dataSource}
+            onChange={(event) => setDataSource(event.target.value)}
+            className="h-9 rounded-md border border-zinc-200 px-2 text-xs text-zinc-900"
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={saveConfig}
+          disabled={busy}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          {mutations.saveConfig.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={connect}
+          disabled={busy}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          Connect
+        </button>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={!status?.connected || busy}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={disconnect}
+          disabled={!status?.connected || busy}
+          className="inline-flex h-8 items-center justify-center rounded-md border border-red-200 px-2.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          <Unplug className="mr-1.5 h-3.5 w-3.5" />
+          Disconnect
+        </button>
       </div>
     </SurfaceCard>
   );

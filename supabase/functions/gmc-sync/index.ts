@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { buildGmcProductInput } from "../_shared/gmc-product-input.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,27 +9,6 @@ const corsHeaders = {
 };
 
 const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1beta";
-
-interface ProductInput {
-  offerId: string;
-  contentLanguage: string;
-  feedLabel: string;
-  channel: string;
-  product: {
-    title: string;
-    description: string;
-    link: string;
-    imageLink: string;
-    price: { amountMicros: string; currencyCode: string };
-    availability: string;
-    condition: string;
-    brand: string;
-    mpn: string;
-    productTypes: string[];
-    shippingWeight?: { value: number; unit: string };
-    itemGroupId: string;
-  };
-}
 
 interface GmcConnection {
   id: string;
@@ -84,57 +64,6 @@ async function ensureToken(
     .eq("updated_at", conn.updated_at);
 
   return tokens.access_token as string;
-}
-
-/** Map product/SKU data to Google ProductInput */
-function mapToProductInput(
-  product: Record<string, unknown>,
-  sku: Record<string, unknown>,
-  stockCount: number,
-  siteUrl: string,
-): ProductInput {
-  const mpn = (product.mpn as string) || "";
-  const price = Number(sku.listed_price ?? 0);
-  if (price <= 0) {
-    throw new Error(`Google Merchant SKU ${String(sku.sku_code ?? "")} has no listed price`);
-  }
-  const conditionGrade = Number(sku.condition_grade) || 3;
-
-  return {
-    offerId: sku.sku_code as string,
-    contentLanguage: "en",
-    feedLabel: "GB",
-    channel: "ONLINE",
-    product: {
-      title:
-        (product.seo_title as string) ||
-        (product.name as string) ||
-        `LEGO ${mpn}`,
-      description:
-        (product.seo_description as string) ||
-        (product.description as string) ||
-        "",
-      link: `${siteUrl}/sets/${mpn}`,
-      imageLink: (product.img_url as string) || "",
-      price: {
-        amountMicros: String(Math.round(price * 1_000_000)),
-        currencyCode: "GBP",
-      },
-      availability: stockCount > 0 ? "in_stock" : "out_of_stock",
-      condition: conditionGrade <= 2 ? "new" : "used",
-      brand: "LEGO",
-      mpn: mpn.replace(/-\d+$/, ""),
-      productTypes: [
-        product.subtheme_name
-          ? `Toys > LEGO > ${product.subtheme_name}`
-          : "Toys > LEGO",
-      ],
-      shippingWeight: product.weight_kg
-        ? { value: product.weight_kg as number, unit: "kg" }
-        : undefined,
-      itemGroupId: mpn,
-    },
-  };
 }
 
 Deno.serve(async (req) => {
@@ -198,6 +127,9 @@ Deno.serve(async (req) => {
 
     // --- Publish all eligible SKUs ---
     if (action === "publish_all") {
+      const skuIds = Array.isArray(body.sku_ids)
+        ? new Set(body.sku_ids.map((value: unknown) => String(value)))
+        : null;
       if (!dataSource) {
         throw new Error(
           "No data source configured. Set data_source on the GMC connection.",
@@ -208,7 +140,7 @@ Deno.serve(async (req) => {
       const { data: skus, error: skuErr } = await supabaseAdmin
         .from("sku")
         .select(
-          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
+          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)",
         )
         .eq("active_flag", true);
 
@@ -259,6 +191,7 @@ Deno.serve(async (req) => {
       const skippedDetails: Array<Record<string, unknown>> = [];
 
       for (const sku of skus ?? []) {
+        if (skuIds && !skuIds.has(String(sku.id))) continue;
         // Only publish SKUs with active web listing
         if (!webSkuIds.has(sku.id)) {
           skipped++;
@@ -289,6 +222,16 @@ Deno.serve(async (req) => {
         }
 
         try {
+          const { warnings } = buildGmcProductInput(
+            {
+              external_sku: sku.sku_code as string,
+              listed_price: listedPrice,
+            },
+            sku as Record<string, unknown>,
+            product,
+            stockCount,
+            siteUrl,
+          );
           const { data: listing, error: listingErr } = await supabaseAdmin.from("channel_listing").upsert(
             {
               channel: "google_shopping",
@@ -297,6 +240,7 @@ Deno.serve(async (req) => {
               offer_status: "publish_queued",
               listed_price: listedPrice,
               listed_quantity: stockCount,
+              raw_data: { gmc_warnings: warnings },
               synced_at: new Date().toISOString(),
             },
             { onConflict: "channel,external_sku" },
