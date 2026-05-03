@@ -207,7 +207,7 @@ export function useVariantChannelPricing(skuId: string | undefined, skuCode?: st
             return [key, { ...quote, sku_code: skuCode }] as const;
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Pricing quote failed';
-            return [key, {
+            const fallback: ChannelPricingQuote = {
               sku_id: skuId!,
               sku_code: skuCode,
               channel: pricingChannel,
@@ -222,7 +222,8 @@ export function useVariantChannelPricing(skuId: string | undefined, skuCode?: st
               warning_reasons: [],
               quote_error: message,
               breakdown: {},
-            }] as const;
+            };
+            return [key, fallback] as [Channel, ChannelPricingQuote];
           }
         }),
       );
