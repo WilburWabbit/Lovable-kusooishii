@@ -16,7 +16,7 @@ import { absoluteUrl } from "@/lib/seo-jsonld";
 
 type SeoDocumentType = "route" | "product" | "theme" | "collection" | "system";
 type SeoIndexationPolicy = "index" | "noindex";
-type SeoStatusFilter = "all" | "missing" | "indexable" | "noindex" | "sitemap" | "hidden";
+type SeoStatusFilter = "all" | "draft" | "missing" | "indexable" | "noindex" | "sitemap" | "hidden";
 
 interface SeoDocumentRow {
   id: string;
@@ -36,6 +36,7 @@ interface SeoRevisionRow {
   id: string;
   seo_document_id: string;
   revision_number: number;
+  status: "draft" | "published" | "archived";
   canonical_path: string;
   canonical_url: string;
   title_tag: string;
@@ -273,6 +274,7 @@ function displaySubtitle(record: SeoDocumentWithRevision) {
 }
 
 function statusKind(record: SeoDocumentWithRevision): Exclude<SeoStatusFilter, "all"> {
+  if (record.revision?.status === "draft") return "draft";
   if (!record.revision || !record.revision.title_tag || !record.revision.meta_description) return "missing";
   if (record.revision.indexation_policy === "noindex") return "noindex";
   if (record.revision.sitemap?.include) return "sitemap";
@@ -282,6 +284,7 @@ function statusKind(record: SeoDocumentWithRevision): Exclude<SeoStatusFilter, "
 
 function statusBadge(record: SeoDocumentWithRevision) {
   const status = statusKind(record);
+  if (status === "draft") return <Badge label="Draft" color="#D97706" small />;
   if (status === "missing") return <Badge label="Needs content" color="#D97706" small />;
   if (status === "noindex") return <Badge label="Noindex" color="#DC2626" small />;
   if (status === "sitemap") return <Badge label="In sitemap" color="#16A34A" small />;
@@ -299,21 +302,24 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
   if (documentsError) throw documentsError;
 
   const rows = (documents ?? []) as SeoDocumentRow[];
-  const revisionIds = rows
-    .map((row) => row.published_revision_id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const documentIds = rows.map((row) => row.id);
 
-  let revisionsById = new Map<string, SeoRevisionRow>();
-  if (revisionIds.length) {
+  const revisionsByDocument = new Map<string, SeoRevisionRow>();
+  if (documentIds.length) {
     const { data: revisions, error: revisionsError } = await db
       .from("seo_revision")
-      .select("id, seo_document_id, revision_number, canonical_path, canonical_url, title_tag, meta_description, indexation_policy, robots_directive, open_graph, twitter_card, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, source, change_summary, published_at, created_at")
-      .in("id", revisionIds);
+      .select("id, seo_document_id, revision_number, status, canonical_path, canonical_url, title_tag, meta_description, indexation_policy, robots_directive, open_graph, twitter_card, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, source, change_summary, published_at, created_at")
+      .in("seo_document_id", documentIds)
+      .order("revision_number", { ascending: false });
 
     if (revisionsError) throw revisionsError;
-    revisionsById = new Map<string, SeoRevisionRow>(
-      ((revisions ?? []) as SeoRevisionRow[]).map((revision) => [revision.id, revision]),
-    );
+    const publishedIds = new Set(rows.map((row) => row.published_revision_id).filter(Boolean));
+    for (const revision of (revisions ?? []) as SeoRevisionRow[]) {
+      if (revisionsByDocument.has(revision.seo_document_id)) continue;
+      if (revision.status === "draft" || publishedIds.has(revision.id)) {
+        revisionsByDocument.set(revision.seo_document_id, revision);
+      }
+    }
   }
 
   const productReferences = Array.from(new Set(
@@ -337,17 +343,17 @@ async function fetchSeoDocuments(): Promise<SeoDocumentWithRevision[]> {
 
   return rows.map((row) => ({
     ...row,
-    revision: row.published_revision_id ? revisionsById.get(row.published_revision_id) ?? null : null,
+    revision: revisionsByDocument.get(row.id) ?? null,
     product: row.entity_reference ? productsByMpn.get(row.entity_reference) ?? null : null,
   }));
 }
 
-async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEditorState) {
+function seoRevisionRpcArgs(record: SeoDocumentWithRevision, state: SeoEditorState, requireContent: boolean) {
   const currentRevision = record.revision;
   const canonicalPath = state.canonical_path.trim();
   if (!canonicalPath.startsWith("/")) throw new Error("Canonical path must start with /");
-  if (!state.title_tag.trim()) throw new Error("Title tag is required");
-  if (!state.meta_description.trim()) throw new Error("Meta description is required");
+  if (requireContent && !state.title_tag.trim()) throw new Error("Title tag is required");
+  if (requireContent && !state.meta_description.trim()) throw new Error("Meta description is required");
 
   const structuredData = parseJsonField("structured data", state.structured_data);
   const breadcrumbs = parseJsonField("breadcrumbs", state.breadcrumbs);
@@ -366,33 +372,52 @@ async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEdi
   };
 
   const canonicalUrl = absoluteUrl(canonicalPath);
+  return {
+    p_seo_document_id: record.id,
+    p_canonical_path: canonicalPath,
+    p_canonical_url: canonicalUrl,
+    p_title_tag: state.title_tag.trim(),
+    p_meta_description: state.meta_description.trim(),
+    p_indexation_policy: state.indexation_policy,
+    p_robots_directive: state.robots_directive.trim() || (state.indexation_policy === "noindex" ? "noindex, nofollow" : "index, follow"),
+    p_open_graph: {
+      ...(currentRevision?.open_graph ?? {}),
+      title: state.title_tag.trim(),
+      description: state.meta_description.trim(),
+      url: canonicalUrl,
+    },
+    p_twitter_card: {
+      ...(currentRevision?.twitter_card ?? {}),
+      title: state.title_tag.trim(),
+      description: state.meta_description.trim(),
+    },
+    p_breadcrumbs: breadcrumbs,
+    p_structured_data: structuredData,
+    p_image_metadata: imageMetadata,
+    p_sitemap: sitemap,
+    p_geo: geo,
+    p_keywords: keywords,
+    p_source: "admin_ui",
+  };
+}
+
+async function saveSeoRevisionDraft(record: SeoDocumentWithRevision, state: SeoEditorState) {
+  const { data: revision, error: revisionError } = await db
+    .rpc("save_seo_revision_draft", {
+      ...seoRevisionRpcArgs(record, state, false),
+      p_change_summary: state.change_summary.trim() || "Saved from SEO/GEO admin.",
+    })
+    .single();
+
+  if (revisionError) throw revisionError;
+  const revisionRow = revision as { id: string } | null;
+  if (!revisionRow?.id) throw new Error("Saved draft was not returned");
+}
+
+async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEditorState) {
   const { data: revision, error: revisionError } = await db
     .rpc("publish_seo_revision", {
-      p_seo_document_id: record.id,
-      p_canonical_path: canonicalPath,
-      p_canonical_url: canonicalUrl,
-      p_title_tag: state.title_tag.trim(),
-      p_meta_description: state.meta_description.trim(),
-      p_indexation_policy: state.indexation_policy,
-      p_robots_directive: state.robots_directive.trim() || (state.indexation_policy === "noindex" ? "noindex, nofollow" : "index, follow"),
-      p_open_graph: {
-        ...(currentRevision?.open_graph ?? {}),
-        title: state.title_tag.trim(),
-        description: state.meta_description.trim(),
-        url: canonicalUrl,
-      },
-      p_twitter_card: {
-        ...(currentRevision?.twitter_card ?? {}),
-        title: state.title_tag.trim(),
-        description: state.meta_description.trim(),
-      },
-      p_breadcrumbs: breadcrumbs,
-      p_structured_data: structuredData,
-      p_image_metadata: imageMetadata,
-      p_sitemap: sitemap,
-      p_geo: geo,
-      p_keywords: keywords,
-      p_source: "admin_ui",
+      ...seoRevisionRpcArgs(record, state, true),
       p_change_summary: state.change_summary.trim() || "Published from SEO/GEO admin.",
     })
     .single();
@@ -452,6 +477,7 @@ export default function SeoGeoPage() {
 
   const counts = useMemo(() => ({
     total: data.length,
+    draft: data.filter((record) => record.revision?.status === "draft").length,
     missing: data.filter((record) => statusKind(record) === "missing").length,
     indexable: data.filter((record) => record.revision?.indexation_policy === "index").length,
     noindex: data.filter((record) => record.revision?.indexation_policy === "noindex").length,
@@ -469,6 +495,18 @@ export default function SeoGeoPage() {
       await queryClient.invalidateQueries({ queryKey: ["seo_document"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Publish failed"),
+  });
+
+  const saveDraft = useMutation({
+    mutationFn: async () => {
+      if (!selected || !editor) throw new Error("Select an SEO document first");
+      await saveSeoRevisionDraft(selected, editor);
+    },
+    onSuccess: async () => {
+      toast.success("SEO/GEO draft saved");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Draft save failed"),
   });
 
   const generate = useMutation({
@@ -539,7 +577,7 @@ export default function SeoGeoPage() {
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Metric label="Documents" value={counts.total} tone="neutral" />
-          <Metric label="Needs Content" value={counts.missing} tone="amber" />
+          <Metric label="Drafts" value={counts.draft} tone="amber" />
           <Metric label="Indexable" value={counts.indexable} tone="blue" />
           <Metric label="Noindex" value={counts.noindex} tone="red" />
           <Metric label="In Sitemap" value={counts.sitemap} tone="green" />
@@ -582,6 +620,7 @@ export default function SeoGeoPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="draft">Drafts</SelectItem>
                       <SelectItem value="missing">Needs content</SelectItem>
                       <SelectItem value="indexable">Indexable</SelectItem>
                       <SelectItem value="noindex">Noindex</SelectItem>
@@ -645,7 +684,7 @@ export default function SeoGeoPage() {
                       {displaySubtitle(selected)}
                     </p>
                     <p className="mt-1 text-[11px] text-zinc-400">
-                      Published revision {selected.revision?.revision_number ?? "none"} · {selected.revision?.source ?? "unpublished"}
+                      {selected.revision?.status === "draft" ? "Saved draft" : "Published revision"} {selected.revision?.revision_number ?? "none"} · {selected.revision?.source ?? "unpublished"}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -660,7 +699,10 @@ export default function SeoGeoPage() {
                       {generate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                       {generate.isPending ? "Generating..." : "Generate Draft"}
                     </Button>
-                    <Button size="sm" onClick={() => publish.mutate()} disabled={publish.isPending}>
+                    <Button variant="outline" size="sm" onClick={() => saveDraft.mutate()} disabled={saveDraft.isPending || publish.isPending}>
+                      <Save className="mr-2 h-4 w-4" /> {saveDraft.isPending ? "Saving..." : "Save Draft"}
+                    </Button>
+                    <Button size="sm" onClick={() => publish.mutate()} disabled={publish.isPending || saveDraft.isPending}>
                       <Save className="mr-2 h-4 w-4" /> {publish.isPending ? "Publishing..." : "Publish Revision"}
                     </Button>
                   </div>
