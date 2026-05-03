@@ -22,7 +22,7 @@ const FORMAT: Record<string, (v: number) => string> = {
 
 const COST_FORMAT: Record<string, (v: number) => string> = {
   packaging_cost: (v) => `£${Number(v).toFixed(2)}`,
-  risk_reserve_rate: (v) => `${v}%`,
+  risk_reserve_rate: (v) => `${(Number(v) * 100).toFixed(2)}%`,
   condition_multiplier_1: (v) => `×${v}`,
   condition_multiplier_2: (v) => `×${v}`,
   condition_multiplier_3: (v) => `×${v}`,
@@ -54,7 +54,11 @@ export function PricingSettingsCard() {
 
   const startEdit = (key: string, currentValue: number, source: 'pricing' | 'cost') => {
     setEditing(key);
-    setEditValue(String(currentValue));
+    if (source === 'cost' && key === 'risk_reserve_rate') {
+      setEditValue(String(Number(currentValue) * 100));
+    } else {
+      setEditValue(String(currentValue));
+    }
     setEditSource(source);
   };
 
@@ -66,7 +70,8 @@ export function PricingSettingsCard() {
     }
     try {
       if (editSource === 'cost' && id) {
-        await updateCost.mutateAsync({ id, value: num });
+        const normalized = key === 'risk_reserve_rate' ? num / 100 : num;
+        await updateCost.mutateAsync({ id, value: normalized });
       } else {
         await updateSetting.mutateAsync({ key, value: num });
       }
