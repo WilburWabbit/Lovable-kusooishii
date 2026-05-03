@@ -6,6 +6,7 @@ class ValidationError extends Error {
 }
 
 const STOCK_MATCHABLE = ["available", "received", "graded"];
+const SALEABLE_STOCK_STATUSES = ["available", "received", "graded", "listed", "restocked"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
 
 function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
@@ -16,6 +17,119 @@ function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function normalizeCommerceChannel(channel: string | null | undefined): string {
+  return channel === "website" ? "web" : (channel ?? "web");
+}
+
+function normalizeQuote(raw: unknown, skuId: string, channel: string) {
+  const quote = (raw ?? {}) as Record<string, unknown>;
+  const feeComponents = (quote.fee_components ?? {}) as Record<string, unknown>;
+  return {
+    sku_id: String(quote.sku_id ?? skuId),
+    sku_code: quote.sku_code ?? null,
+    channel: String(quote.channel ?? channel),
+    floor_price: quote.floor_price == null ? null : Number(quote.floor_price),
+    target_price: quote.target_price == null ? null : Number(quote.target_price),
+    ceiling_price: quote.ceiling_price == null ? null : Number(quote.ceiling_price),
+    estimated_fees: quote.estimated_fees == null
+      ? (feeComponents.estimated_fees == null ? null : Number(feeComponents.estimated_fees))
+      : Number(quote.estimated_fees),
+    estimated_net: quote.estimated_net == null ? null : Number(quote.estimated_net),
+    cost_base: quote.cost_base == null ? null : Number(quote.cost_base),
+    carrying_value: quote.carrying_value == null
+      ? (quote.cogs_or_carrying_value == null ? null : Number(quote.cogs_or_carrying_value))
+      : Number(quote.carrying_value),
+    average_carrying_value: quote.average_carrying_value == null ? null : Number(quote.average_carrying_value),
+    stock_unit_count: quote.stock_unit_count == null ? 0 : Number(quote.stock_unit_count),
+    market_consensus: quote.market_consensus == null
+      ? (quote.market_consensus_price == null ? null : Number(quote.market_consensus_price))
+      : Number(quote.market_consensus),
+    condition_multiplier: quote.condition_multiplier == null ? null : Number(quote.condition_multiplier),
+    confidence_score: quote.confidence_score == null
+      ? (quote.confidence == null ? null : Number(quote.confidence))
+      : Number(quote.confidence_score),
+    blocking_reasons: Array.isArray(quote.blocking_reasons) ? quote.blocking_reasons : [],
+    warning_reasons: Array.isArray(quote.warning_reasons) ? quote.warning_reasons : [],
+    breakdown: quote.breakdown ?? {},
+    raw_quote: quote,
+  };
+}
+
+async function buildWebsiteListingPreflight(
+  admin: any,
+  skuId: string,
+  listedPrice?: number | null,
+) {
+  const { data: sku, error: skuErr } = await admin
+    .from("sku")
+    .select("id, sku_code, active_flag, saleable_flag")
+    .eq("id", skuId)
+    .single();
+  if (skuErr || !sku) throw new ValidationError("SKU not found");
+
+  const { data: stockUnits, error: stockErr } = await admin
+    .from("stock_unit")
+    .select("id, status, v2_status")
+    .eq("sku_id", skuId);
+  if (stockErr) throw stockErr;
+
+  const saleableStockCount = (stockUnits ?? []).filter((unit: Record<string, unknown>) => {
+    const status = String(unit.v2_status ?? unit.status ?? "");
+    return SALEABLE_STOCK_STATUSES.includes(status);
+  }).length;
+
+  const { data: rawQuote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+    p_sku_id: skuId,
+    p_channel: "web",
+    p_candidate_price: listedPrice && listedPrice > 0 ? listedPrice : null,
+  });
+  if (quoteErr) throw quoteErr;
+  const quote = normalizeQuote(rawQuote, skuId, "web");
+
+  const targetPrice = Number(quote.target_price ?? 0);
+  const floorPrice = Number(quote.floor_price ?? 0);
+  const finalPrice = listedPrice && listedPrice > 0 ? Math.max(listedPrice, floorPrice) : targetPrice;
+  const blockers: string[] = [];
+  const actions: string[] = [];
+
+  if (saleableStockCount <= 0) {
+    blockers.push("No saleable stock is available. Receive and grade stock before publishing.");
+    actions.push("receive_stock");
+  }
+  if (!sku.active_flag) {
+    blockers.push("SKU is inactive. Activate it before website publish.");
+    actions.push("activate_sku");
+  }
+  if (!sku.saleable_flag) {
+    blockers.push("SKU is not marked saleable.");
+    actions.push("activate_sku");
+  }
+  if (!finalPrice || finalPrice <= 0) {
+    blockers.push("No valid website target price is available. Recalculate pricing first.");
+    actions.push("recalculate_price");
+  }
+  if (floorPrice > 0 && finalPrice > 0 && finalPrice < floorPrice) {
+    blockers.push(`Website price £${finalPrice.toFixed(2)} is below floor £${floorPrice.toFixed(2)}.`);
+    actions.push("set_price");
+  }
+
+  return {
+    sku_id: skuId,
+    sku_code: sku.sku_code,
+    channel: "web",
+    can_publish: blockers.length === 0,
+    action_state: blockers.length === 0 ? "publish" : actions[0],
+    actions: [...new Set(actions)],
+    blockers,
+    warnings: quote.warning_reasons,
+    saleable_stock_count: saleableStockCount,
+    active_flag: Boolean(sku.active_flag),
+    saleable_flag: Boolean(sku.saleable_flag),
+    final_price: finalPrice > 0 ? Math.round(finalPrice * 100) / 100 : null,
+    quote,
+  };
 }
 
 /** Fully reset a QBO purchase: delete derived stock units, receipt lines, purchase batches/line items, then reset landing to pending */
@@ -484,10 +598,18 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = { success: true };
     } else if (action === "create-web-listing") {
-      const { sku_id, listed_price } = params;
+      const { sku_id, listed_price, listing_title, listing_description } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
 
-      // Fetch SKU details
+      const preflight = await buildWebsiteListingPreflight(
+        admin,
+        sku_id,
+        typeof listed_price === "number" ? listed_price : null,
+      );
+      if (!preflight.can_publish) {
+        throw new ValidationError(preflight.blockers[0] ?? "Website listing is blocked");
+      }
+
       const { data: sku, error: skuErr } = await admin
         .from("sku")
         .select("id, sku_code")
@@ -495,38 +617,10 @@ Deno.serve(async (req) => {
         .single();
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
-      const { data: pricingRows } = await admin
-        .from("v_current_sku_pricing")
-        .select("current_price, channel")
-        .eq("sku_id", sku_id)
-        .order("priced_at", { ascending: false, nullsFirst: false })
-        .limit(12);
-      const webPriceRow = ((pricingRows ?? []) as Record<string, unknown>[])
-        .sort((a, b) => {
-          const rank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
-          return rank(b.channel) - rank(a.channel);
-        })
-        .find((row) => Number(row.current_price ?? 0) > 0);
-
-      // Resolve price: caller-supplied > database
-      let finalPrice = (typeof listed_price === "number" && listed_price > 0)
-        ? listed_price
-        : Number(webPriceRow?.current_price ?? 0);
+      let finalPrice = Number(preflight.final_price ?? 0);
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
-
-      // Validate against the domain quote floor, not legacy listing columns.
-      const { data: quote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
-        p_sku_id: sku_id,
-        p_channel: "web",
-        p_candidate_price: finalPrice,
-      });
-      if (quoteErr) throw quoteErr;
-
-      const quoteFloor = Number((quote as Record<string, unknown> | null)?.floor_price ?? 0);
-      if (quoteFloor > 0 && finalPrice < quoteFloor) {
-        // Bump to the channel-net floor before creating the publish snapshot.
-        finalPrice = quoteFloor;
-      }
+      const quoteFloor = Number(preflight.quote.floor_price ?? 0);
+      if (quoteFloor > 0 && finalPrice < quoteFloor) finalPrice = quoteFloor;
 
       // Sync resolved price back to SKU
       await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);
@@ -540,8 +634,8 @@ Deno.serve(async (req) => {
           listed_price: finalPrice,
           listed_quantity: 0,
           offer_status: "PUBLISHED",
-          listing_title: null,
-          listing_description: null,
+          listing_title: typeof listing_title === "string" && listing_title.trim() ? listing_title.trim() : null,
+          listing_description: typeof listing_description === "string" && listing_description.trim() ? listing_description.trim() : null,
           price_floor: null,
           price_target: null,
           price_ceiling: null,
@@ -571,7 +665,24 @@ Deno.serve(async (req) => {
         if (commandErr) throw commandErr;
       }
 
-      result = { success: true, listing_id: listingId };
+      result = { success: true, listing_id: listingId, preflight, final_price: finalPrice };
+    } else if (action === "website-listing-preflight") {
+      const { sku_id, listed_price } = params;
+      if (!sku_id) throw new ValidationError("sku_id is required");
+      result = await buildWebsiteListingPreflight(
+        admin,
+        sku_id,
+        typeof listed_price === "number" ? listed_price : null,
+      );
+    } else if (action === "activate-sku") {
+      const { sku_id } = params;
+      if (!sku_id) throw new ValidationError("sku_id is required");
+      const { error } = await admin
+        .from("sku")
+        .update({ active_flag: true })
+        .eq("id", sku_id);
+      if (error) throw error;
+      result = { success: true, sku_id };
     } else if (action === "remove-web-listing") {
       const { sku_id } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
@@ -907,7 +1018,19 @@ Deno.serve(async (req) => {
     } else if (action === "calculate-pricing") {
       const { sku_id, channel: requestedChannel } = params;
       if (!sku_id || !requestedChannel) throw new ValidationError("sku_id and channel are required");
-      const channel = requestedChannel === "website" ? "web" : requestedChannel;
+      const channel = normalizeCommerceChannel(requestedChannel);
+
+      const { data: rawQuote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+        p_sku_id: sku_id,
+        p_channel: channel,
+        p_candidate_price: null,
+      });
+      if (quoteErr) throw quoteErr;
+      result = normalizeQuote(rawQuote, sku_id, channel);
+
+      // Retained only as dead-code reference while the pricing engine settles;
+      // the RPC above is the single active calculator for admin pricing.
+      if (false) {
 
       // 1. Get SKU + product info
       const { data: skuData } = await admin
@@ -1217,6 +1340,7 @@ Deno.serve(async (req) => {
           target_floor_clamped: targetFloorClamped ? 1 : 0,
         },
       };
+      }
 
     } else if (action === "batch-calculate-pricing") {
       const { channel: batchChannel } = params;
