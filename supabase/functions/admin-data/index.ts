@@ -3135,6 +3135,252 @@ Deno.serve(async (req) => {
           landing_error: landingErrRes.error?.message ?? null,
         },
       };
+    } else if (action === "gmc-readiness") {
+      const limit = Math.min(Number(params.limit) || 250, 1000);
+      const [
+        connRes,
+        skuRes,
+        webListingRes,
+        gmcListingRes,
+        stockRes,
+        commandRes,
+        attrRes,
+      ] = await Promise.all([
+        admin
+          .from("google_merchant_connection")
+          .select("id, merchant_id, data_source, token_expires_at, updated_at")
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("sku")
+          .select("id, sku_code, condition_grade, active_flag, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, ean, upc, isbn, gmc_product_category, subtheme_name, weight_kg)")
+          .eq("active_flag", true)
+          .order("sku_code", { ascending: true })
+          .limit(limit),
+        admin
+          .from("channel_listing")
+          .select("id, sku_id, channel, external_sku, offer_status, v2_status, listed_price, listed_quantity, synced_at")
+          .eq("channel", "web"),
+        admin
+          .from("channel_listing")
+          .select("id, sku_id, channel, external_sku, external_listing_id, offer_status, v2_status, listed_price, listed_quantity, raw_data, synced_at")
+          .in("channel", ["google_shopping", "gmc"]),
+        admin
+          .from("stock_unit")
+          .select("sku_id, status, v2_status"),
+        admin
+          .from("v_outbound_command_with_references" as never)
+          .select("*")
+          .eq("entity_type" as never, "channel_listing")
+          .in("target_system" as never, ["google_shopping", "gmc"] as never)
+          .order("created_at" as never, { ascending: false })
+          .limit(500),
+        admin
+          .from("product_attribute")
+          .select("product_id, key, source_values_jsonb, chosen_source, custom_value")
+          .eq("namespace", "core")
+          .in("key", ["ean", "upc", "isbn"]),
+      ]);
+
+      if (connRes.error) throw connRes.error;
+      if (skuRes.error) throw skuRes.error;
+      if (webListingRes.error) throw webListingRes.error;
+      if (gmcListingRes.error) throw gmcListingRes.error;
+      if (stockRes.error) throw stockRes.error;
+      if (commandRes.error) throw commandRes.error;
+      if (attrRes.error) throw attrRes.error;
+
+      const conn = connRes.data as any;
+      const connected = Boolean(conn?.id);
+      const dataSourceConfigured = Boolean(conn?.data_source);
+      const tokenExpired = conn?.token_expires_at ? String(conn.token_expires_at) < new Date().toISOString() : null;
+
+      const webBySku = new Map<string, any>();
+      for (const listing of (webListingRes.data ?? []) as any[]) {
+        const live = listing.v2_status === "live" || ["live", "published", "PUBLISHED"].includes(String(listing.offer_status ?? ""));
+        if (live && listing.sku_id) webBySku.set(listing.sku_id, listing);
+      }
+
+      const gmcBySku = new Map<string, any>();
+      for (const listing of (gmcListingRes.data ?? []) as any[]) {
+        if (!listing.sku_id) continue;
+        const existing = gmcBySku.get(listing.sku_id);
+        if (!existing || String(listing.updated_at ?? listing.synced_at ?? "") > String(existing.updated_at ?? existing.synced_at ?? "")) {
+          gmcBySku.set(listing.sku_id, listing);
+        }
+      }
+
+      const stockBySku = new Map<string, number>();
+      for (const unit of (stockRes.data ?? []) as any[]) {
+        if (!unit.sku_id) continue;
+        const available = unit.status === "available" || ["graded", "listed", "restocked"].includes(String(unit.v2_status ?? ""));
+        if (available) stockBySku.set(unit.sku_id, (stockBySku.get(unit.sku_id) ?? 0) + 1);
+      }
+
+      const commandsByListing = new Map<string, any>();
+      for (const command of (commandRes.data ?? []) as any[]) {
+        const entityId = command.entity_id;
+        if (entityId && !commandsByListing.has(entityId)) commandsByListing.set(entityId, command);
+      }
+
+      const attrsByProduct = new Map<string, Record<string, any>>();
+      for (const attr of (attrRes.data ?? []) as any[]) {
+        if (!attr.product_id) continue;
+        const bucket = attrsByProduct.get(attr.product_id) ?? {};
+        bucket[attr.key] = attr;
+        attrsByProduct.set(attr.product_id, bucket);
+      }
+
+      const rows = ((skuRes.data ?? []) as any[]).map((sku) => {
+        const productRelation = sku.product;
+        const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
+        const webListing = webBySku.get(sku.id);
+        const gmcListing = gmcBySku.get(sku.id);
+        const latestCommand = gmcListing?.id ? commandsByListing.get(gmcListing.id) : null;
+        const price = Number(webListing?.listed_price ?? gmcListing?.listed_price ?? 0);
+        const stock = stockBySku.get(sku.id) ?? 0;
+        const barcode = product?.ean || product?.upc || product?.isbn || null;
+        const blocking: string[] = [];
+        const warnings: string[] = [];
+
+        if (!connected) blocking.push("Google Merchant is not connected");
+        if (!dataSourceConfigured) blocking.push("GMC data source is not configured");
+        if (tokenExpired === true) blocking.push("Google Merchant token is expired");
+        if (!webListing) blocking.push("No live web listing");
+        if (price <= 0) blocking.push("Missing listed price");
+        if (!product?.mpn) blocking.push("Missing MPN");
+        if (!product?.name && !product?.seo_title) blocking.push("Missing title");
+        if (!product?.seo_description && !product?.description) blocking.push("Missing description");
+        if (!product?.img_url) blocking.push("Missing primary image");
+        if (!product?.gmc_product_category) warnings.push("Missing Google product category");
+        if (!barcode) warnings.push("Missing GTIN: publish will use LEGO + versioned MPN fallback");
+        if (stock <= 0) warnings.push("No available stock: publish will mark out of stock");
+        const commandError = latestCommand?.last_error ? String(latestCommand.last_error) : null;
+        if (commandError) warnings.push(commandError);
+
+        return {
+          sku_id: sku.id,
+          sku_code: sku.sku_code,
+          condition_grade: sku.condition_grade,
+          product_id: product?.id ?? sku.product_id,
+          mpn: product?.mpn ?? null,
+          product_name: product?.name ?? null,
+          title: product?.seo_title ?? product?.name ?? null,
+          description: product?.seo_description ?? product?.description ?? null,
+          image_url: product?.img_url ?? null,
+          ean: product?.ean ?? null,
+          upc: product?.upc ?? null,
+          isbn: product?.isbn ?? null,
+          gmc_product_category: product?.gmc_product_category ?? null,
+          price,
+          stock_count: stock,
+          status: blocking.length > 0 ? "blocked" : warnings.length > 0 ? "warning" : "ready",
+          blocking,
+          warnings,
+          barcode_source_candidates: attrsByProduct.get(product?.id ?? sku.product_id) ?? {},
+          web_listing_id: webListing?.id ?? null,
+          gmc_listing_id: gmcListing?.id ?? null,
+          gmc_offer_status: gmcListing?.offer_status ?? null,
+          gmc_v2_status: gmcListing?.v2_status ?? null,
+          gmc_external_listing_id: gmcListing?.external_listing_id ?? null,
+          latest_command: latestCommand ? {
+            id: latestCommand.id,
+            status: latestCommand.status,
+            command_type: latestCommand.command_type,
+            retry_count: latestCommand.retry_count,
+            last_error: latestCommand.last_error,
+            next_attempt_at: latestCommand.next_attempt_at,
+            created_at: latestCommand.created_at,
+          } : null,
+        };
+      });
+
+      const ready = rows.filter((row) => row.status === "ready").length;
+      const warning = rows.filter((row) => row.status === "warning").length;
+      const blocked = rows.filter((row) => row.status === "blocked").length;
+
+      result = {
+        connection: {
+          connected,
+          merchant_id: conn?.merchant_id ?? null,
+          data_source: conn?.data_source ?? null,
+          token_expires_at: conn?.token_expires_at ?? null,
+          token_expired: tokenExpired,
+          last_updated: conn?.updated_at ?? null,
+        },
+        summary: { total: rows.length, ready, warning, blocked },
+        rows,
+      };
+    } else if (action === "gmc-publish-events") {
+      const limit = Math.min(Number(params.limit) || 100, 250);
+      const { data, error } = await admin
+        .from("v_outbound_command_with_references" as never)
+        .select("*")
+        .eq("entity_type" as never, "channel_listing")
+        .in("target_system" as never, ["google_shopping", "gmc"] as never)
+        .order("created_at" as never, { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      result = (data ?? []).map((row: any) => ({
+        id: row.id,
+        target_system: row.target_system,
+        command_type: row.command_type,
+        status: row.status,
+        retry_count: row.retry_count,
+        last_error: row.last_error,
+        next_attempt_at: row.next_attempt_at,
+        sent_at: row.sent_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        entity_id: row.entity_id,
+        sku_code: row.sku_code,
+        app_reference: row.app_reference,
+        external_listing_id: row.external_listing_id,
+        channel: row.channel,
+        response_payload: row.response_payload,
+      }));
+    } else if (action === "gmc-save-enrichment") {
+      const productId = params.product_id;
+      if (!productId) throw new ValidationError("product_id is required");
+      const patch: Record<string, unknown> = {};
+      for (const key of ["ean", "upc", "isbn", "gmc_product_category"]) {
+        if (Object.prototype.hasOwnProperty.call(params, key)) {
+          const value = params[key];
+          patch[key] = typeof value === "string" && value.trim() ? value.trim() : null;
+        }
+      }
+      if (Object.keys(patch).length === 0) throw new ValidationError("No enrichment fields supplied");
+      const { error } = await admin.from("product").update(patch).eq("id", productId);
+      if (error) throw error;
+
+      for (const key of ["ean", "upc", "isbn"]) {
+        if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+        const value = patch[key];
+        await admin
+          .from("product_attribute")
+          .delete()
+          .eq("product_id", productId)
+          .eq("namespace", "core")
+          .eq("key", key)
+          .is("channel", null)
+          .is("marketplace", null)
+          .is("category_id", null);
+        if (value) {
+          const { error: attrError } = await admin.from("product_attribute").insert({
+            product_id: productId,
+            namespace: "core",
+            key,
+            aspect_key: key,
+            value: String(value),
+            source: "manual",
+            chosen_source: "custom",
+            custom_value: String(value),
+          });
+          if (attrError) throw attrError;
+        }
+      }
+
+      result = { success: true, updated: patch };
     } else if (action === "list-transcripts") {
       const role = (params as { role?: string }).role;
       const search = (params as { search?: string }).search?.trim();

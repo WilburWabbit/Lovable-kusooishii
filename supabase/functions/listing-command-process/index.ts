@@ -14,6 +14,7 @@ import {
   jsonResponse,
 } from "../_shared/qbo-helpers.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
+import { buildGmcProductInput } from "../_shared/gmc-product-input.ts";
 
 const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 50;
@@ -518,53 +519,6 @@ async function ensureGmcToken(
   return accessToken;
 }
 
-function buildGmcProductInput(
-  listing: Record<string, unknown>,
-  sku: Record<string, unknown>,
-  product: Record<string, unknown>,
-  stockCount: number,
-) {
-  const mpn = String(product.mpn ?? sku.mpn ?? "");
-  const skuCode = String(sku.sku_code ?? listing.external_sku ?? "");
-  const price = Number(listing.listed_price ?? 0);
-  if (price <= 0) {
-    throw new Error(`Google Shopping listing ${skuCode} has no listed price`);
-  }
-  const conditionGrade = Number(sku.condition_grade ?? 3);
-  const title = String(product.seo_title ?? listing.listing_title ?? product.name ?? `LEGO ${mpn}`);
-  const description = String(product.seo_description ?? listing.listing_description ?? product.description ?? "");
-
-  return {
-    offerId: skuCode,
-    contentLanguage: "en",
-    feedLabel: "GB",
-    channel: "ONLINE",
-    product: {
-      title,
-      description,
-      link: `${getSiteUrl()}/sets/${mpn}`,
-      imageLink: String(product.img_url ?? ""),
-      price: {
-        amountMicros: String(Math.round(price * 1_000_000)),
-        currencyCode: "GBP",
-      },
-      availability: stockCount > 0 ? "in_stock" : "out_of_stock",
-      condition: conditionGrade <= 2 ? "new" : "used",
-      brand: "LEGO",
-      mpn: mpn.replace(/-\d+$/, ""),
-      productTypes: [
-        product.subtheme_name
-          ? `Toys > LEGO > ${product.subtheme_name}`
-          : "Toys > LEGO",
-      ],
-      shippingWeight: product.weight_kg
-        ? { value: Number(product.weight_kg), unit: "kg" }
-        : undefined,
-      itemGroupId: mpn,
-    },
-  };
-}
-
 async function processGoogleShoppingCommand(
   admin: ReturnType<typeof createAdminClient>,
   command: ListingCommand,
@@ -629,7 +583,7 @@ async function processGoogleShoppingCommand(
 
   const { data: sku, error: skuErr } = await admin
     .from("sku")
-    .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)")
+    .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)")
     .eq("id" as never, skuId)
     .single();
   if (skuErr) throw skuErr;
@@ -645,7 +599,7 @@ async function processGoogleShoppingCommand(
     .eq("sku_id" as never, skuId)
     .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
   const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
-  const productInput = buildGmcProductInput(listingRow, skuRow, product, stockCount);
+  const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, product, stockCount, getSiteUrl());
 
   const insertRes = await fetchWithTimeout(
     `${GMC_API_BASE}/accounts/${conn.merchant_id}/productInputs:insert?dataSource=${encodeURIComponent(conn.data_source ?? "")}`,
@@ -673,6 +627,10 @@ async function processGoogleShoppingCommand(
       v2_status: "live",
       listed_quantity: stockCount,
       synced_at: new Date().toISOString(),
+      raw_data: {
+        gmc_response: payload,
+        gmc_warnings: warnings,
+      },
     } as never)
     .eq("id" as never, command.entity_id);
 
@@ -680,6 +638,7 @@ async function processGoogleShoppingCommand(
     channel_listing_id: command.entity_id,
     external_listing_id: externalListingId,
     gmc_response: payload,
+    warnings,
   };
 }
 
