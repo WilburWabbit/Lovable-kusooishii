@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
@@ -13,6 +13,18 @@ type GmcStatus = {
   last_updated?: string | null;
 };
 
+type PublishHistoryRow = {
+  id: string;
+  createdAt: string;
+  queued: number;
+  skipped: number;
+  errors: number;
+  errorDetails: unknown[];
+  skippedDetails: unknown[];
+};
+
+const PUBLISH_HISTORY_KEY = 'gmc_publish_history_v1';
+
 export function GmcSettingsCard() {
   const [status, setStatus] = useState<GmcStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +32,20 @@ export function GmcSettingsCard() {
   const [merchantId, setMerchantId] = useState('');
   const [dataSource, setDataSource] = useState('');
   const [lastPublishResult, setLastPublishResult] = useState<Record<string, unknown> | null>(null);
+  const [history, setHistory] = useState<PublishHistoryRow[]>([]);
+  const [query, setQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'createdAt' | 'queued' | 'errors'>('createdAt');
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(PUBLISH_HISTORY_KEY);
+    if (!stored) return;
+    try { setHistory(JSON.parse(stored) as PublishHistoryRow[]); } catch { setHistory([]); }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(PUBLISH_HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
+  }, [history]);
 
   const loadStatus = async () => {
     const data = await invokeWithAuth<GmcStatus>('gmc-auth', { action: 'status' });
@@ -31,35 +57,44 @@ export function GmcSettingsCard() {
 
   useEffect(() => {
     (async () => {
-      try {
-        await loadStatus();
-      } catch {
-        setStatus({ connected: false });
-      } finally {
-        setLoading(false);
-      }
+      try { await loadStatus(); } catch { setStatus({ connected: false }); } finally { setLoading(false); }
     })();
   }, []);
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
-    try {
-      await fn();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Request failed';
-      toast.error(message);
-    } finally {
-      setBusy(null);
-    }
+    try { await fn(); } catch (error) { toast.error(error instanceof Error ? error.message : 'Request failed'); } finally { setBusy(null); }
   };
+
+  const publishRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = history.filter((row) => !q || row.id.toLowerCase().includes(q) || row.createdAt.toLowerCase().includes(q) || String(row.errors).includes(q));
+    return filtered.sort((a, b) => {
+      if (sortBy === 'createdAt') return b.createdAt.localeCompare(a.createdAt);
+      if (sortBy === 'queued') return b.queued - a.queued;
+      return b.errors - a.errors;
+    });
+  }, [history, query, sortBy]);
+
+
+
+  const detailRows = (rows: unknown[]) => (rows as Record<string, unknown>[]).map((row, idx) => {
+    const productHint = String(row.mpn ?? row.sku ?? row.offerId ?? row.offer_id ?? row.productId ?? row.product_id ?? '');
+    const message = String(row.message ?? row.reason ?? row.error ?? row.code ?? 'No message');
+    return (
+      <tr key={`${productHint}-${idx}`} className="border-t">
+        <td className="px-2 py-1">{productHint || '—'}</td>
+        <td className="px-2 py-1">{message}</td>
+        <td className="px-2 py-1">
+          {productHint ? <a className="text-amber-700 underline" href={`/admin/products/${encodeURIComponent(productHint)}`}>Open</a> : '—'}
+        </td>
+      </tr>
+    );
+  });
 
   const saveConfig = () => run('save', async () => {
     if (!merchantId.trim()) throw new Error('Merchant ID is required');
-    await invokeWithAuth('gmc-auth', {
-      action: 'set_config',
-      merchant_id: merchantId.trim(),
-      data_source: dataSource.trim() || null,
-    });
+    await invokeWithAuth('gmc-auth', { action: 'set_config', merchant_id: merchantId.trim(), data_source: dataSource.trim() || null });
     toast.success('Google Merchant config saved');
     await loadStatus();
   });
@@ -81,10 +116,17 @@ export function GmcSettingsCard() {
   const publishAll = () => run('publish', async () => {
     const d = await invokeWithAuth<Record<string, unknown>>('gmc-sync', { action: 'publish_all' });
     setLastPublishResult(d);
-    const queued = Number(d?.queued ?? 0);
-    const skipped = Number(d?.skipped ?? 0);
-    const errors = Number(d?.errors ?? 0);
-    toast.success(`Queued ${queued} products (${skipped} skipped, ${errors} errors)`);
+    const row: PublishHistoryRow = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      queued: Number(d?.queued ?? 0),
+      skipped: Number(d?.skipped ?? 0),
+      errors: Number(d?.errors ?? 0),
+      errorDetails: (d?.errorDetails as unknown[]) ?? [],
+      skippedDetails: (d?.skippedDetails as unknown[]) ?? [],
+    };
+    setHistory((current) => [row, ...current].slice(0, 50));
+    toast.success(`Queued ${row.queued} products (${row.skipped} skipped, ${row.errors} errors)`);
   });
 
   const syncStatus = () => run('sync-status', async () => {
@@ -112,7 +154,58 @@ export function GmcSettingsCard() {
           <button onClick={syncStatus} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border">Sync Status</button>
           <button onClick={disconnect} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border border-red-300 text-red-700">Disconnect</button>
         </div>
-        
+
+        <div className="rounded border p-2 text-xs space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-medium">Publish history</div>
+            <div className="flex gap-2">
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter" className="h-8 rounded border px-2" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'createdAt'|'queued'|'errors')} className="h-8 rounded border px-2">
+                <option value="createdAt">Newest</option>
+                <option value="queued">Most queued</option>
+                <option value="errors">Most errors</option>
+              </select>
+            </div>
+          </div>
+          <table className="w-full text-left text-xs">
+            <thead><tr><th>When</th><th>Queued</th><th>Skipped</th><th>Errors</th><th>Details</th></tr></thead>
+            <tbody>
+              {publishRows.map((row) => (
+                <>
+                  <tr key={row.id} className="border-t">
+                    <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td><Mono>{row.queued}</Mono></td>
+                    <td><Mono>{row.skipped}</Mono></td>
+                    <td><Mono>{row.errors}</Mono></td>
+                    <td>
+                      <button onClick={() => setExpandedRunId(expandedRunId === row.id ? null : row.id)} className="rounded border px-2 py-1">
+                        {expandedRunId === row.id ? <ChevronUp className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />} Details
+                      </button>
+                    </td>
+                  </tr>
+                  {expandedRunId === row.id && (
+                    <tr className="bg-zinc-50">
+                      <td colSpan={5} className="p-2">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <div className="font-medium">Error details ({row.errorDetails.length})</div>
+                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Issue</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.errorDetails)}</tbody></table>
+                          </div>
+                          <div>
+                            <div className="font-medium">Skipped details ({row.skippedDetails.length})</div>
+                            <table className="mt-1 w-full text-left text-[11px]"><thead><tr><th className="px-2">Product</th><th className="px-2">Reason</th><th className="px-2">Action</th></tr></thead><tbody>{detailRows(row.skippedDetails)}</tbody></table>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+              {publishRows.length === 0 && <tr><td colSpan={5} className="py-3 text-zinc-500">No publish events.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
         {lastPublishResult && (
           <div className="rounded border p-2 text-xs space-y-2">
             <div className="font-medium">Last publish diagnostics</div>
@@ -120,14 +213,6 @@ export function GmcSettingsCard() {
               <div>Queued: <Mono>{String(lastPublishResult.queued ?? 0)}</Mono></div>
               <div>Skipped: <Mono>{String(lastPublishResult.skipped ?? 0)}</Mono></div>
               <div>Errors: <Mono>{String(lastPublishResult.errors ?? 0)}</Mono></div>
-            </div>
-            <div>
-              <div className="mb-1 text-muted-foreground">Error details</div>
-              <pre className="max-h-40 overflow-auto rounded bg-zinc-950/70 p-2">{JSON.stringify(lastPublishResult.errorDetails ?? [], null, 2)}</pre>
-            </div>
-            <div>
-              <div className="mb-1 text-muted-foreground">Skipped details</div>
-              <pre className="max-h-40 overflow-auto rounded bg-zinc-950/70 p-2">{JSON.stringify(lastPublishResult.skippedDetails ?? [], null, 2)}</pre>
             </div>
           </div>
         )}

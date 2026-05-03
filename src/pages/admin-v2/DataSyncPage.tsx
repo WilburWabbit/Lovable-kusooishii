@@ -27,7 +27,7 @@ export default function DataSyncPage() {
           <BrickEconomySettingsCard />
           <AiProviderSettingsCard />
         </div>
-        <RebrickableImportCard />
+        <div className="space-y-1"><p className="text-xs text-muted-foreground">Rebrickable catalog import cards currently use BrickLink-linked source feeds.</p><RebrickableImportCard /></div>
         <CsvSyncPage />
       </div>
     </AdminV2Layout>
