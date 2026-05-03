@@ -409,7 +409,10 @@ interface QueryBuilder extends PromiseLike<DbResponse> {
   maybeSingle(): Promise<DbResponse>;
 }
 
-const db = supabase as unknown as { from(table: string): QueryBuilder };
+const db = supabase as unknown as {
+  from(table: string): QueryBuilder;
+  rpc(functionName: string, args: Record<string, unknown>): QueryBuilder;
+};
 
 function formatJson(value: unknown, fallback: string) {
   if (value == null) return fallback;
@@ -530,7 +533,6 @@ async function ensureProductSeoDocument(product: ProductDetail, existing: Produc
 
 async function publishProductSeoRevision(product: ProductDetail, record: ProductSeoRecord | undefined, editor: ProductSeoEditor) {
   const document = await ensureProductSeoDocument(product, record?.document ?? null);
-  const currentRevision = record?.revision;
   const canonicalPath = editor.canonicalPath.trim();
   if (!canonicalPath.startsWith("/")) throw new Error("Canonical path must start with /");
   if (!editor.titleTag.trim()) throw new Error("SEO title is required");
@@ -546,56 +548,40 @@ async function publishProductSeoRevision(product: ProductDetail, record: Product
   const canonicalUrl = absoluteUrl(canonicalPath);
 
   const { data: revision, error: revisionError } = await db
-    .from("seo_revision")
-    .insert({
-      seo_document_id: document.id,
-      revision_number: (currentRevision?.revision_number ?? 0) + 1,
-      status: "published",
-      canonical_path: canonicalPath,
-      canonical_url: canonicalUrl,
-      title_tag: editor.titleTag.trim(),
-      meta_description: editor.metaDescription.trim(),
-      indexation_policy: editor.indexationPolicy,
-      robots_directive: editor.robotsDirective.trim() || (editor.indexationPolicy === "noindex" ? "noindex, nofollow" : "index, follow"),
-      open_graph: {
+    .rpc("publish_seo_revision", {
+      p_seo_document_id: document.id,
+      p_canonical_path: canonicalPath,
+      p_canonical_url: canonicalUrl,
+      p_title_tag: editor.titleTag.trim(),
+      p_meta_description: editor.metaDescription.trim(),
+      p_indexation_policy: editor.indexationPolicy,
+      p_robots_directive: editor.robotsDirective.trim() || (editor.indexationPolicy === "noindex" ? "noindex, nofollow" : "index, follow"),
+      p_open_graph: {
         title: editor.titleTag.trim(),
         description: editor.metaDescription.trim(),
         url: canonicalUrl,
         type: "product",
         image: product.images[0]?.storagePath ?? product.catalogImageUrl ?? undefined,
       },
-      twitter_card: {
+      p_twitter_card: {
         card: product.images[0]?.storagePath || product.catalogImageUrl ? "summary_large_image" : "summary",
         title: editor.titleTag.trim(),
         description: editor.metaDescription.trim(),
       },
-      breadcrumbs: parseJsonField("breadcrumbs", editor.breadcrumbs),
-      structured_data: parseJsonField("structured data", editor.structuredData),
-      image_metadata: parseJsonField("image metadata", editor.imageMetadata),
-      sitemap,
-      geo: parseJsonField("GEO metadata", editor.geo),
-      keywords,
-      source: "product_admin",
-      change_summary: editor.changeSummary.trim() || "Published from product Copy & SEO tab.",
-      published_at: new Date().toISOString(),
+      p_breadcrumbs: parseJsonField("breadcrumbs", editor.breadcrumbs),
+      p_structured_data: parseJsonField("structured data", editor.structuredData),
+      p_image_metadata: parseJsonField("image metadata", editor.imageMetadata),
+      p_sitemap: sitemap,
+      p_geo: parseJsonField("GEO metadata", editor.geo),
+      p_keywords: keywords,
+      p_source: "product_admin",
+      p_change_summary: editor.changeSummary.trim() || "Published from product Copy & SEO tab.",
     })
-    .select("id")
     .single();
 
   if (revisionError) throw revisionError;
   const revisionRow = revision as { id: string } | null;
   if (!revisionRow?.id) throw new Error("Published SEO revision was not returned");
-
-  const { error: documentError } = await db
-    .from("seo_document")
-    .update({
-      status: "published",
-      published_revision_id: revisionRow.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", document.id);
-
-  if (documentError) throw documentError;
 
   // Keep legacy product columns aligned for screens/imports that still read them.
   await supabase
