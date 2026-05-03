@@ -78,6 +78,7 @@ function mapVariant(row: Record<string, unknown>): ProductVariant {
     qtyOnHand: (row.qty_on_hand as number) ?? 0,
     conditionNotes: (row.condition_notes as string) ?? null,
     marketPrice: (row.market_price as number) ?? null,
+    channelPricing: [],
     createdAt: row.created_at as string,
   };
 }
@@ -88,6 +89,8 @@ function mapVariantPricing(row: Record<string, unknown>): ProductVariantPricing 
     skuCode: row.sku_code as string,
     channel: (row.channel as ProductVariantPricing['channel']) ?? null,
     currentPrice: (row.current_price as number) ?? null,
+    targetPrice: (row.target_price as number) ?? null,
+    ceilingPrice: (row.ceiling_price as number) ?? null,
     floorPrice: (row.floor_price as number) ?? null,
     marketPrice: (row.market_price as number) ?? null,
     avgCost: (row.avg_cost as number) ?? null,
@@ -134,7 +137,7 @@ function applyPricing(variant: ProductVariant, pricing: ProductVariantPricing | 
 
   return {
     ...variant,
-    salePrice: pricing.currentPrice ?? variant.salePrice,
+    salePrice: pricing.targetPrice ?? pricing.currentPrice ?? variant.salePrice,
     floorPrice: pricing.floorPrice ?? variant.floorPrice,
     avgCost: pricing.avgCost ?? variant.avgCost,
     costRange: pricing.costRange ?? variant.costRange,
@@ -193,7 +196,7 @@ export function useProducts() {
 
       const { data: pricingRows } = await supabase
         .from('v_current_sku_pricing' as never)
-        .select('sku_id, sku_code, channel, current_price, floor_price, market_price, avg_cost, cost_range, confidence_score, priced_at');
+        .select('sku_id, sku_code, channel, current_price, target_price, floor_price, ceiling_price, market_price, avg_cost, cost_range, confidence_score, priced_at');
 
       const pricingBySku = preferredPricing(
         ((pricingRows ?? []) as Record<string, unknown>[]).map(mapVariantPricing),
@@ -303,12 +306,17 @@ export function useProduct(mpn: string | undefined) {
 
       const { data: pricingRows } = await supabase
         .from('v_current_sku_pricing' as never)
-        .select('sku_id, sku_code, channel, current_price, floor_price, market_price, avg_cost, cost_range, confidence_score, priced_at')
+        .select('sku_id, sku_code, channel, current_price, target_price, floor_price, ceiling_price, market_price, avg_cost, cost_range, confidence_score, priced_at')
         .eq('mpn' as never, mpn!);
 
-      const pricingBySku = preferredPricing(
-        ((pricingRows ?? []) as Record<string, unknown>[]).map(mapVariantPricing),
-      );
+      const allPricingRows = ((pricingRows ?? []) as Record<string, unknown>[]).map(mapVariantPricing);
+      const pricingBySku = preferredPricing(allPricingRows);
+      const pricingRowsBySku = new Map<string, ProductVariantPricing[]>();
+      for (const pricing of allPricingRows) {
+        const list = pricingRowsBySku.get(pricing.skuCode) ?? [];
+        list.push(pricing);
+        pricingRowsBySku.set(pricing.skuCode, list);
+      }
 
       const variants: ProductVariant[] = ((skuRows ?? []) as Record<string, unknown>[]).map((row) => {
         const code = row.sku_code as string;
@@ -319,7 +327,10 @@ export function useProduct(mpn: string | undefined) {
           avgCost: summary ? (summary.avg_cost as number) ?? null : null,
           floorPrice: null,
         };
-        return applyPricing(variant, pricingBySku.get(code));
+        return {
+          ...applyPricing(variant, pricingBySku.get(code)),
+          channelPricing: pricingRowsBySku.get(code) ?? [],
+        };
       });
 
       // Fetch images

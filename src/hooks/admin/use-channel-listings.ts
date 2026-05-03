@@ -22,6 +22,7 @@ export const channelListingKeys = {
   byVariant: (sku: string) => ['v2', 'channel-listings', 'variant', sku] as const,
   fees: (channel: string) => ['v2', 'channel-fees', channel] as const,
   pricingByVariant: (skuId: string) => ['v2', 'channel-pricing', 'variant', skuId] as const,
+  websitePreflight: (skuId: string) => ['v2', 'website-listing-preflight', skuId] as const,
 };
 
 export interface ChannelPricingQuote {
@@ -32,10 +33,31 @@ export interface ChannelPricingQuote {
   ceiling_price: number | null;
   estimated_fees: number | null;
   estimated_net: number | null;
+  carrying_value?: number | null;
+  average_carrying_value?: number | null;
+  stock_unit_count?: number;
   market_consensus: number | null;
   confidence_score: number | null;
+  blocking_reasons?: string[];
+  warning_reasons?: string[];
   sku_code?: string;
   breakdown?: Record<string, number>;
+}
+
+export interface WebsiteListingPreflight {
+  sku_id: string;
+  sku_code: string;
+  channel: 'web';
+  can_publish: boolean;
+  action_state: 'publish' | 'activate_sku' | 'receive_stock' | 'set_price' | 'recalculate_price';
+  actions: string[];
+  blockers: string[];
+  warnings: string[];
+  saleable_stock_count: number;
+  active_flag: boolean;
+  saleable_flag: boolean;
+  final_price: number | null;
+  quote: ChannelPricingQuote;
 }
 
 // ─── Row → Interface Mapper ────────────────────────────────
@@ -186,6 +208,33 @@ export function useVariantChannelPricing(skuId: string | undefined, skuCode?: st
   });
 }
 
+export function useWebsiteListingPreflight(skuId: string | undefined, listedPrice?: number | null) {
+  return useQuery({
+    queryKey: [...channelListingKeys.websitePreflight(skuId ?? ''), listedPrice ?? null],
+    enabled: !!skuId,
+    staleTime: 60_000,
+    queryFn: async () => invokeWithAuth<WebsiteListingPreflight>('admin-data', {
+      action: 'website-listing-preflight',
+      sku_id: skuId!,
+      listed_price: listedPrice ?? undefined,
+    }),
+  });
+}
+
+export function useActivateSku() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ skuId }: { skuId: string; skuCode: string }) =>
+      invokeWithAuth('admin-data', { action: 'activate-sku', sku_id: skuId }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.websitePreflight(variables.skuId) });
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
+      queryClient.invalidateQueries({ queryKey: productKeys.all });
+    },
+  });
+}
+
 // ─── useChannelFees ─────────────────────────────────────────
 
 export interface ChannelFeeInfo {
@@ -294,6 +343,17 @@ export function usePublishListing() {
       if (skuErr) throw skuErr;
 
       const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
+
+      if (channel === 'website' || channel === 'web') {
+        const result = await invokeWithAuth('admin-data', {
+          action: 'create-web-listing',
+          sku_id: skuId,
+          listed_price: listingPrice,
+          listing_title: listingTitle,
+          listing_description: listingDescription,
+        });
+        return result;
+      }
 
       // Normalize channel value: legacy `channel` column uses 'web' for the
       // website, while v2_channel uses 'website'. The UI/Channel type sends

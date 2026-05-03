@@ -4,6 +4,8 @@ import {
   useChannelFees,
   usePublishListing,
   useVariantChannelPricing,
+  useWebsiteListingPreflight,
+  useActivateSku,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
 import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
@@ -51,7 +53,9 @@ function VariantChannelsCard({
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.id, variant.sku);
+  const { data: webPreflight, isLoading: webPreflightLoading } = useWebsiteListingPreflight(variant.id);
   const publishListing = usePublishListing();
+  const activateSku = useActivateSku();
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
@@ -134,6 +138,10 @@ function VariantChannelsCard({
       toast.error(`${ch.label} pricing quote does not match ${variant.sku}`);
       return;
     }
+    if (ch.key === "website" && webPreflight && !webPreflight.can_publish) {
+      toast.error(webPreflight.blockers[0] ?? "Website listing is blocked");
+      return;
+    }
     if (!state?.title?.trim()) {
       toast.error(`${ch.label} listing title is required`);
       return;
@@ -196,7 +204,8 @@ function VariantChannelsCard({
           const estimatedNet = pricing?.estimated_net ?? listing?.estimatedNet ?? null;
           const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
-          const canPublish = !pricingLoading && !titleEmpty && price > 0 && !belowFloor;
+          const websiteBlocked = ch.key === "website" && webPreflight ? !webPreflight.can_publish : false;
+          const canPublish = !pricingLoading && !webPreflightLoading && !titleEmpty && price > 0 && !belowFloor && !websiteBlocked;
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
@@ -288,6 +297,40 @@ function VariantChannelsCard({
                   Calculated target is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update channel costs or pricing controls before publishing.
                 </div>
               )}
+
+              {ch.key === "website" && webPreflight && !webPreflight.can_publish && (
+                <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+                  <div className="font-semibold">Website publish blocked</div>
+                  <div className="mt-1 space-y-0.5">
+                    {webPreflight.blockers.map((blocker) => (
+                      <div key={blocker}>{blocker}</div>
+                    ))}
+                  </div>
+                  {webPreflight.actions.includes("activate_sku") && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await activateSku.mutateAsync({ skuId: variant.id, skuCode: variant.sku });
+                          toast.success(`${variant.sku} activated`);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : "Failed to activate SKU");
+                        }
+                      }}
+                      disabled={activateSku.isPending}
+                      className="mt-2 rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800 disabled:opacity-50"
+                    >
+                      {activateSku.isPending ? "Activating..." : "Activate SKU"}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {ch.key === "website" && webPreflight?.warnings?.length ? (
+                <div className="mb-2 rounded-md border border-zinc-200 bg-white p-2 text-[11px] text-zinc-600">
+                  {webPreflight.warnings.map((warning) => warning.replace(/_/g, " ")).join("; ")}
+                </div>
+              ) : null}
 
               {pricing && (
                 <div className="mb-2 grid grid-cols-3 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px]">

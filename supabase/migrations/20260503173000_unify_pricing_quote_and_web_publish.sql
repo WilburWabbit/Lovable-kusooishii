@@ -588,3 +588,28 @@ FROM public.sku sk
 LEFT JOIN latest_listing_snapshot lls ON lls.sku_id = sk.id;
 
 GRANT SELECT ON public.v_current_sku_pricing TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.coalesce_market_signal_source_metadata()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS '
+BEGIN
+  NEW.metadata := COALESCE(NEW.metadata, ''{}''::jsonb);
+  RETURN NEW;
+END;
+';
+
+DROP TRIGGER IF EXISTS coalesce_market_signal_source_metadata
+  ON public.market_signal_source;
+
+CREATE TRIGGER coalesce_market_signal_source_metadata
+  BEFORE INSERT OR UPDATE ON public.market_signal_source
+  FOR EACH ROW EXECUTE FUNCTION public.coalesce_market_signal_source_metadata();
+
+ALTER TABLE public.market_signal_source
+  ALTER COLUMN metadata SET DEFAULT '{}'::jsonb;
+
+UPDATE public.market_signal_source
+SET metadata = '{}'::jsonb
+WHERE metadata IS NULL;

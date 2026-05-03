@@ -10,13 +10,31 @@ import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
 import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
 import { toast } from "sonner";
-import type { ProductVariant } from "@/lib/types/admin";
+import type { Channel, ProductVariant, ProductVariantPricing } from "@/lib/types/admin";
 
 interface ProductDetailProps {
   mpn: string;
 }
 
 type TabKey = "stock" | "photos" | "copy" | "minifigs" | "channels" | "specs" | "market";
+const HEADER_CHANNELS: Array<{ key: Channel; priceChannel: string; label: string }> = [
+  { key: "website", priceChannel: "web", label: "Web" },
+  { key: "ebay", priceChannel: "ebay", label: "eBay" },
+  { key: "bricklink", priceChannel: "bricklink", label: "BrickLink" },
+  { key: "brickowl", priceChannel: "brickowl", label: "BrickOwl" },
+];
+
+function normalizedPricingChannel(channel: string | null | undefined) {
+  return channel === "website" ? "web" : channel;
+}
+
+function pricingForChannel(variant: ProductVariant, channel: string): ProductVariantPricing | undefined {
+  return variant.channelPricing.find((pricing) => normalizedPricingChannel(pricing.channel) === channel);
+}
+
+function money(value: number | null | undefined) {
+  return value == null || !Number.isFinite(Number(value)) ? "—" : `£${Number(value).toFixed(2)}`;
+}
 
 // ─── Inline editable price cell ──────────────────────────────
 
@@ -173,7 +191,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
         <div
           className="grid gap-3 mb-5"
           style={{
-            gridTemplateColumns: `repeat(${Math.min(product.variants.length, 4)}, 1fr)`,
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
           }}
         >
           {product.variants.map((v) => (
@@ -182,18 +200,11 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 <Mono color="amber" className="text-[13px]">{v.sku}</Mono>
                 <GradeBadge grade={v.grade} size="md" />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <PriceCell variant={v} mpn={mpn} />
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <div className="text-[10px] text-zinc-500">Avg Cost</div>
                   <Mono className="text-sm">
-                    {v.avgCost ? `£${v.avgCost.toFixed(2)}` : "\u2014"}
-                  </Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500">Floor</div>
-                  <Mono color="red" className="text-sm">
-                    {v.floorPrice ? `£${v.floorPrice.toFixed(2)}` : "\u2014"}
+                    {money(v.avgCost)}
                   </Mono>
                 </div>
                 <div>
@@ -207,9 +218,28 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 <div>
                   <div className="text-[10px] text-zinc-500">Market</div>
                   <Mono className="text-sm">
-                    {v.marketPrice ? `£${v.marketPrice.toFixed(2)}` : "\u2014"}
+                    {money(v.marketPrice)}
                   </Mono>
                 </div>
+              </div>
+              <div className="grid gap-1.5">
+                {HEADER_CHANNELS.map((channel) => {
+                  const pricing = pricingForChannel(v, channel.priceChannel);
+                  return (
+                    <div
+                      key={channel.key}
+                      className="grid grid-cols-[72px_1fr_1fr] items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px]"
+                    >
+                      <span className="font-semibold text-zinc-700">{channel.label}</span>
+                      <span className="text-zinc-500">
+                        Target <Mono color={pricing?.targetPrice ? "teal" : "amber"}>{money(pricing?.targetPrice)}</Mono>
+                      </span>
+                      <span className="text-zinc-500">
+                        Floor <Mono color={pricing?.floorPrice ? "red" : "amber"}>{money(pricing?.floorPrice)}</Mono>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </SurfaceCard>
           ))}
