@@ -75,7 +75,7 @@ export const adminSidebarSections: AdminNavSection[] = [
         label: "Settings/System",
         to: "/admin/settings",
         description: "Integrations, rules, mappings, diagnostics, and logs.",
-        match: ["/admin/settings", "/admin/data-sync"],
+        match: ["/admin/settings", "/admin/data-sync", "/admin/gmc"],
       },
     ],
   },

@@ -1,25 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
-import {
-  ShoppingCart,
-  Package,
-  ClipboardList,
-  Users,
-  Wallet,
-  Inbox,
-  AlertTriangle,
-  BarChart3,
-  ArrowUpDown,
-  Receipt,
-  Truck,
-  Settings,
-  Activity,
-  MessageSquare,
-  FileSearch,
-  Store,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
+import { adminSidebarSections, isAdminNavItemActive, type AdminNavCountKey } from "@/lib/admin-navigation";
 
 interface SidebarItemProps {
   icon: React.ElementType;
@@ -75,20 +58,10 @@ export function AdminV2Sidebar({
 }: AdminV2SidebarProps) {
   const location = useLocation();
 
-  const isActive = (path: string) => {
-    if (path === "/admin/purchases") {
-      return location.pathname === "/admin/purchases" || location.pathname.startsWith("/admin/purchases/");
-    }
-    if (path === "/admin/products") {
-      return location.pathname === "/admin/products" || location.pathname.startsWith("/admin/products/");
-    }
-    if (path === "/admin/orders") {
-      return location.pathname === "/admin/orders" || location.pathname.startsWith("/admin/orders/");
-    }
-    if (path === "/admin/customers") {
-      return location.pathname === "/admin/customers" || location.pathname.startsWith("/admin/customers/");
-    }
-    return location.pathname.startsWith(path);
+  const countFor = (key?: AdminNavCountKey) => {
+    if (key === "ungraded") return ungradedCount > 0 ? ungradedCount : undefined;
+    if (key === "actionNeeded") return actionNeededCount > 0 ? actionNeededCount : undefined;
+    return undefined;
   };
 
   return (
@@ -123,133 +96,24 @@ export function AdminV2Sidebar({
         </button>
       </div>
 
-      {/* Pipeline */}
-      <div className="py-3 border-b border-zinc-700/80">
-        <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
-          Pipeline
+      {adminSidebarSections.map((section) => (
+        <div key={section.label} className="py-3 border-b border-zinc-700/80">
+          <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
+            {section.label}
+          </div>
+          {section.items.map((item) => (
+            <SidebarItem
+              key={item.to}
+              icon={item.icon}
+              label={item.label}
+              to={item.to}
+              active={isAdminNavItemActive(location.pathname, item)}
+              count={countFor(item.countKey)}
+              onNavigate={onClose}
+            />
+          ))}
         </div>
-        <SidebarItem
-          icon={ShoppingCart}
-          label="Purchases"
-          to="/admin/purchases"
-          active={isActive("/admin/purchases")}
-          count={ungradedCount > 0 ? ungradedCount : undefined}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Package}
-          label="Products"
-          to="/admin/products"
-          active={isActive("/admin/products")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={ClipboardList}
-          label="Orders"
-          to="/admin/orders"
-          active={isActive("/admin/orders")}
-          count={actionNeededCount > 0 ? actionNeededCount : undefined}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Users}
-          label="Customers"
-          to="/admin/customers"
-          active={isActive("/admin/customers")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Wallet}
-          label="Payouts"
-          to="/admin/payouts"
-          active={isActive("/admin/payouts")}
-          onNavigate={onClose}
-        />
-      </div>
-
-      {/* System */}
-      <div className="py-3 border-b border-zinc-700/80">
-        <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
-          System
-        </div>
-        <SidebarItem
-          icon={Inbox}
-          label="Intake"
-          to="/admin/intake"
-          active={isActive("/admin/intake")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={AlertTriangle}
-          label="Operations"
-          to="/admin/operations"
-          active={isActive("/admin/operations")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={BarChart3}
-          label="Analytics"
-          to="/admin/analytics"
-          active={isActive("/admin/analytics")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={ArrowUpDown}
-          label="Data Sync"
-          to="/admin/data-sync"
-          active={isActive("/admin/data-sync")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Store}
-          label="Google Merchant"
-          to="/admin/gmc"
-          active={isActive("/admin/gmc")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Receipt}
-          label="Pricing"
-          to="/admin/pricing"
-          active={isActive("/admin/pricing")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Truck}
-          label="Shipping Rates"
-          to="/admin/shipping-rates"
-          active={isActive("/admin/shipping-rates")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Settings}
-          label="Channel Mappings"
-          to="/admin/settings/channel-mappings"
-          active={isActive("/admin/settings/channel-mappings")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={FileSearch}
-          label="SEO/GEO"
-          to="/admin/settings/seo-geo"
-          active={isActive("/admin/settings/seo-geo")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Activity}
-          label="App Health"
-          to="/admin/settings/app-health"
-          active={isActive("/admin/settings/app-health")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={MessageSquare}
-          label="Transcripts"
-          to="/admin/system/transcripts"
-          active={isActive("/admin/system/transcripts")}
-          onNavigate={onClose}
-        />
-      </div>
+      ))}
 
       {/* Connection Status Footer */}
       <ConnectionFooter />
