@@ -686,7 +686,7 @@ export function PricingActionsCard() {
               </div>
             ))}
           </div>
-        ))}
+        )}
       </SurfaceCard>
     </div>
   );
