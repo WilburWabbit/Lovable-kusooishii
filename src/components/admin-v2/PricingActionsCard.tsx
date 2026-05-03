@@ -637,8 +637,9 @@ export function PricingActionsCard() {
           </button>
         </div>
 
-        {singleResult && (
-          <div className="mt-3 p-3 rounded bg-zinc-50 border border-zinc-200">
+        {singleResults.map((singleResult) => (
+          <div key={singleResult.sku_code} className="mt-3 p-3 rounded bg-zinc-50 border border-zinc-200">
+            <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-2">{singleResult.sku_code}</div>
             <div className="grid gap-2 text-xs sm:grid-cols-4">
               <div>
                 <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
@@ -681,7 +682,7 @@ export function PricingActionsCard() {
               </Mono>
             </div>
           </div>
-        )}
+        ))}
       </SurfaceCard>
     </div>
   );
