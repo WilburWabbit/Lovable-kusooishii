@@ -16,6 +16,7 @@ import {
   Activity,
   MessageSquare,
   FileSearch,
+  Store,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -198,6 +199,13 @@ export function AdminV2Sidebar({
           label="Data Sync"
           to="/admin/data-sync"
           active={isActive("/admin/data-sync")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={Store}
+          label="Google Merchant"
+          to="/admin/gmc"
+          active={isActive("/admin/gmc")}
           onNavigate={onClose}
         />
         <SidebarItem

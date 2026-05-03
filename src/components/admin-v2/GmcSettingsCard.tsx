@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { invokeWithAuth } from '@/lib/invokeWithAuth';
-import { SurfaceCard, SectionHead, Badge } from './ui-primitives';
+import { SurfaceCard, SectionHead, Badge, Mono } from './ui-primitives';
 
 type GmcStatus = {
   connected: boolean;
@@ -19,6 +19,7 @@ export function GmcSettingsCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [merchantId, setMerchantId] = useState('');
   const [dataSource, setDataSource] = useState('');
+  const [lastPublishResult, setLastPublishResult] = useState<Record<string, unknown> | null>(null);
 
   const loadStatus = async () => {
     const data = await invokeWithAuth<GmcStatus>('gmc-auth', { action: 'status' });
@@ -78,8 +79,12 @@ export function GmcSettingsCard() {
   });
 
   const publishAll = () => run('publish', async () => {
-    const d = await invokeWithAuth<{ queued?: number; errors?: number; skipped?: number }>('gmc-sync', { action: 'publish_all' });
-    toast.success(`Queued ${d.queued ?? 0} products (${d.skipped ?? 0} skipped, ${d.errors ?? 0} errors)`);
+    const d = await invokeWithAuth<Record<string, unknown>>('gmc-sync', { action: 'publish_all' });
+    setLastPublishResult(d);
+    const queued = Number(d?.queued ?? 0);
+    const skipped = Number(d?.skipped ?? 0);
+    const errors = Number(d?.errors ?? 0);
+    toast.success(`Queued ${queued} products (${skipped} skipped, ${errors} errors)`);
   });
 
   const syncStatus = () => run('sync-status', async () => {
@@ -107,6 +112,25 @@ export function GmcSettingsCard() {
           <button onClick={syncStatus} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border">Sync Status</button>
           <button onClick={disconnect} disabled={!status?.connected || !!busy} className="px-3 py-1.5 rounded text-xs font-medium border border-red-300 text-red-700">Disconnect</button>
         </div>
+        
+        {lastPublishResult && (
+          <div className="rounded border p-2 text-xs space-y-2">
+            <div className="font-medium">Last publish diagnostics</div>
+            <div className="grid gap-1 sm:grid-cols-3">
+              <div>Queued: <Mono>{String(lastPublishResult.queued ?? 0)}</Mono></div>
+              <div>Skipped: <Mono>{String(lastPublishResult.skipped ?? 0)}</Mono></div>
+              <div>Errors: <Mono>{String(lastPublishResult.errors ?? 0)}</Mono></div>
+            </div>
+            <div>
+              <div className="mb-1 text-muted-foreground">Error details</div>
+              <pre className="max-h-40 overflow-auto rounded bg-zinc-950/70 p-2">{JSON.stringify(lastPublishResult.errorDetails ?? [], null, 2)}</pre>
+            </div>
+            <div>
+              <div className="mb-1 text-muted-foreground">Skipped details</div>
+              <pre className="max-h-40 overflow-auto rounded bg-zinc-950/70 p-2">{JSON.stringify(lastPublishResult.skippedDetails ?? [], null, 2)}</pre>
+            </div>
+          </div>
+        )}
       </div>
     </SurfaceCard>
   );

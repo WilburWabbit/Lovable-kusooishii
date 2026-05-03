@@ -67,6 +67,7 @@ const TranscriptsPage = lazy(() => import("./pages/admin-v2/TranscriptsPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
+const GmcAdminPage = lazy(() => import("./pages/admin-v2/GmcAdminPage"));
 
 // Lazy-load 404
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -165,6 +166,7 @@ const App = () => (
             <Route path="/admin/shipping-rates" element={<AdminRoute path="/admin/shipping-rates"><ShippingRatesPage /></AdminRoute>} />
             <Route path="/admin/channels/ebay" element={<AdminRoute path="/admin/channels/ebay"><EbayStorefrontPage /></AdminRoute>} />
             <Route path="/admin/data-sync" element={<AdminRoute path="/admin/data-sync"><DataSyncPage /></AdminRoute>} />
+            <Route path="/admin/gmc" element={<AdminRoute path="/admin/gmc"><GmcAdminPage /></AdminRoute>} />
             <Route path="/admin/intake" element={<AdminRoute path="/admin/intake"><IntakePage /></AdminRoute>} />
             <Route path="/admin/operations" element={<AdminRoute path="/admin/operations"><OperationsPage /></AdminRoute>} />
             <Route path="/admin/settings/channel-mappings" element={<AdminRoute path="/admin/settings/channel-mappings"><ChannelMappingsSettingsPage /></AdminRoute>} />
