@@ -229,6 +229,9 @@ export interface ChannelListing {
   feeAdjustedPrice: number | null;
   estimatedFees: number | null;
   estimatedNet: number | null;
+  priceFloor?: number | null;
+  priceTarget?: number | null;
+  priceCeiling?: number | null;
 }
 
 // ─── 2.8 Order ────────────────────────────────────────────

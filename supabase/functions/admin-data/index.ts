@@ -90,7 +90,7 @@ async function buildWebsiteListingPreflight(
 
   const targetPrice = Number(quote.target_price ?? 0);
   const floorPrice = Number(quote.floor_price ?? 0);
-  const finalPrice = listedPrice && listedPrice > 0 ? Math.max(listedPrice, floorPrice) : targetPrice;
+  const finalPrice = listedPrice && listedPrice > 0 ? listedPrice : targetPrice;
   const blockers: string[] = [];
   const actions: string[] = [];
 
@@ -620,7 +620,9 @@ Deno.serve(async (req) => {
       let finalPrice = Number(preflight.final_price ?? 0);
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
       const quoteFloor = Number(preflight.quote.floor_price ?? 0);
-      if (quoteFloor > 0 && finalPrice < quoteFloor) finalPrice = quoteFloor;
+      if (quoteFloor > 0 && finalPrice < quoteFloor) {
+        throw new ValidationError(`Cannot list: website price £${finalPrice.toFixed(2)} is below floor £${quoteFloor.toFixed(2)}.`);
+      }
 
       // Sync resolved price back to SKU
       await admin.from("sku").update({ price: finalPrice }).eq("id", sku_id);

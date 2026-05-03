@@ -40,6 +40,7 @@ export interface ChannelPricingQuote {
   confidence_score: number | null;
   blocking_reasons?: string[];
   warning_reasons?: string[];
+  quote_error?: string;
   sku_code?: string;
   breakdown?: Record<string, number>;
 }
@@ -89,6 +90,9 @@ function mapListing(
     feeAdjustedPrice: (row.fee_adjusted_price as number) ?? null,
     estimatedFees: snapshot?.estimatedFees ?? null,
     estimatedNet: snapshot?.estimatedNet ?? null,
+    priceFloor: (row.price_floor as number) ?? null,
+    priceTarget: (row.price_target as number) ?? null,
+    priceCeiling: (row.price_ceiling as number) ?? null,
   };
 }
 
@@ -191,15 +195,35 @@ export function useVariantChannelPricing(skuId: string | undefined, skuCode?: st
 
       const entries = await Promise.all(
         channels.map(async ({ key, pricingChannel }) => {
-          const quote = await invokeWithAuth<ChannelPricingQuote>('admin-data', {
-            action: 'calculate-pricing',
-            sku_id: skuId!,
-            channel: pricingChannel,
-          });
-          if (quote.sku_id !== skuId) {
-            throw new Error(`Pricing quote returned for the wrong SKU (${skuCode ?? skuId})`);
+          try {
+            const quote = await invokeWithAuth<ChannelPricingQuote>('admin-data', {
+              action: 'calculate-pricing',
+              sku_id: skuId!,
+              channel: pricingChannel,
+            });
+            if (quote.sku_id !== skuId) {
+              throw new Error(`Pricing quote returned for the wrong SKU (${skuCode ?? skuId})`);
+            }
+            return [key, { ...quote, sku_code: skuCode }] as const;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Pricing quote failed';
+            return [key, {
+              sku_id: skuId!,
+              sku_code: skuCode,
+              channel: pricingChannel,
+              floor_price: null,
+              target_price: null,
+              ceiling_price: null,
+              estimated_fees: null,
+              estimated_net: null,
+              market_consensus: null,
+              confidence_score: null,
+              blocking_reasons: [],
+              warning_reasons: [],
+              quote_error: message,
+              breakdown: {},
+            }] as const;
           }
-          return [key, { ...quote, sku_code: skuCode }] as const;
         }),
       );
 

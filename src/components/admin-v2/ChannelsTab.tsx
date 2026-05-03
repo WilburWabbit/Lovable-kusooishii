@@ -32,6 +32,11 @@ function normalizedChannel(channel: Channel | string | null | undefined): Channe
   return (channel ?? "website") as Channel;
 }
 
+type ChannelFormState = { title: string; description: string; price: string };
+type ChannelDirtyState = { title: boolean; description: boolean; price: boolean };
+
+const cleanDirtyState: ChannelDirtyState = { title: false, description: false, price: false };
+
 export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
@@ -55,7 +60,6 @@ function VariantChannelsCard({
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.id, variant.sku);
-  const { data: webPreflight, isLoading: webPreflightLoading } = useWebsiteListingPreflight(variant.id);
   const publishListing = usePublishListing();
   const activateSku = useActivateSku();
   const queryClient = useQueryClient();
@@ -88,19 +92,26 @@ function VariantChannelsCard({
   // fields the user hasn't touched (the previous useState-only init left the
   // form stuck on default-generated values when listings arrived after first
   // render, causing the wrong title to be pushed to eBay).
-  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean }>>({});
-  const [channelState, setChannelState] = useState<
-    Record<string, { title: string; description: string; price: string }>
-  >({});
+  const dirtyRef = useRef<Record<string, ChannelDirtyState>>({});
+  const [channelState, setChannelState] = useState<Record<string, ChannelFormState>>({});
+  const websiteInputPrice = Number(channelState.website?.price ?? "");
+  const websitePreflightPrice = Number.isFinite(websiteInputPrice) && websiteInputPrice > 0
+    ? websiteInputPrice
+    : null;
+  const { data: webPreflight, isLoading: webPreflightLoading } = useWebsiteListingPreflight(
+    variant.id,
+    websitePreflightPrice,
+  );
 
   useEffect(() => {
     setChannelState((prev) => {
-      const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
+      const next: Record<string, ChannelFormState> = { ...prev };
       for (const ch of CHANNELS) {
         const existing = listings.find((l) => normalizedChannel(l.channel) === ch.key);
         const pricing = pricingByChannel?.get(ch.key);
         const quoteBelongsToVariant = !pricing || pricing.sku_id === variant.id;
-        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false };
+        const quoteIsUsable = quoteBelongsToVariant && !pricing?.quote_error;
+        const dirty = dirtyRef.current[ch.key] ?? cleanDirtyState;
         const current = prev[ch.key];
 
         const defaultTitle = ch.key === "ebay" ? defaultEbayTitle : product.name;
@@ -111,17 +122,19 @@ function VariantChannelsCard({
           description: dirty.description
             ? current?.description ?? ""
             : existing?.listingDescription ?? "",
-          price: quoteBelongsToVariant
-            ? pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? ""
-            : existing?.listingPrice?.toFixed(2) ?? "",
+          price: dirty.price
+            ? current?.price ?? ""
+            : quoteIsUsable
+              ? pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? ""
+              : existing?.listingPrice?.toFixed(2) ?? "",
         };
       }
       return next;
     });
   }, [listings, pricingByChannel, defaultEbayTitle, product.name, variant.id]);
 
-  const updateField = (channel: string, field: "title" | "description", value: string) => {
-    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false };
+  const updateField = (channel: string, field: keyof ChannelDirtyState, value: string) => {
+    const channelDirty = dirtyRef.current[channel] ?? cleanDirtyState;
     dirtyRef.current[channel] = { ...channelDirty, [field]: true };
     setChannelState((prev) => ({
       ...prev,
@@ -136,6 +149,7 @@ function VariantChannelsCard({
 
   const handlePublish = async (ch: { key: Channel; label: string }) => {
     const state = channelState[ch.key];
+    const listing = listingsByChannel.get(ch.key);
     const pricing = pricingByChannel?.get(ch.key);
     if (pricing && pricing.sku_id !== variant.id) {
       toast.error(`${ch.label} pricing quote does not match ${variant.sku}`);
@@ -150,15 +164,21 @@ function VariantChannelsCard({
       return;
     }
 
-    const price = Number(pricing?.target_price ?? state.price);
+    const price = Number(state?.price ?? "");
     if (isNaN(price) || price <= 0) {
-      toast.error("Calculated price is not available");
+      toast.error("Enter a valid listing price");
       return;
     }
 
-    const floorPrice = pricing?.floor_price ?? null;
+    const floorPrice = pricing?.floor_price ?? listing?.priceFloor ?? null;
     if (floorPrice != null && price < floorPrice) {
-      toast.error(`${ch.label} calculated target is below its channel floor`);
+      toast.error(`${ch.label} price is below its channel floor`);
+      return;
+    }
+
+    const priceDirty = dirtyRef.current[ch.key]?.price ?? false;
+    if (pricing?.quote_error && (!priceDirty || floorPrice == null || price < floorPrice)) {
+      toast.error(`${ch.label} pricing quote must be fixed before publishing`);
       return;
     }
 
@@ -205,18 +225,28 @@ function VariantChannelsCard({
           const status = listing?.status ?? "draft";
           const statusInfo = CHANNEL_LISTING_STATUSES[status];
           const state = channelState[ch.key] ?? { title: "", description: "", price: "0" };
+          const dirty = dirtyRef.current[ch.key] ?? cleanDirtyState;
           const feeInfo = feesMap?.get(ch.key) ?? (ch.key === "website" ? feesMap?.get("web") : undefined);
           const quote = pricingByChannel?.get(ch.key);
           const pricing = quote?.sku_id === variant.id ? quote : undefined;
-          const price = Number(pricing?.target_price ?? state.price) || 0;
-          const floorPrice = pricing?.floor_price ?? null;
+          const pricingError = pricing?.quote_error ?? null;
+          const price = Number(state.price) || 0;
+          const floorPrice = pricing?.floor_price ?? listing?.priceFloor ?? null;
           const estimatedFees = pricing?.estimated_fees ?? listing?.estimatedFees ?? null;
           const estimatedNet = pricing?.estimated_net ?? listing?.estimatedNet ?? null;
           const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
           const websiteBlocked = ch.key === "website" && webPreflight ? !webPreflight.can_publish : false;
           const preflightChecking = ch.key === "website" && webPreflightLoading;
-          const canPublish = !pricingLoading && !webPreflightLoading && !titleEmpty && price > 0 && !belowFloor && !websiteBlocked;
+          const manualAboveKnownFloor = dirty.price && price > 0 && floorPrice != null && price >= floorPrice;
+          const quoteReady = Boolean(pricing && !pricingError);
+          const canPublish = !pricingLoading
+            && !webPreflightLoading
+            && !titleEmpty
+            && price > 0
+            && !belowFloor
+            && !websiteBlocked
+            && (quoteReady || manualAboveKnownFloor);
           const stockCount = ch.key === "website" ? webPreflight?.saleable_stock_count : pricing?.stock_unit_count;
           const confidence = pricing?.confidence_score == null ? null : Math.round(Number(pricing.confidence_score) * 100);
 
@@ -236,6 +266,7 @@ function VariantChannelsCard({
                   <Badge label={statusInfo.label} color={statusInfo.color} small />
                   {preflightChecking && <Badge label="Checking" color="#71717A" small />}
                   {websiteBlocked && <Badge label="Action needed" color="#F59E0B" small />}
+                  {dirty.price && <Badge label="Manual price" color="#71717A" small />}
                   {liveAndBelowFloor && (
                     <Badge label="Below floor" color="#EF4444" small />
                   )}
@@ -286,8 +317,8 @@ function VariantChannelsCard({
                     step="0.01"
                     min="0"
                     value={state.price}
-                    readOnly
-                    className={`w-full px-2 py-1.5 bg-zinc-50 border rounded text-xs font-mono ${
+                    onChange={(e) => updateField(ch.key, "price", e.target.value)}
+                    className={`w-full px-2 py-1.5 bg-white border rounded text-xs font-mono ${
                       belowFloor ? "border-red-500 text-red-400" : "border-zinc-200 text-zinc-900"
                     }`}
                   />
@@ -313,7 +344,14 @@ function VariantChannelsCard({
               {/* Warnings */}
               {belowFloor && (
                 <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
-                  Calculated target is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update channel costs or pricing controls before publishing.
+                  Price is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update the price or pricing controls before publishing.
+                </div>
+              )}
+
+              {pricingError && (
+                <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
+                  <div>Price quote failed for {ch.label}.</div>
+                  <div className="mt-0.5 font-normal">{pricingError}</div>
                 </div>
               )}
 
@@ -370,7 +408,7 @@ function VariantChannelsCard({
                 </div>
               ) : null}
 
-              {pricing && (
+              {pricing && !pricingError && (
                 <div className="mb-2 grid grid-cols-1 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px] sm:grid-cols-3">
                   <span className="text-zinc-500">Floor <Mono color="red">£{Number(pricing.floor_price ?? 0).toFixed(2)}</Mono></span>
                   <span className="text-zinc-500">Ceiling <Mono color="amber">£{Number(pricing.ceiling_price ?? 0).toFixed(2)}</Mono></span>
