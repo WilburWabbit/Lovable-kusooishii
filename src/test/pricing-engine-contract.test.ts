@@ -11,6 +11,10 @@ const pricingRepairMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260503182000_fix_pricing_enum_cast_and_storefront_offers.sql"),
   "utf8",
 );
+const forceEnumSafeQuoteMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260503190000_force_enum_safe_commerce_quote.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
@@ -67,10 +71,12 @@ describe("pricing engine contract", () => {
   });
 
   it("repairs enum condition grade casts in the canonical quote function", () => {
-    expect(pricingRepairMigration).toContain("sk.condition_grade::integer");
-    expect(pricingRepairMigration).toContain("sk.condition_grade::int");
-    expect(pricingRepairMigration).toContain("regexp_replace(sk.condition_grade::text");
-    expect(pricingRepairMigration).not.toContain("$$");
+    expect(forceEnumSafeQuoteMigration).toContain("CREATE OR REPLACE FUNCTION public.commerce_quote_price");
+    expect(forceEnumSafeQuoteMigration).toContain("regexp_replace(sk.condition_grade::text");
+    expect(forceEnumSafeQuoteMigration).toContain("commerce_quote_price still contains a direct condition_grade integer cast");
+    expect(forceEnumSafeQuoteMigration).not.toContain("sk.condition_grade::integer");
+    expect(forceEnumSafeQuoteMigration).not.toContain("sk.condition_grade::int,");
+    expect(forceEnumSafeQuoteMigration).not.toContain("$$");
   });
 
   it("uses website listing or price decision prices before legacy SKU price on storefront offers", () => {
