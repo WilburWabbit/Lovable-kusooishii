@@ -14,6 +14,7 @@ interface BatchResult {
 
 interface PricingCalculation {
   sku_id: string;
+  sku_code?: string;
   channel: string;
   floor_price: number | null;
   target_price: number | null;
@@ -24,6 +25,8 @@ interface PricingCalculation {
   market_consensus?: number | null;
   breakdown?: Record<string, number>;
 }
+
+type SinglePricingResult = PricingCalculation & { sku_code: string };
 
 interface MarketRefreshSourceResult {
   source: string;
@@ -106,21 +109,23 @@ export function PricingActionsCard() {
   const [singleMpn, setSingleMpn] = useState('');
   const [singleChannel, setSingleChannel] = useState('ebay');
   const [singleRunning, setSingleRunning] = useState(false);
-  const [singleResult, setSingleResult] = useState<PricingCalculation | null>(null);
+  const [singleResults, setSingleResults] = useState<SinglePricingResult[]>([]);
   const [marketRefreshRunning, setMarketRefreshRunning] = useState(false);
   const [marketRefreshCount, setMarketRefreshCount] = useState<number | null>(null);
   const [marketSignalsRunning, setMarketSignalsRunning] = useState(false);
   const [marketRefreshResult, setMarketRefreshResult] = useState<MarketRefreshResult | null>(null);
   const [marketSummary, setMarketSummary] = useState<MarketSummary | null>(null);
 
-  const loadMarketSummary = useCallback(async (skuId?: string) => {
+  const loadMarketSummary = useCallback(async (skuIds?: string | string[]) => {
+    const ids = Array.isArray(skuIds) ? skuIds.filter(Boolean) : skuIds ? [skuIds] : [];
     const signalQuery = supabase
       .from('market_signal')
       .select('source_confidence, freshness_score, observed_at, source:source_id(source_code)' as never)
       .order('observed_at', { ascending: false })
       .limit(250);
 
-    if (skuId) signalQuery.eq('sku_id', skuId);
+    if (ids.length === 1) signalQuery.eq('sku_id', ids[0]);
+    if (ids.length > 1) signalQuery.in('sku_id' as never, ids as never);
 
     const snapshotQuery = supabase
       .from('market_price_snapshot')
@@ -128,7 +133,8 @@ export function PricingActionsCard() {
       .order('captured_at', { ascending: false })
       .limit(100);
 
-    if (skuId) snapshotQuery.eq('sku_id', skuId);
+    if (ids.length === 1) snapshotQuery.eq('sku_id', ids[0]);
+    if (ids.length > 1) snapshotQuery.in('sku_id' as never, ids as never);
 
     const [signalResult, snapshotResult] = await Promise.all([signalQuery, snapshotQuery]);
     if (signalResult.error) throw signalResult.error;
@@ -200,7 +206,7 @@ export function PricingActionsCard() {
     });
   }, []);
 
-  const findFirstSkuForMpn = useCallback(async (mpnInput: string): Promise<{ id: string; sku_code: string } | null> => {
+  const findSkusForMpn = useCallback(async (mpnInput: string): Promise<Array<{ id: string; sku_code: string }>> => {
     const wanted = mpnInput.trim();
     const wantedBase = baseMpn(wanted);
     const { data: products, error: productError } = await supabase
@@ -211,29 +217,31 @@ export function PricingActionsCard() {
     if (productError) throw productError;
 
     const productIds = ((products ?? []) as unknown as Array<{ id: string }>).map((product) => product.id);
+    let productSkus: Array<{ id: string; sku_code: string }> = [];
     if (productIds.length > 0) {
-      const { data: sku, error } = await supabase
+      const { data: skus, error } = await supabase
         .from('sku')
         .select('id, sku_code, condition_grade' as never)
         .in('product_id' as never, productIds as never)
         .eq('active_flag' as never, true as never)
-        .order('condition_grade' as never, { ascending: true } as never)
-        .limit(1)
-        .maybeSingle();
+        .order('sku_code' as never, { ascending: true } as never);
       if (error) throw error;
-      if (sku) return sku as unknown as { id: string; sku_code: string };
+      productSkus = (skus ?? []) as unknown as Array<{ id: string; sku_code: string }>;
     }
 
-    const { data: sku, error } = await supabase
+    const { data: fallbackSkus, error } = await supabase
       .from('sku')
       .select('id, sku_code, condition_grade' as never)
       .or(`mpn.eq.${wanted},sku_code.like.${wanted}.%` as never)
       .eq('active_flag' as never, true as never)
-      .order('condition_grade' as never, { ascending: true } as never)
-      .limit(1)
-      .maybeSingle();
+      .order('sku_code' as never, { ascending: true } as never);
     if (error) throw error;
-    return (sku as unknown as { id: string; sku_code: string } | null) ?? null;
+    const byId = new Map<string, { id: string; sku_code: string }>();
+    for (const sku of productSkus) byId.set(sku.id, sku);
+    for (const sku of ((fallbackSkus ?? []) as unknown as Array<{ id: string; sku_code: string }>)) {
+      byId.set(sku.id, sku);
+    }
+    return [...byId.values()].sort((a, b) => a.sku_code.localeCompare(b.sku_code, undefined, { numeric: true }));
   }, []);
 
   const refreshMarketSnapshots = useCallback(async () => {
@@ -282,8 +290,8 @@ export function PricingActionsCard() {
         return;
       }
       if (onlySingleMpn && mpn) {
-        const sku = await findFirstSkuForMpn(mpn);
-        await loadMarketSummary(sku?.id);
+        const skus = await findSkusForMpn(mpn);
+        await loadMarketSummary(skus.map((sku) => sku.id));
       } else {
         await loadMarketSummary();
       }
@@ -300,7 +308,7 @@ export function PricingActionsCard() {
     } finally {
       setMarketSignalsRunning(false);
     }
-  }, [findFirstSkuForMpn, loadMarketSummary, singleMpn]);
+  }, [findSkusForMpn, loadMarketSummary, singleMpn]);
 
   const runAll = useCallback(async () => {
     setRunning(true);
@@ -374,30 +382,34 @@ export function PricingActionsCard() {
     }
 
     setSingleRunning(true);
-    setSingleResult(null);
+    setSingleResults([]);
 
     try {
-      const sku = await findFirstSkuForMpn(singleMpn.trim());
-      if (!sku) {
+      const skus = await findSkusForMpn(singleMpn.trim());
+      if (skus.length === 0) {
         toast.error(`No active SKU found for MPN "${singleMpn}"`);
         setSingleRunning(false);
         return;
       }
 
-      const pricing = await invokeWithAuth<PricingCalculation>(
-        'admin-data',
-        { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
-      );
+      const results: SinglePricingResult[] = [];
+      for (const sku of skus) {
+        const pricing = await invokeWithAuth<PricingCalculation>(
+          'admin-data',
+          { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
+        );
+        results.push({ ...pricing, sku_code: sku.sku_code });
+      }
 
-      setSingleResult(pricing);
-      await loadMarketSummary(sku.id);
-      toast.success(`Priced ${sku.sku_code}`);
+      setSingleResults(results);
+      await loadMarketSummary(skus.map((sku) => sku.id));
+      toast.success(`Priced ${results.length} SKU${results.length === 1 ? '' : 's'} for ${singleMpn.trim()}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally {
       setSingleRunning(false);
     }
-  }, [findFirstSkuForMpn, singleMpn, singleChannel, loadMarketSummary]);
+  }, [findSkusForMpn, singleMpn, singleChannel, loadMarketSummary]);
 
   return (
     <div className="space-y-4">

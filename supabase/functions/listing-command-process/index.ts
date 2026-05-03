@@ -210,7 +210,7 @@ async function queueGmcPublishAfterWebPublish(
 
     const { data: sku, error: skuErr } = await admin
       .from("sku")
-      .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)")
+      .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, weight_kg, ean, upc, isbn, gmc_product_category)")
       .eq("id" as never, skuId)
       .single();
     if (skuErr) throw skuErr;
@@ -769,7 +769,7 @@ async function processGoogleShoppingCommand(
 
   const { data: sku, error: skuErr } = await admin
     .from("sku")
-    .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)")
+    .select("id, sku_code, condition_grade, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, weight_kg, ean, upc, isbn, gmc_product_category)")
     .eq("id" as never, skuId)
     .single();
   if (skuErr) throw skuErr;

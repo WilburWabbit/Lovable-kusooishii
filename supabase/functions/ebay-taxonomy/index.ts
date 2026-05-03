@@ -26,6 +26,7 @@ import {
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
+import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -37,6 +38,95 @@ const TREE_IDS: Record<string, string> = {
   EBAY_DE: "77",
   EBAY_AU: "15",
 };
+
+const GMC_MAPPING_AI_PROMPT = `You suggest Google Merchant Center mapping rules for Kuso Oishii, a UK LEGO resale commerce platform.
+
+Rules:
+- Return one suggestion for each requested GMC field where possible.
+- Use only the supplied canonical/source keys for canonical_key.
+- Use constant_value for fixed values and fallback defaults.
+- Use transform only for deterministic top-down JSON rules. Supported shape:
+  {"rules":[{"when":{"field":"product_type","op":"includes","value":"minifigure"},"value":"Toys & Games > Toys > Dolls, Playsets & Toy Figures > Toy Figures"}],"default":"Toys & Games > Toys > Building Toys"}
+- Supported condition ops: eq, neq, in, includes, exists, gt, gte, lt, lte.
+- Prefer direct app-mastered fields over constants.
+- For googleProductCategory, prefer gmc_product_category as the canonical source when available, and add a sensible LEGO fallback/category rule from the supplied product facts.
+- Do not invent product facts, identifiers, prices, or availability.
+- Notes and reasons must be short and operational.`;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function cleanNullableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeTransform(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    JSON.parse(trimmed);
+    return trimmed;
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return null;
+}
+
+function parseAiToolObject(data: unknown): Record<string, unknown> {
+  const payload = asRecord(data);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const message = asRecord(asRecord(choices[0]).message);
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const args = asRecord(asRecord(toolCalls[0]).function).arguments;
+  if (args) return typeof args === "string" ? asRecord(JSON.parse(args)) : asRecord(args);
+  const content = cleanNullableString(message.content) ?? "{}";
+  return asRecord(JSON.parse(content));
+}
+
+function normalizeGmcSuggestion(
+  raw: unknown,
+  allowedFields: Set<string>,
+  allowedCanonicalKeys: Set<string>,
+) {
+  const row = asRecord(raw);
+  const aspectKey = cleanNullableString(row.aspect_key);
+  if (!aspectKey || !allowedFields.has(aspectKey)) return null;
+
+  const canonicalKey = cleanNullableString(row.canonical_key);
+  const safeCanonicalKey = canonicalKey && allowedCanonicalKeys.has(canonicalKey)
+    ? canonicalKey
+    : null;
+  const constantValue = cleanNullableString(row.constant_value);
+  let transform: string | null = null;
+  try {
+    transform = normalizeTransform(row.transform);
+  } catch {
+    transform = null;
+  }
+
+  if (!safeCanonicalKey && !constantValue && !transform) return null;
+
+  const confidence = cleanNullableString(row.confidence);
+  return {
+    channel: "gmc",
+    marketplace: "GB",
+    category_id: null,
+    aspect_key: aspectKey,
+    canonical_key: safeCanonicalKey,
+    constant_value: constantValue,
+    transform,
+    notes: cleanNullableString(row.notes),
+    confidence: confidence === "high" || confidence === "medium" || confidence === "low"
+      ? confidence
+      : "medium",
+    reason: cleanNullableString(row.reason) ?? "Suggested from current app data and GMC field semantics.",
+  };
+}
 
 function treeIdFor(marketplace: string): string {
   return TREE_IDS[marketplace] ?? "3";
@@ -608,6 +698,171 @@ Deno.serve(async (req) => {
       const { data, error } = await q;
       if (error) throw error;
       return jsonResponse({ mappings: data ?? [] });
+    }
+
+    if (action === "suggest-gmc-mappings") {
+      const requestedFields = Array.isArray(body.fields)
+        ? body.fields
+          .map((field: unknown) => {
+            const row = asRecord(field);
+            const aspectKey = cleanNullableString(row.aspectKey ?? row.aspect_key);
+            if (!aspectKey) return null;
+            return {
+              aspect_key: aspectKey,
+              label: cleanNullableString(row.label) ?? aspectKey,
+              required: row.required === true,
+              starter: {
+                canonical_key: cleanNullableString(row.defaultCanonical),
+                constant_value: cleanNullableString(row.defaultConstant),
+                transform: cleanNullableString(row.defaultTransform),
+              },
+            };
+          })
+          .filter(Boolean)
+        : [];
+      if (requestedFields.length === 0) throw new Error("fields array is required");
+
+      const bodyCanonicalKeys = Array.isArray(body.canonical_keys)
+        ? body.canonical_keys.map(cleanNullableString).filter(Boolean)
+        : [];
+      const { data: canonicalRows, error: canonicalErr } = await admin
+        .from("canonical_attribute")
+        .select("key, label, attribute_group, data_type, unit, db_column, provider_chain, active")
+        .eq("active", true)
+        .order("sort_order", { ascending: true });
+      if (canonicalErr) throw canonicalErr;
+
+      const canonicalCatalogue = (canonicalRows ?? []).map((row: any) => ({
+        key: row.key,
+        label: row.label,
+        group: row.attribute_group,
+        data_type: row.data_type,
+        unit: row.unit,
+        db_column: row.db_column,
+        provider_chain: row.provider_chain,
+      }));
+
+      const extraDerivedKeys = bodyCanonicalKeys
+        .filter((key: string) => !canonicalCatalogue.some((row: { key: string }) => row.key === key))
+        .map((key: string) => ({
+          key,
+          label: key.replace(/_/g, " "),
+          group: "derived",
+          data_type: "string",
+          unit: null,
+          db_column: null,
+          provider_chain: [{ provider: "derived", field: key }],
+        }));
+
+      const allowedCanonicalKeys = new Set<string>([
+        ...canonicalCatalogue.map((row: { key: string }) => row.key),
+        ...extraDerivedKeys.map((row: { key: string }) => row.key),
+      ]);
+      const allowedFields = new Set<string>(
+        requestedFields.map((field: any) => field.aspect_key),
+      );
+
+      const { data: existingMappings, error: mappingErr } = await admin
+        .from("channel_attribute_mapping")
+        .select("aspect_key, canonical_key, constant_value, transform, notes")
+        .eq("channel", "gmc")
+        .or("marketplace.eq.GB,marketplace.is.null")
+        .is("category_id", null);
+      if (mappingErr) throw mappingErr;
+
+      const { data: products, error: productErr } = await admin
+        .from("product")
+        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, seo_title, seo_description, description, gmc_product_category, ean, upc, isbn, weight_kg")
+        .not("mpn", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(25);
+      if (productErr) throw productErr;
+
+      const promptFacts = {
+        channel: "gmc",
+        marketplace: "GB",
+        requested_fields: requestedFields,
+        current_mappings: existingMappings ?? [],
+        available_sources: [...canonicalCatalogue, ...extraDerivedKeys],
+        product_samples: products ?? [],
+        category_guidance: [
+          "All products are LEGO resale stock.",
+          "Use gmc_product_category when app data already stores a product-specific category.",
+          "Common LEGO fallback: Toys & Games > Toys > Building Toys.",
+          "Minifigure-specific fallback can use: Toys & Games > Toys > Dolls, Playsets & Toy Figures > Toy Figures.",
+        ],
+      };
+
+      let aiResult;
+      try {
+        aiResult = await callChatCompletion({
+          messages: [
+            { role: "system", content: GMC_MAPPING_AI_PROMPT },
+            {
+              role: "user",
+              content: `Suggest reviewable GMC mapping rules from this app data.\n\nFacts JSON:\n${JSON.stringify(promptFacts, null, 2)}`,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "suggest_gmc_mappings",
+                description: "Return reviewable GMC mapping suggestions.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    suggestions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          aspect_key: { type: "string" },
+                          canonical_key: { type: ["string", "null"] },
+                          constant_value: { type: ["string", "null"] },
+                          transform: { type: ["string", "null"] },
+                          notes: { type: ["string", "null"] },
+                          confidence: { type: "string", enum: ["high", "medium", "low"] },
+                          reason: { type: "string" },
+                        },
+                        required: [
+                          "aspect_key",
+                          "canonical_key",
+                          "constant_value",
+                          "transform",
+                          "notes",
+                          "confidence",
+                          "reason",
+                        ],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["suggestions"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "suggest_gmc_mappings" } },
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) return jsonResponse({ error: e.userMessage }, e.status);
+        throw e;
+      }
+
+      const raw = parseAiToolObject(aiResult.data);
+      const suggestions = (Array.isArray(raw.suggestions) ? raw.suggestions : [])
+        .map((suggestion) => normalizeGmcSuggestion(suggestion, allowedFields, allowedCanonicalKeys))
+        .filter(Boolean);
+
+      return jsonResponse({
+        suggestions,
+        provider_used: aiResult.providerUsed,
+        model_used: aiResult.modelUsed,
+        fell_back: aiResult.fellBack,
+        sample_count: (products ?? []).length,
+      });
     }
 
     if (action === "upsert-channel-mapping") {

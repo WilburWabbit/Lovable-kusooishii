@@ -10,6 +10,7 @@ import {
   Send,
   Settings,
   ShieldAlert,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -22,9 +23,11 @@ import { TableFilterInput } from "@/components/admin-v2/TableFilterInput";
 import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "@/components/admin-v2/ui-primitives";
 import {
   type ChannelMappingRecord,
+  type GmcAiMappingSuggestion,
   useCanonicalAttributes,
   useChannelMappings,
   useDeleteChannelMapping,
+  useSuggestGmcMappings,
   useUpsertChannelMapping,
 } from "@/hooks/admin/use-channel-taxonomy";
 import { type GmcPublishEvent, type GmcReadinessRow, useGmcMutations, useGmcPublishEvents, useGmcReadiness } from "@/hooks/admin/use-gmc";
@@ -635,10 +638,12 @@ function GmcMappingRuleRow({
   field,
   mapping,
   canonicalKeys,
+  suggestion,
 }: {
   field: GmcMappingField;
   mapping: ChannelMappingRecord | null;
   canonicalKeys: string[];
+  suggestion?: GmcAiMappingSuggestion | null;
 }) {
   const upsert = useUpsertChannelMapping();
   const remove = useDeleteChannelMapping();
@@ -667,6 +672,17 @@ function GmcMappingRuleRow({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     }
+  };
+
+  const useSuggestion = () => {
+    if (!suggestion) return;
+    setDraft((prev) => ({
+      ...prev,
+      canonical_key: suggestion.canonical_key,
+      constant_value: suggestion.constant_value,
+      transform: suggestion.transform,
+      notes: suggestion.notes ?? `AI suggested (${suggestion.confidence}): ${suggestion.reason}`,
+    }));
   };
 
   const deleteMapping = async () => {
@@ -721,6 +737,22 @@ function GmcMappingRuleRow({
       <td className="px-3 py-3">
         <Badge label={mappingStatus({ field, mapping })} color={mapping ? "#16A34A" : "#D97706"} small />
         <div className="mt-1 text-[11px] text-zinc-500">GB default</div>
+        {suggestion ? (
+          <div className="mt-2 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] normal-case tracking-normal text-sky-800">
+            <div className="font-semibold">AI {suggestion.confidence}</div>
+            <div className="mt-0.5">
+              <Mono>{suggestion.canonical_key ?? suggestion.constant_value ?? (suggestion.transform ? "rule" : "-")}</Mono>
+            </div>
+            <div className="mt-0.5 line-clamp-3">{suggestion.reason}</div>
+            <button
+              type="button"
+              onClick={useSuggestion}
+              className="mt-1 font-semibold text-sky-900 hover:underline"
+            >
+              Use suggestion
+            </button>
+          </div>
+        ) : null}
       </td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-1.5">
@@ -740,6 +772,9 @@ function GmcMappingRulesPanel() {
   const { data: mappings = [], isLoading } = useChannelMappings("gmc", "GB", null, "all");
   const { data: canonicalAttrs = [] } = useCanonicalAttributes();
   const upsert = useUpsertChannelMapping();
+  const suggestMappings = useSuggestGmcMappings();
+  const [aiSuggestions, setAiSuggestions] = useState<GmcAiMappingSuggestion[]>([]);
+  const [lastAiRun, setLastAiRun] = useState<{ provider: string; fellBack: boolean; sampleCount: number } | null>(null);
   const canonicalKeys = useMemo(() => {
     const derivedKeys = [
       "title",
@@ -759,6 +794,13 @@ function GmcMappingRulesPanel() {
       "weight_kg",
       "stock_count",
       "condition_grade",
+      "product_type",
+      "lego_theme",
+      "lego_subtheme",
+      "subtheme_name",
+      "piece_count",
+      "release_year",
+      "retired_flag",
     ];
     return Array.from(new Set([...canonicalAttrs.map((attr) => attr.key), ...derivedKeys])).sort();
   }, [canonicalAttrs]);
@@ -778,6 +820,11 @@ function GmcMappingRulesPanel() {
     () => GMC_MAPPING_FIELDS.map((field) => ({ field, mapping: mappingByAspect.get(field.aspectKey) ?? null })),
     [mappingByAspect],
   );
+  const suggestionByAspect = useMemo(() => {
+    const map = new Map<string, GmcAiMappingSuggestion>();
+    for (const suggestion of aiSuggestions) map.set(suggestion.aspect_key, suggestion);
+    return map;
+  }, [aiSuggestions]);
   const { filters, setFilter, sort, toggleSort, clearFilters, processedRows } = useSimpleTableFilters(rows, {
     accessor: mappingAccessor,
     initialSort: { key: "field", dir: "asc" },
@@ -798,16 +845,88 @@ function GmcMappingRulesPanel() {
     }
   };
 
+  const generateAiSuggestions = async () => {
+    try {
+      const result = await suggestMappings.mutateAsync({
+        fields: GMC_MAPPING_FIELDS,
+        canonicalKeys,
+      });
+      setAiSuggestions(result.suggestions ?? []);
+      setLastAiRun({
+        provider: result.provider_used,
+        fellBack: result.fell_back,
+        sampleCount: result.sample_count,
+      });
+      toast.success(
+        `${result.suggestions?.length ?? 0} GMC mapping suggestion(s) generated` +
+          (result.fell_back ? " with OpenAI fallback" : ""),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI suggestion failed");
+    }
+  };
+
+  const applyAiSuggestions = async () => {
+    if (aiSuggestions.length === 0) return;
+    if (!confirm(`Save ${aiSuggestions.length} AI-suggested GMC mapping(s)? Existing mappings for those fields will be replaced.`)) return;
+    try {
+      for (const suggestion of aiSuggestions) {
+        const existing = mappingByAspect.get(suggestion.aspect_key) ?? null;
+        await upsert.mutateAsync({
+          id: existing?.id,
+          channel: "gmc",
+          marketplace: "GB",
+          category_id: null,
+          aspect_key: suggestion.aspect_key,
+          canonical_key: suggestion.canonical_key?.trim() || null,
+          constant_value: suggestion.constant_value?.trim() || null,
+          transform: suggestion.transform?.trim() || null,
+          notes: [
+            suggestion.notes?.trim(),
+            `AI suggested (${suggestion.confidence}): ${suggestion.reason}`,
+          ].filter(Boolean).join("\n"),
+        });
+      }
+      toast.success("AI-suggested GMC mappings saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI mapping save failed");
+    }
+  };
+
   return (
     <SurfaceCard noPadding>
       <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <SectionHead>GMC Mapping Rules</SectionHead>
           <p className="text-xs text-zinc-500">Map app data to GMC fields. Rule JSON is evaluated top-down by the publisher.</p>
+          {lastAiRun ? (
+            <p className="mt-1 text-[11px] text-sky-700">
+              AI suggestions from {lastAiRun.provider === "lovable" ? "Lovable AI" : "OpenAI"}
+              {lastAiRun.fellBack ? " fallback" : ""}, using {lastAiRun.sampleCount} product sample(s).
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <button type="button" onClick={clearFilters} className="h-8 rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50">
             Clear filters
+          </button>
+          <button
+            type="button"
+            onClick={generateAiSuggestions}
+            disabled={suggestMappings.isPending || canonicalKeys.length === 0}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Suggest with AI
+          </button>
+          <button
+            type="button"
+            onClick={applyAiSuggestions}
+            disabled={upsert.isPending || aiSuggestions.length === 0}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Save className="h-3.5 w-3.5" />
+            Save AI Suggestions
           </button>
           <button
             type="button"
@@ -855,6 +974,7 @@ function GmcMappingRulesPanel() {
                 field={row.field}
                 mapping={row.mapping}
                 canonicalKeys={canonicalKeys}
+                suggestion={suggestionByAspect.get(row.field.aspectKey) ?? null}
               />
             ))}
           </tbody>

@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
       const { data: skus, error: skuErr } = await supabaseAdmin
         .from("sku")
         .select(
-          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg, ean, upc, isbn, gmc_product_category)",
+          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, weight_kg, ean, upc, isbn, gmc_product_category)",
         )
         .eq("active_flag", true);
 

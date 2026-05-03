@@ -5,7 +5,13 @@ export interface GmcProductSource {
   seo_description?: string | null;
   description?: string | null;
   img_url?: string | null;
+  product_type?: string | null;
+  lego_theme?: string | null;
+  lego_subtheme?: string | null;
   subtheme_name?: string | null;
+  piece_count?: number | string | null;
+  release_year?: number | string | null;
+  retired_flag?: boolean | string | null;
   weight_kg?: number | string | null;
   ean?: string | null;
   upc?: string | null;
