@@ -11,6 +11,7 @@ import {
   ArrowUpDown,
   Receipt,
   Truck,
+  Store,
   Settings,
   Activity,
   MessageSquare,
@@ -211,6 +212,13 @@ export function AdminV2Sidebar({
           label="Shipping Rates"
           to="/admin/shipping-rates"
           active={isActive("/admin/shipping-rates")}
+          onNavigate={onClose}
+        />
+        <SidebarItem
+          icon={Store}
+          label="eBay Storefront"
+          to="/admin/channels/ebay"
+          active={isActive("/admin/channels/ebay")}
           onNavigate={onClose}
         />
         <SidebarItem

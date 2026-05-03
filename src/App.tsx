@@ -56,6 +56,7 @@ const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"))
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
 const ShippingRatesPage = lazy(() => import("./pages/admin-v2/ShippingRatesPage"));
+const EbayStorefrontPage = lazy(() => import("./pages/admin-v2/EbayStorefrontPage"));
 const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));
@@ -162,6 +163,7 @@ const App = () => (
             <Route path="/admin/payouts/:payoutId" element={<AdminRoute path="/admin/payouts"><PayoutDetailPage /></AdminRoute>} />
             <Route path="/admin/pricing" element={<AdminRoute path="/admin/pricing"><ChannelFeesPage /></AdminRoute>} />
             <Route path="/admin/shipping-rates" element={<AdminRoute path="/admin/shipping-rates"><ShippingRatesPage /></AdminRoute>} />
+            <Route path="/admin/channels/ebay" element={<AdminRoute path="/admin/channels/ebay"><EbayStorefrontPage /></AdminRoute>} />
             <Route path="/admin/data-sync" element={<AdminRoute path="/admin/data-sync"><DataSyncPage /></AdminRoute>} />
             <Route path="/admin/intake" element={<AdminRoute path="/admin/intake"><IntakePage /></AdminRoute>} />
             <Route path="/admin/operations" element={<AdminRoute path="/admin/operations"><OperationsPage /></AdminRoute>} />
