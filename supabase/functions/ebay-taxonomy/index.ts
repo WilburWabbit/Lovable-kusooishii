@@ -27,6 +27,7 @@ import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
+import { resolveGmcTransformValue, validateGmcTransform } from "../_shared/gmc-product-input.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -52,6 +53,34 @@ Rules:
 - For googleProductCategory, prefer gmc_product_category as the canonical source when available, and add a sensible LEGO fallback/category rule from the supplied product facts.
 - Do not invent product facts, identifiers, prices, or availability.
 - Notes and reasons must be short and operational.`;
+
+const GMC_TRANSFORM_COMPILER_AI_PROMPT = `You compile plain-English operator requests into deterministic Google Merchant Center mapping rule JSON for Kuso Oishii, a UK LEGO resale commerce platform.
+
+Rules:
+- Return a JSON transform object only in the provided tool arguments. Do not return JavaScript, Airtable formulas, SQL, regex code, or executable code.
+- The transform shape must be: {"rules":[{"when":{"field":"product_type","op":"in","value":["set","minifigure"]},"value":"Google category"}],"default":"Fallback category"}.
+- Use only supplied allowed_fields and allowed_ops.
+- Use op "in" when the request says one of several values, "includes" for substring-style text matching, and "eq" for exact values.
+- Rule values and the default must be strings because Google product category is a string field.
+- Preserve category IDs or category paths exactly as the operator wrote them unless the request clearly asks you to infer a category.
+- Prefer a safe LEGO fallback such as "Toys & Games > Toys > Building Toys" only when the operator did not provide a fallback.
+- Keep the explanation short and operational.`;
+
+const GMC_TRANSFORM_ALLOWED_OPS = ["eq", "neq", "in", "includes", "exists", "gt", "gte", "lt", "lte"] as const;
+
+const GMC_PRODUCT_CATEGORY_RULE_FIELDS = [
+  "mpn",
+  "name",
+  "product_type",
+  "lego_theme",
+  "lego_subtheme",
+  "subtheme_name",
+  "piece_count",
+  "release_year",
+  "retired_flag",
+  "status",
+  "gmc_product_category",
+] as const;
 
 const GMC_RUNTIME_CANONICAL_ATTRIBUTES: Record<string, {
   label: string;
@@ -153,6 +182,26 @@ function normalizeGmcSuggestion(
       : "medium",
     reason: cleanNullableString(row.reason) ?? "Suggested from current app data and GMC field semantics.",
   };
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function gmcCategoryRuleSource(row: Record<string, unknown>): Record<string, unknown> {
+  const source: Record<string, unknown> = {};
+  for (const field of GMC_PRODUCT_CATEGORY_RULE_FIELDS) {
+    source[field] = row[field] ?? null;
+  }
+  return source;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(cleanNullableString).filter((item): item is string => Boolean(item))
+    : [];
 }
 
 async function ensureGmcRuntimeCanonicalAttribute(
@@ -758,6 +807,163 @@ Deno.serve(async (req) => {
       const { data, error } = await q;
       if (error) throw error;
       return jsonResponse({ mappings: data ?? [] });
+    }
+
+    if (action === "compile-gmc-transform") {
+      const aspectKey = cleanNullableString(body.aspect_key ?? body.aspectKey);
+      if (aspectKey !== "googleProductCategory") {
+        throw new Error("compile-gmc-transform currently supports googleProductCategory only");
+      }
+
+      const prompt = cleanNullableString(body.prompt);
+      if (!prompt) throw new Error("prompt is required");
+
+      const sampleLimit = clampInt(body.sample_limit, 8, 1, 25);
+      const { data: products, error: productErr } = await admin
+        .from("product")
+        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, gmc_product_category")
+        .not("mpn", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(sampleLimit);
+      if (productErr) throw productErr;
+
+      const productSamples = ((products ?? []) as Record<string, unknown>[])
+        .map((row) => gmcCategoryRuleSource(row));
+      const facts = {
+        aspect_key: aspectKey,
+        prompt,
+        allowed_fields: GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+        allowed_ops: GMC_TRANSFORM_ALLOWED_OPS,
+        product_samples: productSamples,
+        output_contract: {
+          transform_shape: {
+            rules: [
+              {
+                when: { field: "product_type", op: "in", value: ["example", "example"] },
+                value: "Google category string",
+              },
+            ],
+            default: "Fallback Google category string",
+          },
+          notes: [
+            "Every rule value must be a string.",
+            "default is required.",
+            "No executable code is allowed.",
+          ],
+        },
+      };
+
+      const conditionSchema = {
+        type: "object",
+        properties: {
+          field: { type: "string", enum: [...GMC_PRODUCT_CATEGORY_RULE_FIELDS] },
+          op: { type: "string", enum: [...GMC_TRANSFORM_ALLOWED_OPS] },
+          value: {
+            type: ["string", "number", "boolean", "array"],
+            items: { type: ["string", "number", "boolean"] },
+          },
+          values: {
+            type: "array",
+            items: { type: ["string", "number", "boolean"] },
+          },
+        },
+        required: ["field", "op"],
+        additionalProperties: false,
+      };
+
+      let aiResult;
+      try {
+        aiResult = await callChatCompletion({
+          messages: [
+            { role: "system", content: GMC_TRANSFORM_COMPILER_AI_PROMPT },
+            {
+              role: "user",
+              content: `Compile this GMC googleProductCategory rule request into the deterministic transform DSL.\n\nFacts JSON:\n${JSON.stringify(facts, null, 2)}`,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "compile_gmc_transform",
+                description: "Compile plain-English GMC mapping instructions into the approved JSON transform DSL.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    transform: {
+                      type: "object",
+                      properties: {
+                        rules: {
+                          type: "array",
+                          minItems: 1,
+                          items: {
+                            type: "object",
+                            properties: {
+                              when: {
+                                anyOf: [
+                                  conditionSchema,
+                                  { type: "array", minItems: 1, items: conditionSchema },
+                                ],
+                              },
+                              value: { type: "string" },
+                            },
+                            required: ["when", "value"],
+                            additionalProperties: false,
+                          },
+                        },
+                        default: { type: "string" },
+                      },
+                      required: ["rules", "default"],
+                      additionalProperties: false,
+                    },
+                    explanation: { type: "string" },
+                    warnings: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                  },
+                  required: ["transform", "explanation", "warnings"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "compile_gmc_transform" } },
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) return jsonResponse({ error: e.userMessage }, e.status);
+        throw e;
+      }
+
+      const raw = parseAiToolObject(aiResult.data);
+      const validation = validateGmcTransform(raw.transform, {
+        allowedFields: GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+        requireDefault: true,
+        requireStringValues: true,
+      });
+      if (!validation.ok || !validation.transform) {
+        throw new Error(`AI generated invalid GMC rule: ${validation.errors.join("; ")}`);
+      }
+
+      const sampleEvaluations = ((products ?? []) as Record<string, unknown>[]).map((row) => {
+        const source = gmcCategoryRuleSource(row);
+        const resolved = resolveGmcTransformValue(validation.transform, source);
+        return {
+          mpn: cleanNullableString(row.mpn) ?? "",
+          source,
+          value: typeof resolved === "string" && resolved.trim() ? resolved.trim() : null,
+        };
+      });
+
+      return jsonResponse({
+        transform: validation.transform,
+        explanation: cleanNullableString(raw.explanation) ?? "Compiled from the supplied operator prompt.",
+        warnings: [...normalizeStringArray(raw.warnings), ...validation.warnings],
+        sample_evaluations: sampleEvaluations,
+        provider_used: aiResult.providerUsed,
+        model_used: aiResult.modelUsed,
+        fell_back: aiResult.fellBack,
+      });
     }
 
     if (action === "suggest-gmc-mappings") {

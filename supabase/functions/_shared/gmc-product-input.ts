@@ -43,6 +43,23 @@ export interface GmcMappingRule {
   transform?: string | null;
 }
 
+const GMC_TRANSFORM_ALLOWED_OPS = ["eq", "neq", "in", "includes", "exists", "gt", "gte", "lt", "lte"] as const;
+
+export type GmcTransformOp = typeof GMC_TRANSFORM_ALLOWED_OPS[number];
+
+export interface GmcTransformValidationOptions {
+  allowedFields?: readonly string[];
+  requireDefault?: boolean;
+  requireStringValues?: boolean;
+}
+
+export interface GmcTransformValidationResult {
+  ok: boolean;
+  transform: string | null;
+  errors: string[];
+  warnings: string[];
+}
+
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -76,6 +93,14 @@ function isBlank(value: unknown): boolean {
 function normalizeComparable(value: unknown): string {
   if (value == null) return "";
   return String(value).trim().toLowerCase();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function matchesCondition(sourceValues: Record<string, unknown>, condition: Record<string, unknown>): boolean {
@@ -130,7 +155,7 @@ function matchesRule(sourceValues: Record<string, unknown>, when: unknown): bool
   return false;
 }
 
-function resolveTransformValue(transform: string | null | undefined, sourceValues: Record<string, unknown>): unknown {
+export function resolveGmcTransformValue(transform: string | null | undefined, sourceValues: Record<string, unknown>): unknown {
   const text = cleanText(transform);
   if (!text) return undefined;
   const parsed = JSON.parse(text) as Record<string, unknown> | Array<Record<string, unknown>>;
@@ -147,6 +172,130 @@ function resolveTransformValue(transform: string | null | undefined, sourceValue
     return parsed.default;
   }
   return undefined;
+}
+
+function validateCondition(
+  raw: unknown,
+  path: string,
+  allowedFields: Set<string> | null,
+  errors: string[],
+) {
+  if (!isRecord(raw)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+
+  const field = cleanText(raw.field);
+  if (!field) {
+    errors.push(`${path}.field is required`);
+  } else if (allowedFields && !allowedFields.has(field)) {
+    errors.push(`${path}.field "${field}" is not allowed`);
+  }
+
+  const op = (cleanText(raw.op) || "eq") as GmcTransformOp;
+  if (!GMC_TRANSFORM_ALLOWED_OPS.includes(op)) {
+    errors.push(`${path}.op "${op}" is not supported`);
+  }
+
+  if (op === "in") {
+    const values = Array.isArray(raw.values)
+      ? raw.values
+      : Array.isArray(raw.value)
+        ? raw.value
+        : [];
+    if (values.length === 0) errors.push(`${path}.value must be a non-empty array for op "in"`);
+    return;
+  }
+
+  if (op !== "exists" && !hasOwn(raw, "value")) {
+    errors.push(`${path}.value is required`);
+  }
+}
+
+function validateWhen(
+  raw: unknown,
+  path: string,
+  allowedFields: Set<string> | null,
+  errors: string[],
+) {
+  if (raw == null) return;
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) {
+      errors.push(`${path} must not be an empty array`);
+      return;
+    }
+    raw.forEach((condition, index) =>
+      validateCondition(condition, `${path}[${index}]`, allowedFields, errors),
+    );
+    return;
+  }
+  validateCondition(raw, path, allowedFields, errors);
+}
+
+export function validateGmcTransform(
+  transform: unknown,
+  options: GmcTransformValidationOptions = {},
+): GmcTransformValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const allowedFields = options.allowedFields
+    ? new Set(options.allowedFields.map((field) => String(field)))
+    : null;
+
+  let parsed: unknown;
+  if (typeof transform === "string") {
+    const text = cleanText(transform);
+    if (!text) {
+      return { ok: false, transform: null, errors: ["Transform JSON is required"], warnings };
+    }
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return {
+        ok: false,
+        transform: null,
+        errors: [`Invalid JSON: ${err instanceof Error ? err.message : "parse failed"}`],
+        warnings,
+      };
+    }
+  } else {
+    parsed = transform;
+  }
+
+  if (!isRecord(parsed)) {
+    return { ok: false, transform: null, errors: ["Transform must be a JSON object"], warnings };
+  }
+
+  const rules = Array.isArray(parsed.rules) ? parsed.rules : null;
+  if (!rules || rules.length === 0) {
+    errors.push("rules must be a non-empty array");
+  } else {
+    rules.forEach((rule, index) => {
+      if (!isRecord(rule)) {
+        errors.push(`rules[${index}] must be an object`);
+        return;
+      }
+      validateWhen(rule.when, `rules[${index}].when`, allowedFields, errors);
+      if (!hasOwn(rule, "value")) {
+        errors.push(`rules[${index}].value is required`);
+      } else if (options.requireStringValues && typeof rule.value !== "string") {
+        errors.push(`rules[${index}].value must be a string`);
+      }
+    });
+  }
+
+  if (options.requireDefault && !hasOwn(parsed, "default")) {
+    errors.push("default is required");
+  } else if (hasOwn(parsed, "default") && options.requireStringValues && typeof parsed.default !== "string") {
+    errors.push("default must be a string");
+  }
+
+  return {
+    ok: errors.length === 0,
+    transform: errors.length === 0 ? JSON.stringify(parsed) : null,
+    errors,
+    warnings,
+  };
 }
 
 function coerceAspectValue(aspectKey: string, value: unknown): unknown {
@@ -254,7 +403,7 @@ function applyGmcMappings(
     if (!aspectKey) continue;
 
     try {
-      const transformed = resolveTransformValue(mapping.transform, sourceValues);
+      const transformed = resolveGmcTransformValue(mapping.transform, sourceValues);
       if (!isBlank(transformed)) {
         setProductAspect(productPayload, aspectKey, transformed);
         continue;

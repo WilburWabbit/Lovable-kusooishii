@@ -619,6 +619,22 @@ export interface GmcAiMappingSuggestionResult {
   sample_count: number;
 }
 
+export interface GmcTransformSampleEvaluation {
+  mpn: string;
+  source: Record<string, unknown>;
+  value: string | null;
+}
+
+export interface GmcCompiledTransformResult {
+  transform: string;
+  explanation: string;
+  warnings: string[];
+  sample_evaluations: GmcTransformSampleEvaluation[];
+  provider_used: "lovable" | "openai";
+  model_used: string;
+  fell_back: boolean;
+}
+
 export const channelMappingKeys = {
   list: (
     channel: string,
@@ -668,6 +684,22 @@ export function useSuggestGmcMappings() {
         action: "suggest-gmc-mappings",
         fields: input.fields,
         canonical_keys: input.canonicalKeys,
+      }),
+  });
+}
+
+export function useCompileGmcTransform() {
+  return useMutation({
+    mutationFn: async (input: {
+      aspectKey: string;
+      prompt: string;
+      sampleLimit?: number;
+    }) =>
+      invokeWithAuth<GmcCompiledTransformResult>("ebay-taxonomy", {
+        action: "compile-gmc-transform",
+        aspect_key: input.aspectKey,
+        prompt: input.prompt,
+        sample_limit: input.sampleLimit,
       }),
   });
 }

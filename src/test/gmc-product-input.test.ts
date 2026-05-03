@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildGmcProductInput, selectGmcGtin } from "../../supabase/functions/_shared/gmc-product-input";
+import {
+  buildGmcProductInput,
+  resolveGmcTransformValue,
+  selectGmcGtin,
+  validateGmcTransform,
+} from "../../supabase/functions/_shared/gmc-product-input";
 
 const baseProduct = {
   mpn: "75367-1",
@@ -60,5 +65,110 @@ describe("GMC product input mapping", () => {
     expect(() =>
       buildGmcProductInput(baseListing, baseSku, { ...baseProduct, img_url: "" }, 1, "https://kuso.example"),
     ).toThrow(/no primary image/i);
+  });
+});
+
+describe("GMC transform rules", () => {
+  const allowedFields = ["product_type"] as const;
+
+  it("validates and evaluates a product type rule with a fallback", () => {
+    const result = validateGmcTransform(
+      {
+        rules: [
+          {
+            when: { field: "product_type", op: "in", value: ["X", "Y"] },
+            value: "N",
+          },
+        ],
+        default: "A",
+      },
+      { allowedFields, requireDefault: true, requireStringValues: true },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(resolveGmcTransformValue(result.transform, { product_type: "X" })).toBe("N");
+    expect(resolveGmcTransformValue(result.transform, { product_type: "Z" })).toBe("A");
+  });
+
+  it("rejects malformed JSON", () => {
+    const result = validateGmcTransform("{", {
+      allowedFields,
+      requireDefault: true,
+      requireStringValues: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/invalid json/i);
+  });
+
+  it("rejects unsupported operators", () => {
+    const result = validateGmcTransform(
+      {
+        rules: [
+          {
+            when: { field: "product_type", op: "startsWith", value: "X" },
+            value: "N",
+          },
+        ],
+        default: "A",
+      },
+      { allowedFields, requireDefault: true, requireStringValues: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/not supported/i);
+  });
+
+  it("rejects unknown fields", () => {
+    const result = validateGmcTransform(
+      {
+        rules: [
+          {
+            when: { field: "supplier_notes", op: "includes", value: "secret" },
+            value: "N",
+          },
+        ],
+        default: "A",
+      },
+      { allowedFields, requireDefault: true, requireStringValues: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/not allowed/i);
+  });
+
+  it("rejects rules without a default", () => {
+    const result = validateGmcTransform(
+      {
+        rules: [
+          {
+            when: { field: "product_type", op: "eq", value: "X" },
+            value: "N",
+          },
+        ],
+      },
+      { allowedFields, requireDefault: true, requireStringValues: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("default is required");
+  });
+
+  it("rejects non-string GMC category values", () => {
+    const result = validateGmcTransform(
+      {
+        rules: [
+          {
+            when: { field: "product_type", op: "eq", value: "X" },
+            value: 123,
+          },
+        ],
+        default: "A",
+      },
+      { allowedFields, requireDefault: true, requireStringValues: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("rules[0].value must be a string");
   });
 });

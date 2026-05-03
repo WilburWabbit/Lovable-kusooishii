@@ -24,8 +24,10 @@ import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "@/components
 import {
   type ChannelMappingRecord,
   type GmcAiMappingSuggestion,
+  type GmcCompiledTransformResult,
   useCanonicalAttributes,
   useChannelMappings,
+  useCompileGmcTransform,
   useDeleteChannelMapping,
   useSuggestGmcMappings,
   useUpsertChannelMapping,
@@ -634,6 +636,25 @@ function starterMapping(field: GmcMappingField, existing?: ChannelMappingRecord 
   };
 }
 
+function prettyJson(value: string) {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function appendNotes(current: string | null, additions: string[]) {
+  return [...(current?.trim() ? [current.trim()] : []), ...additions.filter(Boolean)].join("\n");
+}
+
+function sampleSourceLabel(source: Record<string, unknown>) {
+  return [
+    source.product_type ? `type ${String(source.product_type)}` : null,
+    source.lego_theme ? `theme ${String(source.lego_theme)}` : null,
+  ].filter(Boolean).join(" · ");
+}
+
 function GmcMappingRuleRow({
   field,
   mapping,
@@ -651,7 +672,11 @@ function GmcMappingRuleRow({
 }) {
   const upsert = useUpsertChannelMapping();
   const remove = useDeleteChannelMapping();
+  const compileTransform = useCompileGmcTransform();
   const [draft, setDraft] = useState<ChannelMappingRecord>(() => starterMapping(field, mapping));
+  const [rulePromptOpen, setRulePromptOpen] = useState(false);
+  const [rulePrompt, setRulePrompt] = useState("");
+  const [compiledRule, setCompiledRule] = useState<GmcCompiledTransformResult | null>(null);
 
   useEffect(() => {
     setDraft(starterMapping(field, mapping));
@@ -710,6 +735,43 @@ function GmcMappingRuleRow({
     }
   };
 
+  const canCompileRule = field.aspectKey === "googleProductCategory";
+
+  const generateRule = async () => {
+    const prompt = rulePrompt.trim();
+    if (!prompt) {
+      toast.error("Describe the rule first");
+      return;
+    }
+    try {
+      const result = await compileTransform.mutateAsync({
+        aspectKey: field.aspectKey,
+        prompt,
+        sampleLimit: 8,
+      });
+      setCompiledRule(result);
+      toast.success("GMC rule generated for review");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Rule generation failed");
+    }
+  };
+
+  const applyCompiledRule = () => {
+    if (!compiledRule) return;
+    const prompt = rulePrompt.trim();
+    setDraft((prev) => ({
+      ...prev,
+      transform: compiledRule.transform,
+      notes: appendNotes(prev.notes, [
+        prompt ? `AI rule prompt: ${prompt}` : "",
+        `AI rule explanation: ${compiledRule.explanation}`,
+      ]),
+    }));
+    setRulePromptOpen(false);
+    setCompiledRule(null);
+    toast.success("Generated rule added to the draft");
+  };
+
   const datalistId = `gmc-canonical-${field.aspectKey.replace(/[^a-z0-9]/gi, "-")}`;
 
   return (
@@ -742,12 +804,101 @@ function GmcMappingRuleRow({
         />
       </td>
       <td className="px-3 py-3">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Rule JSON</span>
+          {canCompileRule ? (
+            <button
+              type="button"
+              onClick={() => setRulePromptOpen((open) => !open)}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
+            >
+              <Sparkles className="h-3 w-3" />
+              Generate rule
+            </button>
+          ) : null}
+        </div>
         <textarea
           value={draft.transform ?? ""}
           onChange={(event) => setDraft((prev) => ({ ...prev, transform: event.target.value || null }))}
           placeholder='{"rules":[{"when":{"field":"stock_count","op":"gt","value":0},"value":"in_stock"}],"default":"out_of_stock"}'
           className="min-h-[72px] w-full min-w-[360px] rounded-md border border-zinc-200 px-2 py-1.5 font-mono text-[11px]"
         />
+        {rulePromptOpen ? (
+          <div className="mt-2 rounded-md border border-sky-200 bg-sky-50 p-2">
+            <textarea
+              value={rulePrompt}
+              onChange={(event) => {
+                setRulePrompt(event.target.value);
+                setCompiledRule(null);
+              }}
+              placeholder="If the product type is Minifigure or Collectible Minifigure, use 1234, else use Toys & Games > Toys > Building Toys"
+              className="min-h-[70px] w-full rounded-md border border-sky-200 bg-white px-2 py-1.5 text-xs text-zinc-900"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={generateRule}
+                disabled={compileTransform.isPending}
+                className="inline-flex h-7 items-center gap-1 rounded-md bg-sky-700 px-2.5 text-[11px] font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
+              >
+                <Sparkles className="h-3 w-3" />
+                {compileTransform.isPending ? "Generating..." : "Generate"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRulePromptOpen(false);
+                  setCompiledRule(null);
+                }}
+                className="h-7 rounded-md border border-sky-200 bg-white px-2.5 text-[11px] font-medium text-sky-800 hover:bg-sky-100"
+              >
+                Cancel
+              </button>
+            </div>
+            {compiledRule ? (
+              <div className="mt-2 rounded-md border border-sky-200 bg-white p-2 text-[11px] text-zinc-700">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-zinc-900">Generated rule</div>
+                    <div className="mt-0.5 text-sky-800">{compiledRule.explanation}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={applyCompiledRule}
+                    className="h-7 shrink-0 rounded-md bg-zinc-900 px-2.5 text-[11px] font-semibold text-white hover:bg-zinc-800"
+                  >
+                    Apply
+                  </button>
+                </div>
+                <pre className="mt-2 max-h-36 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-50">
+                  {prettyJson(compiledRule.transform)}
+                </pre>
+                {compiledRule.warnings.length > 0 ? (
+                  <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
+                    {compiledRule.warnings.join(" ")}
+                  </div>
+                ) : null}
+                {compiledRule.sample_evaluations.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {compiledRule.sample_evaluations.slice(0, 4).map((sample) => (
+                      <div key={sample.mpn} className="flex items-center justify-between gap-2 rounded border border-zinc-100 px-2 py-1">
+                        <span>
+                          <Mono>{sample.mpn}</Mono>
+                          {sampleSourceLabel(sample.source) ? (
+                            <span className="ml-2 text-zinc-500">{sampleSourceLabel(sample.source)}</span>
+                          ) : null}
+                        </span>
+                        <span className="max-w-[210px] truncate font-medium text-zinc-900">
+                          {sample.value ?? "-"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </td>
       <td className="px-3 py-3">
         <Badge label={mappingStatus({ field, mapping })} color={mapping ? "#16A34A" : "#D97706"} small />
