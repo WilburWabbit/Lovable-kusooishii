@@ -115,12 +115,12 @@ const App = () => (
             {/* Storefront */}
             <Route path="/" element={<Index />} />
             <Route path="/browse" element={<BrowsePage />} />
-            <Route path="/themes" element={<Navigate to="/browse?view=themes" replace />} />
-            <Route path="/new-arrivals" element={<Navigate to="/browse?new=true" replace />} />
-            <Route path="/deals" element={<Navigate to="/browse?deals=true" replace />} />
+            <Route path="/themes" element={<BrowsePage />} />
+            <Route path="/new-arrivals" element={<BrowsePage />} />
+            <Route path="/deals" element={<BrowsePage />} />
             <Route path="/sets/:mpn" element={<ProductDetailPage />} />
-            <Route path="/shop/p/:mpn" element={<Navigate to="/sets/:mpn" replace />} />
-            <Route path="/cart" element={<CartPage />} />
+            <Route path="/shop/p/:mpn" element={<LegacyProductRedirect />} />
+            <Route path="/cart" element={<NoIndexRoute title="Cart" description="Your Kuso Oishii shopping cart." path="/cart"><CartPage /></NoIndexRoute>} />
             <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
 
             {/* Content */}
