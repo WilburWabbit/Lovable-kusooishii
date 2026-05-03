@@ -496,7 +496,15 @@ export function useRollingSettlementMonitor() {
         .limit(200);
 
       if (error) throw error;
-      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapRollingSettlement);
+      const cutoff = new Date("2026-04-27T00:00:00Z");
+      return ((data ?? []) as unknown as Record<string, unknown>[])
+        .map(mapRollingSettlement)
+        .filter((row) => {
+          const createdAt = new Date(row.orderCreatedAt);
+          const channel = (row.originChannel ?? "").toLowerCase();
+          const paidBeforeCutoff = (channel === "ebay" || channel === "stripe") && createdAt < cutoff;
+          return !paidBeforeCutoff;
+        });
     },
   });
 }
