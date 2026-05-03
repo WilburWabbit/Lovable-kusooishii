@@ -655,6 +655,25 @@ function sampleSourceLabel(source: Record<string, unknown>) {
   ].filter(Boolean).join(" · ");
 }
 
+function gmcRulePromptPlaceholder(aspectKey: string) {
+  if (aspectKey === "googleProductCategory") {
+    return "If the product type is Minifigure, use Action & Toy Figures, else use Interlocking Blocks";
+  }
+  if (aspectKey === "availability") {
+    return "If stock_count is greater than 0, use in_stock, else use out_of_stock";
+  }
+  if (aspectKey === "condition") {
+    return "If condition_grade is 1 or 2, use new, else use used";
+  }
+  if (aspectKey === "identifierExists") {
+    return "If gtin exists, use true, else use false";
+  }
+  if (aspectKey === "shippingWeight.unit") {
+    return "If weight_g exists, use g, else use kg";
+  }
+  return "Describe the deterministic rule for this GMC field, including the fallback value";
+}
+
 function GmcMappingRuleRow({
   field,
   mapping,
@@ -735,8 +754,6 @@ function GmcMappingRuleRow({
     }
   };
 
-  const canCompileRule = field.aspectKey === "googleProductCategory";
-
   const generateRule = async () => {
     const prompt = rulePrompt.trim();
     if (!prompt) {
@@ -806,16 +823,14 @@ function GmcMappingRuleRow({
       <td className="px-3 py-3">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Rule JSON</span>
-          {canCompileRule ? (
-            <button
-              type="button"
-              onClick={() => setRulePromptOpen((open) => !open)}
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
-            >
-              <Sparkles className="h-3 w-3" />
-              Generate rule
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => setRulePromptOpen((open) => !open)}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
+          >
+            <Sparkles className="h-3 w-3" />
+            Generate rule
+          </button>
         </div>
         <textarea
           value={draft.transform ?? ""}
@@ -831,7 +846,7 @@ function GmcMappingRuleRow({
                 setRulePrompt(event.target.value);
                 setCompiledRule(null);
               }}
-              placeholder="If the product type is Minifigure or Collectible Minifigure, use 1234, else use Toys & Games > Toys > Building Toys"
+              placeholder={gmcRulePromptPlaceholder(field.aspectKey)}
               className="min-h-[70px] w-full rounded-md border border-sky-200 bg-white px-2 py-1.5 text-xs text-zinc-900"
             />
             <div className="mt-2 flex items-center gap-2">
