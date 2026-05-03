@@ -182,6 +182,7 @@ export interface ProductVariant {
   qtyOnHand: number; // computed from stock units
   conditionNotes: string | null;
   marketPrice: number | null;
+  channelPricing: ProductVariantPricing[];
   createdAt: string;
 }
 
@@ -190,6 +191,8 @@ export interface ProductVariantPricing {
   skuCode: string;
   channel: Channel | null;
   currentPrice: number | null;
+  targetPrice: number | null;
+  ceilingPrice: number | null;
   floorPrice: number | null;
   marketPrice: number | null;
   avgCost: number | null;

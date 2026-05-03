@@ -142,7 +142,7 @@ async function ensureSources(admin: SupabaseAdminClient): Promise<Record<SourceC
       rate_limit_per_day: 100,
       metadata: { respect_daily_limit: true },
     },
-  ];
+  ].map((row) => ({ ...row, metadata: row.metadata ?? {} }));
   const { error: upsertError } = await admin
     .from("market_signal_source")
     .upsert(rows, { onConflict: "source_code" });
