@@ -360,8 +360,8 @@ export function usePublishListing() {
       // 'website' — translate so we update the existing row instead of
       // creating a duplicate (and tripping the (channel, external_sku) unique
       // constraint downstream).
-      const legacyChannel = channel === 'website' ? 'web' : channel;
-      const v2Channel = channel === 'web' ? 'website' : channel;
+      const legacyChannel = (channel as string) === 'website' ? 'web' : channel;
+      const v2Channel = (channel as string) === 'web' ? 'website' : channel;
 
       // There is no (sku_id, channel) unique constraint, so a true upsert
       // can't disambiguate the row. Look up ALL rows for this (sku, channel)
