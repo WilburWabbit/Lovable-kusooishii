@@ -1411,6 +1411,7 @@ Deno.serve(async (req) => {
 
       let auto_price_applied = false;
       let auto_price_reason = "";
+      let reviewQueueId: string | null = null;
 
       if (auto_price && price_target != null) {
         // Guard: reject zero/negative target
@@ -1437,6 +1438,27 @@ Deno.serve(async (req) => {
                 auto_price_reason = "No change needed";
               } else if (delta > 0) {
                 // Price increase
+                const pctDelta = currentPrice > 0 ? Math.abs(delta) / currentPrice : 0;
+                if (pctDelta > 0.10) {
+                  const { data: reviewRow, error: reviewErr } = await admin
+                    .from("pricing_recalc_review_queue")
+                    .insert({
+                      channel_listing_id: listing_id,
+                      sku_id: params.sku_id ?? null,
+                      channel: listing.channel,
+                      current_price: currentPrice,
+                      proposed_price: price_target,
+                      pct_change: pctDelta,
+                      direction: "increase",
+                      reason: "Auto recalculation exceeds 10% and requires authorise/edit review.",
+                      status: "pending",
+                    })
+                    .select("id")
+                    .single();
+                  if (reviewErr) throw reviewErr;
+                  reviewQueueId = reviewRow?.id ?? null;
+                  auto_price_reason = `Increase ${(pctDelta * 100).toFixed(1)}% queued for review`;
+                } else {
                 const pctOk = config.max_increase_pct == null || (delta / currentPrice) <= config.max_increase_pct;
                 const amtOk = config.max_increase_amount == null || delta <= config.max_increase_amount;
                 if (pctOk && amtOk) {
@@ -1446,9 +1468,31 @@ Deno.serve(async (req) => {
                 } else {
                   auto_price_reason = `Increase £${delta.toFixed(2)} exceeds threshold (max ${config.max_increase_pct != null ? (config.max_increase_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_increase_amount != null ? '£' + config.max_increase_amount : '∞'})`;
                 }
+                }
               } else {
                 // Price decrease
                 const absDelta = Math.abs(delta);
+                const pctDelta = currentPrice > 0 ? absDelta / currentPrice : 0;
+                if (pctDelta > 0.10) {
+                  const { data: reviewRow, error: reviewErr } = await admin
+                    .from("pricing_recalc_review_queue")
+                    .insert({
+                      channel_listing_id: listing_id,
+                      sku_id: params.sku_id ?? null,
+                      channel: listing.channel,
+                      current_price: currentPrice,
+                      proposed_price: price_target,
+                      pct_change: pctDelta,
+                      direction: "decrease",
+                      reason: "Auto recalculation exceeds 10% and requires authorise/edit review.",
+                      status: "pending",
+                    })
+                    .select("id")
+                    .single();
+                  if (reviewErr) throw reviewErr;
+                  reviewQueueId = reviewRow?.id ?? null;
+                  auto_price_reason = `Decrease ${(pctDelta * 100).toFixed(1)}% queued for review`;
+                } else {
                 const pctOk = config.max_decrease_pct == null || (absDelta / currentPrice) <= config.max_decrease_pct;
                 const amtOk = config.max_decrease_amount == null || absDelta <= config.max_decrease_amount;
                 if (pctOk && amtOk) {
@@ -1457,6 +1501,7 @@ Deno.serve(async (req) => {
                   auto_price_reason = `Auto-decreased from £${currentPrice} to £${price_target}`;
                 } else {
                   auto_price_reason = `Decrease £${absDelta.toFixed(2)} exceeds threshold (max ${config.max_decrease_pct != null ? (config.max_decrease_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_decrease_amount != null ? '£' + config.max_decrease_amount : '∞'})`;
+                }
                 }
               }
             }
@@ -1515,7 +1560,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId };
+      result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId, review_queue_id: reviewQueueId };
 
     } else if (action === "list-channel-pricing-config") {
       const { data, error } = await admin.from("channel_pricing_config").select("*").order("channel");
