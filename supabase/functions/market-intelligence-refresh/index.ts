@@ -132,9 +132,9 @@ async function requireStaff(req: Request, admin: SupabaseAdminClient): Promise<s
 
 async function ensureSources(admin: SupabaseAdminClient): Promise<Record<SourceCode, string>> {
   const rows = [
-    { source_code: "ebay_sold", name: "eBay Sold Orders", source_type: "market_data" },
-    { source_code: "bricklink_price_guide", name: "BrickLink Price Guide", source_type: "market_data" },
-    { source_code: "brickowl_availability", name: "BrickOwl Availability", source_type: "market_data" },
+    { source_code: "ebay_sold", name: "eBay Sold Orders", source_type: "market_data", metadata: {} },
+    { source_code: "bricklink_price_guide", name: "BrickLink Price Guide", source_type: "market_data", metadata: {} },
+    { source_code: "brickowl_availability", name: "BrickOwl Availability", source_type: "market_data", metadata: {} },
     {
       source_code: "brickeconomy",
       name: "BrickEconomy Valuation",

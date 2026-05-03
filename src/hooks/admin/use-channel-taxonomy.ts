@@ -597,6 +597,28 @@ export interface ChannelMappingRecord {
   notes: string | null;
 }
 
+export interface GmcMappingFieldDescriptor {
+  aspectKey: string;
+  label: string;
+  required?: boolean;
+  defaultCanonical?: string;
+  defaultConstant?: string;
+  defaultTransform?: string;
+}
+
+export interface GmcAiMappingSuggestion extends ChannelMappingRecord {
+  confidence: "high" | "medium" | "low";
+  reason: string;
+}
+
+export interface GmcAiMappingSuggestionResult {
+  suggestions: GmcAiMappingSuggestion[];
+  provider_used: "lovable" | "openai";
+  model_used: string;
+  fell_back: boolean;
+  sample_count: number;
+}
+
 export const channelMappingKeys = {
   list: (
     channel: string,
@@ -633,6 +655,20 @@ export function useChannelMappings(
       );
       return res.mappings ?? [];
     },
+  });
+}
+
+export function useSuggestGmcMappings() {
+  return useMutation({
+    mutationFn: async (input: {
+      fields: GmcMappingFieldDescriptor[];
+      canonicalKeys: string[];
+    }) =>
+      invokeWithAuth<GmcAiMappingSuggestionResult>("ebay-taxonomy", {
+        action: "suggest-gmc-mappings",
+        fields: input.fields,
+        canonical_keys: input.canonicalKeys,
+      }),
   });
 }
 
@@ -684,4 +720,3 @@ export function useDeleteChannelMapping() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["channel-mappings"] }),
   });
 }
-

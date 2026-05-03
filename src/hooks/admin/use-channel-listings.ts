@@ -21,7 +21,7 @@ export const channelListingKeys = {
   all: ['v2', 'channel-listings'] as const,
   byVariant: (sku: string) => ['v2', 'channel-listings', 'variant', sku] as const,
   fees: (channel: string) => ['v2', 'channel-fees', channel] as const,
-  pricingByVariant: (sku: string) => ['v2', 'channel-pricing', 'variant', sku] as const,
+  pricingByVariant: (skuId: string) => ['v2', 'channel-pricing', 'variant', skuId] as const,
 };
 
 export interface ChannelPricingQuote {
@@ -34,6 +34,7 @@ export interface ChannelPricingQuote {
   estimated_net: number | null;
   market_consensus: number | null;
   confidence_score: number | null;
+  sku_code?: string;
   breakdown?: Record<string, number>;
 }
 
@@ -153,21 +154,12 @@ export function useChannelListings(skuCode: string | undefined) {
   });
 }
 
-export function useVariantChannelPricing(skuCode: string | undefined) {
+export function useVariantChannelPricing(skuId: string | undefined, skuCode?: string) {
   return useQuery({
-    queryKey: channelListingKeys.pricingByVariant(skuCode ?? ''),
-    enabled: !!skuCode,
+    queryKey: channelListingKeys.pricingByVariant(skuId ?? ''),
+    enabled: !!skuId,
     staleTime: 120_000,
     queryFn: async () => {
-      const { data: skuRow, error: skuErr } = await supabase
-        .from('sku')
-        .select('id' as never)
-        .eq('sku_code', skuCode!)
-        .single();
-
-      if (skuErr) throw skuErr;
-      const skuId = (skuRow as unknown as { id: string }).id;
-
       const channels: Array<{ key: Channel; pricingChannel: string }> = [
         { key: 'ebay', pricingChannel: 'ebay' },
         { key: 'website', pricingChannel: 'web' },
@@ -179,10 +171,13 @@ export function useVariantChannelPricing(skuCode: string | undefined) {
         channels.map(async ({ key, pricingChannel }) => {
           const quote = await invokeWithAuth<ChannelPricingQuote>('admin-data', {
             action: 'calculate-pricing',
-            sku_id: skuId,
+            sku_id: skuId!,
             channel: pricingChannel,
           });
-          return [key, quote] as const;
+          if (quote.sku_id !== skuId) {
+            throw new Error(`Pricing quote returned for the wrong SKU (${skuCode ?? skuId})`);
+          }
+          return [key, { ...quote, sku_code: skuCode }] as const;
         }),
       );
 
