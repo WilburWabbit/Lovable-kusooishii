@@ -226,6 +226,7 @@ function buildSourceValueMap(input: {
     title: input.title,
     description: input.description,
     link: `${input.siteUrl}/sets/${encodeURIComponent(input.mpn)}`,
+    image_link: input.imageLink,
     imageLink: input.imageLink,
     price_amount_micros: input.priceAmountMicros,
     price_currency: input.currencyCode,
@@ -238,6 +239,7 @@ function buildSourceValueMap(input: {
     gmc_product_category: product.gmc_product_category,
     product_type_path: input.productTypePath,
     weight_kg: product.weight_kg,
+    weight_g: Number(product.weight_kg ?? 0) > 0 ? Number(product.weight_kg) * 1000 : null,
   } as Record<string, unknown>;
 }
 

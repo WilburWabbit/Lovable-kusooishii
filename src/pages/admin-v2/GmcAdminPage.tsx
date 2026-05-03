@@ -104,7 +104,7 @@ const GMC_MAPPING_FIELDS: GmcMappingField[] = [
   { aspectKey: "title", label: "Title", required: true, defaultCanonical: "title" },
   { aspectKey: "description", label: "Description", required: true, defaultCanonical: "description" },
   { aspectKey: "link", label: "Product URL", required: true, defaultCanonical: "link" },
-  { aspectKey: "imageLink", label: "Primary image", required: true, defaultCanonical: "imageLink" },
+  { aspectKey: "imageLink", label: "Primary image", required: true, defaultCanonical: "image_link" },
   { aspectKey: "price.amountMicros", label: "Price amount micros", required: true, defaultCanonical: "price_amount_micros" },
   { aspectKey: "price.currencyCode", label: "Currency", required: true, defaultConstant: "GBP" },
   { aspectKey: "availability", label: "Availability", required: true, defaultCanonical: "availability_from_stock" },
@@ -116,7 +116,7 @@ const GMC_MAPPING_FIELDS: GmcMappingField[] = [
   { aspectKey: "googleProductCategory", label: "Google product category", defaultCanonical: "gmc_product_category" },
   { aspectKey: "productTypes", label: "Product type path", defaultCanonical: "product_type_path" },
   { aspectKey: "itemGroupId", label: "Item group ID", defaultCanonical: "mpn" },
-  { aspectKey: "shippingWeight.value", label: "Shipping weight", defaultCanonical: "weight_kg" },
+  { aspectKey: "shippingWeight.value", label: "Shipping weight", defaultCanonical: "weight_g" },
   { aspectKey: "shippingWeight.unit", label: "Shipping weight unit", defaultConstant: "kg" },
 ];
 
@@ -639,11 +639,15 @@ function GmcMappingRuleRow({
   mapping,
   canonicalKeys,
   suggestion,
+  canonicalKeySet,
+  canonicalAttrsLoading,
 }: {
   field: GmcMappingField;
   mapping: ChannelMappingRecord | null;
   canonicalKeys: string[];
   suggestion?: GmcAiMappingSuggestion | null;
+  canonicalKeySet: Set<string>;
+  canonicalAttrsLoading: boolean;
 }) {
   const upsert = useUpsertChannelMapping();
   const remove = useDeleteChannelMapping();
@@ -658,12 +662,23 @@ function GmcMappingRuleRow({
       toast.error("Set a source, constant, or rule before saving");
       return;
     }
+    const canonicalKey = draft.canonical_key?.trim() || null;
+    if (canonicalKey) {
+      if (canonicalAttrsLoading) {
+        toast.error("Canonical attributes are still loading");
+        return;
+      }
+      if (!canonicalKeySet.has(canonicalKey)) {
+        toast.error(`Unknown canonical attribute: ${canonicalKey}`);
+        return;
+      }
+    }
     try {
       await upsert.mutateAsync({
         ...draft,
         marketplace: draft.marketplace || "GB",
         category_id: null,
-        canonical_key: draft.canonical_key?.trim() || null,
+        canonical_key: canonicalKey,
         constant_value: draft.constant_value?.trim() || null,
         transform: draft.transform?.trim() || null,
         notes: draft.notes?.trim() || null,
@@ -770,40 +785,15 @@ function GmcMappingRuleRow({
 
 function GmcMappingRulesPanel() {
   const { data: mappings = [], isLoading } = useChannelMappings("gmc", "GB", null, "all");
-  const { data: canonicalAttrs = [] } = useCanonicalAttributes();
+  const { data: canonicalAttrs = [], isLoading: canonicalAttrsLoading } = useCanonicalAttributes();
   const upsert = useUpsertChannelMapping();
   const suggestMappings = useSuggestGmcMappings();
   const [aiSuggestions, setAiSuggestions] = useState<GmcAiMappingSuggestion[]>([]);
   const [lastAiRun, setLastAiRun] = useState<{ provider: string; fellBack: boolean; sampleCount: number } | null>(null);
   const canonicalKeys = useMemo(() => {
-    const derivedKeys = [
-      "title",
-      "description",
-      "link",
-      "imageLink",
-      "price_amount_micros",
-      "price_currency",
-      "availability_from_stock",
-      "condition_from_grade",
-      "brand",
-      "mpn",
-      "gtin",
-      "identifier_exists",
-      "gmc_product_category",
-      "product_type_path",
-      "weight_kg",
-      "stock_count",
-      "condition_grade",
-      "product_type",
-      "lego_theme",
-      "lego_subtheme",
-      "subtheme_name",
-      "piece_count",
-      "release_year",
-      "retired_flag",
-    ];
-    return Array.from(new Set([...canonicalAttrs.map((attr) => attr.key), ...derivedKeys])).sort();
+    return Array.from(new Set(canonicalAttrs.map((attr) => attr.key))).sort();
   }, [canonicalAttrs]);
+  const canonicalKeySet = useMemo(() => new Set(canonicalKeys), [canonicalKeys]);
 
   const mappingByAspect = useMemo(() => {
     const map = new Map<string, ChannelMappingRecord>();
@@ -834,6 +824,17 @@ function GmcMappingRulesPanel() {
 
   const applyStarterMappings = async () => {
     if (missingStarterRows.length === 0) return;
+    if (canonicalAttrsLoading) {
+      toast.error("Canonical attributes are still loading");
+      return;
+    }
+    const unknownCanonical = missingStarterRows
+      .map((row) => starterMapping(row.field, row.mapping).canonical_key)
+      .filter((key): key is string => Boolean(key && !canonicalKeySet.has(key)));
+    if (unknownCanonical.length > 0) {
+      toast.error(`Unknown canonical attribute: ${unknownCanonical[0]}`);
+      return;
+    }
     if (!confirm(`Create ${missingStarterRows.length} starter GMC field mapping(s)?`)) return;
     try {
       for (const row of missingStarterRows) {
@@ -868,6 +869,17 @@ function GmcMappingRulesPanel() {
 
   const applyAiSuggestions = async () => {
     if (aiSuggestions.length === 0) return;
+    if (canonicalAttrsLoading) {
+      toast.error("Canonical attributes are still loading");
+      return;
+    }
+    const unknownCanonical = aiSuggestions
+      .map((suggestion) => suggestion.canonical_key?.trim() || null)
+      .filter((key): key is string => Boolean(key && !canonicalKeySet.has(key)));
+    if (unknownCanonical.length > 0) {
+      toast.error(`Unknown canonical attribute: ${unknownCanonical[0]}`);
+      return;
+    }
     if (!confirm(`Save ${aiSuggestions.length} AI-suggested GMC mapping(s)? Existing mappings for those fields will be replaced.`)) return;
     try {
       for (const suggestion of aiSuggestions) {
@@ -975,6 +987,8 @@ function GmcMappingRulesPanel() {
                 mapping={row.mapping}
                 canonicalKeys={canonicalKeys}
                 suggestion={suggestionByAspect.get(row.field.aspectKey) ?? null}
+                canonicalKeySet={canonicalKeySet}
+                canonicalAttrsLoading={canonicalAttrsLoading}
               />
             ))}
           </tbody>
