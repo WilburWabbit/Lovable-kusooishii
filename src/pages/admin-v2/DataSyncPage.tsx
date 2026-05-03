@@ -4,6 +4,7 @@ import { QboSettingsCard } from "@/components/admin-v2/QboSettingsCard";
 import { StripeSettingsCard } from "@/components/admin-v2/StripeSettingsCard";
 import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
 import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
+import { GmcSettingsCard } from "@/components/admin-v2/GmcSettingsCard";
 import { AiProviderSettingsCard } from "@/components/admin-v2/AiProviderSettingsCard";
 import { CsvSyncPage } from "@/components/admin-v2/csv-sync/CsvSyncPage";
 import { StagingErrorsPanel } from "@/components/admin-v2/StagingErrorsPanel";
@@ -22,6 +23,7 @@ export default function DataSyncPage() {
           <QboSettingsCard />
           <StripeSettingsCard />
           <EbaySettingsCard />
+          <GmcSettingsCard />
           <BrickEconomySettingsCard />
           <AiProviderSettingsCard />
         </div>
