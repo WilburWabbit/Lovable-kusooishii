@@ -9491,6 +9491,32 @@ export type Database = {
         Args: { p_posting_intent_id: string }
         Returns: string
       }
+      save_seo_revision_draft: {
+        Args: {
+          p_breadcrumbs?: Json
+          p_canonical_path: string
+          p_canonical_url: string
+          p_change_summary?: string
+          p_geo?: Json
+          p_image_metadata?: Json
+          p_indexation_policy?: string
+          p_keywords?: string[]
+          p_meta_description?: string
+          p_metadata?: Json
+          p_open_graph?: Json
+          p_robots_directive?: string
+          p_seo_document_id: string
+          p_sitemap?: Json
+          p_source?: string
+          p_structured_data?: Json
+          p_title_tag?: string
+          p_twitter_card?: Json
+        }
+        Returns: {
+          id: string
+          revision_number: number
+        }[]
+      }
       search_catalog_for_wishlist: {
         Args: {
           filter_subtheme?: string
