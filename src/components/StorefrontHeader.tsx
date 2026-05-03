@@ -46,7 +46,7 @@ export function StorefrontHeader() {
     const items = [
       { name: 'Shop', path: '/browse' },
       { name: 'Themes', path: '/themes' },
-      { name: 'Just Landed', path: '/new-arrivals' },
+      { name: 'New Arrivals', path: '/new-arrivals' },
       ...(hasDeals ? [{ name: 'Deals', path: '/deals' }] : []),
       { name: 'About', path: '/about' },
       { name: 'Blue Bell', path: '/bluebell', className: 'text-blue-600 hover:text-blue-700' },
