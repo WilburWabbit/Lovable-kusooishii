@@ -23,6 +23,11 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
 
+function normalizedChannel(channel: Channel | string | null | undefined): Channel {
+  if (channel === "web") return "website";
+  return (channel ?? "website") as Channel;
+}
+
 export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
 
@@ -45,12 +50,12 @@ function VariantChannelsCard({
   product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
-  const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.sku);
+  const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.id, variant.sku);
   const publishListing = usePublishListing();
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
-    for (const l of listings) map.set(l.channel, l);
+    for (const l of listings) map.set(normalizedChannel(l.channel), l);
     return map;
   }, [listings]);
 
@@ -85,8 +90,9 @@ function VariantChannelsCard({
     setChannelState((prev) => {
       const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
       for (const ch of CHANNELS) {
-        const existing = listings.find((l) => l.channel === ch.key);
+        const existing = listings.find((l) => normalizedChannel(l.channel) === ch.key);
         const pricing = pricingByChannel?.get(ch.key);
+        const quoteBelongsToVariant = !pricing || pricing.sku_id === variant.id;
         const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false };
         const current = prev[ch.key];
 
@@ -98,12 +104,14 @@ function VariantChannelsCard({
           description: dirty.description
             ? current?.description ?? ""
             : existing?.listingDescription ?? "",
-          price: pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? "",
+          price: quoteBelongsToVariant
+            ? pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? ""
+            : existing?.listingPrice?.toFixed(2) ?? "",
         };
       }
       return next;
     });
-  }, [listings, pricingByChannel, defaultEbayTitle, product.name]);
+  }, [listings, pricingByChannel, defaultEbayTitle, product.name, variant.id]);
 
   const updateField = (channel: string, field: "title" | "description", value: string) => {
     const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false };
@@ -122,6 +130,10 @@ function VariantChannelsCard({
   const handlePublish = async (ch: { key: Channel; label: string }) => {
     const state = channelState[ch.key];
     const pricing = pricingByChannel?.get(ch.key);
+    if (pricing && pricing.sku_id !== variant.id) {
+      toast.error(`${ch.label} pricing quote does not match ${variant.sku}`);
+      return;
+    }
     if (!state?.title?.trim()) {
       toast.error(`${ch.label} listing title is required`);
       return;
@@ -176,7 +188,8 @@ function VariantChannelsCard({
           const statusInfo = CHANNEL_LISTING_STATUSES[status];
           const state = channelState[ch.key] ?? { title: "", description: "", price: "0" };
           const feeInfo = feesMap?.get(ch.key) ?? (ch.key === "website" ? feesMap?.get("web") : undefined);
-          const pricing = pricingByChannel?.get(ch.key);
+          const quote = pricingByChannel?.get(ch.key);
+          const pricing = quote?.sku_id === variant.id ? quote : undefined;
           const price = Number(pricing?.target_price ?? state.price) || 0;
           const floorPrice = pricing?.floor_price ?? null;
           const estimatedFees = pricing?.estimated_fees ?? listing?.estimatedFees ?? null;
