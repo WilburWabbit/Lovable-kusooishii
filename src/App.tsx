@@ -68,6 +68,8 @@ const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
 const GmcAdminPage = lazy(() => import("./pages/admin-v2/GmcAdminPage"));
+const IntegrationsPage = lazy(() => import("./pages/admin-v2/IntegrationsPage"));
+const IntegrationDetailPage = lazy(() => import("./pages/admin-v2/IntegrationDetailPage"));
 
 // Lazy-load 404
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -166,6 +168,8 @@ const App = () => (
             <Route path="/admin/shipping-rates" element={<AdminRoute path="/admin/shipping-rates"><ShippingRatesPage /></AdminRoute>} />
             <Route path="/admin/channels/ebay" element={<AdminRoute path="/admin/channels/ebay"><EbayStorefrontPage /></AdminRoute>} />
             <Route path="/admin/data-sync" element={<AdminRoute path="/admin/data-sync"><DataSyncPage /></AdminRoute>} />
+            <Route path="/admin/integrations" element={<AdminRoute path="/admin/integrations"><IntegrationsPage /></AdminRoute>} />
+            <Route path="/admin/integrations/:integration" element={<AdminRoute path="/admin/integrations"><IntegrationDetailPage /></AdminRoute>} />
             <Route path="/admin/gmc" element={<AdminRoute path="/admin/gmc"><GmcAdminPage /></AdminRoute>} />
             <Route path="/admin/intake" element={<AdminRoute path="/admin/intake"><IntakePage /></AdminRoute>} />
             <Route path="/admin/operations" element={<AdminRoute path="/admin/operations"><OperationsPage /></AdminRoute>} />
