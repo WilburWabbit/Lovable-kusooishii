@@ -4174,6 +4174,89 @@ export type Database = {
           },
         ]
       }
+      pricing_recalc_review_queue: {
+        Row: {
+          channel: string
+          channel_listing_id: string
+          created_at: string
+          current_price: number
+          direction: string
+          id: string
+          notes: string | null
+          pct_change: number
+          proposed_price: number
+          reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          sku_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          channel_listing_id: string
+          created_at?: string
+          current_price: number
+          direction: string
+          id?: string
+          notes?: string | null
+          pct_change: number
+          proposed_price: number
+          reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          sku_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          channel_listing_id?: string
+          created_at?: string
+          current_price?: number
+          direction?: string
+          id?: string
+          notes?: string | null
+          pct_change?: number
+          proposed_price?: number
+          reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          sku_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_recalc_review_queue_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "channel_listing"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_recalc_review_queue_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_recalc_review_queue_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "sku_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_recalc_review_queue_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+        ]
+      }
       pricing_settings: {
         Row: {
           key: string
