@@ -28,6 +28,13 @@ import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
 import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
 import { resolveGmcTransformValue, validateGmcTransform } from "../_shared/gmc-product-input.ts";
+import {
+  DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+  GOOGLE_PRODUCT_TAXONOMY_VERSION,
+  normalizeGoogleProductCategoryTransformValues,
+  normalizeGoogleProductCategoryValue,
+  selectGoogleProductTaxonomyCandidates,
+} from "../_shared/google-product-taxonomy.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -47,10 +54,10 @@ Rules:
 - Use only the supplied canonical/source keys for canonical_key.
 - Use constant_value for fixed values and fallback defaults.
 - Use transform only for deterministic top-down JSON rules. Supported shape:
-  {"rules":[{"when":{"field":"product_type","op":"includes","value":"minifigure"},"value":"Toys & Games > Toys > Dolls, Playsets & Toy Figures > Toy Figures"}],"default":"Toys & Games > Toys > Building Toys"}
+  {"rules":[{"when":{"field":"product_type","op":"includes","value":"minifigure"},"value":"6058"}],"default":"3287"}
 - Supported condition ops: eq, neq, in, includes, exists, gt, gte, lt, lte.
 - Prefer direct app-mastered fields over constants.
-- For googleProductCategory, prefer gmc_product_category as the canonical source when available, and add a sensible LEGO fallback/category rule from the supplied product facts.
+- For googleProductCategory, use only IDs from the supplied google_product_taxonomy candidates. Prefer gmc_product_category as the canonical source when available, and add a sensible deterministic fallback rule from the taxonomy candidates.
 - Do not invent product facts, identifiers, prices, or availability.
 - Notes and reasons must be short and operational.`;
 
@@ -58,12 +65,12 @@ const GMC_TRANSFORM_COMPILER_AI_PROMPT = `You compile plain-English operator req
 
 Rules:
 - Return a JSON transform object only in the provided tool arguments. Do not return JavaScript, Airtable formulas, SQL, regex code, or executable code.
-- The transform shape must be: {"rules":[{"when":{"field":"product_type","op":"in","value":["set","minifigure"]},"value":"Google category"}],"default":"Fallback category"}.
+- The transform shape must be: {"rules":[{"when":{"field":"product_type","op":"in","value":["set","minifigure"]},"value":"3287"}],"default":"3287"}.
 - Use only supplied allowed_fields and allowed_ops.
 - Use op "in" when the request says one of several values, "includes" for substring-style text matching, and "eq" for exact values.
-- Rule values and the default must be strings because Google product category is a string field.
-- Preserve category IDs or category paths exactly as the operator wrote them unless the request clearly asks you to infer a category.
-- Prefer a safe LEGO fallback such as "Toys & Games > Toys > Building Toys" only when the operator did not provide a fallback.
+- Rule values and the default must be strings matching the supplied target_field value contract.
+- For googleProductCategory only: use only IDs from the supplied google_product_taxonomy candidates when inferring categories. If the operator provides a category path, resolve it to the matching supplied ID.
+- For non-category fields: do not use Google taxonomy IDs unless the target value contract explicitly asks for one.
 - Keep the explanation short and operational.`;
 
 const GMC_TRANSFORM_ALLOWED_OPS = ["eq", "neq", "in", "includes", "exists", "gt", "gte", "lt", "lte"] as const;
@@ -81,6 +88,113 @@ const GMC_PRODUCT_CATEGORY_RULE_FIELDS = [
   "status",
   "gmc_product_category",
 ] as const;
+
+const GMC_RULE_SOURCE_FIELDS = [
+  ...GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+  "sku_code",
+  "condition_grade",
+  "stock_count",
+  "listed_price",
+  "seo_title",
+  "seo_description",
+  "description",
+  "ean",
+  "upc",
+  "isbn",
+  "weight_kg",
+] as const;
+
+const GMC_RULE_TARGETS: Record<string, {
+  label: string;
+  value_contract: string;
+  examples: string[];
+}> = {
+  title: {
+    label: "Title",
+    value_contract: "String title override. Prefer canonical title mapping for dynamic titles; use rules only for controlled fallback titles.",
+    examples: ["LEGO Star Wars set", "LEGO collectible minifigure"],
+  },
+  description: {
+    label: "Description",
+    value_contract: "String description override. Prefer canonical description mapping for dynamic descriptions.",
+    examples: ["Retired LEGO set in inspected resale condition."],
+  },
+  link: {
+    label: "Product URL",
+    value_contract: "Absolute product URL string. Prefer canonical link mapping unless a deterministic fallback is required.",
+    examples: ["https://kusooishii.example/sets/75367-1"],
+  },
+  imageLink: {
+    label: "Primary image",
+    value_contract: "Absolute image URL string. Prefer canonical image_link mapping unless a deterministic fallback is required.",
+    examples: ["https://kusooishii.example/images/placeholder.jpg"],
+  },
+  "price.amountMicros": {
+    label: "Price amount micros",
+    value_contract: "Integer micros as a string. Example: GBP 19.99 is 19990000.",
+    examples: ["19990000", "49990000"],
+  },
+  "price.currencyCode": {
+    label: "Currency",
+    value_contract: "ISO 4217 currency code string.",
+    examples: ["GBP"],
+  },
+  availability: {
+    label: "Availability",
+    value_contract: "Google availability string. Use one of: in_stock, out_of_stock, preorder, backorder.",
+    examples: ["in_stock", "out_of_stock"],
+  },
+  condition: {
+    label: "Condition",
+    value_contract: "Google condition string. Use one of: new, used, refurbished.",
+    examples: ["new", "used"],
+  },
+  brand: {
+    label: "Brand",
+    value_contract: "Brand string.",
+    examples: ["LEGO"],
+  },
+  mpn: {
+    label: "MPN",
+    value_contract: "Manufacturer part number string. Preserve the LEGO version suffix.",
+    examples: ["75367-1"],
+  },
+  gtin: {
+    label: "GTIN",
+    value_contract: "Barcode string containing EAN, UPC, or ISBN digits only where available.",
+    examples: ["5702017421476"],
+  },
+  identifierExists: {
+    label: "Identifier exists",
+    value_contract: "Boolean-like string. Use true when GTIN or brand+MPN exists; false only when no valid identifier exists.",
+    examples: ["true", "false"],
+  },
+  googleProductCategory: {
+    label: "Google product category",
+    value_contract: "Google product taxonomy ID as a string. Use only supplied google_product_taxonomy candidate IDs.",
+    examples: ["3287", "6058"],
+  },
+  productTypes: {
+    label: "Product type path",
+    value_contract: "Merchant-defined product type path string.",
+    examples: ["Toys > LEGO > Star Wars", "Toys > LEGO > Minifigures"],
+  },
+  itemGroupId: {
+    label: "Item group ID",
+    value_contract: "String grouping variants of the same item. Usually the versioned MPN.",
+    examples: ["75367-1"],
+  },
+  "shippingWeight.value": {
+    label: "Shipping weight",
+    value_contract: "Numeric weight as a string in the unit configured by shippingWeight.unit.",
+    examples: ["1.25", "750"],
+  },
+  "shippingWeight.unit": {
+    label: "Shipping weight unit",
+    value_contract: "Google weight unit string. Use one of: kg, g, lb, oz.",
+    examples: ["kg", "g"],
+  },
+};
 
 const GMC_RUNTIME_CANONICAL_ATTRIBUTES: Record<string, {
   label: string;
@@ -157,12 +271,22 @@ function normalizeGmcSuggestion(
   const safeCanonicalKey = canonicalKey && allowedCanonicalKeys.has(canonicalKey)
     ? canonicalKey
     : null;
-  const constantValue = cleanNullableString(row.constant_value);
+  let constantValue = cleanNullableString(row.constant_value);
   let transform: string | null = null;
   try {
-    transform = normalizeTransform(row.transform);
+    let rawTransform = row.transform;
+    if (aspectKey === "googleProductCategory" && typeof rawTransform === "string") {
+      rawTransform = JSON.parse(rawTransform);
+    }
+    if (aspectKey === "googleProductCategory") {
+      rawTransform = normalizeGoogleProductCategoryTransformValues(rawTransform).transform;
+    }
+    transform = normalizeTransform(rawTransform);
   } catch {
     transform = null;
+  }
+  if (aspectKey === "googleProductCategory" && constantValue) {
+    constantValue = normalizeGoogleProductCategoryValue(constantValue) ?? constantValue;
   }
 
   if (!safeCanonicalKey && !constantValue && !transform) return null;
@@ -192,7 +316,7 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 
 function gmcCategoryRuleSource(row: Record<string, unknown>): Record<string, unknown> {
   const source: Record<string, unknown> = {};
-  for (const field of GMC_PRODUCT_CATEGORY_RULE_FIELDS) {
+  for (const field of GMC_RULE_SOURCE_FIELDS) {
     source[field] = row[field] ?? null;
   }
   return source;
@@ -811,9 +935,9 @@ Deno.serve(async (req) => {
 
     if (action === "compile-gmc-transform") {
       const aspectKey = cleanNullableString(body.aspect_key ?? body.aspectKey);
-      if (aspectKey !== "googleProductCategory") {
-        throw new Error("compile-gmc-transform currently supports googleProductCategory only");
-      }
+      if (!aspectKey) throw new Error("aspect_key is required");
+      const target = GMC_RULE_TARGETS[aspectKey];
+      if (!target) throw new Error(`compile-gmc-transform does not support ${aspectKey}`);
 
       const prompt = cleanNullableString(body.prompt);
       if (!prompt) throw new Error("prompt is required");
@@ -821,7 +945,7 @@ Deno.serve(async (req) => {
       const sampleLimit = clampInt(body.sample_limit, 8, 1, 25);
       const { data: products, error: productErr } = await admin
         .from("product")
-        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, gmc_product_category")
+        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, seo_title, seo_description, description, gmc_product_category, ean, upc, isbn, weight_kg")
         .not("mpn", "is", null)
         .order("updated_at", { ascending: false })
         .limit(sampleLimit);
@@ -829,24 +953,39 @@ Deno.serve(async (req) => {
 
       const productSamples = ((products ?? []) as Record<string, unknown>[])
         .map((row) => gmcCategoryRuleSource(row));
+      const taxonomyCandidates = selectGoogleProductTaxonomyCandidates({
+        prompt,
+        productSamples,
+        limit: 20,
+      });
       const facts = {
         aspect_key: aspectKey,
+        target_field: target,
         prompt,
-        allowed_fields: GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+        allowed_fields: GMC_RULE_SOURCE_FIELDS,
         allowed_ops: GMC_TRANSFORM_ALLOWED_OPS,
+        google_product_taxonomy: aspectKey === "googleProductCategory"
+          ? {
+            version: GOOGLE_PRODUCT_TAXONOMY_VERSION,
+            candidates: taxonomyCandidates,
+            default_lego_category_id: DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+            instruction: "Use candidate IDs as rule values/defaults. Do not output category paths for googleProductCategory.",
+          }
+          : undefined,
         product_samples: productSamples,
         output_contract: {
           transform_shape: {
             rules: [
               {
                 when: { field: "product_type", op: "in", value: ["example", "example"] },
-                value: "Google category string",
+                value: target.examples[0] ?? "value",
               },
             ],
-            default: "Fallback Google category string",
+            default: target.examples[0] ?? "value",
           },
           notes: [
             "Every rule value must be a string.",
+            `Target value contract: ${target.value_contract}`,
             "default is required.",
             "No executable code is allowed.",
           ],
@@ -856,7 +995,7 @@ Deno.serve(async (req) => {
       const conditionSchema = {
         type: "object",
         properties: {
-          field: { type: "string", enum: [...GMC_PRODUCT_CATEGORY_RULE_FIELDS] },
+          field: { type: "string", enum: [...GMC_RULE_SOURCE_FIELDS] },
           op: { type: "string", enum: [...GMC_TRANSFORM_ALLOWED_OPS] },
           value: {
             type: ["string", "number", "boolean", "array"],
@@ -878,7 +1017,7 @@ Deno.serve(async (req) => {
             { role: "system", content: GMC_TRANSFORM_COMPILER_AI_PROMPT },
             {
               role: "user",
-              content: `Compile this GMC googleProductCategory rule request into the deterministic transform DSL.\n\nFacts JSON:\n${JSON.stringify(facts, null, 2)}`,
+              content: `Compile this GMC ${aspectKey} rule request into the deterministic transform DSL.\n\nFacts JSON:\n${JSON.stringify(facts, null, 2)}`,
             },
           ],
           tools: [
@@ -886,7 +1025,7 @@ Deno.serve(async (req) => {
               type: "function",
               function: {
                 name: "compile_gmc_transform",
-                description: "Compile plain-English GMC mapping instructions into the approved JSON transform DSL.",
+                description: `Compile plain-English GMC ${target.label} mapping instructions into the approved JSON transform DSL.`,
                 parameters: {
                   type: "object",
                   properties: {
@@ -936,8 +1075,11 @@ Deno.serve(async (req) => {
       }
 
       const raw = parseAiToolObject(aiResult.data);
-      const validation = validateGmcTransform(raw.transform, {
-        allowedFields: GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+      const normalizedTaxonomyTransform = aspectKey === "googleProductCategory"
+        ? normalizeGoogleProductCategoryTransformValues(raw.transform)
+        : { transform: raw.transform, warnings: [] };
+      const validation = validateGmcTransform(normalizedTaxonomyTransform.transform, {
+        allowedFields: GMC_RULE_SOURCE_FIELDS,
         requireDefault: true,
         requireStringValues: true,
       });
@@ -958,7 +1100,11 @@ Deno.serve(async (req) => {
       return jsonResponse({
         transform: validation.transform,
         explanation: cleanNullableString(raw.explanation) ?? "Compiled from the supplied operator prompt.",
-        warnings: [...normalizeStringArray(raw.warnings), ...validation.warnings],
+        warnings: [
+          ...normalizeStringArray(raw.warnings),
+          ...normalizedTaxonomyTransform.warnings,
+          ...validation.warnings,
+        ],
         sample_evaluations: sampleEvaluations,
         provider_used: aiResult.providerUsed,
         model_used: aiResult.modelUsed,
@@ -1044,18 +1190,29 @@ Deno.serve(async (req) => {
         .limit(25);
       if (productErr) throw productErr;
 
+      const productSamples = (products ?? []) as Record<string, unknown>[];
+      const taxonomyCandidates = selectGoogleProductTaxonomyCandidates({
+        productSamples,
+        limit: 20,
+      });
       const promptFacts = {
         channel: "gmc",
         marketplace: "GB",
         requested_fields: requestedFields,
         current_mappings: existingMappings ?? [],
         available_sources: [...canonicalCatalogue, ...extraDerivedKeys],
-        product_samples: products ?? [],
+        product_samples: productSamples,
+        google_product_taxonomy: {
+          version: GOOGLE_PRODUCT_TAXONOMY_VERSION,
+          candidates: taxonomyCandidates,
+          default_lego_category_id: DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+          instruction: "Use candidate IDs as constants and transform rule values for googleProductCategory.",
+        },
         category_guidance: [
           "All products are LEGO resale stock.",
           "Use gmc_product_category when app data already stores a product-specific category.",
-          "Common LEGO fallback: Toys & Games > Toys > Building Toys.",
-          "Minifigure-specific fallback can use: Toys & Games > Toys > Dolls, Playsets & Toy Figures > Toy Figures.",
+          `Common LEGO fallback ID: ${DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID}.`,
+          "Minifigure-specific fallback should use the best matching supplied taxonomy candidate ID.",
         ],
       };
 

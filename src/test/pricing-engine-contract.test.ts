@@ -15,6 +15,10 @@ const forceEnumSafeQuoteMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260503190000_force_enum_safe_commerce_quote.sql"),
   "utf8",
 );
+const rebalancePricingMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260503193000_rebalance_pricing_floor_target.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
@@ -46,9 +50,44 @@ describe("pricing engine contract", () => {
   });
 
   it("does not use SKU purchase price as a retail target fallback", () => {
-    expect(migration).not.toContain("existingSkuPrice");
-    expect(migration).not.toContain("GREATEST(v_floor, COALESCE(v_market_consensus, v_floor), v_sku_price");
-    expect(migration).toContain("v_target := v_floor;");
+    expect(rebalancePricingMigration).not.toContain("existingSkuPrice");
+    expect(rebalancePricingMigration).not.toContain("GREATEST(v_floor, COALESCE(v_market_consensus, v_floor), v_sku_price");
+    expect(rebalancePricingMigration).not.toContain("sk.price");
+  });
+
+  it("keeps market target separate from cost recovery floor", () => {
+    expect(rebalancePricingMigration).toContain("v_non_fee_costs := ROUND(v_carrying_value + v_packaging_cost + v_shipping_cost, 2)");
+    expect(rebalancePricingMigration).toContain("v_needed_price := (v_non_fee_costs + v_total_channel_fees + v_risk_reserve + v_min_profit)");
+    expect(rebalancePricingMigration).toContain("v_target := ROUND(GREATEST(v_target, 0), 2)");
+    expect(rebalancePricingMigration).toContain("market_target_below_floor");
+    expect(rebalancePricingMigration).toContain("''target_floor_clamped'', 0");
+    expect(rebalancePricingMigration).not.toContain("v_target := v_floor;");
+    expect(rebalancePricingMigration).not.toContain("v_floor := ROUND((1.2 *");
+  });
+
+  it("keeps the 40478-1.2 style economics in a plausible range", () => {
+    const carrying = 26.76;
+    const packaging = 0.05;
+    const shipping = 2.59;
+    const minProfit = 1;
+    const feeRate = 0.143;
+    const fixedFee = 0.3;
+    const riskRate = 0.005;
+    const minMargin = 0.05;
+    let floor = carrying + packaging + shipping + minProfit;
+
+    for (let i = 0; i < 8; i += 1) {
+      const fees = floor * feeRate + fixedFee;
+      const risk = floor * riskRate;
+      floor = (carrying + packaging + shipping + fees + risk + minProfit) / (1 - minMargin);
+    }
+
+    const market = 29.18;
+    const target = Math.floor(market) - 0.01;
+
+    expect(floor).toBeGreaterThan(35);
+    expect(floor).toBeLessThan(45);
+    expect(target).toBeLessThan(floor);
   });
 
   it("routes admin pricing through the canonical quote RPC", () => {
