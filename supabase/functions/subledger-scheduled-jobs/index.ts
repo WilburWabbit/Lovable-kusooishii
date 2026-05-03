@@ -47,7 +47,39 @@ function normalizeJob(value: unknown): ScheduledJob | "all" {
   return "all";
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  if (aBytes.length !== bBytes.length) return false;
+
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i += 1) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
+}
+
+function authenticateInternalSchedule(req: Request): string | null {
+  const expected = Deno.env.get("SUBLEDGER_SCHEDULED_JOBS_SECRET")
+    ?? Deno.env.get("SUBLEDGER_CRON_SECRET")
+    ?? "";
+  const provided = req.headers.get("x-internal-shared-secret")
+    ?? req.headers.get("x-internal-secret")
+    ?? "";
+
+  if (!provided) return null;
+  if (!expected) throw new Error("Unauthorized — scheduled job secret is not configured");
+  if (!timingSafeEqual(provided, expected)) {
+    throw new Error("Unauthorized — invalid scheduled job secret");
+  }
+  return "scheduled-job";
+}
+
 async function requireAutomationActor(req: Request, admin: SupabaseAdminClient): Promise<string> {
+  const internalActor = authenticateInternalSchedule(req);
+  if (internalActor) return internalActor;
+
   const auth = await authenticateRequest(req, admin);
   if (auth.userId === "service-role") return auth.userId;
 
@@ -177,10 +209,11 @@ async function recordAudit(
   results: ScheduledJobResult[],
 ): Promise<void> {
   const correlationId = crypto.randomUUID();
+  const systemActor = actorId === "service-role" || actorId === "scheduled-job";
   const { error } = await admin.from("audit_event").insert({
     id: crypto.randomUUID(),
-    actor_id: actorId === "service-role" ? null : actorId,
-    actor_type: actorId === "service-role" ? "system" : "user",
+    actor_id: systemActor ? null : actorId,
+    actor_type: systemActor ? "system" : "user",
     entity_type: "scheduled_job",
     entity_id: correlationId,
     trigger_type: "subledger_scheduled_jobs",

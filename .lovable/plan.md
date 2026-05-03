@@ -1,46 +1,92 @@
 ## Root cause
 
-Both publish attempts (web + ebay) for product `eee4c676-f29a-40fb-9d45-a41c4301ed5b` (SKU `31157-1.1`) failed at the INSERT into `channel_listing` with the Postgres error:
+Unit `PO688-2` (SKU `31157-1.1`) was sold on 2 May at 08:47 (order `cf13fce5…`), but it still shows as in stock on the website.
+
+Inspecting the unit in the database:
 
 ```
-null value in column "external_sku" of relation "channel_listing"
-violates not-null constraint
+status:    'available'   ← legacy lifecycle column (unchanged)
+v2_status: 'sold'        ← v2 lifecycle column (correctly set)
+sold_at:   2026-05-02T08:47:33Z
+order_id:  cf13fce5-…
 ```
 
-(Confirmed in postgres logs at 2026-05-02 08:15:14 and 08:15:16 UTC.)
+The website's product page calls the `product_detail_offers(p_mpn)` RPC, which counts in-stock units with:
 
-### Why
+```sql
+JOIN stock_unit su ON su.sku_id = s.id AND su.status = 'available'
+```
 
-- `channel_listing.external_sku` is declared `NOT NULL` with no default.
-- The publish hook `usePublishListing` (`src/hooks/admin/use-channel-listings.ts`) builds an INSERT payload that omits `external_sku`.
-- The hook's UPDATE branch works because it never touches the column, but this product had **no pre-existing `channel_listing` row**, so both publish attempts went through the INSERT branch and were rejected.
-- No `outbound_command` rows were ever created — the failure happens before the snapshot/queue RPCs run.
+So the offer counts any unit whose **legacy** `status` is `'available'`, even when its **v2** lifecycle has moved on to `'sold'`. Result: `stock_count = 1` for `31157-1.1` despite the unit being sold.
 
-This is a generic bug: any first-time publish for any (sku, channel) pair will fail the same way.
+Why the legacy column wasn't updated: the `allocate_stock_for_order_line` RPC (called by `v2-process-order` during checkout) only writes to `v2_status`:
+
+```sql
+UPDATE public.stock_unit
+SET v2_status = 'sold',
+    sold_at   = COALESCE(sold_at, now()),
+    order_id  = v_line.sales_order_id
+WHERE id = v_unit.id;
+```
+
+It never advances the legacy `status` enum (which has no `'sold'` value — sold units should sit at `'allocated'` / `'picked'` / `'packed'` / `'shipped'` / `'delivered'` / `'closed'`). Every other read path that filters by `status = 'available'` will mis-report sold units as in stock — this isn't unique to the storefront.
 
 ## Fix
 
-Populate `external_sku` on the INSERT payload in `usePublishListing`. The natural value is the SKU code we already looked up (e.g. `31157-1.1`), which is what the eBay/sync code uses elsewhere as the external SKU identifier.
+Make the offer query and the allocation RPC agree on a single source of truth for "is this unit still saleable", consistent with how `allocate_stock_for_order_line` itself selects units (it uses `COALESCE(v2_status, status) IN ('listed','graded','available','restocked')`).
 
-### Change
+### 1. Migration — patch `allocate_stock_for_order_line` to also advance legacy status
 
-In `src/hooks/admin/use-channel-listings.ts` (around lines 240–299):
+Update the unit-update statement in the RPC so future allocations move the legacy column to `'allocated'` (the correct post-sale, pre-pick lifecycle state) at the same time as setting `v2_status = 'sold'`:
 
-1. Extend the SKU lookup to also select `sku_code` (we already have it from the input as `skuCode`, but read from DB for safety so we use the canonical value).
-2. Add `external_sku: skuCode` to the `payload` object so it is set on INSERT.
-3. Leave the UPDATE branch as-is (don't overwrite an existing `external_sku` that may have been set by a prior eBay/web sync to a marketplace-assigned value).
+```sql
+UPDATE public.stock_unit
+SET v2_status = 'sold',
+    status    = 'allocated',
+    sold_at   = COALESCE(sold_at, now()),
+    order_id  = v_line.sales_order_id
+WHERE id = v_unit.id;
+```
 
-To prevent this whole class of bug, also relax the column to allow a default fallback at the DB level:
+This keeps the two columns aligned for every future sale through both the website and the eBay order processor (which calls the same RPC).
 
-- New migration: alter `channel_listing.external_sku` to default to the related `sku.sku_code` via a `BEFORE INSERT` trigger when the caller doesn't supply one. (Keep `NOT NULL`, but populate it automatically.)
+### 2. Migration — patch `product_detail_offers` to filter on the unified saleable predicate
 
-### After deployment
+Mirror the allocation RPC's predicate so the storefront stays correct even if a unit's legacy status drifts:
 
-Manually retry the publish for SKU `31157-1.1` on both `web` and `ebay` from `/admin/products/<id>` → Channels tab. The fix will create the `channel_listing` rows, generate price decision snapshots, and enqueue `publish` commands into `outbound_command` for the `listing-command-process` worker to pick up.
+```sql
+JOIN stock_unit su
+  ON su.sku_id = s.id
+ AND COALESCE(su.v2_status::text, su.status::text) IN ('listed','graded','available','restocked')
+```
 
-## Files touched
+This makes "in stock on the website" mean exactly the same thing as "available to allocate to an order", which is the correct invariant.
 
-- `src/hooks/admin/use-channel-listings.ts` — add `external_sku: skuCode` to insert payload.
-- `supabase/migrations/<new>.sql` — `BEFORE INSERT` trigger on `channel_listing` defaulting `external_sku` from `sku.sku_code` when null.
+### 3. Migration — backfill the one stuck unit
 
-No other components, RPCs, or edge functions need changes.
+```sql
+UPDATE public.stock_unit
+SET status = 'allocated'
+WHERE v2_status = 'sold'
+  AND status   = 'available'
+  AND order_id IS NOT NULL;
+```
+
+Scoped to units that have already been sold-and-linked to an order; safe to run as a one-off correction.
+
+### 4. eBay quantity sync
+
+`v2-process-order` already queues `pushEbayQuantityForSkus` after allocation, so eBay quantity will refresh via the existing outbox. No edge function changes needed — the RPC change alone fixes the website read path.
+
+## Files
+
+- `supabase/migrations/<new>_fix_sold_unit_status.sql` — three statements above (replace `allocate_stock_for_order_line`, replace `product_detail_offers`, backfill).
+
+No frontend changes required. No edge function changes required.
+
+## Verification
+
+After deploy:
+- `SELECT * FROM product_detail_offers('31157-1');` should return `stock_count = 0` for `31157-1.1`.
+- Product page `/sets/31157-1` shows "No stock currently available" for grade 1.
+- Future sales: confirm a freshly sold unit has `status = 'allocated'` and `v2_status = 'sold'`.

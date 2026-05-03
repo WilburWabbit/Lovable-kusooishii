@@ -1,0 +1,126 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "KUSO OISHII" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e7]
+          - generic [ref=e8]: KUSO OISHII
+        - navigation [ref=e9]:
+          - link "Shop" [ref=e10] [cursor=pointer]:
+            - /url: /browse
+          - link "Themes" [ref=e11] [cursor=pointer]:
+            - /url: /themes
+          - link "Just Landed" [ref=e12] [cursor=pointer]:
+            - /url: /new-arrivals
+          - link "About" [ref=e13] [cursor=pointer]:
+            - /url: /about
+          - link "Blue Bell" [ref=e14] [cursor=pointer]:
+            - /url: /bluebell
+        - generic [ref=e15]:
+          - button [ref=e16] [cursor=pointer]:
+            - img
+          - link [ref=e17] [cursor=pointer]:
+            - /url: /account?tab=wishlist
+            - button [ref=e18]:
+              - img
+          - link [ref=e19] [cursor=pointer]:
+            - /url: /cart
+            - button [ref=e20]:
+              - img
+          - link [ref=e21] [cursor=pointer]:
+            - /url: /login
+            - img
+    - main [ref=e22]:
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - heading "Sign in" [level=1] [ref=e26]
+          - paragraph [ref=e27]: Sign in. You know the drill.
+        - generic [ref=e28]:
+          - button "Continue with Google" [ref=e29] [cursor=pointer]:
+            - img
+            - text: Continue with Google
+          - button "Continue with Apple" [ref=e30] [cursor=pointer]:
+            - img
+            - text: Continue with Apple
+        - generic [ref=e35]: or
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - text: Email
+            - textbox "Email" [ref=e38]:
+              - /placeholder: you@example.com
+          - generic [ref=e39]:
+            - generic [ref=e40]:
+              - generic [ref=e41]: Password
+              - link "Forgot password?" [ref=e42] [cursor=pointer]:
+                - /url: /forgot-password
+            - textbox "Password" [ref=e43]
+          - button "Sign In" [ref=e44] [cursor=pointer]
+        - paragraph [ref=e45]:
+          - text: No account?
+          - link "Create one" [ref=e46] [cursor=pointer]:
+            - /url: /signup
+    - contentinfo [ref=e47]:
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - generic [ref=e50]:
+            - text: KUSO OISHII
+            - paragraph [ref=e51]: LEGO® from someone who actually gives a damn. Rescued stock, honest grading, fair prices.
+            - generic [ref=e52]:
+              - img [ref=e53]
+              - generic [ref=e56]: Brookville, Norfolk UK
+            - link "Instagram" [ref=e58] [cursor=pointer]:
+              - /url: https://www.instagram.com/kuso_oishii/
+              - img
+          - generic [ref=e59]:
+            - heading "Quick Links" [level=4] [ref=e60]
+            - navigation [ref=e61]:
+              - link "Shop All Sets" [ref=e62] [cursor=pointer]:
+                - /url: /browse
+              - link "Browse Themes" [ref=e63] [cursor=pointer]:
+                - /url: /themes
+              - link "Just Landed" [ref=e64] [cursor=pointer]:
+                - /url: /new-arrivals
+              - link "Blue Bell LEGO® Club" [ref=e65] [cursor=pointer]:
+                - /url: /bluebell
+              - link "About Us" [ref=e66] [cursor=pointer]:
+                - /url: /about
+          - generic [ref=e67]:
+            - heading "Customer Service" [level=4] [ref=e68]
+            - navigation [ref=e69]:
+              - link "FAQ" [ref=e70] [cursor=pointer]:
+                - /url: /faq
+              - link "Grading Guide" [ref=e71] [cursor=pointer]:
+                - /url: /grading
+              - link "Contact Us" [ref=e72] [cursor=pointer]:
+                - /url: /contact
+              - link "Track Your Order" [ref=e73] [cursor=pointer]:
+                - /url: /order-tracking
+              - link "Returns & Exchanges" [ref=e74] [cursor=pointer]:
+                - /url: /returns-exchanges
+              - link "Shipping Info" [ref=e75] [cursor=pointer]:
+                - /url: /shipping-policy
+          - generic [ref=e76]:
+            - heading "First Dibs" [level=4] [ref=e77]
+            - paragraph [ref=e78]: Stock alerts, wishlists, and club perks. No spam. Just bricks.
+            - generic [ref=e79]:
+              - textbox "Enter your email" [ref=e80]
+              - button "Create Account" [ref=e81] [cursor=pointer]:
+                - img
+                - text: Create Account
+            - paragraph [ref=e82]:
+              - text: Already have an account?
+              - link "Sign in" [ref=e83] [cursor=pointer]:
+                - /url: /login
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - paragraph [ref=e87]: © 2026 Kuso Oishii. All rights reserved.
+            - paragraph [ref=e88]: LEGO®, the LEGO® logo and the Minifigure are trademarks of the LEGO® Group, which does not sponsor, authorise or endorse Kuso Oishii.
+          - generic [ref=e89]:
+            - link "Privacy Policy" [ref=e90] [cursor=pointer]:
+              - /url: /privacy
+            - link "Terms of Service" [ref=e91] [cursor=pointer]:
+              - /url: /terms
