@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
         .select(
           "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
         )
-        .eq("active", true);
+        .eq("active_flag", true);
 
       if (skuErr) throw new Error(`Failed to fetch SKUs: ${skuErr.message}`);
 
