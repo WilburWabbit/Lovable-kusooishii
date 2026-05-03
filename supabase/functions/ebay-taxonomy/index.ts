@@ -53,6 +53,31 @@ Rules:
 - Do not invent product facts, identifiers, prices, or availability.
 - Notes and reasons must be short and operational.`;
 
+const GMC_RUNTIME_CANONICAL_ATTRIBUTES: Record<string, {
+  label: string;
+  attribute_group: "identity" | "physical" | "lifecycle" | "marketing" | "value" | "other";
+  data_type: "string" | "int" | "decimal" | "date" | "bool";
+  sort_order: number;
+}> = {
+  title: { label: "GMC Title", attribute_group: "marketing", data_type: "string", sort_order: 900 },
+  description: { label: "GMC Description", attribute_group: "marketing", data_type: "string", sort_order: 901 },
+  link: { label: "Product URL", attribute_group: "marketing", data_type: "string", sort_order: 902 },
+  imageLink: { label: "Primary Image URL", attribute_group: "marketing", data_type: "string", sort_order: 903 },
+  price_amount_micros: { label: "Price Amount Micros", attribute_group: "other", data_type: "string", sort_order: 904 },
+  price_currency: { label: "Price Currency", attribute_group: "other", data_type: "string", sort_order: 905 },
+  availability_from_stock: { label: "Availability From Stock", attribute_group: "lifecycle", data_type: "string", sort_order: 906 },
+  condition_from_grade: { label: "Condition From Grade", attribute_group: "lifecycle", data_type: "string", sort_order: 907 },
+  brand: { label: "Brand", attribute_group: "identity", data_type: "string", sort_order: 908 },
+  gtin: { label: "GTIN", attribute_group: "identity", data_type: "string", sort_order: 909 },
+  identifier_exists: { label: "Identifier Exists", attribute_group: "identity", data_type: "bool", sort_order: 910 },
+  product_type_path: { label: "Product Type Path", attribute_group: "marketing", data_type: "string", sort_order: 911 },
+  stock_count: { label: "Stock Count", attribute_group: "lifecycle", data_type: "int", sort_order: 912 },
+  condition_grade: { label: "Condition Grade", attribute_group: "lifecycle", data_type: "int", sort_order: 913 },
+  lego_theme: { label: "LEGO Theme", attribute_group: "identity", data_type: "string", sort_order: 914 },
+  lego_subtheme: { label: "LEGO Subtheme", attribute_group: "identity", data_type: "string", sort_order: 915 },
+  subtheme_name: { label: "Subtheme Name", attribute_group: "identity", data_type: "string", sort_order: 916 },
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -126,6 +151,39 @@ function normalizeGmcSuggestion(
       : "medium",
     reason: cleanNullableString(row.reason) ?? "Suggested from current app data and GMC field semantics.",
   };
+}
+
+async function ensureGmcRuntimeCanonicalAttribute(
+  admin: ReturnType<typeof createAdminClient>,
+  key: string,
+) {
+  const descriptor = GMC_RUNTIME_CANONICAL_ATTRIBUTES[key];
+  if (!descriptor) return;
+
+  const { data: existing, error: existingErr } = await admin
+    .from("canonical_attribute")
+    .select("key")
+    .eq("key", key)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (existing) return;
+
+  const { error } = await admin
+    .from("canonical_attribute")
+    .insert({
+      key,
+      label: descriptor.label,
+      attribute_group: descriptor.attribute_group,
+      editor: "readOnly",
+      data_type: descriptor.data_type,
+      unit: null,
+      db_column: null,
+      provider_chain: [{ provider: "derived", field: key }],
+      editable: false,
+      sort_order: descriptor.sort_order,
+      active: true,
+    });
+  if (error && !String(error.message).toLowerCase().includes("duplicate")) throw error;
 }
 
 function treeIdFor(marketplace: string): string {
@@ -872,6 +930,9 @@ Deno.serve(async (req) => {
       }
       if (!row.canonical_key && !row.constant_value && !row.transform) {
         throw new Error("Set canonical_key, constant_value, or transform");
+      }
+      if (row.channel === "gmc" && row.canonical_key) {
+        await ensureGmcRuntimeCanonicalAttribute(admin, String(row.canonical_key));
       }
       // Use a delete-then-insert to honour the partial unique index that
       // includes COALESCE(...) — Postgres ON CONFLICT can't target it.

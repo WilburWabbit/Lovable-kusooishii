@@ -592,11 +592,11 @@ export function PricingActionsCard() {
         )}
       </SurfaceCard>
 
-      {/* Single SKU pricing */}
+      {/* Single MPN pricing */}
       <SurfaceCard>
         <SectionHead>Single MPN Pricing</SectionHead>
         <p className="text-xs text-zinc-500 mt-1 mb-4">
-          Calculate pricing for the first active SKU attached to an MPN.
+          Calculate pricing for every active SKU attached to an MPN.
         </p>
 
         <div className="flex items-end gap-3 mb-3">
@@ -637,50 +637,54 @@ export function PricingActionsCard() {
           </button>
         </div>
 
-        {singleResults.map((singleResult) => (
-          <div key={singleResult.sku_code} className="mt-3 p-3 rounded bg-zinc-50 border border-zinc-200">
-            <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-2">{singleResult.sku_code}</div>
-            <div className="grid gap-2 text-xs sm:grid-cols-4">
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
-                <Mono color="red">£{Number(singleResult.floor_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Target</span>
-                <Mono color="teal">£{Number(singleResult.target_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Ceiling</span>
-                <Mono color="amber">£{Number(singleResult.ceiling_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Market</span>
-                <Mono color={singleResult.market_consensus != null ? 'teal' : 'amber'}>
-                  {singleResult.market_consensus != null ? `£${Number(singleResult.market_consensus).toFixed(2)}` : 'n/a'}
-                </Mono>
-              </div>
-            </div>
+        {singleResults.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {singleResults.map((result) => (
+              <div key={result.sku_id} className="rounded border border-zinc-200 bg-zinc-50 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <Mono color="amber">{result.sku_code}</Mono>
+                  <Mono color={confidenceTone(result.confidence_score)}>
+                    {((result.confidence_score ?? 0) * 100).toFixed(0)}%
+                  </Mono>
+                </div>
 
-            {singleResult.breakdown && (
-              <div className="mt-3 pt-2 border-t border-zinc-200 space-y-1">
-                <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">Breakdown</div>
-                {Object.entries(singleResult.breakdown as Record<string, number>).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-[11px]">
-                    <span className="text-zinc-500">{k.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-zinc-700">
-                      {k.includes('rate') || k.includes('margin') ? `${v}%` : `£${Number(v).toFixed(2)}`}
-                    </span>
+                <div className="grid gap-2 text-xs sm:grid-cols-4">
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
+                    <Mono color="red">£{Number(result.floor_price ?? 0).toFixed(2)}</Mono>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Target</span>
+                    <Mono color="teal">£{Number(result.target_price ?? 0).toFixed(2)}</Mono>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Ceiling</span>
+                    <Mono color="amber">£{Number(result.ceiling_price ?? 0).toFixed(2)}</Mono>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Market</span>
+                    <Mono color={result.market_consensus != null ? 'teal' : 'amber'}>
+                      {result.market_consensus != null ? `£${Number(result.market_consensus).toFixed(2)}` : 'n/a'}
+                    </Mono>
+                  </div>
+                </div>
 
-            <div className="mt-2 pt-2 border-t border-zinc-200 flex justify-between text-[11px]">
-              <span className="text-zinc-500">Confidence</span>
-              <Mono color={(singleResult.confidence_score ?? 0) >= 0.7 ? 'teal' : 'amber'}>
-                {((singleResult.confidence_score ?? 0) * 100).toFixed(0)}%
-              </Mono>
-            </div>
+                {result.breakdown && (
+                  <div className="mt-3 grid gap-x-4 gap-y-1 border-t border-zinc-200 pt-2 text-[11px] sm:grid-cols-2">
+                    {Object.entries(result.breakdown as Record<string, number>).map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3">
+                        <span className="text-zinc-500">{k.replace(/_/g, ' ')}</span>
+                        <span className="font-mono text-zinc-700">
+                          {k.includes('rate') || k.includes('margin') || k.includes('pct')
+                            ? `${Number(v).toFixed(2)}%`
+                            : `£${Number(v).toFixed(2)}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         ))}
       </SurfaceCard>
