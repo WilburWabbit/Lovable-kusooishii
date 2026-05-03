@@ -56,6 +56,7 @@ const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"))
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
 const ShippingRatesPage = lazy(() => import("./pages/admin-v2/ShippingRatesPage"));
+const EbayStorefrontPage = lazy(() => import("./pages/admin-v2/EbayStorefrontPage"));
 const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));

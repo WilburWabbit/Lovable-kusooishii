@@ -6203,6 +6203,154 @@ export type Database = {
         }
         Relationships: []
       }
+      seo_document: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          document_key: string
+          document_type: string
+          entity_id: string | null
+          entity_reference: string | null
+          entity_type: string | null
+          id: string
+          metadata: Json
+          published_revision_id: string | null
+          route_path: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          document_key: string
+          document_type: string
+          entity_id?: string | null
+          entity_reference?: string | null
+          entity_type?: string | null
+          id?: string
+          metadata?: Json
+          published_revision_id?: string | null
+          route_path?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          document_key?: string
+          document_type?: string
+          entity_id?: string | null
+          entity_reference?: string | null
+          entity_type?: string | null
+          id?: string
+          metadata?: Json
+          published_revision_id?: string | null
+          route_path?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seo_document_published_revision_id_fkey"
+            columns: ["published_revision_id"]
+            isOneToOne: false
+            referencedRelation: "seo_revision"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seo_revision: {
+        Row: {
+          breadcrumbs: Json
+          canonical_path: string
+          canonical_url: string
+          change_summary: string | null
+          created_at: string
+          created_by: string | null
+          geo: Json
+          id: string
+          image_metadata: Json
+          indexation_policy: string
+          keywords: string[]
+          meta_description: string
+          metadata: Json
+          open_graph: Json
+          published_at: string | null
+          revision_number: number
+          robots_directive: string
+          seo_document_id: string
+          sitemap: Json
+          source: string
+          status: string
+          structured_data: Json
+          title_tag: string
+          twitter_card: Json
+        }
+        Insert: {
+          breadcrumbs?: Json
+          canonical_path: string
+          canonical_url: string
+          change_summary?: string | null
+          created_at?: string
+          created_by?: string | null
+          geo?: Json
+          id?: string
+          image_metadata?: Json
+          indexation_policy?: string
+          keywords?: string[]
+          meta_description: string
+          metadata?: Json
+          open_graph?: Json
+          published_at?: string | null
+          revision_number: number
+          robots_directive?: string
+          seo_document_id: string
+          sitemap?: Json
+          source?: string
+          status?: string
+          structured_data?: Json
+          title_tag: string
+          twitter_card?: Json
+        }
+        Update: {
+          breadcrumbs?: Json
+          canonical_path?: string
+          canonical_url?: string
+          change_summary?: string | null
+          created_at?: string
+          created_by?: string | null
+          geo?: Json
+          id?: string
+          image_metadata?: Json
+          indexation_policy?: string
+          keywords?: string[]
+          meta_description?: string
+          metadata?: Json
+          open_graph?: Json
+          published_at?: string | null
+          revision_number?: number
+          robots_directive?: string
+          seo_document_id?: string
+          sitemap?: Json
+          source?: string
+          status?: string
+          structured_data?: Json
+          title_tag?: string
+          twitter_card?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seo_revision_seo_document_id_fkey"
+            columns: ["seo_document_id"]
+            isOneToOne: false
+            referencedRelation: "seo_document"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shipping_rate_table: {
         Row: {
           active: boolean
@@ -8983,6 +9131,7 @@ export type Database = {
           filter_grade?: string
           filter_retired?: boolean
           filter_theme_id?: string
+          include_out_of_stock?: boolean
           search_term?: string
         }
         Returns: {
@@ -9195,6 +9344,32 @@ export type Database = {
           stock_count: number
         }[]
       }
+      publish_seo_revision: {
+        Args: {
+          p_breadcrumbs?: Json
+          p_canonical_path: string
+          p_canonical_url: string
+          p_change_summary?: string
+          p_geo?: Json
+          p_image_metadata?: Json
+          p_indexation_policy?: string
+          p_keywords?: string[]
+          p_meta_description: string
+          p_metadata?: Json
+          p_open_graph?: Json
+          p_robots_directive?: string
+          p_seo_document_id: string
+          p_sitemap?: Json
+          p_source?: string
+          p_structured_data?: Json
+          p_title_tag: string
+          p_twitter_card?: Json
+        }
+        Returns: {
+          id: string
+          revision_number: number
+        }[]
+      }
       queue_listing_command: {
         Args: {
           p_actor_id?: string
@@ -9315,6 +9490,32 @@ export type Database = {
       retry_qbo_posting_intent: {
         Args: { p_posting_intent_id: string }
         Returns: string
+      }
+      save_seo_revision_draft: {
+        Args: {
+          p_breadcrumbs?: Json
+          p_canonical_path: string
+          p_canonical_url: string
+          p_change_summary?: string
+          p_geo?: Json
+          p_image_metadata?: Json
+          p_indexation_policy?: string
+          p_keywords?: string[]
+          p_meta_description?: string
+          p_metadata?: Json
+          p_open_graph?: Json
+          p_robots_directive?: string
+          p_seo_document_id: string
+          p_sitemap?: Json
+          p_source?: string
+          p_structured_data?: Json
+          p_title_tag?: string
+          p_twitter_card?: Json
+        }
+        Returns: {
+          id: string
+          revision_number: number
+        }[]
       }
       search_catalog_for_wishlist: {
         Args: {
