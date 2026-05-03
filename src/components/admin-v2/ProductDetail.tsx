@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useProduct, useUpdateSKUPrice } from "@/hooks/admin/use-products";
+import { useProduct } from "@/hooks/admin/use-products";
 import { SurfaceCard, Mono, GradeBadge, BackButton } from "./ui-primitives";
 import { StockUnitsTab } from "./StockUnitsTab";
 import { PhotosTab } from "./tabs/PhotosTab";
@@ -9,7 +9,6 @@ import { MinifigsTab } from "./tabs/MinifigsTab";
 import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
 import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
-import { toast } from "sonner";
 import type { Channel, ProductVariant, ProductVariantPricing } from "@/lib/types/admin";
 
 interface ProductDetailProps {
@@ -34,108 +33,6 @@ function pricingForChannel(variant: ProductVariant, channel: string): ProductVar
 
 function money(value: number | null | undefined) {
   return value == null || !Number.isFinite(Number(value)) ? "—" : `£${Number(value).toFixed(2)}`;
-}
-
-// ─── Inline editable price cell ──────────────────────────────
-
-function PriceCell({ variant, mpn }: { variant: ProductVariant; mpn: string }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
-  const updatePrice = useUpdateSKUPrice();
-
-  const startEdit = () => {
-    setValue(variant.salePrice?.toFixed(2) ?? "");
-    setEditing(true);
-  };
-
-  const save = async () => {
-    const num = parseFloat(value);
-    if (isNaN(num) || num <= 0) {
-      toast.error("Enter a valid price");
-      return;
-    }
-    try {
-      await updatePrice.mutateAsync({
-        skuId: variant.id,
-        mpn,
-        price: num,
-        floorPrice: variant.floorPrice,
-      });
-      toast.success(`${variant.sku} price set to £${num.toFixed(2)}`);
-      setEditing(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update price");
-    }
-  };
-
-  const cancel = () => setEditing(false);
-
-  const belowFloor =
-    editing &&
-    variant.floorPrice != null &&
-    parseFloat(value) > 0 &&
-    parseFloat(value) < variant.floorPrice;
-
-  if (editing) {
-    return (
-      <div>
-        <div className="text-[10px] text-zinc-500">Price</div>
-        <div className="flex items-center gap-1 mt-0.5">
-          <span className="text-xs text-zinc-400">£</span>
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-              if (e.key === "Escape") cancel();
-            }}
-            autoFocus
-            className={`w-16 px-1.5 py-0.5 text-xs font-mono border rounded bg-white text-right focus:outline-none focus:ring-1 ${
-              belowFloor
-                ? "border-red-400 focus:ring-red-400 text-red-600"
-                : "border-amber-300 focus:ring-amber-400"
-            }`}
-          />
-        </div>
-        {belowFloor && (
-          <div className="text-[9px] text-red-500 mt-0.5">
-            Below floor £{variant.floorPrice!.toFixed(2)}
-          </div>
-        )}
-        <div className="flex gap-1 mt-1">
-          <button
-            onClick={save}
-            disabled={updatePrice.isPending || !!belowFloor}
-            className="text-[9px] text-amber-600 hover:text-amber-500 font-medium disabled:text-zinc-400"
-          >
-            {updatePrice.isPending ? "..." : "Save"}
-          </button>
-          <button
-            onClick={cancel}
-            className="text-[9px] text-zinc-400 hover:text-zinc-600"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="text-[10px] text-zinc-500">Price</div>
-      <button
-        onClick={startEdit}
-        className="bg-transparent border-none cursor-pointer p-0 hover:opacity-70 transition-opacity"
-        title="Click to edit price"
-      >
-        <Mono color="teal" className="text-sm">
-          {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
-        </Mono>
-      </button>
-    </div>
-  );
 }
 
 // ─── ProductDetail ───────────────────────────────────────────

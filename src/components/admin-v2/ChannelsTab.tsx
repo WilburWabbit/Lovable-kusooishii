@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  channelListingKeys,
   useChannelListings,
   useChannelFees,
   usePublishListing,
@@ -56,6 +58,7 @@ function VariantChannelsCard({
   const { data: webPreflight, isLoading: webPreflightLoading } = useWebsiteListingPreflight(variant.id);
   const publishListing = usePublishListing();
   const activateSku = useActivateSku();
+  const queryClient = useQueryClient();
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
@@ -177,6 +180,13 @@ function VariantChannelsCard({
     }
   };
 
+  const refreshWebsitePreflight = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.pricingByVariant(variant.id) }),
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.websitePreflight(variant.id) }),
+    ]);
+  };
+
   return (
     <SurfaceCard>
       <div className="flex items-center justify-between mb-3">
@@ -205,7 +215,10 @@ function VariantChannelsCard({
           const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
           const websiteBlocked = ch.key === "website" && webPreflight ? !webPreflight.can_publish : false;
+          const preflightChecking = ch.key === "website" && webPreflightLoading;
           const canPublish = !pricingLoading && !webPreflightLoading && !titleEmpty && price > 0 && !belowFloor && !websiteBlocked;
+          const stockCount = ch.key === "website" ? webPreflight?.saleable_stock_count : pricing?.stock_unit_count;
+          const confidence = pricing?.confidence_score == null ? null : Math.round(Number(pricing.confidence_score) * 100);
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
@@ -217,13 +230,19 @@ function VariantChannelsCard({
               className="p-3.5 bg-zinc-50 rounded-lg border border-zinc-200"
             >
               {/* Channel header */}
-              <div className="flex justify-between items-center mb-2.5">
+              <div className="flex flex-wrap justify-between items-center gap-2 mb-2.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-zinc-900">{ch.label}</span>
                   <Badge label={statusInfo.label} color={statusInfo.color} small />
+                  {preflightChecking && <Badge label="Checking" color="#71717A" small />}
+                  {websiteBlocked && <Badge label="Action needed" color="#F59E0B" small />}
                   {liveAndBelowFloor && (
                     <Badge label="Below floor" color="#EF4444" small />
                   )}
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                  <span>Stock <Mono color={stockCount ? "teal" : "amber"}>{stockCount ?? "—"}</Mono></span>
+                  <span>Confidence <Mono color={confidence != null && confidence >= 70 ? "teal" : "amber"}>{confidence == null ? "—" : `${confidence}%`}</Mono></span>
                 </div>
               </div>
 
@@ -257,7 +276,7 @@ function VariantChannelsCard({
               </div>
 
               {/* Price + fees */}
-              <div className="grid grid-cols-3 gap-2 mb-2">
+              <div className="grid grid-cols-1 gap-2 mb-2 sm:grid-cols-3">
                 <div>
                   <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                     Price (£)
@@ -307,20 +326,39 @@ function VariantChannelsCard({
                     ))}
                   </div>
                   {webPreflight.actions.includes("activate_sku") && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await activateSku.mutateAsync({ skuId: variant.id, skuCode: variant.sku });
+                            toast.success(`${variant.sku} activated`);
+                            await refreshWebsitePreflight();
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : "Failed to activate SKU");
+                          }
+                        }}
+                        disabled={activateSku.isPending}
+                        className="rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800 disabled:opacity-50"
+                      >
+                        {activateSku.isPending ? "Activating..." : "Activate SKU"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={refreshWebsitePreflight}
+                        className="rounded border border-zinc-300 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700"
+                      >
+                        Recheck
+                      </button>
+                    </div>
+                  )}
+                  {!webPreflight.actions.includes("activate_sku") && webPreflight.actions.includes("recalculate_price") && (
                     <button
                       type="button"
-                      onClick={async () => {
-                        try {
-                          await activateSku.mutateAsync({ skuId: variant.id, skuCode: variant.sku });
-                          toast.success(`${variant.sku} activated`);
-                        } catch (err) {
-                          toast.error(err instanceof Error ? err.message : "Failed to activate SKU");
-                        }
-                      }}
-                      disabled={activateSku.isPending}
-                      className="mt-2 rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800 disabled:opacity-50"
+                      onClick={refreshWebsitePreflight}
+                      className="mt-2 rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800"
                     >
-                      {activateSku.isPending ? "Activating..." : "Activate SKU"}
+                      Recalculate price
                     </button>
                   )}
                 </div>
@@ -333,7 +371,7 @@ function VariantChannelsCard({
               ) : null}
 
               {pricing && (
-                <div className="mb-2 grid grid-cols-3 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px]">
+                <div className="mb-2 grid grid-cols-1 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px] sm:grid-cols-3">
                   <span className="text-zinc-500">Floor <Mono color="red">£{Number(pricing.floor_price ?? 0).toFixed(2)}</Mono></span>
                   <span className="text-zinc-500">Ceiling <Mono color="amber">£{Number(pricing.ceiling_price ?? 0).toFixed(2)}</Mono></span>
                   <span className="text-zinc-500">Market <Mono color={pricing.market_consensus == null ? "amber" : "teal"}>{pricing.market_consensus == null ? "n/a" : `£${Number(pricing.market_consensus).toFixed(2)}`}</Mono></span>

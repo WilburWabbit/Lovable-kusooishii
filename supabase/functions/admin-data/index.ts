@@ -632,8 +632,10 @@ Deno.serve(async (req) => {
           external_sku: sku.sku_code,
           sku_id: sku.id,
           listed_price: finalPrice,
-          listed_quantity: 0,
+          listed_quantity: preflight.saleable_stock_count,
           offer_status: "PUBLISHED",
+          v2_channel: "website",
+          v2_status: "live",
           listing_title: typeof listing_title === "string" && listing_title.trim() ? listing_title.trim() : null,
           listing_description: typeof listing_description === "string" && listing_description.trim() ? listing_description.trim() : null,
           price_floor: null,
@@ -642,6 +644,7 @@ Deno.serve(async (req) => {
           confidence_score: null,
           pricing_notes: null,
           priced_at: null,
+          listed_at: new Date().toISOString(),
           synced_at: new Date().toISOString(),
         },
         { onConflict: "channel,external_sku", ignoreDuplicates: false }
@@ -679,7 +682,7 @@ Deno.serve(async (req) => {
       if (!sku_id) throw new ValidationError("sku_id is required");
       const { error } = await admin
         .from("sku")
-        .update({ active_flag: true })
+        .update({ active_flag: true, saleable_flag: true })
         .eq("id", sku_id);
       if (error) throw error;
       result = { success: true, sku_id };

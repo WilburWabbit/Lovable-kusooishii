@@ -271,7 +271,7 @@ BEGIN
     SELECT bec.current_value
     INTO v_market_consensus
     FROM public.brickeconomy_collection bec
-    WHERE bec.item_number IN (v_mpn, regexp_replace(v_mpn, ''-\d+$'', ''''))
+    WHERE bec.item_number IN (v_mpn, regexp_replace(v_mpn, ''-[0-9]+$'', ''''))
       AND bec.current_value IS NOT NULL
     ORDER BY CASE WHEN bec.item_number = v_mpn THEN 0 ELSE 1 END, bec.synced_at DESC
     LIMIT 1;
