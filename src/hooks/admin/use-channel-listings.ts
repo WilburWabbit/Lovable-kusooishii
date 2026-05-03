@@ -319,6 +319,11 @@ interface PublishListingInput {
   overrideReasonNote?: string;
 }
 
+interface PublishListingResult {
+  sku_id?: string;
+  listing_id?: string;
+}
+
 export function usePublishListing() {
   const queryClient = useQueryClient();
 
@@ -345,14 +350,14 @@ export function usePublishListing() {
       const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
 
       if (channel === 'website' || channel === 'web') {
-        const result = await invokeWithAuth('admin-data', {
+        const result = await invokeWithAuth<PublishListingResult>('admin-data', {
           action: 'create-web-listing',
           sku_id: skuId,
           listed_price: listingPrice,
           listing_title: listingTitle,
           listing_description: listingDescription,
         });
-        return result;
+        return { ...result, sku_id: skuId };
       }
 
       // Normalize channel value: legacy `channel` column uses 'web' for the
@@ -467,11 +472,13 @@ export function usePublishListing() {
 
       if (commandError) throw commandError;
 
-      return data;
+      return { ...(data as Record<string, unknown>), sku_id: skuId };
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
-      queryClient.invalidateQueries({ queryKey: channelListingKeys.pricingByVariant(variables.skuCode) });
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'channel-pricing'] });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'website-listing-preflight'] });
       queryClient.invalidateQueries({ queryKey: productKeys.all });
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
     },

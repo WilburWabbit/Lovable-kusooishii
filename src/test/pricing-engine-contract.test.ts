@@ -11,6 +11,14 @@ const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
 );
+const marketRefresh = readFileSync(
+  join(repoRoot, "supabase/functions/market-intelligence-refresh/index.ts"),
+  "utf8",
+);
+const marketRefreshCopy = readFileSync(
+  join(repoRoot, "supabase/functions/market-intelligence-refresh/index 2.ts"),
+  "utf8",
+);
 
 describe("pricing engine contract", () => {
   it("uses received saleable stock for carrying value and excludes pending receipt", () => {
@@ -42,5 +50,18 @@ describe("pricing engine contract", () => {
     expect(adminData).toContain('actions.push("activate_sku")');
     expect(adminData).toContain('actions.push("receive_stock")');
     expect(adminData).toContain('actions.push("recalculate_price")');
+  });
+
+  it("publishes website listings through v2 live status and saleable quantity", () => {
+    expect(adminData).toContain('v2_channel: "website"');
+    expect(adminData).toContain('v2_status: "live"');
+    expect(adminData).toContain("listed_quantity: preflight.saleable_stock_count");
+  });
+
+  it("coalesces market signal source metadata in both function copies", () => {
+    for (const source of [marketRefresh, marketRefreshCopy]) {
+      expect(source).toContain('metadata: {}');
+      expect(source).toContain("metadata: row.metadata ?? {}");
+    }
   });
 });
