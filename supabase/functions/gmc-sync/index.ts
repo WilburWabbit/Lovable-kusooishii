@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
         .select(
           "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
         )
-        .eq("active", true);
+        .eq("active_flag", true);
 
       if (skuErr) throw new Error(`Failed to fetch SKUs: ${skuErr.message}`);
 
@@ -256,11 +256,13 @@ Deno.serve(async (req) => {
       let errors = 0;
       let skipped = 0;
       const errorDetails: string[] = [];
+      const skippedDetails: Array<Record<string, unknown>> = [];
 
       for (const sku of skus ?? []) {
         // Only publish SKUs with active web listing
         if (!webSkuIds.has(sku.id)) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_product" });
           continue;
         }
 
@@ -273,6 +275,7 @@ Deno.serve(async (req) => {
           : productRelation;
         if (!product) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_mpn" });
           continue;
         }
 
@@ -281,6 +284,7 @@ Deno.serve(async (req) => {
         const listedPrice = Number(webListing?.listed_price ?? 0);
         if (listedPrice <= 0) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "not_listable_grade" });
           continue;
         }
 
@@ -324,7 +328,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ queued, published: queued, errors, skipped, errorDetails }),
+        JSON.stringify({ queued, published: queued, errors, skipped, errorDetails, skippedDetails }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
