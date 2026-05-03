@@ -243,7 +243,7 @@ export default function BrowsePage() {
     );
   }
 
-  const pageTitle = isNewMode ? "Just Landed" : isDealsMode ? "Deals" : "Browse Stock";
+  const pageTitle = isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse Stock";
   const pageSubtitle = isNewMode
     ? "Newest arrivals, sorted by release year"
     : isDealsMode
