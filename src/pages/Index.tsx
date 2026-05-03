@@ -96,7 +96,7 @@ export default function HomePage() {
         <div className="container">
           <div className="flex items-end justify-between">
             <div>
-              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">Just Landed</p>
+              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary">New Arrivals</p>
               <h2 className="mt-2 font-display text-2xl font-bold text-foreground lg:text-3xl">
                 Fresh picks
               </h2>
