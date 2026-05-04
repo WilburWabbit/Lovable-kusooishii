@@ -42,8 +42,29 @@ export function verifyServiceRoleJWT(token: string, supabaseUrl: string): boolea
 
   try {
     const payload = JSON.parse(base64UrlDecode(parts[1]));
+    if (payload?.role !== SERVICE_ROLE) return false;
+
     const expectedRef = projectRefFromSupabaseUrl(supabaseUrl);
-    return payload?.role === SERVICE_ROLE && !!expectedRef && payload?.ref === expectedRef;
+    if (!expectedRef) return false;
+
+    // Legacy HS256 service-role JWT: { ref: "<project-ref>", role: "service_role" }
+    if (payload?.ref === expectedRef) return true;
+
+    // New asymmetric (rotated) service-role JWT: ref claim may be absent;
+    // identify the project via iss = "https://<ref>.supabase.co/auth/v1"
+    // (or similar host-based issuer). Accept any iss whose hostname starts
+    // with the expected project ref.
+    const iss = typeof payload?.iss === "string" ? payload.iss : "";
+    if (iss) {
+      try {
+        const issHost = new URL(iss).hostname;
+        if (issHost.split(".")[0] === expectedRef) return true;
+      } catch {
+        // iss is not a URL — fall through
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }
