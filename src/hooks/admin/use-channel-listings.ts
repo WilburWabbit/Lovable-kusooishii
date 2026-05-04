@@ -10,6 +10,7 @@ import { invokeWithAuth } from '@/lib/invokeWithAuth';
 import type {
   ChannelListing,
   Channel,
+  ChannelAvailabilityOverride,
   ChannelListingStatus,
 } from '@/lib/types/admin';
 import { productKeys } from './use-products';
@@ -87,6 +88,11 @@ function mapListing(
     listingTitle: (row.listing_title as string) ?? null,
     listingDescription: (row.listing_description as string) ?? null,
     listingPrice: (row.listed_price as number) ?? null,
+    listedQuantity: (row.listed_quantity as number) ?? null,
+    offerStatus: (row.offer_status as string) ?? null,
+    availabilityOverride: (row.availability_override as ChannelAvailabilityOverride) ?? null,
+    availabilityOverrideAt: (row.availability_override_at as string) ?? null,
+    availabilityOverrideBy: (row.availability_override_by as string) ?? null,
     feeAdjustedPrice: (row.fee_adjusted_price as number) ?? null,
     estimatedFees: snapshot?.estimatedFees ?? null,
     estimatedNet: snapshot?.estimatedNet ?? null,
@@ -504,6 +510,37 @@ export function usePublishListing() {
       queryClient.invalidateQueries({ queryKey: channelListingKeys.all });
       queryClient.invalidateQueries({ queryKey: ['v2', 'channel-pricing'] });
       queryClient.invalidateQueries({ queryKey: ['v2', 'website-listing-preflight'] });
+      queryClient.invalidateQueries({ queryKey: productKeys.all });
+      queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
+    },
+  });
+}
+
+// ─── useChannelListingAction ───────────────────────────────
+
+type ChannelListingAction =
+  | 'set-channel-out-of-stock'
+  | 'clear-channel-out-of-stock'
+  | 'delist-channel-listing';
+
+interface ChannelListingActionInput {
+  skuCode: string;
+  listingId: string;
+  action: ChannelListingAction;
+}
+
+export function useChannelListingAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ listingId, action }: ChannelListingActionInput) => {
+      return invokeWithAuth('admin-data', {
+        action,
+        listing_id: listingId,
+      });
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
       queryClient.invalidateQueries({ queryKey: productKeys.all });
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
     },

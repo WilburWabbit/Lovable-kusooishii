@@ -25,9 +25,21 @@ export type PurchaseBatchStatus = 'draft' | 'recorded';
 
 export type VendorType = 'supplier' | 'marketplace' | 'payment_processor' | 'other';
 
-export type Channel = 'ebay' | 'website' | 'web' | 'bricklink' | 'brickowl' | 'in_person' | 'etsy' | 'squarespace';
+export type Channel =
+  | 'ebay'
+  | 'website'
+  | 'web'
+  | 'google_shopping'
+  | 'gmc'
+  | 'bricklink'
+  | 'brickowl'
+  | 'in_person'
+  | 'etsy'
+  | 'squarespace';
 
 export type ChannelListingStatus = 'draft' | 'live' | 'paused' | 'ended';
+
+export type ChannelAvailabilityOverride = 'manual_out_of_stock';
 
 export type OrderStatus =
   | 'needs_allocation'
@@ -226,6 +238,11 @@ export interface ChannelListing {
   listingTitle: string | null;
   listingDescription: string | null;
   listingPrice: number | null;
+  listedQuantity: number | null;
+  offerStatus: string | null;
+  availabilityOverride: ChannelAvailabilityOverride | null;
+  availabilityOverrideAt: string | null;
+  availabilityOverrideBy: string | null;
   feeAdjustedPrice: number | null;
   estimatedFees: number | null;
   estimatedNet: number | null;

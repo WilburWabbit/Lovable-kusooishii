@@ -308,7 +308,7 @@ eBay Fulfillment API ←── ebay-poll-orders      │
                     ▼               ▼
           landing_raw_ebay_order   Canonical tables:
           (external_id, payload,   ├─ sales_order
-           status=pending)         ├─ sales_order_line
+           status=retrying)        ├─ sales_order_line
                     │              ├─ stock_unit (FIFO consume)
                     │              ├─ customer (upsert)
                     │              │
@@ -832,11 +832,12 @@ Two dedicated retry functions handle failed landing rows with exponential backof
 ```
 ebay-retry-order (cron, every 5 min)
        │
-       ├─ Reads: landing_raw_ebay_order (status=error/retrying)
+       ├─ Reads: landing_raw_ebay_order (status=pending/error/retrying, after receive grace)
        ├─ Backoff: 0, 2, 10, 30, 60 minutes
        ├─ Max attempts: 5
        ├─ Retries → ebay-process-order
        ├─ On exhaust → admin_alert + audit_event
+       ├─ Alerts on rows older than 30 min still not committed/skipped
        └─ Writes: landing table (status, retry_count, last_retry_at, error_message)
 
 qbo-retry-sync (cron)

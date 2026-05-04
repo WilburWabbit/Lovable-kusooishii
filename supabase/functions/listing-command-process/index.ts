@@ -191,6 +191,12 @@ function getGmcProductInputName(merchantId: string, externalListingId: string | 
   return `accounts/${merchantId}/productInputs/${toBase64Url(productInputId)}`;
 }
 
+function commandPayloadQuantity(command: ListingCommand): number | null {
+  const payloadQuantity = Number(command.payload?.listed_quantity);
+  if (!Number.isFinite(payloadQuantity) || payloadQuantity < 0) return null;
+  return Math.floor(payloadQuantity);
+}
+
 async function recordListingCommandFailure(
   admin: ReturnType<typeof createAdminClient>,
   command: ListingCommand,
@@ -1444,7 +1450,8 @@ async function processGoogleShoppingCommand(
     .select("id", { count: "exact", head: true })
     .eq("sku_id" as never, skuId)
     .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
-  const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
+  const queuedQuantity = commandPayloadQuantity(command);
+  const stockCount = queuedQuantity ?? count ?? Number(listingRow.listed_quantity ?? 0);
   const gmcMappings = await getGmcMappings(admin);
   const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, productForGmc, stockCount, getSiteUrl(), gmcMappings);
   if (!dataSourceName) {

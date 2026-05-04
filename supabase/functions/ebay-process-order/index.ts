@@ -202,6 +202,8 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let requestOrderId: string | null = null;
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -218,6 +220,7 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
     const body = await req.json().catch(() => ({}));
     const orderId = body.order_id;
+    requestOrderId = orderId || null;
     const action = body.action || "process_order";
 
     if (!orderId) {
@@ -385,22 +388,62 @@ Deno.serve(async (req) => {
     if (!order) throw new Error(`eBay order ${orderId} not found`);
 
     const correlationId = crypto.randomUUID();
-    const { data: landingRow } = await admin
+    const receivedAt = new Date().toISOString();
+    const { data: existingLanding, error: existingLandingErr } = await admin
+      .from("landing_raw_ebay_order")
+      .select("id, received_at")
+      .eq("external_id", orderId)
+      .maybeSingle();
+
+    if (existingLandingErr) {
+      throw new Error(`Failed to check existing eBay landing row: ${existingLandingErr.message}`);
+    }
+
+    const landingWasCreated = !existingLanding;
+    const landingReceivedAt = existingLanding?.received_at || receivedAt;
+    const { data: landingRow, error: landingErr } = await admin
       .from("landing_raw_ebay_order")
       .upsert(
         {
           external_id: orderId,
           raw_payload: order,
-          status: "pending",
+          status: "retrying",
+          error_message: null,
           correlation_id: correlationId,
-          received_at: new Date().toISOString(),
+          received_at: landingReceivedAt,
+          last_retry_at: receivedAt,
         },
         { onConflict: "external_id" }
       )
       .select("id")
       .single();
+
+    if (landingErr || !landingRow?.id) {
+      throw new Error(`Failed to land eBay order ${orderId}: ${landingErr?.message || "missing landing id"}`);
+    }
+
     const landingId = landingRow?.id;
     console.log(`Landed eBay order ${orderId} → landing_raw_ebay_order ${landingId}`);
+
+    if (landingWasCreated) {
+      const { error: landingAuditErr } = await admin.from("audit_event").insert({
+        entity_type: "landing_raw_ebay_order",
+        entity_id: landingId,
+        trigger_type: "ebay_order_landed",
+        actor_type: "system",
+        source_system: "ebay-process-order",
+        correlation_id: correlationId,
+        after_json: {
+          external_id: orderId,
+          status: "retrying",
+          received_at: landingReceivedAt,
+        },
+      });
+
+      if (landingAuditErr) {
+        throw new Error(`Failed to audit eBay landing row ${landingId}: ${landingAuditErr.message}`);
+      }
+    }
 
     // ── Step 2: Idempotency check ──
     const { data: existing } = await admin
@@ -923,8 +966,7 @@ Deno.serve(async (req) => {
     console.error("ebay-process-order error:", e);
     // Try to mark landing row as error
     try {
-      const body2 = await req.clone().json().catch(() => ({}));
-      if (body2?.order_id) {
+      if (requestOrderId) {
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const errAdmin = createClient(supabaseUrl, serviceKey);
@@ -932,7 +974,7 @@ Deno.serve(async (req) => {
           status: "error",
           error_message: (e.message || "Unknown error").substring(0, 500),
           processed_at: new Date().toISOString(),
-        }).eq("external_id", body2.order_id).in("status", ["pending", "retrying"]);
+        }).eq("external_id", requestOrderId).in("status", ["pending", "retrying", "error"]);
       }
     } catch { /* best effort */ }
     return new Response(
