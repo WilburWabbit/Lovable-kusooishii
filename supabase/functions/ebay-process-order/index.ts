@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -211,7 +212,7 @@ Deno.serve(async (req) => {
     // Only accept service-role calls (from ebay-notifications)
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") || "";
-    if (token !== serviceKey) {
+    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

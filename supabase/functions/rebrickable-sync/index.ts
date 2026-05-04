@@ -1,6 +1,7 @@
 // Rebrickable sync — modes: set | enrich | full
 // Redeployed: 2026-04-27
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 import {
   fetchSetMinifigs,
   getBlCreds,
@@ -976,7 +977,7 @@ async function ensureAuthorized(
   // deno-lint-ignore no-explicit-any
   admin: any,
   authHeader: string | null,
-  serviceRoleKey: string,
+  supabaseUrl: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   if (!authHeader?.startsWith("Bearer ")) {
     return { ok: false, status: 401, error: "Unauthorized" };
@@ -984,7 +985,7 @@ async function ensureAuthorized(
   const token = authHeader.replace("Bearer ", "");
 
   // Service-role bypass (used by pg_cron)
-  if (token === serviceRoleKey) return { ok: true };
+  if (verifyServiceRoleJWT(token, supabaseUrl)) return { ok: true };
 
   const {
     data: { user },
@@ -1028,7 +1029,7 @@ Deno.serve(async (req) => {
     const auth = await ensureAuthorized(
       db,
       req.headers.get("Authorization"),
-      serviceRoleKey,
+      supabaseUrl,
     );
     if (!auth.ok) {
       return jsonResponse({ error: auth.error }, auth.status);

@@ -2,6 +2,7 @@
 import * as React from 'npm:react@18.3.1'
 import { renderAsync } from 'npm:@react-email/components@0.0.22'
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { verifyServiceRoleJWT } from '../_shared/auth.ts'
 import { TEMPLATES } from '../_shared/transactional-email-templates/registry.tsx'
 
 // Configuration baked in at scaffold time
@@ -24,29 +25,14 @@ function generateToken(): string {
     .join('')
 }
 
-// Parse JWT claims without verification (gateway already verified signature)
-function parseJwtClaims(token: string): Record<string, unknown> | null {
-  const parts = token.split('.')
-  if (parts.length < 2) return null
-  try {
-    const payload = parts[1]
-      .replaceAll('-', '+')
-      .replaceAll('_', '/')
-      .padEnd(Math.ceil(parts[1].length / 4) * 4, '=')
-    return JSON.parse(atob(payload)) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
-  // Defense in depth: only service_role callers may send emails.
-  // The anon key is a valid JWT but must NOT be allowed to trigger sends.
+  // Defense in depth: only service_role callers for this project may send
+  // emails. The anon key is a valid JWT but must NOT trigger sends.
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(
@@ -55,14 +41,6 @@ Deno.serve(async (req) => {
     )
   }
   const token = authHeader.slice('Bearer '.length).trim()
-  const claims = parseJwtClaims(token)
-  if (claims?.role !== 'service_role') {
-    return new Response(
-      JSON.stringify({ error: 'Forbidden' }),
-      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
@@ -74,6 +52,13 @@ Deno.serve(async (req) => {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
+    )
+  }
+
+  if (!verifyServiceRoleJWT(token, supabaseUrl)) {
+    return new Response(
+      JSON.stringify({ error: 'Forbidden' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 

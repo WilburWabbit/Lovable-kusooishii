@@ -62,23 +62,17 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - Do NOT build monolithic receive-validate-process-write Edge Functions
 - For migrations that may be run through Lovable SQL, do NOT use dollar-quoted function bodies (`$$` or `$function$`). Use single-quoted function bodies with doubled internal quotes, because Lovable's SQL runner can misparse dollar-quoted PL/pgSQL as an unterminated string.
 
-## Lovable Deployment Checks
+## Supabase in Lovable Projects
 
-Whenever Lovable or any external agent receives, pulls, imports, or applies an external commit, it must check for database and Edge Function deployment work before declaring the change complete.
+Lovable auto-injects `SUPABASE_SERVICE_ROLE_KEY` into every Edge Function at runtime. Reading it with `Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")` to create a server-side admin Supabase client is correct and expected. Do not remove those admin-client usages when auditing service-role handling.
 
-1. Inspect the incoming commit/diff for new or changed files under `supabase/migrations/`.
-2. Run every new migration that has not already been applied, in timestamp/name order. If a migration cannot be executed, stop and report the exact filename and error.
-3. Inspect the incoming commit/diff for new or changed files under `supabase/functions/`.
-4. Deploy every new or changed Edge Function directory. The function name is the directory name immediately under `supabase/functions/`.
-5. After execution, report:
-   - migrations run
-   - migrations skipped because they were already applied
-   - Edge Functions deployed
-   - any failures or manual follow-up required
+Service-role misuse to avoid:
 
-When Codex or another agent creates a commit or push from this repository, its handoff message should include a Lovable-ready prompt listing the migrations that need to be run and Edge Functions that need to be deployed.
-
-Codex does not have access to Lovable's Supabase project or deployment controls for this app. Codex must prepare code, migrations, and deployment instructions, then hand off the actual migration execution and Edge Function deployment to Lovable or the project owner.
+- Do NOT authenticate internal callers by byte-comparing bearer tokens to `Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")` (for example, `token === serviceRoleKey`). This breaks after key rotation when a valid service-role JWT in another caller no longer byte-matches the function environment.
+- For service-role bypasses, decode the JWT and verify `role === "service_role"` and `ref === <project-ref-from-SUPABASE_URL>`. The existing good pattern is in `supabase/functions/qbo-process-pending/index.ts`; new or refactored code should centralize this as `verifyServiceRoleJWT()` in `supabase/functions/_shared/auth.ts`.
+- Do NOT store Lovable-managed service-role keys in `vault.decrypted_secrets` or read Vault copies such as `service_role_key` or `email_queue_service_role_key` for `pg_cron`. Vault copies drift after Lovable rotates the key.
+- Prefer cron and internal scheduled calls to use `Authorization: Bearer <anon key>` for the Supabase gateway plus an `x-internal-shared-secret` header checked against a Lovable-managed secret such as `INTERNAL_CRON_SECRET`.
+- Webhook receivers still must land raw payloads and return quickly. Auth cleanup must preserve the land -> stage -> validate -> map -> promote architecture and must not inline processing into receivers.
 
 ## Integration Architecture Patterns
 

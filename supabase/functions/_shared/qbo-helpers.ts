@@ -4,6 +4,7 @@
 // ============================================================
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "./auth.ts";
 
 // ─── CORS ───────────────────────────────────────────────────
 
@@ -49,10 +50,12 @@ export async function authenticateRequest(
   }
   const token = authHeader.replace("Bearer ", "");
 
-  // Allow internal service-to-service calls (e.g. qbo-sync-payout invoking
-  // qbo-sync-sales-receipt) to authenticate using the service role key.
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (serviceRoleKey && token === serviceRoleKey) {
+  // Allow internal service-to-service calls to authenticate with any valid
+  // service_role JWT for this Supabase project. Do not byte-compare the
+  // token to SUPABASE_SERVICE_ROLE_KEY because Lovable key rotation can make
+  // stored or forwarded service-role JWTs drift from the function env value.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  if (verifyServiceRoleJWT(token, supabaseUrl)) {
     return { userId: "service-role", email: undefined };
   }
 

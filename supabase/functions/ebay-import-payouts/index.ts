@@ -10,6 +10,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import {
   EbayFinancesClient,
@@ -56,7 +57,7 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");
     const token = authHeader.replace("Bearer ", "");
 
-    if (token !== serviceRoleKey) {
+    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);
       if (userError || !user) throw new Error("Unauthorized");
     }

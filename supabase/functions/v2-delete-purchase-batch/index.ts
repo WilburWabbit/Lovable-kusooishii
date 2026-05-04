@@ -11,6 +11,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 type SupabaseAdminClient = ReturnType<typeof createClient>;
 type QboDeleteResult = { deleted: boolean; reason?: string };
@@ -119,7 +120,7 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const isServiceRole = token === serviceRoleKey;
+    const isServiceRole = verifyServiceRoleJWT(token, supabaseUrl);
     let actorId: string | null = null;
 
     if (!isServiceRole) {

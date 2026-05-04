@@ -10,6 +10,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 import { calculateFloorPrice, decomposeFees } from "../_shared/pricing.ts";
 import type { FeeScheduleRow } from "../_shared/pricing.ts";
 
@@ -36,9 +37,9 @@ Deno.serve(async (req) => {
 
     // Verify service role or admin auth
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.includes(serviceRoleKey) && authHeader !== `Bearer ${serviceRoleKey}`) {
+    const token = authHeader?.replace("Bearer ", "") ?? "";
+    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
       if (authHeader?.startsWith("Bearer ")) {
-        const token = authHeader.replace("Bearer ", "");
         const { data: { user }, error } = await admin.auth.getUser(token);
         if (error || !user) {
           return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
