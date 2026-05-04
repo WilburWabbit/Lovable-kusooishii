@@ -5,8 +5,8 @@ const staticRoutes = ['/', '/browse', '/themes', '/new-arrivals', '/deals', '/ab
 
 async function fetchProductRoutes() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey) return [];
+  const publishableKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !publishableKey) return [];
 
   // Use browse_catalog to respect live storefront filtering rules,
   // including sold-out visibility policies.
@@ -14,8 +14,8 @@ async function fetchProductRoutes() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      apikey: anonKey,
-      Authorization: `Bearer ${anonKey}`,
+      apikey: publishableKey,
+      Authorization: `Bearer ${publishableKey}`,
     },
     body: JSON.stringify({
       search_term: null,

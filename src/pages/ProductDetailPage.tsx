@@ -12,7 +12,6 @@ import { useStore, type Product } from "@/lib/store";
 import { trackViewItem } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
-import { usePageSeo } from "@/hooks/use-page-seo";
 import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
 import { absoluteUrl, breadcrumbJsonLd } from "@/lib/seo-jsonld";
 
@@ -53,6 +52,15 @@ interface MediaItem {
   url: string;
   alt: string;
   is_primary: boolean;
+}
+
+interface ProductMediaStorefrontRow {
+  id: string;
+  is_primary: boolean;
+  media_asset: {
+    original_url: string | null;
+    alt_text: string | null;
+  } | null;
 }
 
 export default function ProductDetailPage() {
@@ -173,7 +181,7 @@ export default function ProductDetailPage() {
         .select("include_catalog_img")
         .eq("id", product!.id)
         .maybeSingle();
-      return (data as any)?.include_catalog_img ?? false;
+      return (data as { include_catalog_img?: boolean | null } | null)?.include_catalog_img ?? false;
     },
     enabled: !!product?.id,
   });
@@ -182,13 +190,13 @@ export default function ProductDetailPage() {
   const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("product_media")
         .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
         .eq("product_id", product!.id)
         .order("sort_order", { ascending: true });
       if (error) throw error;
-      return (data ?? []).map((pm: any) => ({
+      return ((data ?? []) as unknown as ProductMediaStorefrontRow[]).map((pm) => ({
         id: pm.id,
         url: pm.media_asset?.original_url,
         alt: pm.media_asset?.alt_text ?? "",
@@ -266,33 +274,6 @@ export default function ProductDetailPage() {
     ] : undefined
   });
 
-  usePageSeo({
-    title: product ? `${product.name} (${product.mpn})` : 'LEGO® Set',
-    description: product?.description ?? `Shop ${product?.name ?? 'LEGO® sets'} with graded condition options and fast UK shipping from Kuso Oishii.`,
-    path: mpn ? `/sets/${mpn}` : '/sets',
-    imageUrl: primaryImageUrl ?? undefined,
-    imageAlt: product ? `${product.name} product image` : undefined,
-    keywords: product ? [product.mpn, product.name, 'LEGO resale', 'graded LEGO sets', 'UK LEGO store'] : undefined,
-    geo: { region: 'GB', placename: 'United Kingdom' },
-    jsonLd: product ? {
-      '@context': 'https://schema.org',
-      '@type': 'Product',
-      name: product.name,
-      sku: product.mpn,
-      mpn: product.mpn,
-      description: product.description ?? undefined,
-      image: allImageUrls.length ? allImageUrls : (primaryImageUrl ? [primaryImageUrl] : undefined),
-      brand: { '@type': 'Brand', name: 'LEGO' },
-      offers: offers?.map((offer) => ({
-        '@type': 'Offer',
-        priceCurrency: 'GBP',
-        price: offer.price ?? 0,
-        availability: offer.stock_count > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-        url: `https://kusooishii.com/sets/${product.mpn}`
-      }))
-    } : undefined
-  });
-
   // Fire view_item event once per product load
   const viewItemFired = useRef<string | null>(null);
   useEffect(() => {
@@ -321,7 +302,7 @@ export default function ProductDetailPage() {
       retired: product.retired_flag,
       yearReleased: product.release_year,
     });
-  }, [product, offers]);
+  }, [product, offers, primaryImageUrl, allImageUrls, themeName]);
 
   function buildCartProduct(p: ProductDetailRow, offer: Offer): Product {
     return {
