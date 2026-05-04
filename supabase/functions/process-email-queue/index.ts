@@ -1,6 +1,6 @@
 import { sendLovableEmail } from 'npm:@lovable.dev/email-js'
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { verifyServiceRoleJWT } from '../_shared/auth.ts'
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from '../_shared/auth.ts'
 
 const MAX_RETRIES = 5
 const DEFAULT_BATCH_SIZE = 10
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
   // gateway layer. This adds an explicit role + project-ref check so only
   // service-role callers for this project can trigger queue processing.
   const token = authHeader.slice('Bearer '.length).trim()
-  if (!verifyServiceRoleJWT(token, supabaseUrl)) {
+  if (!verifyInternalSharedSecret(req) && !verifyServiceRoleJWT(token, supabaseUrl)) {
     return new Response(
       JSON.stringify({ error: 'Forbidden' }),
       { status: 403, headers: { 'Content-Type': 'application/json' } }

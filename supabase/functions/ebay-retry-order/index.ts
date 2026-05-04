@@ -1,6 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 /**
  * eBay Retry Order — Picks up landing_raw_ebay_order rows with status
@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
     // Auth: service-role only
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") || "";
-    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
+    if (!verifyInternalSharedSecret(req) && !verifyServiceRoleJWT(token, supabaseUrl)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
