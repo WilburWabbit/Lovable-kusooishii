@@ -617,7 +617,7 @@ Deno.serve(async (req) => {
         .single();
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
-      let finalPrice = Number(preflight.final_price ?? 0);
+      const finalPrice = Number(preflight.final_price ?? 0);
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
       const quoteFloor = Number(preflight.quote.floor_price ?? 0);
       if (quoteFloor > 0 && finalPrice < quoteFloor) {
@@ -654,6 +654,8 @@ Deno.serve(async (req) => {
       if (uErr) throw uErr;
 
       const listingId = webListing?.id;
+      let commandId: string | null = null;
+      let outboxProcess: Record<string, unknown> | null = null;
       if (listingId) {
         const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
           p_sku_id: sku.id,
@@ -663,14 +665,51 @@ Deno.serve(async (req) => {
         });
         if (snapshotErr) throw snapshotErr;
 
-        const { error: commandErr } = await admin.rpc("queue_listing_command", {
+        const { data: queuedCommandId, error: queuedCommandErr } = await admin.rpc("queue_listing_command", {
           p_channel_listing_id: listingId,
           p_command_type: "publish",
         });
-        if (commandErr) throw commandErr;
+        if (queuedCommandErr) throw queuedCommandErr;
+        commandId = queuedCommandId ?? null;
+
+        if (commandId) {
+          try {
+            const processRes = await fetch(`${supabaseUrl}/functions/v1/listing-command-process`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceRoleKey}`,
+                apikey: serviceRoleKey,
+              },
+              body: JSON.stringify({ commandId, trigger: "website_publish" }),
+            });
+            const processPayload = await processRes.json().catch(() => ({}));
+            outboxProcess = {
+              ok: processRes.ok,
+              status: processRes.status,
+              payload: processPayload,
+            };
+            if (!processRes.ok) {
+              console.warn("Immediate website listing outbox processing failed", processPayload);
+            }
+          } catch (err) {
+            outboxProcess = {
+              ok: false,
+              error: err instanceof Error ? err.message : "Unknown outbox processing error",
+            };
+            console.warn("Immediate website listing outbox processing failed", err);
+          }
+        }
       }
 
-      result = { success: true, listing_id: listingId, preflight, final_price: finalPrice };
+      result = {
+        success: true,
+        listing_id: listingId,
+        command_id: commandId,
+        outbox_process: outboxProcess,
+        preflight,
+        final_price: finalPrice,
+      };
     } else if (action === "website-listing-preflight") {
       const { sku_id, listed_price } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");

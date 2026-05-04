@@ -64,15 +64,15 @@ function retryDelayMinutes(retryCount: number): number {
 }
 
 function normalizeTarget(value: string | null | undefined): string {
-  if (value === "website") return "web";
-  return value ?? "web";
+  const normalized = String(value ?? "web").toLowerCase();
+  if (normalized === "website") return "web";
+  return normalized;
 }
 
 function getSiteUrl(): string {
   const configured = Deno.env.get("SITE_URL");
   if (configured) return configured.replace(/\/$/, "");
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  return supabaseUrl.replace(".supabase.co", "").replace(/\/$/, "");
+  return "https://www.kusooishii.com";
 }
 
 function isRetryableError(message: string): boolean {
@@ -239,6 +239,555 @@ async function resolveListingCommandFailure(
 
 function isPublishedListing(row: Record<string, unknown>): boolean {
   return row.v2_status === "live" || ["live", "published", "PUBLISHED"].includes(String(row.offer_status ?? ""));
+}
+
+function publicSiteUrl(): string {
+  return (Deno.env.get("SITE_URL") ?? "https://www.kusooishii.com").replace(/\/$/, "");
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function objectOrEmpty(value: unknown): Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function arrayOrEmpty(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function isSaleableStockStatus(unit: Record<string, unknown>): boolean {
+  const status = String(unit.v2_status ?? unit.status ?? "");
+  return ["available", "graded", "listed", "restocked"].includes(status);
+}
+
+async function fetchSeoDocument(
+  admin: ReturnType<typeof createAdminClient>,
+  documentKey: string,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await admin
+    .from("seo_document")
+    .select("id, document_key, document_type, route_path, entity_type, entity_id, entity_reference, status, published_revision_id, metadata")
+    .eq("document_key" as never, documentKey)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+async function ensureSeoDocument(
+  admin: ReturnType<typeof createAdminClient>,
+  input: {
+    documentKey: string;
+    documentType: string;
+    routePath?: string | null;
+    entityType?: string | null;
+    entityId?: string | null;
+    entityReference?: string | null;
+    metadata: Record<string, unknown>;
+  },
+): Promise<Record<string, unknown>> {
+  const existing = await fetchSeoDocument(admin, input.documentKey);
+  const patch = {
+    document_type: input.documentType,
+    route_path: input.routePath ?? null,
+    entity_type: input.entityType ?? null,
+    entity_id: input.entityId ?? null,
+    entity_reference: input.entityReference ?? null,
+    status: "published",
+    metadata: {
+      ...objectOrEmpty(existing?.metadata),
+      ...input.metadata,
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    const { data, error } = await admin
+      .from("seo_document")
+      .update(patch as never)
+      .eq("id" as never, existing.id)
+      .select("id, document_key, document_type, route_path, entity_type, entity_id, entity_reference, status, published_revision_id, metadata")
+      .single();
+    if (error) throw error;
+    return data as Record<string, unknown>;
+  }
+
+  const { data, error } = await admin
+    .from("seo_document")
+    .insert({
+      document_key: input.documentKey,
+      ...patch,
+    } as never)
+    .select("id, document_key, document_type, route_path, entity_type, entity_id, entity_reference, status, published_revision_id, metadata")
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+async function fetchPublishedRevision(
+  admin: ReturnType<typeof createAdminClient>,
+  document: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const publishedRevisionId = typeof document.published_revision_id === "string"
+    ? document.published_revision_id
+    : null;
+  if (!publishedRevisionId) return null;
+
+  const { data, error } = await admin
+    .from("seo_revision")
+    .select("id, revision_number, canonical_path, canonical_url, title_tag, meta_description, indexation_policy, robots_directive, open_graph, twitter_card, breadcrumbs, structured_data, image_metadata, sitemap, geo, keywords, metadata")
+    .eq("id" as never, publishedRevisionId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+async function nextSeoRevisionNumber(
+  admin: ReturnType<typeof createAdminClient>,
+  seoDocumentId: string,
+): Promise<number> {
+  const { data, error } = await admin
+    .from("seo_revision")
+    .select("revision_number")
+    .eq("seo_document_id" as never, seoDocumentId)
+    .order("revision_number" as never, { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return Number((data as Record<string, unknown> | null)?.revision_number ?? 0) + 1;
+}
+
+async function ensurePublishedSeoRevision(
+  admin: ReturnType<typeof createAdminClient>,
+  document: Record<string, unknown>,
+  defaults: {
+    canonicalPath: string;
+    titleTag: string;
+    metaDescription: string;
+    openGraph?: Record<string, unknown>;
+    twitterCard?: Record<string, unknown>;
+    breadcrumbs?: Array<Record<string, unknown>>;
+    structuredData?: Array<Record<string, unknown>>;
+    imageMetadata?: Record<string, unknown>;
+    sitemap: Record<string, unknown>;
+    keywords?: string[];
+    source: string;
+    changeSummary: string;
+    metadata: Record<string, unknown>;
+  },
+): Promise<{ id: string; action: "created" | "updated" }> {
+  const documentId = String(document.id);
+  const existing = await fetchPublishedRevision(admin, document);
+  const baseUrl = publicSiteUrl();
+  const existingSitemap = objectOrEmpty(existing?.sitemap);
+  const sitemap = {
+    ...defaults.sitemap,
+    ...existingSitemap,
+    include: true,
+  };
+  const metadata = {
+    ...objectOrEmpty(existing?.metadata),
+    ...defaults.metadata,
+  };
+
+  if (existing?.id) {
+    const patch = {
+      canonical_path: textOrNull(existing.canonical_path) ?? defaults.canonicalPath,
+      canonical_url: textOrNull(existing.canonical_url) ?? `${baseUrl}${defaults.canonicalPath}`,
+      title_tag: textOrNull(existing.title_tag) ?? defaults.titleTag,
+      meta_description: textOrNull(existing.meta_description) ?? defaults.metaDescription,
+      indexation_policy: "index",
+      robots_directive: "index, follow",
+      open_graph: Object.keys(objectOrEmpty(existing.open_graph)).length ? existing.open_graph : (defaults.openGraph ?? {}),
+      twitter_card: Object.keys(objectOrEmpty(existing.twitter_card)).length ? existing.twitter_card : (defaults.twitterCard ?? {}),
+      breadcrumbs: arrayOrEmpty(existing.breadcrumbs).length ? existing.breadcrumbs : (defaults.breadcrumbs ?? []),
+      structured_data: defaults.structuredData ?? arrayOrEmpty(existing.structured_data),
+      image_metadata: Object.keys(objectOrEmpty(existing.image_metadata)).length ? existing.image_metadata : (defaults.imageMetadata ?? {}),
+      sitemap,
+      geo: Object.keys(objectOrEmpty(existing.geo)).length ? existing.geo : { region: "GB", placename: "United Kingdom" },
+      keywords: Array.isArray(existing.keywords) && existing.keywords.length ? existing.keywords : (defaults.keywords ?? []),
+      metadata,
+    };
+
+    const { error } = await admin
+      .from("seo_revision")
+      .update(patch as never)
+      .eq("id" as never, existing.id);
+    if (error) throw error;
+    return { id: String(existing.id), action: "updated" };
+  }
+
+  const revisionNumber = await nextSeoRevisionNumber(admin, documentId);
+  const insert = {
+    seo_document_id: documentId,
+    revision_number: revisionNumber,
+    status: "published",
+    canonical_path: defaults.canonicalPath,
+    canonical_url: `${baseUrl}${defaults.canonicalPath}`,
+    title_tag: defaults.titleTag,
+    meta_description: defaults.metaDescription,
+    indexation_policy: "index",
+    robots_directive: "index, follow",
+    open_graph: defaults.openGraph ?? {},
+    twitter_card: defaults.twitterCard ?? {},
+    breadcrumbs: defaults.breadcrumbs ?? [],
+    structured_data: defaults.structuredData ?? [],
+    image_metadata: defaults.imageMetadata ?? {},
+    sitemap,
+    geo: { region: "GB", placename: "United Kingdom" },
+    keywords: defaults.keywords ?? [],
+    source: defaults.source,
+    change_summary: defaults.changeSummary,
+    published_at: new Date().toISOString(),
+    metadata,
+  };
+
+  const { data, error } = await admin
+    .from("seo_revision")
+    .insert(insert as never)
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  const revisionId = String((data as Record<string, unknown>).id);
+  const { error: docErr } = await admin
+    .from("seo_document")
+    .update({
+      published_revision_id: revisionId,
+      status: "published",
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id" as never, documentId);
+  if (docErr) throw docErr;
+
+  return { id: revisionId, action: "created" };
+}
+
+async function touchDiscoveryDocument(
+  admin: ReturnType<typeof createAdminClient>,
+  input: {
+    documentKey: string;
+    documentType: string;
+    routePath: string;
+    titleTag: string;
+    metaDescription: string;
+    sitemapFamily: string;
+    sitemapChangefreq: string;
+    sitemapPriority: number;
+    entityType?: string | null;
+    entityId?: string | null;
+    entityReference?: string | null;
+    metadata: Record<string, unknown>;
+  },
+): Promise<Record<string, unknown>> {
+  const document = await ensureSeoDocument(admin, {
+    documentKey: input.documentKey,
+    documentType: input.documentType,
+    routePath: input.routePath,
+    entityType: input.entityType ?? null,
+    entityId: input.entityId ?? null,
+    entityReference: input.entityReference ?? null,
+    metadata: input.metadata,
+  });
+
+  const revision = await ensurePublishedSeoRevision(admin, document, {
+    canonicalPath: input.routePath,
+    titleTag: input.titleTag,
+    metaDescription: input.metaDescription,
+    breadcrumbs: [
+      { name: "Home", path: "/" },
+      { name: input.titleTag, path: input.routePath },
+    ],
+    sitemap: {
+      include: true,
+      family: input.sitemapFamily,
+      changefreq: input.sitemapChangefreq,
+      priority: input.sitemapPriority,
+    },
+    keywords: [input.titleTag, "LEGO resale", "graded LEGO sets"],
+    source: "storefront_publish",
+    changeSummary: "Refreshed after website listing publication.",
+    metadata: input.metadata,
+  });
+
+  return {
+    document_key: input.documentKey,
+    revision_id: revision.id,
+    revision_action: revision.action,
+  };
+}
+
+async function refreshStorefrontDiscovery(
+  admin: ReturnType<typeof createAdminClient>,
+  listingId: string,
+  commandType: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const { data: listing, error: listingErr } = await admin
+      .from("channel_listing")
+      .select("id, channel, v2_channel, sku_id, external_sku, listed_price, listed_quantity, listing_title, listing_description, offer_status, v2_status, listed_at, updated_at")
+      .eq("id" as never, listingId)
+      .maybeSingle();
+    if (listingErr) throw listingErr;
+    if (!listing) return { refreshed: false, reason: "listing_not_found" };
+
+    const listingRow = listing as Record<string, unknown>;
+    const channel = normalizeTarget(textOrNull(listingRow.channel) ?? textOrNull(listingRow.v2_channel) ?? "web");
+    if (channel !== "web") return { refreshed: false, reason: "not_website_listing" };
+
+    const skuId = textOrNull(listingRow.sku_id);
+    if (!skuId) return { refreshed: false, reason: "missing_sku" };
+
+    const { data: sku, error: skuErr } = await admin
+      .from("sku")
+      .select("id, sku_code, condition_grade, product_id")
+      .eq("id" as never, skuId)
+      .maybeSingle();
+    if (skuErr) throw skuErr;
+    if (!sku) return { refreshed: false, reason: "sku_not_found" };
+
+    const skuRow = sku as Record<string, unknown>;
+    const productId = textOrNull(skuRow.product_id);
+    if (!productId) return { refreshed: false, reason: "missing_product" };
+
+    const { data: product, error: productErr } = await admin
+      .from("product")
+      .select("id, mpn, name, seo_title, seo_description, description, img_url, product_type, theme_id, subtheme_name, release_year, retired_flag")
+      .eq("id" as never, productId)
+      .maybeSingle();
+    if (productErr) throw productErr;
+    if (!product) return { refreshed: false, reason: "product_not_found" };
+
+    const productRow = product as Record<string, unknown>;
+    const mpn = textOrNull(productRow.mpn);
+    const productName = textOrNull(productRow.name) ?? mpn;
+    if (!mpn || !productName) return { refreshed: false, reason: "missing_product_mpn_or_name" };
+
+    const themeId = textOrNull(productRow.theme_id);
+    let theme: Record<string, unknown> | null = null;
+    if (themeId) {
+      const { data: themeData, error: themeErr } = await admin
+        .from("theme")
+        .select("id, name, slug")
+        .eq("id" as never, themeId)
+        .maybeSingle();
+      if (themeErr) throw themeErr;
+      theme = (themeData as Record<string, unknown> | null) ?? null;
+    }
+
+    const { data: stockUnits, error: stockErr } = await admin
+      .from("stock_unit")
+      .select("id, status, v2_status")
+      .eq("sku_id" as never, skuId);
+    if (stockErr) throw stockErr;
+    const stockCount = ((stockUnits ?? []) as Record<string, unknown>[]).filter(isSaleableStockStatus).length;
+
+    const baseUrl = publicSiteUrl();
+    const productPath = `/sets/${encodeURIComponent(mpn)}`;
+    const listedAt = textOrNull(listingRow.listed_at) ?? textOrNull(listingRow.updated_at) ?? new Date().toISOString();
+    const listedPrice = Number(listingRow.listed_price ?? 0);
+    const description = textOrNull(productRow.seo_description)
+      ?? textOrNull(productRow.description)
+      ?? `Shop ${productName} with graded condition options and fast UK shipping from Kuso Oishii.`;
+    const title = textOrNull(productRow.seo_title) ?? `${productName} (${mpn})`;
+    const imageUrl = textOrNull(productRow.img_url);
+    const themeName = textOrNull(theme?.name);
+    const metadata = {
+      refreshed_from: "listing-command-process",
+      refreshed_reason: `website_${commandType}`,
+      last_storefront_listing_id: listingId,
+      last_storefront_sku_id: skuId,
+      last_storefront_listed_at: listedAt,
+    };
+
+    const productDocument = await ensureSeoDocument(admin, {
+      documentKey: `product:${mpn}`,
+      documentType: "product",
+      routePath: null,
+      entityType: "product",
+      entityId: productId,
+      entityReference: mpn,
+      metadata,
+    });
+    const productRevision = await ensurePublishedSeoRevision(admin, productDocument, {
+      canonicalPath: productPath,
+      titleTag: title,
+      metaDescription: description,
+      openGraph: {
+        type: "product",
+        site_name: "Kuso Oishii",
+        title,
+        description,
+        url: `${baseUrl}${productPath}`,
+        image: imageUrl,
+      },
+      twitterCard: {
+        card: imageUrl ? "summary_large_image" : "summary",
+        title,
+        description,
+        image: imageUrl,
+      },
+      breadcrumbs: [
+        { name: "Home", path: "/" },
+        { name: "Browse LEGO Sets", path: "/browse" },
+        { name: productName, path: productPath },
+      ],
+      structuredData: [{
+        "@context": "https://schema.org",
+        "@type": "Product",
+        name: productName,
+        sku: mpn,
+        mpn,
+        description,
+        image: imageUrl ? [imageUrl] : undefined,
+        brand: { "@type": "Brand", name: "LEGO" },
+        offers: listedPrice > 0 ? [{
+          "@type": "Offer",
+          priceCurrency: "GBP",
+          price: listedPrice,
+          availability: stockCount > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+          url: `${baseUrl}${productPath}`,
+        }] : [],
+      }],
+      imageMetadata: imageUrl ? { url: imageUrl, alt: `${productName} product image` } : {},
+      sitemap: { include: true, family: "product", changefreq: "weekly", priority: 0.8 },
+      keywords: [mpn, productName, themeName, "LEGO resale", "graded LEGO sets", "UK LEGO store"].filter((value): value is string => Boolean(value)),
+      source: "storefront_publish",
+      changeSummary: "Created or refreshed after website listing publication.",
+      metadata,
+    });
+
+    const touched: Record<string, unknown>[] = [];
+    for (const route of [
+      {
+        documentKey: "route:/browse",
+        documentType: "route",
+        routePath: "/browse",
+        titleTag: "Browse LEGO Sets",
+        metaDescription: "Browse graded LEGO sets and minifigures with clear condition data at Kuso Oishii.",
+        sitemapFamily: "browse",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+      },
+      {
+        documentKey: "route:/themes",
+        documentType: "route",
+        routePath: "/themes",
+        titleTag: "Browse Themes",
+        metaDescription: "Browse LEGO sets by theme at Kuso Oishii.",
+        sitemapFamily: "browse",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+      },
+      {
+        documentKey: "route:/new-arrivals",
+        documentType: "route",
+        routePath: "/new-arrivals",
+        titleTag: "New Arrivals",
+        metaDescription: "See the latest graded LEGO stock newly added to Kuso Oishii.",
+        sitemapFamily: "browse",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+      },
+      {
+        documentKey: "route:/deals",
+        documentType: "route",
+        routePath: "/deals",
+        titleTag: "Deals",
+        metaDescription: "Explore graded LEGO deals with clear condition details and fair UK pricing.",
+        sitemapFamily: "browse",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+      },
+      {
+        documentKey: "collection:new-arrivals",
+        documentType: "collection",
+        routePath: "/new-arrivals",
+        titleTag: "New Arrivals",
+        metaDescription: "See the latest graded LEGO stock newly added to Kuso Oishii.",
+        sitemapFamily: "collection",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+        entityReference: "new-arrivals",
+      },
+      {
+        documentKey: "collection:deals",
+        documentType: "collection",
+        routePath: "/deals",
+        titleTag: "Deals",
+        metaDescription: "Explore graded LEGO deals with clear condition details and fair UK pricing.",
+        sitemapFamily: "collection",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+        entityReference: "deals",
+      },
+    ]) {
+      touched.push(await touchDiscoveryDocument(admin, {
+        ...route,
+        metadata,
+      }));
+    }
+
+    if (themeId && themeName) {
+      touched.push(await touchDiscoveryDocument(admin, {
+        documentKey: `theme:${themeId}`,
+        documentType: "theme",
+        routePath: `/browse?theme=${encodeURIComponent(themeId)}`,
+        titleTag: `${themeName} LEGO Sets`,
+        metaDescription: `Browse graded ${themeName} LEGO sets and minifigures with clear condition data at Kuso Oishii.`,
+        sitemapFamily: "theme",
+        sitemapChangefreq: "weekly",
+        sitemapPriority: 0.7,
+        entityType: "theme",
+        entityId: themeId,
+        entityReference: themeName,
+        metadata,
+      }));
+    }
+
+    return {
+      refreshed: true,
+      product_document_key: `product:${mpn}`,
+      product_revision_id: productRevision.id,
+      product_revision_action: productRevision.action,
+      touched_documents: touched,
+      stock_count: stockCount,
+    };
+  } catch (err) {
+    console.warn("Failed to refresh storefront discovery after website listing command", err);
+    return {
+      refreshed: false,
+      reason: err instanceof Error ? err.message : "unknown_error",
+    };
+  }
+}
+
+async function resetStaleProcessingCommands(admin: ReturnType<typeof createAdminClient>): Promise<number> {
+  const cutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+  const now = new Date().toISOString();
+  const { data, error } = await admin
+    .from("outbound_command")
+    .update({
+      status: "pending",
+      next_attempt_at: now,
+      last_error: "Recovered stale listing outbox processing claim.",
+      updated_at: now,
+    } as never)
+    .eq("entity_type" as never, "channel_listing")
+    .eq("status" as never, "processing")
+    .is("sent_at" as never, null)
+    .lt("updated_at" as never, cutoff)
+    .select("id");
+
+  if (error) {
+    console.warn("Failed to reset stale listing commands", error);
+    return 0;
+  }
+
+  return (data ?? []).length;
 }
 
 async function queueGmcPublishAfterWebPublish(
@@ -449,6 +998,7 @@ async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>
 
   if (error) throw error;
 
+  const storefrontDiscovery = await refreshStorefrontDiscovery(admin, command.entity_id, command.command_type);
   const gmcAutoPublish = command.command_type === "publish"
     ? await queueGmcPublishAfterWebPublish(admin, command.entity_id)
     : null;
@@ -457,6 +1007,7 @@ async function acknowledgeWebCommand(admin: ReturnType<typeof createAdminClient>
     channel_listing_id: command.entity_id,
     applied_locally: true,
     patch: statusPatch,
+    storefront_discovery: storefrontDiscovery,
     gmc_auto_publish: gmcAutoPublish,
   };
 }
@@ -934,6 +1485,7 @@ Deno.serve(async (req) => {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const batchSize = clampBatchSize(body.batchSize ?? body.batch_size);
     const commandId = typeof body.commandId === "string" ? body.commandId : null;
+    const recoveredStaleCommands = await resetStaleProcessingCommands(admin);
 
     let query = admin
       .from("outbound_command")
@@ -1051,6 +1603,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       processed: results.length,
+      recovered_stale_commands: recoveredStaleCommands,
       results,
     });
   } catch (err) {

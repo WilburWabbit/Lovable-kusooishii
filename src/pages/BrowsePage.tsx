@@ -23,9 +23,9 @@ import { Switch } from "@/components/ui/switch";
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const viewMode = searchParams.get("view");
-  const isNewMode = searchParams.get("new") === "true";
-  const isDealsMode = searchParams.get("deals") === "true";
+  const viewMode = searchParams.get("view") ?? (location.pathname === "/themes" ? "themes" : null);
+  const isNewMode = searchParams.get("new") === "true" || location.pathname === "/new-arrivals";
+  const isDealsMode = searchParams.get("deals") === "true" || location.pathname === "/deals";
 
   const selectedThemeId = searchParams.get("theme");
   const selectedGrade = searchParams.get("grade");
@@ -60,9 +60,11 @@ export default function BrowsePage() {
   const setRetiredFilter = useCallback((v: boolean | null) => setParam("retired", v == null ? null : String(v)), [setParam]);
   const setIncludeOutOfStock = useCallback((v: boolean) => setParam("includeSoldOut", v ? "true" : null), [setParam]);
 
-  const yearRange: [number, number] | null = yearMinParam && yearMaxParam
-    ? [parseInt(yearMinParam, 10), parseInt(yearMaxParam, 10)]
-    : null;
+  const yearRange = useMemo<[number, number] | null>(() => (
+    yearMinParam && yearMaxParam
+      ? [parseInt(yearMinParam, 10), parseInt(yearMaxParam, 10)]
+      : null
+  ), [yearMinParam, yearMaxParam]);
   const setYearRange = useCallback((v: [number, number] | null) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -91,7 +93,7 @@ export default function BrowsePage() {
   const { data: filterMeta } = useQuery({
     queryKey: ["browse_filter_meta", includeOutOfStock],
     queryFn: async () => {
-      const { data, error } = await (supabase as any).rpc("browse_catalog", {
+      const { data, error } = await supabase.rpc("browse_catalog", {
         search_term: null,
         filter_theme_id: null,
         filter_grade: null,
@@ -99,7 +101,7 @@ export default function BrowsePage() {
         include_out_of_stock: includeOutOfStock,
       });
       if (error) throw error;
-      const rows = data as any[];
+      const rows = (data ?? []) as BrowseCatalogItem[];
       const themeMap = new Map<string, { id: string; name: string }>();
       let minYear = Infinity;
       let maxYear = -Infinity;
@@ -128,6 +130,7 @@ export default function BrowsePage() {
   });
 
   const themes = filterMeta?.themes;
+  const selectedThemeName = themes?.find((theme) => theme.id === selectedThemeId)?.name ?? null;
   const yearMin = filterMeta?.yearMin ?? 2000;
   const yearMax = filterMeta?.yearMax ?? new Date().getFullYear();
 
@@ -135,7 +138,7 @@ export default function BrowsePage() {
   const { data: products, isLoading } = useQuery({
     queryKey: ["browse_catalog", debouncedSearch, selectedThemeId, selectedGrade, retiredFilter, includeOutOfStock, isDealsMode],
     queryFn: async () => {
-      const { data, error } = await (supabase as any).rpc("browse_catalog", {
+      const { data, error } = await supabase.rpc("browse_catalog", {
         search_term: debouncedSearch || null,
         filter_theme_id: selectedThemeId || null,
         filter_grade: selectedGrade || null,
@@ -214,25 +217,37 @@ export default function BrowsePage() {
     pageSizeOptions,
   } = usePagination(filteredProducts);
 
-  const seoTitle = viewMode === "themes" ? "Browse Themes" : isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse LEGO® Sets";
-  const seoDescription = viewMode === "themes"
+  const searchParamKeys = Array.from(searchParams.keys());
+  const isCleanThemeFilteredPage =
+    location.pathname === "/browse" &&
+    Boolean(selectedThemeId) &&
+    searchParamKeys.length === 1 &&
+    searchParams.has("theme");
+  const seoTitle = isCleanThemeFilteredPage && selectedThemeName
+    ? `${selectedThemeName} LEGO® Sets`
+    : viewMode === "themes" ? "Browse Themes" : isNewMode ? "New Arrivals" : isDealsMode ? "Deals" : "Browse LEGO® Sets";
+  const seoDescription = isCleanThemeFilteredPage && selectedThemeName
+    ? `Browse graded ${selectedThemeName} LEGO® sets and minifigures with clear condition data at Kuso Oishii.`
+    : viewMode === "themes"
     ? "Browse LEGO® sets by theme at Kuso Oishii."
     : isNewMode
     ? "See the latest graded LEGO® stock newly added to Kuso Oishii."
     : isDealsMode
     ? "Explore graded LEGO® deals with clear condition details and fair UK pricing."
     : "Browse graded LEGO® sets and minifigures with clear condition data at Kuso Oishii.";
-  const canonicalPath = viewMode === "themes" ? "/themes" : isNewMode ? "/new-arrivals" : isDealsMode ? "/deals" : "/browse";
+  const canonicalPath = isCleanThemeFilteredPage && selectedThemeId
+    ? `/browse?theme=${selectedThemeId}`
+    : viewMode === "themes" ? "/themes" : isNewMode ? "/new-arrivals" : isDealsMode ? "/deals" : "/browse";
   const cleanBrowsePaths = new Set(["/browse", "/themes", "/new-arrivals", "/deals"]);
-  const isCleanPublicBrowsePage = cleanBrowsePaths.has(location.pathname) && Array.from(searchParams.keys()).length === 0;
-  const seoDocumentKey = isCleanPublicBrowsePage ? `route:${canonicalPath}` : undefined;
+  const isCleanPublicBrowsePage = cleanBrowsePaths.has(location.pathname) && searchParamKeys.length === 0;
+  const seoDocumentKey = isCleanThemeFilteredPage && selectedThemeId ? `theme:${selectedThemeId}` : isCleanPublicBrowsePage ? `route:${canonicalPath}` : undefined;
 
   useSeoDocumentPageSeo(seoDocumentKey, {
     title: seoTitle,
     description: seoDescription,
     path: canonicalPath,
-    noIndex: !isCleanPublicBrowsePage,
-    jsonLd: isCleanPublicBrowsePage ? pageBreadcrumbJsonLd(seoTitle, canonicalPath) : undefined,
+    noIndex: !isCleanPublicBrowsePage && !isCleanThemeFilteredPage,
+    jsonLd: isCleanPublicBrowsePage || isCleanThemeFilteredPage ? pageBreadcrumbJsonLd(seoTitle, canonicalPath) : undefined,
   });
 
   if (viewMode === "themes") {
