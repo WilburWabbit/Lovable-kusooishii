@@ -9128,6 +9128,10 @@ export type Database = {
           user_id: string
         }[]
       }
+      admin_set_cron_vault_secret: {
+        Args: { p_name: string; p_value: string }
+        Returns: string
+      }
       admin_set_user_role: {
         Args: {
           assign: boolean
