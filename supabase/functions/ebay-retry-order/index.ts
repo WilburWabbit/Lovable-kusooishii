@@ -177,6 +177,7 @@ Deno.serve(async (req) => {
 
       try {
         // Call ebay-process-order — it handles idempotency, landing upsert, and QBO sync
+        const internalSecret = Deno.env.get("INTERNAL_CRON_SECRET") ?? "";
         const processRes = await fetch(
           `${supabaseUrl}/functions/v1/ebay-process-order`,
           {
@@ -184,6 +185,7 @@ Deno.serve(async (req) => {
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${serviceRoleKey}`,
+              "x-internal-shared-secret": internalSecret,
             },
             body: JSON.stringify({ order_id: row.external_id }),
             signal: AbortSignal.timeout(55000),
