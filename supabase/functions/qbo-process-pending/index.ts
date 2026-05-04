@@ -1,5 +1,6 @@
 // Redeployed: 2026-04-06
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 /**
  * qbo-process-pending — THE single source of truth for all QBO → canonical processing.
@@ -1766,36 +1767,11 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
 
     // Internal trigger: trust if the webhook header is set AND the bearer token
-    // decodes as a service_role JWT for this project. We don't require the token
-    // to byte-match Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") because the value
-    // stored in Vault (used by pg_cron) can drift from the function's env after
-    // key rotations. The JWT role claim is sufficient since only the project
-    // can issue a service_role JWT.
-    let isInternal = false;
-    if (req.headers.get("x-webhook-trigger") === "true") {
-      try {
-        const parts = token.split(".");
-        if (parts.length === 3) {
-          const payload = JSON.parse(
-            new TextDecoder().decode(
-              Uint8Array.from(
-                atob(parts[1].replace(/-/g, "+").replace(/_/g, "/").padEnd(parts[1].length + (4 - parts[1].length % 4) % 4, "=")),
-                (c) => c.charCodeAt(0),
-              ),
-            ),
-          );
-          if (payload?.role === "service_role" && payload?.ref) {
-            // Only accept tokens issued for this project
-            const expectedRef = supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1];
-            if (expectedRef && payload.ref === expectedRef) {
-              isInternal = true;
-            }
-          }
-        }
-      } catch {
-        // fall through — isInternal stays false
-      }
-    }
+    // decodes as a service_role JWT for this project. Do not require a byte
+    // match against SUPABASE_SERVICE_ROLE_KEY; Lovable key rotation can make
+    // stored or forwarded service-role JWTs drift from the function env value.
+    const isInternal = req.headers.get("x-webhook-trigger") === "true" &&
+      verifyServiceRoleJWT(token, supabaseUrl);
 
     if (!isInternal) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);

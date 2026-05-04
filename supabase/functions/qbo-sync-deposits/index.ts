@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 /**
  * qbo-sync-deposits — LAND ONLY
@@ -78,7 +79,8 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader?.replace("Bearer ", "") ?? "";
-    const isInternal = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
+    const isInternal = req.headers.get("x-webhook-trigger") === "true" &&
+      verifyServiceRoleJWT(token, supabaseUrl);
 
     if (!isInternal) {
       if (!authHeader?.startsWith("Bearer ")) throw new Error("Unauthorized");

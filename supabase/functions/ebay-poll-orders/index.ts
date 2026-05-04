@@ -14,6 +14,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -161,7 +162,7 @@ Deno.serve(async (req) => {
     // Auth: accept service role (cron) or authenticated admin
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") || "";
-    if (token !== serviceRoleKey) {
+    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);
       if (userError || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {

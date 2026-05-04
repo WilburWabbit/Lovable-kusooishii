@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -101,7 +102,7 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
 
     let user: { id: string; email?: string | null } | null = null;
-    if (token === serviceRoleKey) {
+    if (verifyServiceRoleJWT(token, supabaseUrl)) {
       if (typeof queued_by === "string" && queued_by.length > 0) {
         const {
           data: { user: queuedUser },

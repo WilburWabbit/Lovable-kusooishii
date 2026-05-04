@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 /**
  * qbo-sync-purchases — LAND ONLY
@@ -113,7 +114,8 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace("Bearer ", "");
-    const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
+    const isWebhook = req.headers.get("x-webhook-trigger") === "true" &&
+      verifyServiceRoleJWT(token, supabaseUrl);
 
     let targetMonth: string | null = null;
     try {

@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,7 +78,8 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const token = authHeader.replace("Bearer ", "");
-    const isWebhook = req.headers.get("x-webhook-trigger") === "true" && token === serviceRoleKey;
+    const isWebhook = req.headers.get("x-webhook-trigger") === "true" &&
+      verifyServiceRoleJWT(token, supabaseUrl);
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 

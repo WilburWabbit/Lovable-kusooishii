@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { verifyServiceRoleJWT } from "../_shared/auth.ts";
 import { pushEbayQuantityForSkus } from "../_shared/ebay-inventory-sync.ts";
 
 const corsHeaders = {
@@ -191,7 +192,7 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const body = await req.json().catch(() => ({}));
 
-    if (token === serviceRoleKey && body._triggered_by === "notification") {
+    if (verifyServiceRoleJWT(token, supabaseUrl) && body._triggered_by === "notification") {
       // Trusted internal call — skip user auth
       console.log("Service-role invocation from notification webhook");
     } else {
