@@ -2423,9 +2423,11 @@ export type Database = {
           error_message: string | null
           external_id: string
           id: string
+          last_retry_at: string | null
           processed_at: string | null
           raw_payload: Json
           received_at: string
+          retry_count: number
           status: Database["public"]["Enums"]["landing_status"]
         }
         Insert: {
@@ -2433,9 +2435,11 @@ export type Database = {
           error_message?: string | null
           external_id: string
           id?: string
+          last_retry_at?: string | null
           processed_at?: string | null
           raw_payload: Json
           received_at?: string
+          retry_count?: number
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Update: {
@@ -2443,9 +2447,11 @@ export type Database = {
           error_message?: string | null
           external_id?: string
           id?: string
+          last_retry_at?: string | null
           processed_at?: string | null
           raw_payload?: Json
           received_at?: string
+          retry_count?: number
           status?: Database["public"]["Enums"]["landing_status"]
         }
         Relationships: []
@@ -9722,7 +9728,13 @@ export type Database = {
     Enums: {
       app_role: "admin" | "staff" | "member"
       condition_grade: "1" | "2" | "3" | "4" | "5"
-      landing_status: "pending" | "staged" | "committed" | "error" | "skipped"
+      landing_status:
+        | "pending"
+        | "staged"
+        | "committed"
+        | "error"
+        | "skipped"
+        | "retrying"
       listing_status:
         | "draft"
         | "price_pending"
@@ -9924,7 +9936,14 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "staff", "member"],
       condition_grade: ["1", "2", "3", "4", "5"],
-      landing_status: ["pending", "staged", "committed", "error", "skipped"],
+      landing_status: [
+        "pending",
+        "staged",
+        "committed",
+        "error",
+        "skipped",
+        "retrying",
+      ],
       listing_status: [
         "draft",
         "price_pending",
