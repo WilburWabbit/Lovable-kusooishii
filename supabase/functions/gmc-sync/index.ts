@@ -218,36 +218,41 @@ Deno.serve(async (req) => {
       // Offer status casing is historical; v2_status is preferred where present.
       const { data: webListings } = await supabaseAdmin
         .from("channel_listing")
-        .select("sku_id, offer_status, v2_status, listed_price")
+        .select("sku_id, offer_status, v2_status, listed_price, availability_override, availability_override_at, availability_override_by")
         .eq("channel", "web");
 
       const webListingBySku = new Map<string, Record<string, unknown>>();
       for (const listing of (webListings ?? []) as Record<string, unknown>[]) {
-        if (
-          listing.v2_status === "live" ||
-          ["live", "published", "PUBLISHED"].includes(String(listing.offer_status ?? ""))
-        ) {
+        const offerStatus = String(listing.offer_status ?? "").toUpperCase();
+        const isEndQueued = ["END_QUEUED", "ENDED", "DELISTED"].includes(offerStatus);
+        const isPublished = listing.v2_status === "live" || ["LIVE", "PUBLISHED"].includes(offerStatus);
+        if (!isEndQueued && isPublished) {
           webListingBySku.set(listing.sku_id as string, listing);
         }
       }
 
       const webSkuIds = new Set(
         (webListings ?? [])
-          .filter((l: Record<string, unknown>) =>
-            l.v2_status === "live" ||
-            ["live", "published", "PUBLISHED"].includes(String(l.offer_status ?? "")),
-          )
+          .filter((l: Record<string, unknown>) => {
+            const offerStatus = String(l.offer_status ?? "").toUpperCase();
+            const isEndQueued = ["END_QUEUED", "ENDED", "DELISTED"].includes(offerStatus);
+            const isPublished = l.v2_status === "live" || ["LIVE", "PUBLISHED"].includes(offerStatus);
+            return !isEndQueued && isPublished;
+          })
           .map((l: Record<string, unknown>) => l.sku_id),
       );
 
       // Get stock counts
       const { data: stockCounts } = await supabaseAdmin
         .from("stock_unit")
-        .select("sku_id")
-        .eq("status", "available");
+        .select("sku_id, status, v2_status");
 
       const stockMap = new Map<string, number>();
       for (const su of stockCounts ?? []) {
+        const status = String((su as Record<string, unknown>).status ?? "");
+        const v2Status = String((su as Record<string, unknown>).v2_status ?? "");
+        const isSaleable = ["graded", "listed", "restocked"].includes(v2Status) || status === "available";
+        if (!isSaleable) continue;
         const skuId = su.sku_id as string;
         stockMap.set(skuId, (stockMap.get(skuId) || 0) + 1);
       }
@@ -276,8 +281,9 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const stockCount = stockMap.get(sku.id) || 0;
         const webListing = webListingBySku.get(sku.id);
+        const manualOutOfStock = webListing?.availability_override === "manual_out_of_stock";
+        const stockCount = manualOutOfStock ? 0 : stockMap.get(sku.id) || 0;
         const listedPrice = Number(webListing?.listed_price ?? 0);
         if (listedPrice <= 0) {
           skipped++;
@@ -293,6 +299,9 @@ Deno.serve(async (req) => {
               offer_status: "publish_queued",
               listed_price: listedPrice,
               listed_quantity: stockCount,
+              availability_override: manualOutOfStock ? "manual_out_of_stock" : null,
+              availability_override_at: manualOutOfStock ? webListing?.availability_override_at ?? null : null,
+              availability_override_by: manualOutOfStock ? webListing?.availability_override_by ?? null : null,
               synced_at: new Date().toISOString(),
             },
             { onConflict: "channel,external_sku" },

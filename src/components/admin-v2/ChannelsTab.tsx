@@ -3,6 +3,7 @@ import {
   useChannelListings,
   useChannelFees,
   usePublishListing,
+  useChannelListingAction,
   calculateChannelPrice,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
@@ -22,6 +23,8 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "bricklink", label: "BrickLink", titleLimit: 200 },
   { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
+
+const DISABLED_CONNECTORS = new Set<Channel>(["bricklink", "brickowl"]);
 
 export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
@@ -46,12 +49,14 @@ function VariantChannelsCard({
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
   const publishListing = usePublishListing();
+  const channelAction = useChannelListingAction();
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
     for (const l of listings) map.set(l.channel, l);
     return map;
   }, [listings]);
+  const gmcListing = listingsByChannel.get("google_shopping") ?? listingsByChannel.get("gmc");
 
   // Generate Cassini-optimised eBay title from product metadata
   const defaultEbayTitle = useMemo(() => {
@@ -179,6 +184,40 @@ function VariantChannelsCard({
     }
   };
 
+  const handleAvailabilityAction = async (
+    ch: { key: Channel; label: string },
+    listing: ChannelListing | undefined,
+    action: "set-channel-out-of-stock" | "clear-channel-out-of-stock" | "delist-channel-listing",
+  ) => {
+    if (!listing) return;
+
+    const copy = {
+      "set-channel-out-of-stock": `Set ${variant.sku} as out of stock on ${ch.label}?`,
+      "clear-channel-out-of-stock": `Clear the manual out-of-stock hold for ${variant.sku} on ${ch.label}?`,
+      "delist-channel-listing": `Delist ${variant.sku} from ${ch.label}?`,
+    }[action];
+
+    if (!window.confirm(copy)) return;
+
+    try {
+      await channelAction.mutateAsync({
+        skuCode: variant.sku,
+        listingId: listing.id,
+        action,
+      });
+
+      const message = {
+        "set-channel-out-of-stock": `${ch.label} out-of-stock sync queued`,
+        "clear-channel-out-of-stock": `${ch.label} stock sync queued`,
+        "delist-channel-listing": `${ch.label} delist queued`,
+      }[action];
+      toast.success(message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Channel action failed";
+      toast.error(message);
+    }
+  };
+
   return (
     <SurfaceCard>
       <div className="flex items-center justify-between mb-3">
@@ -210,6 +249,12 @@ function VariantChannelsCard({
           const titleEmpty = !state.title?.trim();
           const overrideReady = !belowFloor || (override.approved && override.reason.trim().length >= 5);
           const canPublish = !titleEmpty && price > 0 && overrideReady;
+          const manualOutOfStock = listing?.availabilityOverride === "manual_out_of_stock";
+          const connectorDisabled = DISABLED_CONNECTORS.has(ch.key);
+          const listingEnded = status === "ended";
+          const delistQueued = String(listing?.offerStatus ?? "").toLowerCase() === "end_queued";
+          const actionDisabled = !listing || connectorDisabled || listingEnded || delistQueued || channelAction.isPending;
+          const connectorMessage = connectorDisabled ? "Connector not available yet" : undefined;
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
@@ -228,7 +273,38 @@ function VariantChannelsCard({
                   {liveAndBelowFloor && (
                     <Badge label="Below floor" color="#EF4444" small />
                   )}
+                  {manualOutOfStock && (
+                    <Badge label="Manual OOS" color="#F59E0B" small />
+                  )}
                 </div>
+              </div>
+
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-zinc-600">
+                <span>
+                  Qty: <Mono className="text-[10px]">{listing?.listedQuantity ?? "—"}</Mono>
+                </span>
+                {listing?.offerStatus && (
+                  <span>
+                    Offer: <Mono className="text-[10px]">{listing.offerStatus}</Mono>
+                  </span>
+                )}
+                {listing?.externalId && (
+                  <span>
+                    External:{" "}
+                    {listing.externalUrl ? (
+                      <a
+                        href={listing.externalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-[10px] text-teal-600 underline underline-offset-2"
+                      >
+                        {listing.externalId}
+                      </a>
+                    ) : (
+                      <Mono className="text-[10px]">{listing.externalId}</Mono>
+                    )}
+                  </span>
+                )}
               </div>
 
               {/* Title */}
@@ -327,7 +403,7 @@ function VariantChannelsCard({
               {/* Publish */}
               <button
                 onClick={() => handlePublish(ch)}
-                disabled={!canPublish || publishListing.isPending}
+                disabled={!canPublish || publishListing.isPending || channelAction.isPending}
                 className="w-full py-1.5 rounded text-[11px] font-semibold cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   background: canPublish ? "#22C55E" : "#E4E4E7",
@@ -337,6 +413,60 @@ function VariantChannelsCard({
               >
                 {publishListing.isPending ? "Publishing…" : status === "live" ? "Update Listing" : "Publish"}
               </button>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() =>
+                    handleAvailabilityAction(
+                      ch,
+                      listing,
+                      manualOutOfStock ? "clear-channel-out-of-stock" : "set-channel-out-of-stock",
+                    )
+                  }
+                  disabled={actionDisabled}
+                  title={connectorMessage}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {manualOutOfStock ? "Clear OOS" : "Set OOS"}
+                </button>
+                <button
+                  onClick={() => handleAvailabilityAction(ch, listing, "delist-channel-listing")}
+                  disabled={actionDisabled}
+                  title={connectorMessage}
+                  className="rounded border border-red-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Delist
+                </button>
+              </div>
+              {connectorDisabled && (
+                <div className="mt-1 text-[10px] text-zinc-500">Connector not available yet</div>
+              )}
+
+              {ch.key === "website" && (
+                <div className="mt-2 rounded border border-zinc-200 bg-white px-2 py-1.5">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-600">
+                    <span className="font-semibold text-zinc-800">GMC</span>
+                    {gmcListing ? (
+                      <>
+                        <span>Follows Website availability</span>
+                        {gmcListing.availabilityOverride === "manual_out_of_stock" && (
+                          <Badge label="Manual OOS" color="#F59E0B" small />
+                        )}
+                        <span>
+                          Qty: <Mono className="text-[10px]">{gmcListing.listedQuantity ?? "—"}</Mono>
+                        </span>
+                        {gmcListing.offerStatus && (
+                          <span>
+                            Offer: <Mono className="text-[10px]">{gmcListing.offerStatus}</Mono>
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span>No GMC listing queued</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

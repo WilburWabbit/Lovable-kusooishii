@@ -6,12 +6,224 @@ class ValidationError extends Error {
 }
 
 const STOCK_MATCHABLE = ["available", "received", "graded"];
+const SALEABLE_STOCK_V2_STATUSES = ["graded", "listed", "restocked"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
+const CHANNELS_PENDING_OUTBOUND_CONNECTOR = new Set(["bricklink", "brickowl"]);
 
 function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
   const status = unit.status ?? "";
   const v2Status = unit.v2_status ?? "";
   return STOCK_MATCHABLE.includes(status) && !["sold", "written_off"].includes(v2Status);
+}
+
+type ChannelListingActionRow = {
+  id: string;
+  sku_id: string | null;
+  channel: string | null;
+  v2_channel: string | null;
+  v2_status: string | null;
+  offer_status: string | null;
+  listed_quantity: number | null;
+  external_listing_id: string | null;
+  external_sku: string | null;
+  availability_override: string | null;
+  availability_override_at: string | null;
+  availability_override_by: string | null;
+  synced_at: string | null;
+};
+
+const CHANNEL_ACTION_SELECT =
+  "id, sku_id, channel, v2_channel, v2_status, offer_status, listed_quantity, external_listing_id, external_sku, availability_override, availability_override_at, availability_override_by, synced_at";
+
+function normalizeListingChannel(listing: Pick<ChannelListingActionRow, "channel" | "v2_channel">): string {
+  const raw = (listing.channel ?? listing.v2_channel ?? "website").toLowerCase();
+  if (raw === "website") return "web";
+  return raw;
+}
+
+function isWebsiteListing(listing: Pick<ChannelListingActionRow, "channel" | "v2_channel">): boolean {
+  return normalizeListingChannel(listing) === "web";
+}
+
+async function countSaleableStock(admin: any, skuId: string): Promise<number> {
+  const { count, error } = await admin
+    .from("stock_unit")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", skuId)
+    .in("v2_status", SALEABLE_STOCK_V2_STATUSES);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function fetchChannelListingForAction(admin: any, listingId: string): Promise<ChannelListingActionRow> {
+  const { data, error } = await admin
+    .from("channel_listing")
+    .select(CHANNEL_ACTION_SELECT)
+    .eq("id", listingId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new ValidationError("channel listing not found");
+  return data as ChannelListingActionRow;
+}
+
+async function queueChannelListingCommand(
+  admin: any,
+  listingId: string,
+  commandType: "sync_quantity" | "end",
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await admin.rpc("queue_listing_command", {
+    p_channel_listing_id: listingId,
+    p_command_type: commandType,
+    p_actor_id: userId,
+  });
+
+  if (error) throw error;
+  return data ?? null;
+}
+
+async function findGmcListingsForSku(admin: any, skuId: string): Promise<ChannelListingActionRow[]> {
+  const { data, error } = await admin
+    .from("channel_listing")
+    .select(CHANNEL_ACTION_SELECT)
+    .eq("sku_id", skuId)
+    .in("channel", ["google_shopping", "gmc"]);
+
+  if (error) throw error;
+  return (data ?? []) as ChannelListingActionRow[];
+}
+
+async function cascadeWebsiteAvailabilityToGmc(
+  admin: any,
+  websiteListing: ChannelListingActionRow,
+  action: "manual_out_of_stock" | "clear_out_of_stock" | "delist",
+  userId: string,
+  now: string,
+): Promise<string[]> {
+  if (!isWebsiteListing(websiteListing) || !websiteListing.sku_id) return [];
+
+  const gmcListings = await findGmcListingsForSku(admin, websiteListing.sku_id);
+  const commandIds: string[] = [];
+  const restoredQuantity = action === "clear_out_of_stock"
+    ? await countSaleableStock(admin, websiteListing.sku_id)
+    : 0;
+
+  for (const gmcListing of gmcListings) {
+    if (action === "manual_out_of_stock") {
+      const { error } = await admin
+        .from("channel_listing")
+        .update({
+          availability_override: "manual_out_of_stock",
+          availability_override_at: now,
+          availability_override_by: userId,
+          listed_quantity: 0,
+          offer_status: "OUT_OF_STOCK",
+          synced_at: now,
+        })
+        .eq("id", gmcListing.id);
+      if (error) throw error;
+
+      const commandId = await queueChannelListingCommand(admin, gmcListing.id, "sync_quantity", userId);
+      if (commandId) commandIds.push(commandId);
+      const after = await fetchChannelListingForAction(admin, gmcListing.id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        "gmc_out_of_stock_cascaded_from_website",
+        gmcListing,
+        after,
+        commandId,
+        [],
+      );
+      continue;
+    }
+
+    if (action === "clear_out_of_stock") {
+      const { error } = await admin
+        .from("channel_listing")
+        .update({
+          availability_override: null,
+          availability_override_at: null,
+          availability_override_by: null,
+          listed_quantity: restoredQuantity,
+          offer_status: "PUBLISHED",
+          synced_at: now,
+        })
+        .eq("id", gmcListing.id);
+      if (error) throw error;
+
+      const commandId = await queueChannelListingCommand(admin, gmcListing.id, "sync_quantity", userId);
+      if (commandId) commandIds.push(commandId);
+      const after = await fetchChannelListingForAction(admin, gmcListing.id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        "gmc_out_of_stock_clear_cascaded_from_website",
+        gmcListing,
+        after,
+        commandId,
+        [],
+      );
+      continue;
+    }
+
+    const { error } = await admin
+      .from("channel_listing")
+      .update({
+        availability_override: null,
+        availability_override_at: null,
+        availability_override_by: null,
+        listed_quantity: 0,
+        offer_status: "END_QUEUED",
+        synced_at: now,
+      })
+      .eq("id", gmcListing.id);
+    if (error) throw error;
+
+    const commandId = await queueChannelListingCommand(admin, gmcListing.id, "end", userId);
+    if (commandId) commandIds.push(commandId);
+    const after = await fetchChannelListingForAction(admin, gmcListing.id);
+    await auditChannelAvailabilityAction(
+      admin,
+      userId,
+      "gmc_delist_cascaded_from_website",
+      gmcListing,
+      after,
+      commandId,
+      [],
+    );
+  }
+
+  return commandIds;
+}
+
+async function auditChannelAvailabilityAction(
+  admin: any,
+  userId: string,
+  triggerType: string,
+  before: ChannelListingActionRow,
+  after: ChannelListingActionRow,
+  commandId: string | null,
+  cascadedCommandIds: string[],
+) {
+  const { error } = await admin.from("audit_event").insert({
+    entity_type: "channel_listing",
+    entity_id: after.id,
+    trigger_type: triggerType,
+    actor_type: "user",
+    actor_id: userId,
+    source_system: "admin-data",
+    before_json: before,
+    after_json: after,
+    output_json: {
+      command_id: commandId,
+      cascaded_gmc_command_ids: cascadedCommandIds,
+    },
+  });
+
+  if (error) throw error;
 }
 
 function slugify(name: string): string {
@@ -595,6 +807,9 @@ Deno.serve(async (req) => {
             listed_quantity: 0,
             offer_status: "ENDED",
             v2_status: "ended",
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
             synced_at: endedAt,
           } as never)
           .in("id", listingIds);
@@ -613,6 +828,136 @@ Deno.serve(async (req) => {
 
         result = { success: true, ended: listingIds.length, command_ids: commandIds };
       }
+
+    /* ── Channel availability controls ── */
+
+    } else if (
+      action === "set-channel-out-of-stock" ||
+      action === "clear-channel-out-of-stock" ||
+      action === "delist-channel-listing"
+    ) {
+      const { listing_id } = params;
+      if (!listing_id) throw new ValidationError("listing_id is required");
+
+      const before = await fetchChannelListingForAction(admin, listing_id);
+      if (!before.sku_id) throw new ValidationError("channel listing is not linked to a SKU");
+
+      const channel = normalizeListingChannel(before);
+      if (CHANNELS_PENDING_OUTBOUND_CONNECTOR.has(channel)) {
+        throw new ValidationError(`${channel} outbound controls are not available yet`);
+      }
+
+      if (channel === "google_shopping" || channel === "gmc") {
+        throw new ValidationError("GMC availability is controlled by the Website listing");
+      }
+
+      const now = new Date().toISOString();
+      let commandType: "sync_quantity" | "end" = "sync_quantity";
+      let triggerType = "channel_out_of_stock_set";
+      let cascadedCommandIds: string[] = [];
+
+      if (action === "set-channel-out-of-stock") {
+        if (before.v2_status === "ended") {
+          throw new ValidationError("Cannot set an ended listing out of stock");
+        }
+
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: "manual_out_of_stock",
+            availability_override_at: now,
+            availability_override_by: userId,
+            listed_quantity: 0,
+            offer_status: "OUT_OF_STOCK",
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "manual_out_of_stock",
+            userId,
+            now,
+          );
+        }
+      } else if (action === "clear-channel-out-of-stock") {
+        const listedQuantity = await countSaleableStock(admin, before.sku_id);
+        const restoreOfferStatus =
+          String(before.offer_status ?? "").toLowerCase() === "out_of_stock"
+            ? "PUBLISHED"
+            : before.offer_status;
+
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
+            listed_quantity: listedQuantity,
+            offer_status: restoreOfferStatus,
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        triggerType = "channel_out_of_stock_cleared";
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "clear_out_of_stock",
+            userId,
+            now,
+          );
+        }
+      } else {
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
+            listed_quantity: 0,
+            offer_status: "END_QUEUED",
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        commandType = "end";
+        triggerType = "channel_listing_delist_queued";
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "delist",
+            userId,
+            now,
+          );
+        }
+      }
+
+      const commandId = await queueChannelListingCommand(admin, listing_id, commandType, userId);
+      const after = await fetchChannelListingForAction(admin, listing_id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        triggerType,
+        before,
+        after,
+        commandId,
+        cascadedCommandIds,
+      );
+
+      result = {
+        success: true,
+        listing_id,
+        command_id: commandId,
+        cascaded_gmc_command_ids: cascadedCommandIds,
+      };
 
     /* ── Media CRUD ── */
 

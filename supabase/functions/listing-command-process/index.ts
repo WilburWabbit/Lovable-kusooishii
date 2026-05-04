@@ -95,6 +95,28 @@ async function parseJsonResponse(res: Response): Promise<Record<string, unknown>
   }
 }
 
+function responseErrorMessage(payload: Record<string, unknown>, fallback: string): string {
+  const error = payload.error;
+  if (error && typeof error === "object") {
+    const errorObj = error as Record<string, unknown>;
+    if (typeof errorObj.message === "string" && errorObj.message.trim()) {
+      return errorObj.message;
+    }
+    return JSON.stringify(errorObj);
+  }
+  if (typeof error === "string" && error.trim()) return error;
+  if (typeof payload.raw_response === "string" && payload.raw_response.trim()) {
+    return payload.raw_response;
+  }
+  return fallback;
+}
+
+function commandPayloadQuantity(command: ListingCommand): number | null {
+  const payloadQuantity = Number(command.payload?.listed_quantity);
+  if (!Number.isFinite(payloadQuantity) || payloadQuantity < 0) return null;
+  return Math.floor(payloadQuantity);
+}
+
 async function recordListingCommandFailure(
   admin: ReturnType<typeof createAdminClient>,
   command: ListingCommand,
@@ -603,7 +625,7 @@ async function processGoogleShoppingCommand(
       );
       if (!deleteRes.ok && deleteRes.status !== 404) {
         const payload = await parseJsonResponse(deleteRes);
-        throw new Error(String(payload.error ?? payload.raw_response ?? `GMC delete failed [${deleteRes.status}]`));
+        throw new Error(responseErrorMessage(payload, `GMC delete failed [${deleteRes.status}]`));
       }
     }
 
@@ -644,7 +666,8 @@ async function processGoogleShoppingCommand(
     .select("id", { count: "exact", head: true })
     .eq("sku_id" as never, skuId)
     .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
-  const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
+  const queuedQuantity = commandPayloadQuantity(command);
+  const stockCount = queuedQuantity ?? count ?? Number(listingRow.listed_quantity ?? 0);
   const productInput = buildGmcProductInput(listingRow, skuRow, product, stockCount);
 
   const insertRes = await fetchWithTimeout(
@@ -661,7 +684,7 @@ async function processGoogleShoppingCommand(
   );
   const payload = await parseJsonResponse(insertRes);
   if (!insertRes.ok) {
-    throw new Error(String(payload.error ?? payload.raw_response ?? `GMC insert failed [${insertRes.status}]`));
+    throw new Error(responseErrorMessage(payload, `GMC insert failed [${insertRes.status}]`));
   }
 
   const externalListingId = typeof payload.name === "string" ? payload.name : listingRow.external_listing_id ?? null;
