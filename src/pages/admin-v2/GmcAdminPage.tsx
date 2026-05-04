@@ -96,10 +96,10 @@ interface GmcMappingField {
 
 const CONDITION_RULES = JSON.stringify({
   rules: [
-    { when: { field: "condition_grade", op: "lte", value: 2 }, value: "new" },
-    { when: { field: "condition_grade", op: "gt", value: 2 }, value: "used" },
+    { when: { field: "condition_grade", op: "lte", value: 2 }, value: "NEW" },
+    { when: { field: "condition_grade", op: "gt", value: 2 }, value: "USED" },
   ],
-  default: "used",
+  default: "USED",
 });
 
 const GMC_MAPPING_FIELDS: GmcMappingField[] = [
@@ -119,7 +119,7 @@ const GMC_MAPPING_FIELDS: GmcMappingField[] = [
   { aspectKey: "productTypes", label: "Product type path", defaultCanonical: "product_type_path" },
   { aspectKey: "itemGroupId", label: "Item group ID", defaultCanonical: "mpn" },
   { aspectKey: "shippingWeight.value", label: "Shipping weight", defaultCanonical: "weight_g" },
-  { aspectKey: "shippingWeight.unit", label: "Shipping weight unit", defaultConstant: "kg" },
+  { aspectKey: "shippingWeight.unit", label: "Shipping weight unit", defaultConstant: "g" },
 ];
 
 function formatDateTime(value?: string | null): string {
@@ -660,10 +660,10 @@ function gmcRulePromptPlaceholder(aspectKey: string) {
     return "If the product type is Minifigure, use Action & Toy Figures, else use Interlocking Blocks";
   }
   if (aspectKey === "availability") {
-    return "If stock_count is greater than 0, use in_stock, else use out_of_stock";
+    return "If stock_count is greater than 0, use IN_STOCK, else use OUT_OF_STOCK";
   }
   if (aspectKey === "condition") {
-    return "If condition_grade is 1 or 2, use new, else use used";
+    return "If condition_grade is 1 or 2, use NEW, else use USED";
   }
   if (aspectKey === "identifierExists") {
     return "If gtin exists, use true, else use false";
@@ -835,7 +835,7 @@ function GmcMappingRuleRow({
         <textarea
           value={draft.transform ?? ""}
           onChange={(event) => setDraft((prev) => ({ ...prev, transform: event.target.value || null }))}
-          placeholder='{"rules":[{"when":{"field":"stock_count","op":"gt","value":0},"value":"in_stock"}],"default":"out_of_stock"}'
+          placeholder='{"rules":[{"when":{"field":"stock_count","op":"gt","value":0},"value":"IN_STOCK"}],"default":"OUT_OF_STOCK"}'
           className="min-h-[72px] w-full min-w-[360px] rounded-md border border-zinc-200 px-2 py-1.5 font-mono text-[11px]"
         />
         {rulePromptOpen ? (

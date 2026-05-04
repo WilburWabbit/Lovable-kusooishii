@@ -8,7 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1beta";
+const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1";
 
 interface GmcConnection {
   id: string;
@@ -18,6 +18,65 @@ interface GmcConnection {
   updated_at: string;
   merchant_id: string;
   data_source: string | null;
+}
+
+async function parseJsonResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { raw_response: text };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringifyApiError(payload: Record<string, unknown>, fallback: string): string {
+  if (typeof payload.message === "string" && payload.message.trim()) return payload.message;
+  if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
+  if (isRecord(payload.error)) {
+    const error = payload.error;
+    const parts = [
+      typeof error.message === "string" && error.message.trim() ? error.message : null,
+      error.status ? `status=${String(error.status)}` : null,
+      error.code ? `code=${String(error.code)}` : null,
+      error.details ? `details=${JSON.stringify(error.details)}` : null,
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join(" ") : JSON.stringify(error);
+  }
+  if (typeof payload.raw_response === "string" && payload.raw_response.trim()) return payload.raw_response;
+  return fallback;
+}
+
+function countriesForStatus(status: Record<string, unknown>, key: string): string[] {
+  return Array.isArray(status[key]) ? (status[key] as unknown[]).map(String).filter(Boolean) : [];
+}
+
+function mapGmcOfferStatus(product: Record<string, unknown>): string {
+  const productStatus = isRecord(product.productStatus) ? product.productStatus : {};
+  const statuses = Array.isArray(productStatus.destinationStatuses)
+    ? productStatus.destinationStatuses.filter(isRecord)
+    : [];
+
+  if (statuses.some((status) =>
+    status.status === "DISAPPROVED" || countriesForStatus(status, "disapprovedCountries").length > 0
+  )) {
+    return "suppressed";
+  }
+  if (statuses.some((status) =>
+    status.status === "APPROVED" || countriesForStatus(status, "approvedCountries").length > 0
+  )) {
+    return "published";
+  }
+  if (statuses.some((status) =>
+    status.status === "PENDING" || countriesForStatus(status, "pendingCountries").length > 0
+  )) {
+    return "pending";
+  }
+  return "unknown";
 }
 
 /** Refresh GMC access token if expired */
@@ -45,25 +104,28 @@ async function ensureToken(
   });
 
   if (!tokenRes.ok) {
-    throw new Error(`Token refresh failed [${tokenRes.status}]`);
+    const payload = await parseJsonResponse(tokenRes);
+    throw new Error(stringifyApiError(payload, `Token refresh failed [${tokenRes.status}]`));
   }
 
-  const tokens = await tokenRes.json();
+  const tokens = await parseJsonResponse(tokenRes);
+  const accessToken = String(tokens.access_token ?? "");
+  if (!accessToken) throw new Error("Token refresh returned no access token");
   const newExpiry = new Date(
-    Date.now() + (tokens.expires_in ?? 3600) * 1000,
+    Date.now() + Number(tokens.expires_in ?? 3600) * 1000,
   ).toISOString();
 
   await supabaseAdmin
     .from("google_merchant_connection")
     .update({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || conn.refresh_token,
+      access_token: accessToken,
+      refresh_token: typeof tokens.refresh_token === "string" ? tokens.refresh_token : conn.refresh_token,
       token_expires_at: newExpiry,
     })
     .eq("id", conn.id)
     .eq("updated_at", conn.updated_at);
 
-  return tokens.access_token as string;
+  return accessToken;
 }
 
 Deno.serve(async (req) => {
@@ -324,18 +386,27 @@ Deno.serve(async (req) => {
 
     // --- Sync status from GMC ---
     if (action === "sync_status") {
-      const listUrl = `${GMC_API_BASE}/accounts/${merchantId}/products`;
-      const res = await fetch(listUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const products: Record<string, unknown>[] = [];
+      let pageToken: string | null = null;
+      do {
+        const listUrl = new URL(`${GMC_API_BASE}/accounts/${merchantId}/products`);
+        if (pageToken) listUrl.searchParams.set("pageToken", pageToken);
+        const res = await fetch(listUrl.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`GMC list products failed [${res.status}]: ${errBody}`);
-      }
+        const data = await parseJsonResponse(res);
+        if (!res.ok) {
+          throw new Error(stringifyApiError(data, `GMC list products failed [${res.status}]`));
+        }
 
-      const data = await res.json();
-      const products = data.products || [];
+        if (Array.isArray(data.products)) {
+          products.push(...data.products.filter(isRecord));
+        }
+        pageToken = typeof data.nextPageToken === "string" && data.nextPageToken
+          ? data.nextPageToken
+          : null;
+      } while (pageToken);
 
       // Get existing google_shopping channel listings
       const { data: existingListings } = await supabaseAdmin
@@ -360,23 +431,17 @@ Deno.serve(async (req) => {
           | undefined;
         if (!existing) continue;
 
-        // Map GMC product status to our offer_status
-        const gmcStatus =
-          product.productStatus?.destinationStatuses?.[0]?.status ||
-          "unknown";
-        const offerStatus =
-          gmcStatus === "APPROVED"
-            ? "published"
-            : gmcStatus === "DISAPPROVED"
-              ? "suppressed"
-              : gmcStatus === "PENDING"
-                ? "pending"
-                : "unknown";
+        const externalListingId = typeof product.base64EncodedName === "string"
+          ? product.base64EncodedName
+          : typeof product.name === "string"
+            ? product.name
+            : existing.external_listing_id;
 
         await supabaseAdmin
           .from("channel_listing")
           .update({
-            offer_status: offerStatus,
+            external_listing_id: externalListingId,
+            offer_status: mapGmcOfferStatus(product),
             synced_at: new Date().toISOString(),
           })
           .eq("id", existing.id);

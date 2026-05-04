@@ -67,6 +67,7 @@ const ChannelMappingsSettingsPage = lazy(() => import("./pages/admin-v2/ChannelM
 const AppHealthPage = lazy(() => import("./pages/admin-v2/AppHealthPage"));
 const SeoGeoPage = lazy(() => import("./pages/admin-v2/SeoGeoPage"));
 const TranscriptsPage = lazy(() => import("./pages/admin-v2/TranscriptsPage"));
+const MarketingPlaceholderPage = lazy(() => import("./pages/admin-v2/MarketingPlaceholderPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
@@ -181,6 +182,11 @@ const App = () => (
             <Route path="/admin/settings/seo-geo" element={<AdminRoute path="/admin/settings/seo-geo"><SeoGeoPage /></AdminRoute>} />
             <Route path="/admin/settings/app-health" element={<AdminRoute path="/admin/settings/app-health"><AppHealthPage /></AdminRoute>} />
             <Route path="/admin/settings/transcripts" element={<AdminRoute path="/admin/settings/transcripts"><TranscriptsPage /></AdminRoute>} />
+            <Route path="/admin/marketing/google-analytics" element={<AdminRoute path="/admin/marketing/google-analytics"><MarketingPlaceholderPage channel="google-analytics" /></AdminRoute>} />
+            <Route path="/admin/marketing/facebook" element={<AdminRoute path="/admin/marketing/facebook"><MarketingPlaceholderPage channel="facebook" /></AdminRoute>} />
+            <Route path="/admin/marketing/instagram" element={<AdminRoute path="/admin/marketing/instagram"><MarketingPlaceholderPage channel="instagram" /></AdminRoute>} />
+            <Route path="/admin/marketing/twitter" element={<AdminRoute path="/admin/marketing/twitter"><MarketingPlaceholderPage channel="twitter" /></AdminRoute>} />
+            <Route path="/admin/marketing/youtube" element={<AdminRoute path="/admin/marketing/youtube"><MarketingPlaceholderPage channel="youtube" /></AdminRoute>} />
             <Route path="/admin/system/transcripts" element={<AdminRoute path="/admin/system/transcripts"><Navigate to="/admin/settings/transcripts" replace /></AdminRoute>} />
             <Route path="/admin/qbo-callback" element={<AdminRoute path="/admin/qbo-callback"><QboCallbackPage /></AdminRoute>} />
             <Route path="/admin/ebay-callback" element={<AdminRoute path="/admin/ebay-callback"><EbayCallbackPage /></AdminRoute>} />

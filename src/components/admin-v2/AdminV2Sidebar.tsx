@@ -46,13 +46,9 @@ function SidebarItem({ icon: Icon, label, to, active, count, onNavigate }: Sideb
 }
 
 function isSettingsArea(pathname: string) {
-  return (
-    pathname === "/admin/settings" ||
-    pathname.startsWith("/admin/settings/") ||
-    pathname === "/admin/data-sync" ||
-    pathname.startsWith("/admin/data-sync/") ||
-    pathname === "/admin/gmc" ||
-    pathname.startsWith("/admin/gmc/")
+  if (pathname === "/admin/settings") return true;
+  return adminSettingsGroups.some((group) =>
+    group.items.some((item) => pathname === item.to || pathname.startsWith(`${item.to}/`)),
   );
 }
 

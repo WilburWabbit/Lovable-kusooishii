@@ -141,13 +141,13 @@ const GMC_RULE_TARGETS: Record<string, {
   },
   availability: {
     label: "Availability",
-    value_contract: "Google availability string. Use one of: in_stock, out_of_stock, preorder, backorder.",
-    examples: ["in_stock", "out_of_stock"],
+    value_contract: "Google availability enum. Use one of: IN_STOCK, OUT_OF_STOCK, PREORDER, LIMITED_AVAILABILITY, BACKORDER.",
+    examples: ["IN_STOCK", "OUT_OF_STOCK"],
   },
   condition: {
     label: "Condition",
-    value_contract: "Google condition string. Use one of: new, used, refurbished.",
-    examples: ["new", "used"],
+    value_contract: "Google condition enum. Use one of: NEW, USED, REFURBISHED.",
+    examples: ["NEW", "USED"],
   },
   brand: {
     label: "Brand",
