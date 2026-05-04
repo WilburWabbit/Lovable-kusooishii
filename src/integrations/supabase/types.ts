@@ -9722,7 +9722,13 @@ export type Database = {
     Enums: {
       app_role: "admin" | "staff" | "member"
       condition_grade: "1" | "2" | "3" | "4" | "5"
-      landing_status: "pending" | "staged" | "committed" | "error" | "skipped"
+      landing_status:
+        | "pending"
+        | "staged"
+        | "committed"
+        | "error"
+        | "skipped"
+        | "retrying"
       listing_status:
         | "draft"
         | "price_pending"
@@ -9924,7 +9930,14 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "staff", "member"],
       condition_grade: ["1", "2", "3", "4", "5"],
-      landing_status: ["pending", "staged", "committed", "error", "skipped"],
+      landing_status: [
+        "pending",
+        "staged",
+        "committed",
+        "error",
+        "skipped",
+        "retrying",
+      ],
       listing_status: [
         "draft",
         "price_pending",
