@@ -43,6 +43,18 @@ export async function authenticateRequest(
   req: Request,
   admin: SupabaseClient,
 ): Promise<{ userId: string; email: string | undefined }> {
+  const internalSharedSecret = Deno.env.get("INTERNAL_CRON_SECRET");
+  const providedSharedSecret = req.headers.get("x-internal-shared-secret")
+    ?? req.headers.get("x-internal-secret");
+
+  if (
+    internalSharedSecret &&
+    providedSharedSecret &&
+    providedSharedSecret === internalSharedSecret
+  ) {
+    return { userId: "internal-cron", email: undefined };
+  }
+
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("Unauthorized — missing Bearer token");

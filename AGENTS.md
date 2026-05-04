@@ -94,3 +94,12 @@ When building or modifying any external integration:
 6. **Idempotency** — Every staged record needs an external ID to prevent duplicate processing.
 7. **Cross-channel dedup** — Use external ID reference tables (DocNumber, origin_channel + origin_reference), not timing/amount matching.
 8. **Fix architecture, not symptoms** — If 5+ incremental fixes target the same subsystem, the architecture needs restructuring.
+
+## Supabase in Lovable Projects — Secret & Cron Standards
+
+- Never duplicate a Lovable-managed secret into Vault. If Lovable owns the secret, Edge Functions read it via `Deno.env.get(...)`; do not create a second hand-maintained copy.
+- Use one shared secret naming pair for internal cron auth only: `INTERNAL_CRON_SECRET` (Edge env) ↔ `cron_shared_secret` (Vault row seeded by the operator with the exact same plaintext).
+- All Postgres `pg_net` internal function calls must use the same header envelope: `apikey: <anon>`, `Authorization: Bearer <anon>`, and `x-internal-shared-secret: <secret>`.
+- All cron-invoked Edge Functions must authenticate through shared helpers (`authenticateRequest` in `_shared/qbo-helpers.ts` and/or a shared internal-secret helper) rather than per-function bespoke auth logic.
+- Cron SQL should be one-liners that call `public.invoke_internal_function('<fn-name>', '<body>'::jsonb)` so auth and URL behavior stays centralized.
+- Keep land-only receivers land-only. Never move validation/promotion/reconciliation into webhook receivers while changing auth.
