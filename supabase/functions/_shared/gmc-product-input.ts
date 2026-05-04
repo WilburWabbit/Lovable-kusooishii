@@ -5,6 +5,8 @@ export interface GmcProductSource {
   seo_description?: string | null;
   description?: string | null;
   img_url?: string | null;
+  primary_image_url?: string | null;
+  website_image_url?: string | null;
   product_type?: string | null;
   lego_theme?: string | null;
   lego_subtheme?: string | null;
@@ -44,6 +46,7 @@ export interface GmcMappingRule {
 }
 
 const GMC_TRANSFORM_ALLOWED_OPS = ["eq", "neq", "in", "includes", "exists", "gt", "gte", "lt", "lte"] as const;
+const DEFAULT_PUBLIC_SITE_URL = "https://www.kusooishii.com";
 
 export type GmcTransformOp = typeof GMC_TRANSFORM_ALLOWED_OPS[number];
 
@@ -66,6 +69,42 @@ function cleanText(value: unknown): string {
 
 function cleanBarcode(value: unknown): string {
   return cleanText(value).replace(/[^0-9Xx]/g, "");
+}
+
+export function normalizeGmcSiteUrl(value: unknown): string {
+  const raw = cleanText(value);
+  if (!raw) return DEFAULT_PUBLIC_SITE_URL;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.hostname.endsWith(".supabase.co") || !parsed.hostname.includes(".")) {
+      return DEFAULT_PUBLIC_SITE_URL;
+    }
+    return `${parsed.protocol}//${parsed.host}`.replace(/\/$/, "");
+  } catch {
+    return DEFAULT_PUBLIC_SITE_URL;
+  }
+}
+
+function normalizeGoogleProductCategory(value: unknown): string {
+  const text = cleanText(value);
+  if (!text) return "";
+  const numericPrefix = text.match(/^\s*(\d+)/);
+  return numericPrefix ? numericPrefix[1] : text;
+}
+
+function normalizeStorefrontLink(value: unknown): string {
+  const text = cleanText(value);
+  if (!text) return "";
+  try {
+    const parsed = new URL(text);
+    if (parsed.hostname.endsWith(".supabase.co") || !parsed.hostname.includes(".")) {
+      return `${DEFAULT_PUBLIC_SITE_URL}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return text;
+  } catch {
+    return text;
+  }
 }
 
 export function selectGmcGtin(product: GmcProductSource): { gtin: string | null; source: "ean" | "upc" | "isbn" | null } {
@@ -325,6 +364,12 @@ function coerceAspectValue(aspectKey: string, value: unknown): unknown {
     };
     return aliases[normalized] ?? value;
   }
+  if (aspectKey === "link") {
+    return normalizeStorefrontLink(value);
+  }
+  if (aspectKey === "googleProductCategory") {
+    return normalizeGoogleProductCategory(value);
+  }
   if (aspectKey === "productTypes") {
     if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
     return [String(value)];
@@ -417,7 +462,8 @@ function buildSourceValueMap(input: {
     mpn: input.mpn,
     gtin: input.gtin,
     identifier_exists: input.identifierExists,
-    gmc_product_category: product.gmc_product_category,
+    gmc_product_category: normalizeGoogleProductCategory(product.gmc_product_category),
+    google_product_category: normalizeGoogleProductCategory(product.gmc_product_category),
     product_type_path: input.productTypePath,
     weight_kg: product.weight_kg,
     weight_g: Number(product.weight_kg ?? 0) > 0 ? Number(product.weight_kg) * 1000 : null,
@@ -471,8 +517,9 @@ export function buildGmcProductInput(
 
   const title = cleanText(product.seo_title) || cleanText(listing.listing_title) || cleanText(product.name) || `LEGO ${mpn}`;
   const description = cleanText(product.seo_description) || cleanText(listing.listing_description) || cleanText(product.description);
-  const imageLink = cleanText(product.img_url);
-  const gmcCategory = cleanText(product.gmc_product_category);
+  const siteBaseUrl = normalizeGmcSiteUrl(siteUrl);
+  const imageLink = cleanText(product.primary_image_url) || cleanText(product.website_image_url) || cleanText(product.img_url);
+  const gmcCategory = normalizeGoogleProductCategory(product.gmc_product_category);
   const conditionGrade = Number(sku.condition_grade ?? 3);
   const weightKg = Number(product.weight_kg ?? 0);
   const gtin = selectGmcGtin(product);
@@ -490,7 +537,7 @@ export function buildGmcProductInput(
   const productAttributes: Record<string, unknown> = {
     title,
     description,
-    link: `${siteUrl}/sets/${encodeURIComponent(mpn)}`,
+    link: `${siteBaseUrl}/sets/${encodeURIComponent(mpn)}`,
     imageLink,
     price: {
       amountMicros: priceAmountMicros,
@@ -519,7 +566,7 @@ export function buildGmcProductInput(
     sku,
     product,
     stockCount,
-    siteUrl,
+    siteUrl: siteBaseUrl,
     title,
     description,
     imageLink,

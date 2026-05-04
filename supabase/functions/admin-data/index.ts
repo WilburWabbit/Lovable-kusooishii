@@ -3519,12 +3519,42 @@ Deno.serve(async (req) => {
       }
 
       const allSkus = (skuRes.data ?? []) as any[];
+      const productIds = Array.from(new Set(
+        allSkus
+          .map((sku) => {
+            const productRelation = sku.product;
+            const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
+            return product?.id ?? sku.product_id;
+          })
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ));
+      const primaryImageByProduct = new Map<string, string>();
+      if (productIds.length > 0) {
+        const { data: mediaRows, error: mediaErr } = await admin
+          .from("product_media")
+          .select("product_id, sort_order, is_primary, media_asset:media_asset_id(original_url)")
+          .in("product_id", productIds)
+          .order("product_id", { ascending: true })
+          .order("is_primary", { ascending: false })
+          .order("sort_order", { ascending: true });
+        if (mediaErr) throw mediaErr;
+        for (const mediaRow of (mediaRows ?? []) as Array<Record<string, unknown>>) {
+          const mediaProductId = typeof mediaRow.product_id === "string" ? mediaRow.product_id : "";
+          if (!mediaProductId || primaryImageByProduct.has(mediaProductId)) continue;
+          const asset = mediaRow.media_asset as Record<string, unknown> | null;
+          const url = typeof asset?.original_url === "string" ? asset.original_url.trim() : "";
+          if (url) primaryImageByProduct.set(mediaProductId, url);
+        }
+      }
+
       const sourceSkus = allSkus.filter((sku) => webBySku.has(sku.id));
       const excludedNoWebPage = allSkus.length - sourceSkus.length;
 
       const rows = sourceSkus.map((sku) => {
         const productRelation = sku.product;
         const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
+        const productId = product?.id ?? sku.product_id;
+        const websitePrimaryImageUrl = primaryImageByProduct.get(productId) ?? null;
         const webListing = webBySku.get(sku.id);
         const gmcListing = gmcBySku.get(sku.id);
         const latestCommand = gmcListing?.id ? commandsByListing.get(gmcListing.id) : null;
@@ -3541,7 +3571,7 @@ Deno.serve(async (req) => {
         if (!product?.mpn) blocking.push("Missing MPN");
         if (!product?.name && !product?.seo_title) blocking.push("Missing title");
         if (!product?.seo_description && !product?.description) blocking.push("Missing description");
-        if (!product?.img_url) blocking.push("Missing primary image");
+        if (!websitePrimaryImageUrl) blocking.push("Missing website primary image");
         if (!product?.gmc_product_category) warnings.push("Missing Google product category");
         if (!barcode) warnings.push("Missing GTIN: publish will use LEGO + versioned MPN fallback");
         if (stock <= 0) warnings.push("No available stock: publish will mark out of stock");
@@ -3552,12 +3582,12 @@ Deno.serve(async (req) => {
           sku_id: sku.id,
           sku_code: sku.sku_code,
           condition_grade: sku.condition_grade,
-          product_id: product?.id ?? sku.product_id,
+          product_id: productId,
           mpn: product?.mpn ?? null,
           product_name: product?.name ?? null,
           title: product?.seo_title ?? product?.name ?? null,
           description: product?.seo_description ?? product?.description ?? null,
-          image_url: product?.img_url ?? null,
+          image_url: websitePrimaryImageUrl,
           ean: product?.ean ?? null,
           upc: product?.upc ?? null,
           isbn: product?.isbn ?? null,

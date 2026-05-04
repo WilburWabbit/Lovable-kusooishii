@@ -117,6 +117,41 @@ function stringifyApiError(payload: Record<string, unknown>, fallback: string): 
   return fallback;
 }
 
+async function getWebsitePrimaryImageUrl(
+  admin: ReturnType<typeof createAdminClient>,
+  productId: unknown,
+): Promise<string | null> {
+  const id = typeof productId === "string" ? productId.trim() : "";
+  if (!id) return null;
+
+  const { data, error } = await admin
+    .from("product_media")
+    .select("sort_order, is_primary, media_asset:media_asset_id(original_url)")
+    .eq("product_id" as never, id)
+    .order("is_primary" as never, { ascending: false })
+    .order("sort_order" as never, { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const row = data as Record<string, unknown> | null;
+  const asset = row?.media_asset as Record<string, unknown> | null;
+  const url = typeof asset?.original_url === "string" ? asset.original_url.trim() : "";
+  return url || null;
+}
+
+function withWebsitePrimaryImage(
+  product: Record<string, unknown>,
+  imageUrl: string | null,
+): Record<string, unknown> {
+  return {
+    ...product,
+    primary_image_url: imageUrl,
+    img_url: imageUrl,
+  };
+}
+
 function toBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -831,6 +866,9 @@ async function queueGmcPublishAfterWebPublish(
     const productRelation = skuRow.product as Record<string, unknown> | Record<string, unknown>[] | null;
     const product = Array.isArray(productRelation) ? productRelation[0] ?? null : productRelation;
     if (!product) return { queued: false, reason: "missing_product" };
+    const websitePrimaryImageUrl = await getWebsitePrimaryImageUrl(admin, product.id);
+    if (!websitePrimaryImageUrl) return { queued: false, reason: "missing_website_primary_image" };
+    const productForGmc = withWebsitePrimaryImage(product, websitePrimaryImageUrl);
 
     const { count } = await admin
       .from("stock_unit")
@@ -848,7 +886,7 @@ async function queueGmcPublishAfterWebPublish(
         listed_price: listedPrice,
       },
       skuRow,
-      product,
+      productForGmc,
       stockCount,
       getSiteUrl(),
       gmcMappings,
@@ -1398,6 +1436,8 @@ async function processGoogleShoppingCommand(
   const productRelation = skuRow.product as Record<string, unknown> | Record<string, unknown>[] | null;
   const product = Array.isArray(productRelation) ? productRelation[0] ?? null : productRelation;
   if (!product) throw new Error("Google Shopping listing SKU has no product");
+  const websitePrimaryImageUrl = await getWebsitePrimaryImageUrl(admin, product.id);
+  const productForGmc = withWebsitePrimaryImage(product, websitePrimaryImageUrl);
 
   const { count } = await admin
     .from("stock_unit")
@@ -1406,7 +1446,7 @@ async function processGoogleShoppingCommand(
     .in("v2_status" as never, ["graded", "listed", "restocked"] as never);
   const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
   const gmcMappings = await getGmcMappings(admin);
-  const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, product, stockCount, getSiteUrl(), gmcMappings);
+  const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, productForGmc, stockCount, getSiteUrl(), gmcMappings);
   if (!dataSourceName) {
     throw new Error("No GMC data source configured on google_merchant_connection");
   }
