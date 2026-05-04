@@ -1,7 +1,7 @@
 // Rebrickable sync — modes: set | enrich | full
 // Redeployed: 2026-04-27
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from "../_shared/auth.ts";
 import {
   fetchSetMinifigs,
   getBlCreds,
@@ -976,9 +976,12 @@ async function incrementalMode(
 async function ensureAuthorized(
   // deno-lint-ignore no-explicit-any
   admin: any,
+  req: Request,
   authHeader: string | null,
   supabaseUrl: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (verifyInternalSharedSecret(req)) return { ok: true };
+
   if (!authHeader?.startsWith("Bearer ")) {
     return { ok: false, status: 401, error: "Unauthorized" };
   }
@@ -1028,6 +1031,7 @@ Deno.serve(async (req) => {
     // Auth guard
     const auth = await ensureAuthorized(
       db,
+      req,
       req.headers.get("Authorization"),
       supabaseUrl,
     );

@@ -1,6 +1,6 @@
 // Redeployed: 2026-04-06
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 /**
  * qbo-process-pending — THE single source of truth for all QBO → canonical processing.
@@ -1770,8 +1770,8 @@ Deno.serve(async (req) => {
     // decodes as a service_role JWT for this project. Do not require a byte
     // match against SUPABASE_SERVICE_ROLE_KEY; Lovable key rotation can make
     // stored or forwarded service-role JWTs drift from the function env value.
-    const isInternal = req.headers.get("x-webhook-trigger") === "true" &&
-      verifyServiceRoleJWT(token, supabaseUrl);
+    const isInternal = verifyInternalSharedSecret(req) ||
+      (req.headers.get("x-webhook-trigger") === "true" && verifyServiceRoleJWT(token, supabaseUrl));
 
     if (!isInternal) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);

@@ -7,7 +7,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from "../_shared/auth.ts";
 
 const MAX_SHIPPING_DAYS = 7;
 
@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
     // Verify this is called with service role (from cron or admin)
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") ?? "";
-    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
+    if (!verifyInternalSharedSecret(req) && !verifyServiceRoleJWT(token, supabaseUrl)) {
       // Also accept if called by an authenticated admin/staff user
       if (authHeader?.startsWith("Bearer ")) {
         const { data: { user }, error } = await admin.auth.getUser(token);
