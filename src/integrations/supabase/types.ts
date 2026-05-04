@@ -1167,6 +1167,9 @@ export type Database = {
       }
       channel_listing: {
         Row: {
+          availability_override: string | null
+          availability_override_at: string | null
+          availability_override_by: string | null
           channel: string
           confidence_score: number | null
           created_at: string
@@ -1199,6 +1202,9 @@ export type Database = {
             | null
         }
         Insert: {
+          availability_override?: string | null
+          availability_override_at?: string | null
+          availability_override_by?: string | null
           channel?: string
           confidence_score?: number | null
           created_at?: string
@@ -1231,6 +1237,9 @@ export type Database = {
             | null
         }
         Update: {
+          availability_override?: string | null
+          availability_override_at?: string | null
+          availability_override_by?: string | null
           channel?: string
           confidence_score?: number | null
           created_at?: string
