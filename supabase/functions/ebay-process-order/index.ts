@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
     // Only accept service-role calls (from ebay-notifications)
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "") || "";
-    if (!verifyServiceRoleJWT(token, supabaseUrl)) {
+    if (!verifyInternalSharedSecret(req) && !verifyServiceRoleJWT(token, supabaseUrl)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
