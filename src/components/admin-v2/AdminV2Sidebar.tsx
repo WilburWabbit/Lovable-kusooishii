@@ -1,27 +1,13 @@
+import type { ElementType } from "react";
 import { Link, useLocation } from "react-router-dom";
-import {
-  ShoppingCart,
-  Package,
-  ClipboardList,
-  Users,
-  Wallet,
-  Inbox,
-  AlertTriangle,
-  BarChart3,
-  ArrowUpDown,
-  Receipt,
-  Truck,
-  Settings,
-  Activity,
-  MessageSquare,
-  FileSearch,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStatus } from "@/hooks/admin/use-connection-status";
+import { adminSidebarSections, isAdminNavItemActive, type AdminNavCountKey } from "@/lib/admin-navigation";
+import { adminSettingsGroups } from "@/lib/admin-settings-navigation";
 
 interface SidebarItemProps {
-  icon: React.ElementType;
+  icon: ElementType;
   label: string;
   to: string;
   active: boolean;
@@ -59,6 +45,17 @@ function SidebarItem({ icon: Icon, label, to, active, count, onNavigate }: Sideb
   );
 }
 
+function isSettingsArea(pathname: string) {
+  if (pathname === "/admin/settings") return true;
+  return adminSettingsGroups.some((group) =>
+    group.items.some((item) => pathname === item.to || pathname.startsWith(`${item.to}/`)),
+  );
+}
+
+function isSettingsSubItemActive(pathname: string, to: string) {
+  return pathname === to || pathname.startsWith(`${to}/`);
+}
+
 interface AdminV2SidebarProps {
   ungradedCount?: number;
   actionNeededCount?: number;
@@ -74,20 +71,10 @@ export function AdminV2Sidebar({
 }: AdminV2SidebarProps) {
   const location = useLocation();
 
-  const isActive = (path: string) => {
-    if (path === "/admin/purchases") {
-      return location.pathname === "/admin/purchases" || location.pathname.startsWith("/admin/purchases/");
-    }
-    if (path === "/admin/products") {
-      return location.pathname === "/admin/products" || location.pathname.startsWith("/admin/products/");
-    }
-    if (path === "/admin/orders") {
-      return location.pathname === "/admin/orders" || location.pathname.startsWith("/admin/orders/");
-    }
-    if (path === "/admin/customers") {
-      return location.pathname === "/admin/customers" || location.pathname.startsWith("/admin/customers/");
-    }
-    return location.pathname.startsWith(path);
+  const countFor = (key?: AdminNavCountKey) => {
+    if (key === "ungraded") return ungradedCount > 0 ? ungradedCount : undefined;
+    if (key === "actionNeeded") return actionNeededCount > 0 ? actionNeededCount : undefined;
+    return undefined;
   };
 
   return (
@@ -103,7 +90,7 @@ export function AdminV2Sidebar({
     >
       {/* Brand */}
       <div className="px-4 py-5 border-b border-zinc-700/80 flex items-center justify-between">
-        <Link to="/admin/purchases" className="flex items-center gap-2" onClick={onClose}>
+        <Link to="/admin/work-queue" className="flex items-center gap-2" onClick={onClose}>
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-sm font-extrabold text-zinc-900">
             K
           </div>
@@ -122,126 +109,62 @@ export function AdminV2Sidebar({
         </button>
       </div>
 
-      {/* Pipeline */}
-      <div className="py-3 border-b border-zinc-700/80">
-        <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
-          Pipeline
-        </div>
-        <SidebarItem
-          icon={ShoppingCart}
-          label="Purchases"
-          to="/admin/purchases"
-          active={isActive("/admin/purchases")}
-          count={ungradedCount > 0 ? ungradedCount : undefined}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Package}
-          label="Products"
-          to="/admin/products"
-          active={isActive("/admin/products")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={ClipboardList}
-          label="Orders"
-          to="/admin/orders"
-          active={isActive("/admin/orders")}
-          count={actionNeededCount > 0 ? actionNeededCount : undefined}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Users}
-          label="Customers"
-          to="/admin/customers"
-          active={isActive("/admin/customers")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Wallet}
-          label="Payouts"
-          to="/admin/payouts"
-          active={isActive("/admin/payouts")}
-          onNavigate={onClose}
-        />
-      </div>
+      {adminSidebarSections.map((section) => (
+        <div key={section.label} className="py-3 border-b border-zinc-700/80">
+          <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
+            {section.label}
+          </div>
+          {section.items.map((item) => {
+            const active = isAdminNavItemActive(location.pathname, item);
+            const showSettingsGroups = item.to === "/admin/settings" && isSettingsArea(location.pathname);
 
-      {/* System */}
-      <div className="py-3 border-b border-zinc-700/80">
-        <div className="px-4 pb-2 text-[10px] text-zinc-500 font-semibold uppercase tracking-[0.08em]">
-          System
+            return (
+              <div key={item.to}>
+                <SidebarItem
+                  icon={item.icon}
+                  label={item.label}
+                  to={item.to}
+                  active={active}
+                  count={countFor(item.countKey)}
+                  onNavigate={onClose}
+                />
+                {showSettingsGroups ? (
+                  <div className="ml-4 mt-2 space-y-3 border-l border-zinc-700/80 pl-3">
+                    {adminSettingsGroups.map((group) => (
+                      <div key={group.title}>
+                        <div className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-zinc-600">
+                          {group.title}
+                        </div>
+                        <div className="space-y-0.5">
+                          {group.items.map((subItem) => {
+                            const subActive = isSettingsSubItemActive(location.pathname, subItem.to);
+                            return (
+                              <Link
+                                key={subItem.to}
+                                to={subItem.to}
+                                onClick={onClose}
+                                className={cn(
+                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                                  subActive
+                                    ? "bg-zinc-800 text-amber-300"
+                                    : "text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300",
+                                )}
+                              >
+                                <subItem.icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                <span className="truncate">{subItem.label}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
-        <SidebarItem
-          icon={Inbox}
-          label="Intake"
-          to="/admin/intake"
-          active={isActive("/admin/intake")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={AlertTriangle}
-          label="Operations"
-          to="/admin/operations"
-          active={isActive("/admin/operations")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={BarChart3}
-          label="Analytics"
-          to="/admin/analytics"
-          active={isActive("/admin/analytics")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={ArrowUpDown}
-          label="Data Sync"
-          to="/admin/data-sync"
-          active={isActive("/admin/data-sync")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Receipt}
-          label="Pricing"
-          to="/admin/pricing"
-          active={isActive("/admin/pricing")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Truck}
-          label="Shipping Rates"
-          to="/admin/shipping-rates"
-          active={isActive("/admin/shipping-rates")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Settings}
-          label="Channel Mappings"
-          to="/admin/settings/channel-mappings"
-          active={isActive("/admin/settings/channel-mappings")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={FileSearch}
-          label="SEO/GEO"
-          to="/admin/settings/seo-geo"
-          active={isActive("/admin/settings/seo-geo")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={Activity}
-          label="App Health"
-          to="/admin/settings/app-health"
-          active={isActive("/admin/settings/app-health")}
-          onNavigate={onClose}
-        />
-        <SidebarItem
-          icon={MessageSquare}
-          label="Transcripts"
-          to="/admin/system/transcripts"
-          active={isActive("/admin/system/transcripts")}
-          onNavigate={onClose}
-        />
-      </div>
+      ))}
 
       {/* Connection Status Footer */}
       <ConnectionFooter />

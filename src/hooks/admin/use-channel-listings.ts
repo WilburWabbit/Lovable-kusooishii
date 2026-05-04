@@ -22,7 +22,45 @@ export const channelListingKeys = {
   all: ['v2', 'channel-listings'] as const,
   byVariant: (sku: string) => ['v2', 'channel-listings', 'variant', sku] as const,
   fees: (channel: string) => ['v2', 'channel-fees', channel] as const,
+  pricingByVariant: (skuId: string) => ['v2', 'channel-pricing', 'variant', skuId] as const,
+  websitePreflight: (skuId: string) => ['v2', 'website-listing-preflight', skuId] as const,
 };
+
+export interface ChannelPricingQuote {
+  sku_id: string;
+  channel: string;
+  floor_price: number | null;
+  target_price: number | null;
+  ceiling_price: number | null;
+  estimated_fees: number | null;
+  estimated_net: number | null;
+  carrying_value?: number | null;
+  average_carrying_value?: number | null;
+  stock_unit_count?: number;
+  market_consensus: number | null;
+  confidence_score: number | null;
+  blocking_reasons?: string[];
+  warning_reasons?: string[];
+  quote_error?: string;
+  sku_code?: string;
+  breakdown?: Record<string, number>;
+}
+
+export interface WebsiteListingPreflight {
+  sku_id: string;
+  sku_code: string;
+  channel: 'web';
+  can_publish: boolean;
+  action_state: 'publish' | 'activate_sku' | 'receive_stock' | 'set_price' | 'recalculate_price';
+  actions: string[];
+  blockers: string[];
+  warnings: string[];
+  saleable_stock_count: number;
+  active_flag: boolean;
+  saleable_flag: boolean;
+  final_price: number | null;
+  quote: ChannelPricingQuote;
+}
 
 // ─── Row → Interface Mapper ────────────────────────────────
 
@@ -58,6 +96,9 @@ function mapListing(
     feeAdjustedPrice: (row.fee_adjusted_price as number) ?? null,
     estimatedFees: snapshot?.estimatedFees ?? null,
     estimatedNet: snapshot?.estimatedNet ?? null,
+    priceFloor: (row.price_floor as number) ?? null,
+    priceTarget: (row.price_target as number) ?? null,
+    priceCeiling: (row.price_ceiling as number) ?? null,
   };
 }
 
@@ -141,6 +182,86 @@ export function useChannelListings(skuCode: string | undefined) {
       }
 
       return collapsedRows.map((r) => mapListing(r, skuCode!, snapshotsById));
+    },
+  });
+}
+
+export function useVariantChannelPricing(skuId: string | undefined, skuCode?: string) {
+  return useQuery({
+    queryKey: channelListingKeys.pricingByVariant(skuId ?? ''),
+    enabled: !!skuId,
+    staleTime: 120_000,
+    queryFn: async () => {
+      const channels: Array<{ key: Channel; pricingChannel: string }> = [
+        { key: 'ebay', pricingChannel: 'ebay' },
+        { key: 'website', pricingChannel: 'web' },
+        { key: 'bricklink', pricingChannel: 'bricklink' },
+        { key: 'brickowl', pricingChannel: 'brickowl' },
+      ];
+
+      const entries = await Promise.all(
+        channels.map(async ({ key, pricingChannel }) => {
+          try {
+            const quote = await invokeWithAuth<ChannelPricingQuote>('admin-data', {
+              action: 'calculate-pricing',
+              sku_id: skuId!,
+              channel: pricingChannel,
+            });
+            if (quote.sku_id !== skuId) {
+              throw new Error(`Pricing quote returned for the wrong SKU (${skuCode ?? skuId})`);
+            }
+            return [key, { ...quote, sku_code: skuCode }] as const;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Pricing quote failed';
+            const fallback: ChannelPricingQuote = {
+              sku_id: skuId!,
+              sku_code: skuCode,
+              channel: pricingChannel,
+              floor_price: null,
+              target_price: null,
+              ceiling_price: null,
+              estimated_fees: null,
+              estimated_net: null,
+              market_consensus: null,
+              confidence_score: null,
+              blocking_reasons: [],
+              warning_reasons: [],
+              quote_error: message,
+              breakdown: {},
+            };
+            return [key, fallback] as [Channel, ChannelPricingQuote];
+          }
+        }),
+      );
+
+      return new Map<Channel, ChannelPricingQuote>(entries);
+    },
+  });
+}
+
+export function useWebsiteListingPreflight(skuId: string | undefined, listedPrice?: number | null) {
+  return useQuery({
+    queryKey: [...channelListingKeys.websitePreflight(skuId ?? ''), listedPrice ?? null],
+    enabled: !!skuId,
+    staleTime: 60_000,
+    queryFn: async () => invokeWithAuth<WebsiteListingPreflight>('admin-data', {
+      action: 'website-listing-preflight',
+      sku_id: skuId!,
+      listed_price: listedPrice ?? undefined,
+    }),
+  });
+}
+
+export function useActivateSku() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ skuId }: { skuId: string; skuCode: string }) =>
+      invokeWithAuth('admin-data', { action: 'activate-sku', sku_id: skuId }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.websitePreflight(variables.skuId) });
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
+      queryClient.invalidateQueries({ queryKey: productKeys.all });
     },
   });
 }
@@ -229,6 +350,11 @@ interface PublishListingInput {
   overrideReasonNote?: string;
 }
 
+interface PublishListingResult {
+  sku_id?: string;
+  listing_id?: string;
+}
+
 export function usePublishListing() {
   const queryClient = useQueryClient();
 
@@ -254,13 +380,24 @@ export function usePublishListing() {
 
       const skuId = (skuRow as unknown as Record<string, unknown>).id as string;
 
+      if (channel === 'website' || channel === 'web') {
+        const result = await invokeWithAuth<PublishListingResult>('admin-data', {
+          action: 'create-web-listing',
+          sku_id: skuId,
+          listed_price: listingPrice,
+          listing_title: listingTitle,
+          listing_description: listingDescription,
+        });
+        return { ...result, sku_id: skuId };
+      }
+
       // Normalize channel value: legacy `channel` column uses 'web' for the
       // website, while v2_channel uses 'website'. The UI/Channel type sends
       // 'website' — translate so we update the existing row instead of
       // creating a duplicate (and tripping the (channel, external_sku) unique
       // constraint downstream).
-      const legacyChannel = channel === 'website' ? 'web' : channel;
-      const v2Channel = channel === 'web' ? 'website' : channel;
+      const legacyChannel = (channel as string) === 'website' ? 'web' : channel;
+      const v2Channel = (channel as string) === 'web' ? 'website' : channel;
 
       // There is no (sku_id, channel) unique constraint, so a true upsert
       // can't disambiguate the row. Look up ALL rows for this (sku, channel)
@@ -335,7 +472,7 @@ export function usePublishListing() {
       const { data: snapshotData, error: snapshotError } = await supabase
         .rpc('create_price_decision_snapshot' as never, {
           p_sku_id: skuId,
-          p_channel: channel,
+          p_channel: legacyChannel,
           p_channel_listing_id: listingId,
           p_candidate_price: listingPrice,
         } as never);
@@ -366,10 +503,13 @@ export function usePublishListing() {
 
       if (commandError) throw commandError;
 
-      return data;
+      return { ...(data as Record<string, unknown>), sku_id: skuId };
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: channelListingKeys.byVariant(variables.skuCode) });
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'channel-pricing'] });
+      queryClient.invalidateQueries({ queryKey: ['v2', 'website-listing-preflight'] });
       queryClient.invalidateQueries({ queryKey: productKeys.all });
       queryClient.invalidateQueries({ queryKey: stockUnitKeys.all });
     },

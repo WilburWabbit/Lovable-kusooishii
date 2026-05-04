@@ -194,6 +194,7 @@ export interface ProductVariant {
   qtyOnHand: number; // computed from stock units
   conditionNotes: string | null;
   marketPrice: number | null;
+  channelPricing: ProductVariantPricing[];
   createdAt: string;
 }
 
@@ -202,6 +203,8 @@ export interface ProductVariantPricing {
   skuCode: string;
   channel: Channel | null;
   currentPrice: number | null;
+  targetPrice: number | null;
+  ceilingPrice: number | null;
   floorPrice: number | null;
   marketPrice: number | null;
   avgCost: number | null;
@@ -243,6 +246,9 @@ export interface ChannelListing {
   feeAdjustedPrice: number | null;
   estimatedFees: number | null;
   estimatedNet: number | null;
+  priceFloor?: number | null;
+  priceTarget?: number | null;
+  priceCeiling?: number | null;
 }
 
 // ─── 2.8 Order ────────────────────────────────────────────

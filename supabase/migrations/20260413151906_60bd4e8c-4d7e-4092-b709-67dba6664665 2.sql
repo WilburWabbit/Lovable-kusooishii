@@ -1,0 +1,1 @@
+ALTER TABLE public.ebay_payout_transactions ADD COLUMN qbo_purchase_id text;

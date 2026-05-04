@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useProduct, useUpdateSKUPrice } from "@/hooks/admin/use-products";
+import { useProduct } from "@/hooks/admin/use-products";
 import { SurfaceCard, Mono, GradeBadge, BackButton } from "./ui-primitives";
 import { StockUnitsTab } from "./StockUnitsTab";
 import { PhotosTab } from "./tabs/PhotosTab";
@@ -9,115 +9,30 @@ import { MinifigsTab } from "./tabs/MinifigsTab";
 import { ChannelsTab } from "./ChannelsTab";
 import { SpecificationsTab } from "./SpecificationsTab";
 import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
-import { toast } from "sonner";
-import type { ProductVariant } from "@/lib/types/admin";
+import type { Channel, ProductVariant, ProductVariantPricing } from "@/lib/types/admin";
 
 interface ProductDetailProps {
   mpn: string;
 }
 
 type TabKey = "stock" | "photos" | "copy" | "minifigs" | "channels" | "specs" | "market";
+const HEADER_CHANNELS: Array<{ key: Channel; priceChannel: string; label: string }> = [
+  { key: "website", priceChannel: "web", label: "Web" },
+  { key: "ebay", priceChannel: "ebay", label: "eBay" },
+  { key: "bricklink", priceChannel: "bricklink", label: "BrickLink" },
+  { key: "brickowl", priceChannel: "brickowl", label: "BrickOwl" },
+];
 
-// ─── Inline editable price cell ──────────────────────────────
+function normalizedPricingChannel(channel: string | null | undefined) {
+  return channel === "website" ? "web" : channel;
+}
 
-function PriceCell({ variant, mpn }: { variant: ProductVariant; mpn: string }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
-  const updatePrice = useUpdateSKUPrice();
+function pricingForChannel(variant: ProductVariant, channel: string): ProductVariantPricing | undefined {
+  return variant.channelPricing.find((pricing) => normalizedPricingChannel(pricing.channel) === channel);
+}
 
-  const startEdit = () => {
-    setValue(variant.salePrice?.toFixed(2) ?? "");
-    setEditing(true);
-  };
-
-  const save = async () => {
-    const num = parseFloat(value);
-    if (isNaN(num) || num <= 0) {
-      toast.error("Enter a valid price");
-      return;
-    }
-    try {
-      await updatePrice.mutateAsync({
-        skuId: variant.id,
-        mpn,
-        price: num,
-        floorPrice: variant.floorPrice,
-      });
-      toast.success(`${variant.sku} price set to £${num.toFixed(2)}`);
-      setEditing(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update price");
-    }
-  };
-
-  const cancel = () => setEditing(false);
-
-  const belowFloor =
-    editing &&
-    variant.floorPrice != null &&
-    parseFloat(value) > 0 &&
-    parseFloat(value) < variant.floorPrice;
-
-  if (editing) {
-    return (
-      <div>
-        <div className="text-[10px] text-zinc-500">Price</div>
-        <div className="flex items-center gap-1 mt-0.5">
-          <span className="text-xs text-zinc-400">£</span>
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-              if (e.key === "Escape") cancel();
-            }}
-            autoFocus
-            className={`w-16 px-1.5 py-0.5 text-xs font-mono border rounded bg-white text-right focus:outline-none focus:ring-1 ${
-              belowFloor
-                ? "border-red-400 focus:ring-red-400 text-red-600"
-                : "border-amber-300 focus:ring-amber-400"
-            }`}
-          />
-        </div>
-        {belowFloor && (
-          <div className="text-[9px] text-red-500 mt-0.5">
-            Below floor £{variant.floorPrice!.toFixed(2)}
-          </div>
-        )}
-        <div className="flex gap-1 mt-1">
-          <button
-            onClick={save}
-            disabled={updatePrice.isPending || !!belowFloor}
-            className="text-[9px] text-amber-600 hover:text-amber-500 font-medium disabled:text-zinc-400"
-          >
-            {updatePrice.isPending ? "..." : "Save"}
-          </button>
-          <button
-            onClick={cancel}
-            className="text-[9px] text-zinc-400 hover:text-zinc-600"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="text-[10px] text-zinc-500">Price</div>
-      <button
-        onClick={startEdit}
-        className="bg-transparent border-none cursor-pointer p-0 hover:opacity-70 transition-opacity"
-        title="Click to edit price"
-      >
-        <Mono color="teal" className="text-sm">
-          {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
-        </Mono>
-      </button>
-    </div>
-  );
+function money(value: number | null | undefined) {
+  return value == null || !Number.isFinite(Number(value)) ? "—" : `£${Number(value).toFixed(2)}`;
 }
 
 // ─── ProductDetail ───────────────────────────────────────────
@@ -173,7 +88,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
         <div
           className="grid gap-3 mb-5"
           style={{
-            gridTemplateColumns: `repeat(${Math.min(product.variants.length, 4)}, 1fr)`,
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
           }}
         >
           {product.variants.map((v) => (
@@ -182,18 +97,11 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 <Mono color="amber" className="text-[13px]">{v.sku}</Mono>
                 <GradeBadge grade={v.grade} size="md" />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <PriceCell variant={v} mpn={mpn} />
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <div className="text-[10px] text-zinc-500">Avg Cost</div>
                   <Mono className="text-sm">
-                    {v.avgCost ? `£${v.avgCost.toFixed(2)}` : "\u2014"}
-                  </Mono>
-                </div>
-                <div>
-                  <div className="text-[10px] text-zinc-500">Floor</div>
-                  <Mono color="red" className="text-sm">
-                    {v.floorPrice ? `£${v.floorPrice.toFixed(2)}` : "\u2014"}
+                    {money(v.avgCost)}
                   </Mono>
                 </div>
                 <div>
@@ -207,9 +115,28 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
                 <div>
                   <div className="text-[10px] text-zinc-500">Market</div>
                   <Mono className="text-sm">
-                    {v.marketPrice ? `£${v.marketPrice.toFixed(2)}` : "\u2014"}
+                    {money(v.marketPrice)}
                   </Mono>
                 </div>
+              </div>
+              <div className="grid gap-1.5">
+                {HEADER_CHANNELS.map((channel) => {
+                  const pricing = pricingForChannel(v, channel.priceChannel);
+                  return (
+                    <div
+                      key={channel.key}
+                      className="grid grid-cols-[72px_1fr_1fr] items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px]"
+                    >
+                      <span className="font-semibold text-zinc-700">{channel.label}</span>
+                      <span className="text-zinc-500">
+                        Target <Mono color={pricing?.targetPrice ? "teal" : "amber"}>{money(pricing?.targetPrice)}</Mono>
+                      </span>
+                      <span className="text-zinc-500">
+                        Floor <Mono color={pricing?.floorPrice ? "red" : "amber"}>{money(pricing?.floorPrice)}</Mono>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </SurfaceCard>
           ))}

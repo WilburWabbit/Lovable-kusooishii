@@ -10,7 +10,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-internal-shared-secret, x-internal-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // ─── Fetch with Timeout ─────────────────────────────────────
@@ -142,9 +142,16 @@ export function jsonResponse(data: unknown, status = 200): Response {
 
 export function errorResponse(err: unknown, status = 400): Response {
   console.error("Edge function error:", err);
+  const message = err instanceof Error
+    ? err.message
+    : typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message?: unknown }).message)
+      : typeof err === "string"
+        ? err
+        : "Unknown error";
   return new Response(
     JSON.stringify({
-      error: err instanceof Error ? err.message : "Unknown error",
+      error: message,
     }),
     {
       status,

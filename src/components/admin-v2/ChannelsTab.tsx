@@ -1,10 +1,14 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  channelListingKeys,
   useChannelListings,
   useChannelFees,
   usePublishListing,
   useChannelListingAction,
-  calculateChannelPrice,
+  useVariantChannelPricing,
+  useWebsiteListingPreflight,
+  useActivateSku,
 } from "@/hooks/admin/use-channel-listings";
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
 import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
@@ -25,6 +29,16 @@ const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
 ];
 
 const DISABLED_CONNECTORS = new Set<Channel>(["bricklink", "brickowl"]);
+
+function normalizedChannel(channel: Channel | string | null | undefined): Channel {
+  if (channel === "web") return "website";
+  return (channel ?? "website") as Channel;
+}
+
+type ChannelFormState = { title: string; description: string; price: string };
+type ChannelDirtyState = { title: boolean; description: boolean; price: boolean };
+
+const cleanDirtyState: ChannelDirtyState = { title: false, description: false, price: false };
 
 export function ChannelsTab({ variants, product }: ChannelsTabProps) {
   const { data: feesMap } = useChannelFees();
@@ -48,12 +62,15 @@ function VariantChannelsCard({
   product: Product;
 }) {
   const { data: listings = [] } = useChannelListings(variant.sku);
+  const { data: pricingByChannel, isLoading: pricingLoading } = useVariantChannelPricing(variant.id, variant.sku);
   const publishListing = usePublishListing();
   const channelAction = useChannelListingAction();
+  const activateSku = useActivateSku();
+  const queryClient = useQueryClient();
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
-    for (const l of listings) map.set(l.channel, l);
+    for (const l of listings) map.set(normalizedChannel(l.channel), l);
     return map;
   }, [listings]);
   const gmcListing = listingsByChannel.get("google_shopping") ?? listingsByChannel.get("gmc");
@@ -74,29 +91,32 @@ function VariantChannelsCard({
     }).title;
   }, [product, variant.grade]);
 
-  // Per-channel local state for title, description, price.
+  // Per-channel local state for title and description.
   // Tracks which fields the user has manually edited so async loads of
   // `listings`/`feesMap` don't clobber unsaved typing — but they DO populate
   // fields the user hasn't touched (the previous useState-only init left the
   // form stuck on default-generated values when listings arrived after first
   // render, causing the wrong title to be pushed to eBay).
-  const dirtyRef = useRef<Record<string, { title: boolean; description: boolean; price: boolean }>>({});
-  const [channelState, setChannelState] = useState<
-    Record<string, { title: string; description: string; price: string }>
-  >({});
-  const [overrideState, setOverrideState] = useState<
-    Record<string, { approved: boolean; reason: string }>
-  >({});
+  const dirtyRef = useRef<Record<string, ChannelDirtyState>>({});
+  const [channelState, setChannelState] = useState<Record<string, ChannelFormState>>({});
+  const websiteInputPrice = Number(channelState.website?.price ?? "");
+  const websitePreflightPrice = Number.isFinite(websiteInputPrice) && websiteInputPrice > 0
+    ? websiteInputPrice
+    : null;
+  const { data: webPreflight, isLoading: webPreflightLoading } = useWebsiteListingPreflight(
+    variant.id,
+    websitePreflightPrice,
+  );
 
   useEffect(() => {
     setChannelState((prev) => {
-      const next: Record<string, { title: string; description: string; price: string }> = { ...prev };
+      const next: Record<string, ChannelFormState> = { ...prev };
       for (const ch of CHANNELS) {
-        const existing = listings.find((l) => l.channel === ch.key);
-        const feeInfo = feesMap?.get(ch.key);
-        const basePrice = variant.salePrice ?? 0;
-        const feeCalc = calculateChannelPrice(basePrice, variant.floorPrice, feeInfo);
-        const dirty = dirtyRef.current[ch.key] ?? { title: false, description: false, price: false };
+        const existing = listings.find((l) => normalizedChannel(l.channel) === ch.key);
+        const pricing = pricingByChannel?.get(ch.key);
+        const quoteBelongsToVariant = !pricing || pricing.sku_id === variant.id;
+        const quoteIsUsable = quoteBelongsToVariant && !pricing?.quote_error;
+        const dirty = dirtyRef.current[ch.key] ?? cleanDirtyState;
         const current = prev[ch.key];
 
         const defaultTitle = ch.key === "ebay" ? defaultEbayTitle : product.name;
@@ -109,15 +129,17 @@ function VariantChannelsCard({
             : existing?.listingDescription ?? "",
           price: dirty.price
             ? current?.price ?? ""
-            : existing?.listingPrice?.toFixed(2) ?? feeCalc.suggestedPrice.toFixed(2),
+            : quoteIsUsable
+              ? pricing?.target_price?.toFixed(2) ?? existing?.listingPrice?.toFixed(2) ?? ""
+              : existing?.listingPrice?.toFixed(2) ?? "",
         };
       }
       return next;
     });
-  }, [listings, feesMap, defaultEbayTitle, product.name, variant.salePrice, variant.floorPrice]);
+  }, [listings, pricingByChannel, defaultEbayTitle, product.name, variant.id]);
 
-  const updateField = (channel: string, field: "title" | "description" | "price", value: string) => {
-    const channelDirty = dirtyRef.current[channel] ?? { title: false, description: false, price: false };
+  const updateField = (channel: string, field: keyof ChannelDirtyState, value: string) => {
+    const channelDirty = dirtyRef.current[channel] ?? cleanDirtyState;
     dirtyRef.current[channel] = { ...channelDirty, [field]: true };
     setChannelState((prev) => ({
       ...prev,
@@ -130,37 +152,38 @@ function VariantChannelsCard({
     }));
   };
 
-  const updateOverride = (channel: string, patch: Partial<{ approved: boolean; reason: string }>) => {
-    setOverrideState((prev) => ({
-      ...prev,
-      [channel]: {
-        approved: prev[channel]?.approved ?? false,
-        reason: prev[channel]?.reason ?? "",
-        ...patch,
-      },
-    }));
-  };
-
   const handlePublish = async (ch: { key: Channel; label: string }) => {
     const state = channelState[ch.key];
+    const listing = listingsByChannel.get(ch.key);
+    const pricing = pricingByChannel?.get(ch.key);
+    if (pricing && pricing.sku_id !== variant.id) {
+      toast.error(`${ch.label} pricing quote does not match ${variant.sku}`);
+      return;
+    }
+    if (ch.key === "website" && webPreflight && !webPreflight.can_publish) {
+      toast.error(webPreflight.blockers[0] ?? "Website listing is blocked");
+      return;
+    }
     if (!state?.title?.trim()) {
       toast.error(`${ch.label} listing title is required`);
       return;
     }
 
-    const price = parseFloat(state.price);
+    const price = Number(state?.price ?? "");
     if (isNaN(price) || price <= 0) {
-      toast.error("Invalid price");
+      toast.error("Enter a valid listing price");
       return;
     }
 
-    const feeInfo = feesMap?.get(ch.key);
-    const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
-    const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
-    const override = overrideState[ch.key] ?? { approved: false, reason: "" };
+    const floorPrice = pricing?.floor_price ?? listing?.priceFloor ?? null;
+    if (floorPrice != null && price < floorPrice) {
+      toast.error(`${ch.label} price is below its channel floor`);
+      return;
+    }
 
-    if (belowFloor && (!override.approved || override.reason.trim().length < 5)) {
-      toast.error("Approve the below-floor price and enter a reason");
+    const priceDirty = dirtyRef.current[ch.key]?.price ?? false;
+    if (pricing?.quote_error && (!priceDirty || floorPrice == null || price < floorPrice)) {
+      toast.error(`${ch.label} pricing quote must be fixed before publishing`);
       return;
     }
 
@@ -171,11 +194,9 @@ function VariantChannelsCard({
         listingTitle: state.title.trim(),
         listingDescription: state.description.trim() || undefined,
         listingPrice: price,
-        estimatedFees: feeCalc.estimatedFees,
-        estimatedNet: feeCalc.estimatedNet,
-        allowBelowFloor: belowFloor && override.approved,
-        overrideReasonCode: belowFloor ? "below_floor_staff_approval" : undefined,
-        overrideReasonNote: belowFloor ? override.reason.trim() : undefined,
+        estimatedFees: pricing?.estimated_fees ?? undefined,
+        estimatedNet: pricing?.estimated_net ?? undefined,
+        allowBelowFloor: false,
       });
       toast.success(`Queued ${variant.sku} for ${ch.label}`);
     } catch (err: unknown) {
@@ -218,6 +239,13 @@ function VariantChannelsCard({
     }
   };
 
+  const refreshWebsitePreflight = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.pricingByVariant(variant.id) }),
+      queryClient.invalidateQueries({ queryKey: channelListingKeys.websitePreflight(variant.id) }),
+    ]);
+  };
+
   return (
     <SurfaceCard>
       <div className="flex items-center justify-between mb-3">
@@ -225,13 +253,8 @@ function VariantChannelsCard({
           <Mono color="amber" className="text-sm">{variant.sku}</Mono>
           <GradeBadge grade={variant.grade} size="md" />
           <Mono color="teal">
-            {variant.salePrice ? `£${variant.salePrice.toFixed(2)}` : "—"}
+            {pricingLoading ? "Pricing..." : "Channel priced"}
           </Mono>
-          {variant.floorPrice && (
-            <span className="text-[10px] text-zinc-500">
-              Floor: <Mono color="red" className="text-[10px]">£{variant.floorPrice.toFixed(2)}</Mono>
-            </span>
-          )}
         </div>
       </div>
 
@@ -241,14 +264,30 @@ function VariantChannelsCard({
           const status = listing?.status ?? "draft";
           const statusInfo = CHANNEL_LISTING_STATUSES[status];
           const state = channelState[ch.key] ?? { title: "", description: "", price: "0" };
-          const price = parseFloat(state.price) || 0;
-          const feeInfo = feesMap?.get(ch.key);
-          const feeCalc = calculateChannelPrice(price, variant.floorPrice, feeInfo);
-          const belowFloor = variant.floorPrice != null && price > 0 && price < variant.floorPrice;
-          const override = overrideState[ch.key] ?? { approved: false, reason: "" };
+          const dirty = dirtyRef.current[ch.key] ?? cleanDirtyState;
+          const feeInfo = feesMap?.get(ch.key) ?? (ch.key === "website" ? feesMap?.get("web") : undefined);
+          const quote = pricingByChannel?.get(ch.key);
+          const pricing = quote?.sku_id === variant.id ? quote : undefined;
+          const pricingError = pricing?.quote_error ?? null;
+          const price = Number(state.price) || 0;
+          const floorPrice = pricing?.floor_price ?? listing?.priceFloor ?? null;
+          const estimatedFees = pricing?.estimated_fees ?? listing?.estimatedFees ?? null;
+          const estimatedNet = pricing?.estimated_net ?? listing?.estimatedNet ?? null;
+          const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
-          const overrideReady = !belowFloor || (override.approved && override.reason.trim().length >= 5);
-          const canPublish = !titleEmpty && price > 0 && overrideReady;
+          const websiteBlocked = ch.key === "website" && webPreflight ? !webPreflight.can_publish : false;
+          const preflightChecking = ch.key === "website" && webPreflightLoading;
+          const manualAboveKnownFloor = dirty.price && price > 0 && floorPrice != null && price >= floorPrice;
+          const quoteReady = Boolean(pricing && !pricingError);
+          const canPublish = !pricingLoading
+            && !webPreflightLoading
+            && !titleEmpty
+            && price > 0
+            && !belowFloor
+            && !websiteBlocked
+            && (quoteReady || manualAboveKnownFloor);
+          const stockCount = ch.key === "website" ? webPreflight?.saleable_stock_count : pricing?.stock_unit_count;
+          const confidence = pricing?.confidence_score == null ? null : Math.round(Number(pricing.confidence_score) * 100);
           const manualOutOfStock = listing?.availabilityOverride === "manual_out_of_stock";
           const connectorDisabled = DISABLED_CONNECTORS.has(ch.key);
           const listingEnded = status === "ended";
@@ -258,7 +297,7 @@ function VariantChannelsCard({
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
-            && variant.floorPrice != null && listing.listingPrice < variant.floorPrice;
+            && floorPrice != null && listing.listingPrice < floorPrice;
 
           return (
             <div
@@ -266,16 +305,23 @@ function VariantChannelsCard({
               className="p-3.5 bg-zinc-50 rounded-lg border border-zinc-200"
             >
               {/* Channel header */}
-              <div className="flex justify-between items-center mb-2.5">
+              <div className="flex flex-wrap justify-between items-center gap-2 mb-2.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-zinc-900">{ch.label}</span>
                   <Badge label={statusInfo.label} color={statusInfo.color} small />
+                  {preflightChecking && <Badge label="Checking" color="#71717A" small />}
+                  {websiteBlocked && <Badge label="Action needed" color="#F59E0B" small />}
+                  {dirty.price && <Badge label="Manual price" color="#71717A" small />}
                   {liveAndBelowFloor && (
                     <Badge label="Below floor" color="#EF4444" small />
                   )}
                   {manualOutOfStock && (
                     <Badge label="Manual OOS" color="#F59E0B" small />
                   )}
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                  <span>Stock <Mono color={stockCount ? "teal" : "amber"}>{stockCount ?? "—"}</Mono></span>
+                  <span>Confidence <Mono color={confidence != null && confidence >= 70 ? "teal" : "amber"}>{confidence == null ? "—" : `${confidence}%`}</Mono></span>
                 </div>
               </div>
 
@@ -337,7 +383,7 @@ function VariantChannelsCard({
               </div>
 
               {/* Price + fees */}
-              <div className="grid grid-cols-3 gap-2 mb-2">
+              <div className="grid grid-cols-1 gap-2 mb-2 sm:grid-cols-3">
                 <div>
                   <label className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-0.5">
                     Price (£)
@@ -358,7 +404,7 @@ function VariantChannelsCard({
                     Est. Fees
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-red-400">
-                    £{feeCalc.estimatedFees.toFixed(2)}
+                    {estimatedFees == null ? "—" : `£${Number(estimatedFees).toFixed(2)}`}
                   </div>
                 </div>
                 <div>
@@ -366,29 +412,83 @@ function VariantChannelsCard({
                     Net
                   </label>
                   <div className="px-2 py-1.5 text-xs font-mono text-teal-500">
-                    £{feeCalc.estimatedNet.toFixed(2)}
+                    {estimatedNet == null ? "—" : `£${Number(estimatedNet).toFixed(2)}`}
                   </div>
                 </div>
               </div>
 
               {/* Warnings */}
               {belowFloor && (
-                <div className="mb-2 space-y-2 rounded-md border border-red-200 bg-red-50 p-2">
-                  <label className="flex items-center gap-2 text-[11px] font-medium text-red-700">
-                    <input
-                      type="checkbox"
-                      checked={override.approved}
-                      onChange={(e) => updateOverride(ch.key, { approved: e.target.checked })}
-                      className="h-3.5 w-3.5"
-                    />
-                    Approve below floor price (£{variant.floorPrice!.toFixed(2)})
-                  </label>
-                  <input
-                    value={override.reason}
-                    onChange={(e) => updateOverride(ch.key, { reason: e.target.value })}
-                    placeholder="Reason for pricing override"
-                    className="w-full rounded border border-red-200 bg-white px-2 py-1.5 text-[11px] text-zinc-900"
-                  />
+                <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
+                  Price is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update the price or pricing controls before publishing.
+                </div>
+              )}
+
+              {pricingError && (
+                <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
+                  <div>Price quote failed for {ch.label}.</div>
+                  <div className="mt-0.5 font-normal">{pricingError}</div>
+                </div>
+              )}
+
+              {ch.key === "website" && webPreflight && !webPreflight.can_publish && (
+                <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+                  <div className="font-semibold">Website publish blocked</div>
+                  <div className="mt-1 space-y-0.5">
+                    {webPreflight.blockers.map((blocker) => (
+                      <div key={blocker}>{blocker}</div>
+                    ))}
+                  </div>
+                  {webPreflight.actions.includes("activate_sku") && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await activateSku.mutateAsync({ skuId: variant.id, skuCode: variant.sku });
+                            toast.success(`${variant.sku} activated`);
+                            await refreshWebsitePreflight();
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : "Failed to activate SKU");
+                          }
+                        }}
+                        disabled={activateSku.isPending}
+                        className="rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800 disabled:opacity-50"
+                      >
+                        {activateSku.isPending ? "Activating..." : "Activate SKU"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={refreshWebsitePreflight}
+                        className="rounded border border-zinc-300 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700"
+                      >
+                        Recheck
+                      </button>
+                    </div>
+                  )}
+                  {!webPreflight.actions.includes("activate_sku") && webPreflight.actions.includes("recalculate_price") && (
+                    <button
+                      type="button"
+                      onClick={refreshWebsitePreflight}
+                      className="mt-2 rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800"
+                    >
+                      Recalculate price
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {ch.key === "website" && webPreflight?.warnings?.length ? (
+                <div className="mb-2 rounded-md border border-zinc-200 bg-white p-2 text-[11px] text-zinc-600">
+                  {webPreflight.warnings.map((warning) => warning.replace(/_/g, " ")).join("; ")}
+                </div>
+              ) : null}
+
+              {pricing && !pricingError && (
+                <div className="mb-2 grid grid-cols-1 gap-2 rounded border border-zinc-200 bg-white px-2 py-1.5 text-[10px] sm:grid-cols-3">
+                  <span className="text-zinc-500">Floor <Mono color="red">£{Number(pricing.floor_price ?? 0).toFixed(2)}</Mono></span>
+                  <span className="text-zinc-500">Ceiling <Mono color="amber">£{Number(pricing.ceiling_price ?? 0).toFixed(2)}</Mono></span>
+                  <span className="text-zinc-500">Market <Mono color={pricing.market_consensus == null ? "amber" : "teal"}>{pricing.market_consensus == null ? "n/a" : `£${Number(pricing.market_consensus).toFixed(2)}`}</Mono></span>
                 </div>
               )}
 

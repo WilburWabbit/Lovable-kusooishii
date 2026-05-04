@@ -3,7 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 /**
  * eBay Retry Order — Picks up landing_raw_ebay_order rows with status
- * IN ('error', 'retrying') and re-calls ebay-process-order for each.
+ * IN ('pending', 'error', 'retrying') after a short receive grace period
+ * and re-calls ebay-process-order for each.
  *
  * Backoff schedule (minutes since last attempt):
  *   Attempt 1: immediate
@@ -34,6 +35,85 @@ const BACKOFF_MS = [
   60 * 60_000, // attempt 5: 60 min
 ];
 const MAX_RETRIES = 5;
+const PENDING_GRACE_MS = 2 * 60_000;
+const STUCK_ALERT_AGE_MS = 30 * 60_000;
+const STUCK_ORDER_ALERT_CATEGORY = "ebay_order_stuck_in_landing";
+
+type SupabaseAdmin = ReturnType<typeof createClient>;
+type StuckOrderRow = {
+  id: string;
+  external_id: string;
+  status: string;
+  received_at: string;
+  retry_count: number | null;
+  last_retry_at: string | null;
+  error_message: string | null;
+};
+type ExistingAlertRow = { entity_id: string | null };
+type StuckAlertSummary = {
+  stuck_count: number;
+  alerts_created: number;
+  error?: string;
+};
+type RetryResult = Record<string, unknown>;
+
+async function raiseStuckOrderAlerts(admin: SupabaseAdmin, nowMs: number): Promise<StuckAlertSummary> {
+  const stuckCutoff = new Date(nowMs - STUCK_ALERT_AGE_MS).toISOString();
+  const { data: stuckRowsData, error: stuckErr } = await admin
+    .from("landing_raw_ebay_order")
+    .select("id, external_id, status, received_at, retry_count, last_retry_at, error_message")
+    .lt("received_at", stuckCutoff)
+    .not("status", "in", "(committed,skipped)")
+    .limit(50);
+
+  if (stuckErr) {
+    throw new Error(`Failed to query stuck eBay landing rows: ${stuckErr.message}`);
+  }
+
+  const stuckRows = (stuckRowsData || []) as StuckOrderRow[];
+  if (!stuckRows.length) {
+    return { stuck_count: 0, alerts_created: 0 };
+  }
+
+  const stuckIds = stuckRows.map((row) => row.id);
+  const { data: existingAlertsData, error: existingAlertErr } = await admin
+    .from("admin_alert")
+    .select("entity_id")
+    .eq("category", STUCK_ORDER_ALERT_CATEGORY)
+    .eq("entity_type", "landing_raw_ebay_order")
+    .eq("acknowledged", false)
+    .in("entity_id", stuckIds);
+
+  if (existingAlertErr) {
+    throw new Error(`Failed to query existing stuck-order alerts: ${existingAlertErr.message}`);
+  }
+
+  const existingAlerts = (existingAlertsData || []) as ExistingAlertRow[];
+  const alreadyAlerted = new Set(existingAlerts.map((alert) => alert.entity_id));
+  const alertsToCreate = stuckRows
+    .filter((row) => !alreadyAlerted.has(row.id))
+    .map((row) => ({
+      severity: "warning",
+      category: STUCK_ORDER_ALERT_CATEGORY,
+      title: `eBay order stuck in landing: ${row.external_id}`,
+      detail:
+        `eBay order ${row.external_id} (landing ${row.id}) has been in status '${row.status}' ` +
+        `since ${row.received_at}. Retry count: ${row.retry_count || 0}. ` +
+        `Last retry: ${row.last_retry_at || "never"}. ` +
+        `Last error: ${row.error_message || "none"}.`,
+      entity_type: "landing_raw_ebay_order",
+      entity_id: row.id,
+    }));
+
+  if (alertsToCreate.length > 0) {
+    const { error: alertErr } = await admin.from("admin_alert").insert(alertsToCreate);
+    if (alertErr) {
+      throw new Error(`Failed to create stuck-order alerts: ${alertErr.message}`);
+    }
+  }
+
+  return { stuck_count: stuckRows.length, alerts_created: alertsToCreate.length };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -55,28 +135,25 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const now = Date.now();
+    const retryGraceCutoff = new Date(now - PENDING_GRACE_MS).toISOString();
 
     // Find landing rows needing retry, respecting backoff
-    const { data: pendingRows, error: queryErr } = await admin
+    const { data: pendingRowsData, error: queryErr } = await admin
       .from("landing_raw_ebay_order")
-      .select("id, external_id, status, retry_count, last_retry_at, error_message")
-      .in("status", ["error", "retrying"])
+      .select("id, external_id, status, retry_count, last_retry_at, received_at, error_message")
+      .in("status", ["pending", "error", "retrying"])
+      .lt("received_at", retryGraceCutoff)
       .order("last_retry_at", { ascending: true, nullsFirst: true })
       .limit(10);
 
     if (queryErr) throw new Error(`Failed to query pending landing rows: ${queryErr.message}`);
-    if (!pendingRows?.length) {
-      return new Response(
-        JSON.stringify({ success: true, processed: 0, message: "No eBay orders pending retry" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const pendingRows = pendingRowsData || [];
 
     let processed = 0;
     let retrying = 0;
     let failed = 0;
     let skippedBackoff = 0;
-    const results: any[] = [];
+    const results: RetryResult[] = [];
 
     for (const row of pendingRows) {
       // Check backoff — has enough time elapsed since last attempt?
@@ -146,8 +223,9 @@ Deno.serve(async (req) => {
           throw new Error(processData.error || `HTTP ${processRes.status}`);
         }
 
-      } catch (err: any) {
-        const errorMsg = (err.message || "Unknown error").substring(0, 500);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const errorMsg = (message || "Unknown error").substring(0, 500);
         const newRetryCount = retryCount + 1;
 
         if (newRetryCount >= MAX_RETRIES) {
@@ -203,23 +281,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    let stuckAlertSummary: StuckAlertSummary = { stuck_count: 0, alerts_created: 0 };
+    try {
+      stuckAlertSummary = await raiseStuckOrderAlerts(admin, now);
+    } catch (alertErr) {
+      console.error("Failed to raise stuck eBay order alerts:", alertErr);
+      const message = alertErr instanceof Error ? alertErr.message : String(alertErr);
+      stuckAlertSummary = {
+        stuck_count: 0,
+        alerts_created: 0,
+        error: message || "Unknown stuck-order alert error",
+      };
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         total_pending: pendingRows.length,
+        message: pendingRows.length ? undefined : "No eBay orders pending retry",
         skipped_backoff: skippedBackoff,
         processed,
         retrying,
         failed,
+        stuck_alerts: stuckAlertSummary,
         results,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
-  } catch (err: any) {
+  } catch (err) {
     console.error("ebay-retry-order error:", err);
+    const message = err instanceof Error ? err.message : String(err);
     return new Response(
-      JSON.stringify({ error: err.message || "Unknown error" }),
+      JSON.stringify({ error: message || "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

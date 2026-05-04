@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
+import { usePageSeo } from "@/hooks/use-page-seo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +11,7 @@ import { trackSignUp, stashAuthAction } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 
 export default function SignupPage() {
+  usePageSeo({ title: 'Create Account', description: 'Create your Kuso Oishii account.', path: '/signup', noIndex: true });
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState(searchParams.get("email") ?? "");

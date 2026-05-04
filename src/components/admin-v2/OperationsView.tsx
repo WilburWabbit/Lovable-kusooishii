@@ -327,7 +327,7 @@ export function OperationsView() {
   const cancelPostingIntent = useCancelPostingIntent();
   const createBlueBellSettlement = useCreateBlueBellSettlement();
   const exportReport = useOperationsExport();
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("open");
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [selectedAccrualIds, setSelectedAccrualIds] = useState<string[]>([]);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
@@ -346,7 +346,11 @@ export function OperationsView() {
   const blueBellOutstanding = blueBellAccruals.reduce((sum, row) => sum + row.commissionOutstanding, 0);
 
   const visibleCases = useMemo(
-    () => cases.filter((caseRow) => statusFilter === "all" || caseRow.status === statusFilter),
+    () => cases.filter((caseRow) => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "action_required") return caseRow.status === "open" || caseRow.status === "in_progress";
+      return caseRow.status === statusFilter;
+    }),
     [cases, statusFilter],
   );
   const selectedCases = visibleCases.filter((caseRow) => selectedCaseIds.includes(caseRow.id));
@@ -788,8 +792,9 @@ export function OperationsView() {
               className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700"
               aria-label="Filter by status"
             >
-              <option value="all">All open</option>
+              <option value="action_required">Action required</option>
               <option value="open">Open</option>
+              <option value="all">All</option>
               <option value="in_progress">In progress</option>
             </select>
           </div>
@@ -859,7 +864,7 @@ export function OperationsView() {
                       </div>
                       <Mono color="dim">{shortId(caseRow.id)}</Mono>
                     </td>
-                    <td className="px-3 py-3 text-xs"><RecordLink route={caseRow.targetRoute} label={caseRow.targetLabel ?? caseRow.orderNumber} /></td>
+                    <td className="px-3 py-3 text-xs"><RecordLink route={caseRow.targetRoute ?? (caseRow.salesOrderId ? `/admin/orders/${caseRow.salesOrderId}` : null)} label={caseRow.targetLabel ?? caseRow.orderNumber ?? caseRow.relatedEntityId} /></td>
                     <td className="px-3 py-3">
                       <ReferenceStack app={caseRow.appReference ?? caseRow.orderNumber} qboDoc={caseRow.qboDocNumber} qboId={caseRow.qboEntityId} external={caseRow.externalReference ?? caseRow.stripeReference ?? caseRow.ebayReference} />
                     </td>

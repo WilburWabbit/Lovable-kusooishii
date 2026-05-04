@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePageSeo } from "@/hooks/use-page-seo";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ interface WelcomeData {
 }
 
 export default function WelcomePage() {
+  usePageSeo({ title: 'Welcome', description: 'Welcome to Kuso Oishii.', path: '/welcome', noIndex: true });
   const { code } = useParams<{ code: string }>();
   const [data, setData] = useState<WelcomeData | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { buildGmcProductInput, normalizeGmcSiteUrl, type GmcMappingRule } from "../_shared/gmc-product-input.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,28 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1beta";
-
-interface ProductInput {
-  offerId: string;
-  contentLanguage: string;
-  feedLabel: string;
-  channel: string;
-  product: {
-    title: string;
-    description: string;
-    link: string;
-    imageLink: string;
-    price: { amountMicros: string; currencyCode: string };
-    availability: string;
-    condition: string;
-    brand: string;
-    mpn: string;
-    productTypes: string[];
-    shippingWeight?: { value: number; unit: string };
-    itemGroupId: string;
-  };
-}
+const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1";
 
 interface GmcConnection {
   id: string;
@@ -38,6 +18,100 @@ interface GmcConnection {
   updated_at: string;
   merchant_id: string;
   data_source: string | null;
+}
+
+async function parseJsonResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { raw_response: text };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringifyApiError(payload: Record<string, unknown>, fallback: string): string {
+  if (typeof payload.message === "string" && payload.message.trim()) return payload.message;
+  if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
+  if (isRecord(payload.error)) {
+    const error = payload.error;
+    const parts = [
+      typeof error.message === "string" && error.message.trim() ? error.message : null,
+      error.status ? `status=${String(error.status)}` : null,
+      error.code ? `code=${String(error.code)}` : null,
+      error.details ? `details=${JSON.stringify(error.details)}` : null,
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join(" ") : JSON.stringify(error);
+  }
+  if (typeof payload.raw_response === "string" && payload.raw_response.trim()) return payload.raw_response;
+  return fallback;
+}
+
+async function getWebsitePrimaryImageUrl(
+  supabaseAdmin: SupabaseClient,
+  productId: unknown,
+): Promise<string | null> {
+  const id = typeof productId === "string" ? productId.trim() : "";
+  if (!id) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("product_media")
+    .select("sort_order, is_primary, media_asset:media_asset_id(original_url)")
+    .eq("product_id", id)
+    .order("is_primary", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const row = data as Record<string, unknown> | null;
+  const asset = row?.media_asset as Record<string, unknown> | null;
+  const url = typeof asset?.original_url === "string" ? asset.original_url.trim() : "";
+  return url || null;
+}
+
+function withWebsitePrimaryImage(
+  product: Record<string, unknown>,
+  imageUrl: string | null,
+): Record<string, unknown> {
+  return {
+    ...product,
+    primary_image_url: imageUrl,
+    img_url: imageUrl,
+  };
+}
+
+function countriesForStatus(status: Record<string, unknown>, key: string): string[] {
+  return Array.isArray(status[key]) ? (status[key] as unknown[]).map(String).filter(Boolean) : [];
+}
+
+function mapGmcOfferStatus(product: Record<string, unknown>): string {
+  const productStatus = isRecord(product.productStatus) ? product.productStatus : {};
+  const statuses = Array.isArray(productStatus.destinationStatuses)
+    ? productStatus.destinationStatuses.filter(isRecord)
+    : [];
+
+  if (statuses.some((status) =>
+    status.status === "DISAPPROVED" || countriesForStatus(status, "disapprovedCountries").length > 0
+  )) {
+    return "suppressed";
+  }
+  if (statuses.some((status) =>
+    status.status === "APPROVED" || countriesForStatus(status, "approvedCountries").length > 0
+  )) {
+    return "published";
+  }
+  if (statuses.some((status) =>
+    status.status === "PENDING" || countriesForStatus(status, "pendingCountries").length > 0
+  )) {
+    return "pending";
+  }
+  return "unknown";
 }
 
 /** Refresh GMC access token if expired */
@@ -65,76 +139,28 @@ async function ensureToken(
   });
 
   if (!tokenRes.ok) {
-    throw new Error(`Token refresh failed [${tokenRes.status}]`);
+    const payload = await parseJsonResponse(tokenRes);
+    throw new Error(stringifyApiError(payload, `Token refresh failed [${tokenRes.status}]`));
   }
 
-  const tokens = await tokenRes.json();
+  const tokens = await parseJsonResponse(tokenRes);
+  const accessToken = String(tokens.access_token ?? "");
+  if (!accessToken) throw new Error("Token refresh returned no access token");
   const newExpiry = new Date(
-    Date.now() + (tokens.expires_in ?? 3600) * 1000,
+    Date.now() + Number(tokens.expires_in ?? 3600) * 1000,
   ).toISOString();
 
   await supabaseAdmin
     .from("google_merchant_connection")
     .update({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || conn.refresh_token,
+      access_token: accessToken,
+      refresh_token: typeof tokens.refresh_token === "string" ? tokens.refresh_token : conn.refresh_token,
       token_expires_at: newExpiry,
     })
     .eq("id", conn.id)
     .eq("updated_at", conn.updated_at);
 
-  return tokens.access_token as string;
-}
-
-/** Map product/SKU data to Google ProductInput */
-function mapToProductInput(
-  product: Record<string, unknown>,
-  sku: Record<string, unknown>,
-  stockCount: number,
-  siteUrl: string,
-): ProductInput {
-  const mpn = (product.mpn as string) || "";
-  const price = Number(sku.listed_price ?? 0);
-  if (price <= 0) {
-    throw new Error(`Google Merchant SKU ${String(sku.sku_code ?? "")} has no listed price`);
-  }
-  const conditionGrade = Number(sku.condition_grade) || 3;
-
-  return {
-    offerId: sku.sku_code as string,
-    contentLanguage: "en",
-    feedLabel: "GB",
-    channel: "ONLINE",
-    product: {
-      title:
-        (product.seo_title as string) ||
-        (product.name as string) ||
-        `LEGO ${mpn}`,
-      description:
-        (product.seo_description as string) ||
-        (product.description as string) ||
-        "",
-      link: `${siteUrl}/sets/${mpn}`,
-      imageLink: (product.img_url as string) || "",
-      price: {
-        amountMicros: String(Math.round(price * 1_000_000)),
-        currencyCode: "GBP",
-      },
-      availability: stockCount > 0 ? "in_stock" : "out_of_stock",
-      condition: conditionGrade <= 2 ? "new" : "used",
-      brand: "LEGO",
-      mpn: mpn.replace(/-\d+$/, ""),
-      productTypes: [
-        product.subtheme_name
-          ? `Toys > LEGO > ${product.subtheme_name}`
-          : "Toys > LEGO",
-      ],
-      shippingWeight: product.weight_kg
-        ? { value: product.weight_kg as number, unit: "kg" }
-        : undefined,
-      itemGroupId: mpn,
-    },
-  };
+  return accessToken;
 }
 
 Deno.serve(async (req) => {
@@ -145,7 +171,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const siteUrl = Deno.env.get("SITE_URL") || supabaseUrl.replace(".supabase.co", "");
+    const siteUrl = normalizeGmcSiteUrl(Deno.env.get("SITE_URL") || supabaseUrl);
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
     const body = await req.json();
@@ -198,6 +224,9 @@ Deno.serve(async (req) => {
 
     // --- Publish all eligible SKUs ---
     if (action === "publish_all") {
+      const skuIds = Array.isArray(body.sku_ids)
+        ? new Set(body.sku_ids.map((value: unknown) => String(value)))
+        : null;
       if (!dataSource) {
         throw new Error(
           "No data source configured. Set data_source on the GMC connection.",
@@ -208,9 +237,9 @@ Deno.serve(async (req) => {
       const { data: skus, error: skuErr } = await supabaseAdmin
         .from("sku")
         .select(
-          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, subtheme_name, weight_kg)",
+          "id, sku_code, condition_grade, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, weight_kg, ean, upc, isbn, gmc_product_category)",
         )
-        .eq("active", true);
+        .eq("active_flag", true);
 
       if (skuErr) throw new Error(`Failed to fetch SKUs: ${skuErr.message}`);
 
@@ -257,15 +286,28 @@ Deno.serve(async (req) => {
         stockMap.set(skuId, (stockMap.get(skuId) || 0) + 1);
       }
 
+      const { data: mappingRows, error: mappingErr } = await supabaseAdmin
+        .from("channel_attribute_mapping")
+        .select("aspect_key, canonical_key, constant_value, transform")
+        .eq("channel", "gmc")
+        .or("marketplace.eq.GB,marketplace.is.null")
+        .is("category_id", null);
+      if (mappingErr) throw new Error(`Failed to fetch GMC mappings: ${mappingErr.message}`);
+      const gmcMappings = (mappingRows ?? []) as GmcMappingRule[];
+
       let queued = 0;
       let errors = 0;
       let skipped = 0;
       const errorDetails: string[] = [];
+      const skippedDetails: Array<Record<string, unknown>> = [];
 
       for (const sku of skus ?? []) {
-        // Only publish SKUs with active web listing
+        if (skuIds && !skuIds.has(String(sku.id))) continue;
+        // GMC requires a published product page. Excluded SKUs are auto-queued
+        // when their website listing publish command is acknowledged live.
         if (!webSkuIds.has(sku.id)) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_live_web_page" });
           continue;
         }
 
@@ -278,8 +320,16 @@ Deno.serve(async (req) => {
           : productRelation;
         if (!product) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_mpn" });
           continue;
         }
+        const websitePrimaryImageUrl = await getWebsitePrimaryImageUrl(supabaseAdmin, product.id);
+        if (!websitePrimaryImageUrl) {
+          skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_website_primary_image" });
+          continue;
+        }
+        const productForGmc = withWebsitePrimaryImage(product, websitePrimaryImageUrl);
 
         const webListing = webListingBySku.get(sku.id);
         const manualOutOfStock = webListing?.availability_override === "manual_out_of_stock";
@@ -287,10 +337,22 @@ Deno.serve(async (req) => {
         const listedPrice = Number(webListing?.listed_price ?? 0);
         if (listedPrice <= 0) {
           skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "not_listable_grade" });
           continue;
         }
 
         try {
+          const { warnings } = buildGmcProductInput(
+            {
+              external_sku: sku.sku_code as string,
+              listed_price: listedPrice,
+            },
+            sku as Record<string, unknown>,
+            productForGmc,
+            stockCount,
+            siteUrl,
+            gmcMappings,
+          );
           const { data: listing, error: listingErr } = await supabaseAdmin.from("channel_listing").upsert(
             {
               channel: "google_shopping",
@@ -302,6 +364,7 @@ Deno.serve(async (req) => {
               availability_override: manualOutOfStock ? "manual_out_of_stock" : null,
               availability_override_at: manualOutOfStock ? webListing?.availability_override_at ?? null : null,
               availability_override_by: manualOutOfStock ? webListing?.availability_override_by ?? null : null,
+              raw_data: { gmc_warnings: warnings },
               synced_at: new Date().toISOString(),
             },
             { onConflict: "channel,external_sku" },
@@ -333,7 +396,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ queued, published: queued, errors, skipped, errorDetails }),
+        JSON.stringify({ queued, published: queued, errors, skipped, errorDetails, skippedDetails }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -374,18 +437,27 @@ Deno.serve(async (req) => {
 
     // --- Sync status from GMC ---
     if (action === "sync_status") {
-      const listUrl = `${GMC_API_BASE}/accounts/${merchantId}/products`;
-      const res = await fetch(listUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const products: Record<string, unknown>[] = [];
+      let pageToken: string | null = null;
+      do {
+        const listUrl = new URL(`${GMC_API_BASE}/accounts/${merchantId}/products`);
+        if (pageToken) listUrl.searchParams.set("pageToken", pageToken);
+        const res = await fetch(listUrl.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`GMC list products failed [${res.status}]: ${errBody}`);
-      }
+        const data = await parseJsonResponse(res);
+        if (!res.ok) {
+          throw new Error(stringifyApiError(data, `GMC list products failed [${res.status}]`));
+        }
 
-      const data = await res.json();
-      const products = data.products || [];
+        if (Array.isArray(data.products)) {
+          products.push(...data.products.filter(isRecord));
+        }
+        pageToken = typeof data.nextPageToken === "string" && data.nextPageToken
+          ? data.nextPageToken
+          : null;
+      } while (pageToken);
 
       // Get existing google_shopping channel listings
       const { data: existingListings } = await supabaseAdmin
@@ -410,23 +482,17 @@ Deno.serve(async (req) => {
           | undefined;
         if (!existing) continue;
 
-        // Map GMC product status to our offer_status
-        const gmcStatus =
-          product.productStatus?.destinationStatuses?.[0]?.status ||
-          "unknown";
-        const offerStatus =
-          gmcStatus === "APPROVED"
-            ? "published"
-            : gmcStatus === "DISAPPROVED"
-              ? "suppressed"
-              : gmcStatus === "PENDING"
-                ? "pending"
-                : "unknown";
+        const externalListingId = typeof product.base64EncodedName === "string"
+          ? product.base64EncodedName
+          : typeof product.name === "string"
+            ? product.name
+            : existing.external_listing_id;
 
         await supabaseAdmin
           .from("channel_listing")
           .update({
-            offer_status: offerStatus,
+            external_listing_id: externalListingId,
+            offer_status: mapGmcOfferStatus(product),
             synced_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
