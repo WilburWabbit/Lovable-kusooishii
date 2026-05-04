@@ -1,6 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { verifyServiceRoleJWT, verifyInternalSharedSecret } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
