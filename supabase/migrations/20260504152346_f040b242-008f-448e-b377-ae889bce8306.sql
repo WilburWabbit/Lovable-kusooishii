@@ -1,0 +1,1 @@
+UPDATE landing_raw_ebay_order SET last_retry_at = NULL, status = 'pending' WHERE external_id = '03-14598-63856';
