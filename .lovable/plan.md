@@ -1,92 +1,38 @@
-## Root cause
 
-Unit `PO688-2` (SKU `31157-1.1`) was sold on 2 May at 08:47 (order `cf13fce5…`), but it still shows as in stock on the website.
+## Pending work since the last applied state
 
-Inspecting the unit in the database:
+### Migrations to apply (3, in order)
 
-```
-status:    'available'   ← legacy lifecycle column (unchanged)
-v2_status: 'sold'        ← v2 lifecycle column (correctly set)
-sold_at:   2026-05-02T08:47:33Z
-order_id:  cf13fce5-…
-```
+The applied watermark is `20260504131707`. Three files are sitting unapplied (Lovable stores them with the last digit truncated, so newer-timestamped files can already be applied while older ones remain pending — this is the case here):
 
-The website's product page calls the `product_detail_offers(p_mpn)` RPC, which counts in-stock units with:
+1. `20260504101500_migrate_gmc_outbox_to_merchant_api_v1.sql` — resets stuck `outbound_command` rows for `google_shopping`/`gmc` whose `last_error` was masked as `[object Object]`, and reopens the matching `reconciliation_case` rows. Pure data update, idempotent.
+2. `20260504115458_repair_storefront_discovery_publish_pipeline.sql` — drops/recreates `public.browse_catalog(...)` and related storefront discovery functions (single-quoted bodies, Lovable-safe).
+3. `20260504130000_channel_listing_availability_override.sql` — adds `availability_override*` columns to `channel_listing` plus a CHECK constraint, an index, and updates `queue_listing_command(...)` to honor manual out-of-stock holds.
 
-```sql
-JOIN stock_unit su ON su.sku_id = s.id AND su.status = 'available'
-```
+Migration `20260504131708` (cron auth helper) is already applied.
 
-So the offer counts any unit whose **legacy** `status` is `'available'`, even when its **v2** lifecycle has moved on to `'sold'`. Result: `stock_count = 1` for `31157-1.1` despite the unit being sold.
+### Edge Functions to redeploy
 
-Why the legacy column wasn't updated: the `allocate_stock_for_order_line` RPC (called by `v2-process-order` during checkout) only writes to `v2_status`:
+From the most recent commit `acdc0b3f "Harden Lovable Supabase cron auth"`:
 
-```sql
-UPDATE public.stock_unit
-SET v2_status = 'sold',
-    sold_at   = COALESCE(sold_at, now()),
-    order_id  = v_line.sales_order_id
-WHERE id = v_unit.id;
-```
+- `auto-markdown-prices`
+- `auto-progress-orders`
+- `ebay-retry-order`
+- `process-email-queue`
+- `qbo-process-pending`
+- `rebrickable-sync`
 
-It never advances the legacy `status` enum (which has no `'sold'` value — sold units should sit at `'allocated'` / `'picked'` / `'packed'` / `'shipped'` / `'delivered'` / `'closed'`). Every other read path that filters by `status = 'available'` will mis-report sold units as in stock — this isn't unique to the storefront.
+The earlier commit `7c37c9f2` touched ~22 functions and was already deployed in the previous loop. I will not redeploy those again unless the new commit's edits to `_shared/auth.ts` or `_shared/qbo-helpers.ts` require it — `git diff` shows only the 6 functions above changed in this commit and `_shared/*` is unchanged since the prior deploy, so no fan-out redeploy is needed.
 
-## Fix
+## Execution
 
-Make the offer query and the allocation RPC agree on a single source of truth for "is this unit still saleable", consistent with how `allocate_stock_for_order_line` itself selects units (it uses `COALESCE(v2_status, status) IN ('listed','graded','available','restocked')`).
+1. Apply the 3 migrations in timestamp order.
+2. Deploy the 6 Edge Functions in parallel.
+3. Verify:
+   - `supabase_migrations.schema_migrations` contains the 3 new versions.
+   - All 6 functions report successful deployment.
+   - `process-email-queue` config still has `verify_jwt = true` (no change).
+   - Tail edge function logs for `qbo-process-pending` and `subledger-scheduled-jobs` to confirm the cron-auth `Unauthorized` errors stop (or report them clearly if Vault `cron_shared_secret` mismatch persists from the prior loop — that is a separate, already-flagged issue).
+4. Report applied migrations, deployed functions, and any failures.
 
-### 1. Migration — patch `allocate_stock_for_order_line` to also advance legacy status
-
-Update the unit-update statement in the RPC so future allocations move the legacy column to `'allocated'` (the correct post-sale, pre-pick lifecycle state) at the same time as setting `v2_status = 'sold'`:
-
-```sql
-UPDATE public.stock_unit
-SET v2_status = 'sold',
-    status    = 'allocated',
-    sold_at   = COALESCE(sold_at, now()),
-    order_id  = v_line.sales_order_id
-WHERE id = v_unit.id;
-```
-
-This keeps the two columns aligned for every future sale through both the website and the eBay order processor (which calls the same RPC).
-
-### 2. Migration — patch `product_detail_offers` to filter on the unified saleable predicate
-
-Mirror the allocation RPC's predicate so the storefront stays correct even if a unit's legacy status drifts:
-
-```sql
-JOIN stock_unit su
-  ON su.sku_id = s.id
- AND COALESCE(su.v2_status::text, su.status::text) IN ('listed','graded','available','restocked')
-```
-
-This makes "in stock on the website" mean exactly the same thing as "available to allocate to an order", which is the correct invariant.
-
-### 3. Migration — backfill the one stuck unit
-
-```sql
-UPDATE public.stock_unit
-SET status = 'allocated'
-WHERE v2_status = 'sold'
-  AND status   = 'available'
-  AND order_id IS NOT NULL;
-```
-
-Scoped to units that have already been sold-and-linked to an order; safe to run as a one-off correction.
-
-### 4. eBay quantity sync
-
-`v2-process-order` already queues `pushEbayQuantityForSkus` after allocation, so eBay quantity will refresh via the existing outbox. No edge function changes needed — the RPC change alone fixes the website read path.
-
-## Files
-
-- `supabase/migrations/<new>_fix_sold_unit_status.sql` — three statements above (replace `allocate_stock_for_order_line`, replace `product_detail_offers`, backfill).
-
-No frontend changes required. No edge function changes required.
-
-## Verification
-
-After deploy:
-- `SELECT * FROM product_detail_offers('31157-1');` should return `stock_count = 0` for `31157-1.1`.
-- Product page `/sets/31157-1` shows "No stock currently available" for grade 1.
-- Future sales: confirm a freshly sold unit has `status = 'allocated'` and `v2_status = 'sold'`.
+No canonical data, order state, or staging rows will be modified beyond what the GMC outbox reset migration explicitly does (which is its purpose).
