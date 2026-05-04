@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StorefrontLayout } from "@/components/StorefrontLayout";
+import { usePageSeo } from "@/hooks/use-page-seo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +11,7 @@ import { trackLogin, stashAuthAction } from "@/lib/gtm-ecommerce";
 import { toast } from "sonner";
 
 export default function LoginPage() {
+  usePageSeo({ title: 'Sign In', description: 'Sign in to your Kuso Oishii account.', path: '/login', noIndex: true });
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/account";

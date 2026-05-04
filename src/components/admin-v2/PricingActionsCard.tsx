@@ -14,14 +14,19 @@ interface BatchResult {
 
 interface PricingCalculation {
   sku_id: string;
+  sku_code?: string;
   channel: string;
   floor_price: number | null;
   target_price: number | null;
   ceiling_price: number | null;
+  estimated_fees?: number | null;
+  estimated_net?: number | null;
   confidence_score: number | null;
   market_consensus?: number | null;
   breakdown?: Record<string, number>;
 }
+
+type SinglePricingResult = PricingCalculation & { sku_code: string };
 
 interface MarketRefreshSourceResult {
   source: string;
@@ -89,6 +94,10 @@ function confidenceTone(value: number | null | undefined): 'teal' | 'amber' | 'r
   return 'red';
 }
 
+function baseMpn(mpn: string) {
+  return mpn.trim().replace(/-\d+$/, '');
+}
+
 export function PricingActionsCard() {
   const [running, setRunning] = useState(false);
   const [channel, setChannel] = useState('ebay');
@@ -97,24 +106,26 @@ export function PricingActionsCard() {
   const [completed, setCompleted] = useState(0);
   const [errors, setErrors] = useState(0);
 
-  const [singleSku, setSingleSku] = useState('');
+  const [singleMpn, setSingleMpn] = useState('');
   const [singleChannel, setSingleChannel] = useState('ebay');
   const [singleRunning, setSingleRunning] = useState(false);
-  const [singleResult, setSingleResult] = useState<PricingCalculation | null>(null);
+  const [singleResults, setSingleResults] = useState<SinglePricingResult[]>([]);
   const [marketRefreshRunning, setMarketRefreshRunning] = useState(false);
   const [marketRefreshCount, setMarketRefreshCount] = useState<number | null>(null);
   const [marketSignalsRunning, setMarketSignalsRunning] = useState(false);
   const [marketRefreshResult, setMarketRefreshResult] = useState<MarketRefreshResult | null>(null);
   const [marketSummary, setMarketSummary] = useState<MarketSummary | null>(null);
 
-  const loadMarketSummary = useCallback(async (skuId?: string) => {
+  const loadMarketSummary = useCallback(async (skuIds?: string | string[]) => {
+    const ids = Array.isArray(skuIds) ? skuIds.filter(Boolean) : skuIds ? [skuIds] : [];
     const signalQuery = supabase
       .from('market_signal')
       .select('source_confidence, freshness_score, observed_at, source:source_id(source_code)' as never)
       .order('observed_at', { ascending: false })
       .limit(250);
 
-    if (skuId) signalQuery.eq('sku_id', skuId);
+    if (ids.length === 1) signalQuery.eq('sku_id', ids[0]);
+    if (ids.length > 1) signalQuery.in('sku_id' as never, ids as never);
 
     const snapshotQuery = supabase
       .from('market_price_snapshot')
@@ -122,7 +133,8 @@ export function PricingActionsCard() {
       .order('captured_at', { ascending: false })
       .limit(100);
 
-    if (skuId) snapshotQuery.eq('sku_id', skuId);
+    if (ids.length === 1) snapshotQuery.eq('sku_id', ids[0]);
+    if (ids.length > 1) snapshotQuery.in('sku_id' as never, ids as never);
 
     const [signalResult, snapshotResult] = await Promise.all([signalQuery, snapshotQuery]);
     if (signalResult.error) throw signalResult.error;
@@ -194,6 +206,44 @@ export function PricingActionsCard() {
     });
   }, []);
 
+  const findSkusForMpn = useCallback(async (mpnInput: string): Promise<Array<{ id: string; sku_code: string }>> => {
+    const wanted = mpnInput.trim();
+    const wantedBase = baseMpn(wanted);
+    const { data: products, error: productError } = await supabase
+      .from('product')
+      .select('id, mpn' as never)
+      .or(`mpn.eq.${wanted},mpn.like.${wantedBase}-%` as never)
+      .limit(25);
+    if (productError) throw productError;
+
+    const productIds = ((products ?? []) as unknown as Array<{ id: string }>).map((product) => product.id);
+    let productSkus: Array<{ id: string; sku_code: string }> = [];
+    if (productIds.length > 0) {
+      const { data: skus, error } = await supabase
+        .from('sku')
+        .select('id, sku_code, condition_grade' as never)
+        .in('product_id' as never, productIds as never)
+        .eq('active_flag' as never, true as never)
+        .order('sku_code' as never, { ascending: true } as never);
+      if (error) throw error;
+      productSkus = (skus ?? []) as unknown as Array<{ id: string; sku_code: string }>;
+    }
+
+    const { data: fallbackSkus, error } = await supabase
+      .from('sku')
+      .select('id, sku_code, condition_grade' as never)
+      .or(`mpn.eq.${wanted},sku_code.like.${wanted}.%` as never)
+      .eq('active_flag' as never, true as never)
+      .order('sku_code' as never, { ascending: true } as never);
+    if (error) throw error;
+    const byId = new Map<string, { id: string; sku_code: string }>();
+    for (const sku of productSkus) byId.set(sku.id, sku);
+    for (const sku of ((fallbackSkus ?? []) as unknown as Array<{ id: string; sku_code: string }>)) {
+      byId.set(sku.id, sku);
+    }
+    return [...byId.values()].sort((a, b) => a.sku_code.localeCompare(b.sku_code, undefined, { numeric: true }));
+  }, []);
+
   const refreshMarketSnapshots = useCallback(async () => {
     setMarketRefreshRunning(true);
 
@@ -212,36 +262,36 @@ export function PricingActionsCard() {
     }
   }, [loadMarketSummary]);
 
-  const refreshMarketSignals = useCallback(async (onlySingleSku = false) => {
+  const refreshMarketSignals = useCallback(async (onlySingleMpn = false) => {
     setMarketSignalsRunning(true);
 
     try {
-      const skuCode = onlySingleSku ? singleSku.trim() : '';
-      if (onlySingleSku && !skuCode) {
-        toast.error('Enter a SKU code before refreshing a single SKU');
+      const mpn = onlySingleMpn ? singleMpn.trim() : '';
+      if (onlySingleMpn && !mpn) {
+        toast.error('Enter an MPN before refreshing a single product');
         return;
       }
 
       const result = await invokeWithAuth<MarketRefreshResult>(
         'market-intelligence-refresh',
         {
-          sku_code: skuCode || undefined,
+          mpn: mpn || undefined,
           sources: MARKET_SOURCES.map((source) => source.code),
-          limit: onlySingleSku ? 1 : 75,
+          limit: onlySingleMpn ? 25 : 75,
           refresh_snapshots: true,
         }
       );
 
       setMarketRefreshResult(result);
       setMarketRefreshCount(result.snapshot_rows);
-      if (onlySingleSku && skuCode) {
-        const { data: sku, error } = await supabase
-          .from('sku')
-          .select('id' as never)
-          .eq('sku_code', skuCode)
-          .maybeSingle();
-        if (error) throw error;
-        await loadMarketSummary((sku as unknown as { id: string } | null)?.id);
+      if (onlySingleMpn && result.target_count === 0) {
+        toast.warning(`No active SKU found for MPN "${mpn}"`);
+        await loadMarketSummary();
+        return;
+      }
+      if (onlySingleMpn && mpn) {
+        const skus = await findSkusForMpn(mpn);
+        await loadMarketSummary(skus.map((sku) => sku.id));
       } else {
         await loadMarketSummary();
       }
@@ -258,7 +308,7 @@ export function PricingActionsCard() {
     } finally {
       setMarketSignalsRunning(false);
     }
-  }, [loadMarketSummary, singleSku]);
+  }, [findSkusForMpn, loadMarketSummary, singleMpn]);
 
   const runAll = useCallback(async () => {
     setRunning(true);
@@ -326,43 +376,40 @@ export function PricingActionsCard() {
   }, [channel]);
 
   const runSingle = useCallback(async () => {
-    if (!singleSku.trim()) {
-      toast.error('Enter a SKU code');
+    if (!singleMpn.trim()) {
+      toast.error('Enter an MPN');
       return;
     }
 
     setSingleRunning(true);
-    setSingleResult(null);
+    setSingleResults([]);
 
     try {
-      const { data: sku, error } = await supabase
-        .from('sku')
-        .select('id, sku_code' as never)
-        .eq('sku_code', singleSku.trim())
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!sku) {
-        toast.error(`SKU "${singleSku}" not found`);
+      const skus = await findSkusForMpn(singleMpn.trim());
+      if (skus.length === 0) {
+        toast.error(`No active SKU found for MPN "${singleMpn}"`);
         setSingleRunning(false);
         return;
       }
 
-      const skuRow = sku as unknown as { id: string; sku_code: string };
-      const pricing = await invokeWithAuth<PricingCalculation>(
-        'admin-data',
-        { action: 'calculate-pricing', sku_id: skuRow.id, channel: singleChannel }
-      );
+      const results: SinglePricingResult[] = [];
+      for (const sku of skus) {
+        const pricing = await invokeWithAuth<PricingCalculation>(
+          'admin-data',
+          { action: 'calculate-pricing', sku_id: sku.id, channel: singleChannel }
+        );
+        results.push({ ...pricing, sku_code: sku.sku_code });
+      }
 
-      setSingleResult(pricing);
-      await loadMarketSummary(skuRow.id);
-      toast.success(`Priced ${skuRow.sku_code}`);
+      setSingleResults(results);
+      await loadMarketSummary(skus.map((sku) => sku.id));
+      toast.success(`Priced ${results.length} SKU${results.length === 1 ? '' : 's'} for ${singleMpn.trim()}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally {
       setSingleRunning(false);
     }
-  }, [singleSku, singleChannel, loadMarketSummary]);
+  }, [findSkusForMpn, singleMpn, singleChannel, loadMarketSummary]);
 
   return (
     <div className="space-y-4">
@@ -373,7 +420,20 @@ export function PricingActionsCard() {
           Refresh real source signals, rebuild weighted consensus, and inspect whether pricing is relying on fresh evidence.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">MPN</label>
+            <input
+              type="text"
+              value={singleMpn}
+              onChange={(e) => setSingleMpn(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && refreshMarketSignals(true)}
+              placeholder="e.g. 10349-1"
+              disabled={marketSignalsRunning || marketRefreshRunning}
+              className="w-36 px-2 py-1.5 text-xs border border-zinc-200 rounded bg-white font-mono"
+            />
+          </div>
+
           <button
             onClick={() => refreshMarketSignals(false)}
             disabled={marketSignalsRunning || marketRefreshRunning}
@@ -385,11 +445,11 @@ export function PricingActionsCard() {
 
           <button
             onClick={() => refreshMarketSignals(true)}
-            disabled={marketSignalsRunning || marketRefreshRunning || !singleSku.trim()}
+            disabled={marketSignalsRunning || marketRefreshRunning || !singleMpn.trim()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
           >
             {marketSignalsRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            Single SKU Signals
+            Single MPN Signals
           </button>
 
           <button
@@ -532,22 +592,22 @@ export function PricingActionsCard() {
         )}
       </SurfaceCard>
 
-      {/* Single SKU pricing */}
+      {/* Single MPN pricing */}
       <SurfaceCard>
-        <SectionHead>Single SKU Pricing</SectionHead>
+        <SectionHead>Single MPN Pricing</SectionHead>
         <p className="text-xs text-zinc-500 mt-1 mb-4">
-          Calculate pricing for a specific SKU (e.g. 10349-1.1).
+          Calculate pricing for every active SKU attached to an MPN.
         </p>
 
         <div className="flex items-end gap-3 mb-3">
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">SKU Code</label>
+            <label className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider block mb-1">MPN</label>
             <input
               type="text"
-              value={singleSku}
-              onChange={(e) => setSingleSku(e.target.value)}
+              value={singleMpn}
+              onChange={(e) => setSingleMpn(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSingle()}
-              placeholder="e.g. 10349-1.1"
+              placeholder="e.g. 10349-1"
               disabled={singleRunning}
               className="w-36 px-2 py-1.5 text-xs border border-zinc-200 rounded bg-white font-mono"
             />
@@ -577,49 +637,54 @@ export function PricingActionsCard() {
           </button>
         </div>
 
-        {singleResult && (
-          <div className="mt-3 p-3 rounded bg-zinc-50 border border-zinc-200">
-            <div className="grid gap-2 text-xs sm:grid-cols-4">
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
-                <Mono color="red">£{Number(singleResult.floor_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Target</span>
-                <Mono color="teal">£{Number(singleResult.target_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Ceiling</span>
-                <Mono color="amber">£{Number(singleResult.ceiling_price ?? 0).toFixed(2)}</Mono>
-              </div>
-              <div>
-                <span className="text-zinc-500 block text-[10px] uppercase">Market</span>
-                <Mono color={singleResult.market_consensus != null ? 'teal' : 'amber'}>
-                  {singleResult.market_consensus != null ? `£${Number(singleResult.market_consensus).toFixed(2)}` : 'n/a'}
-                </Mono>
-              </div>
-            </div>
+        {singleResults.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {singleResults.map((result) => (
+              <div key={result.sku_id} className="rounded border border-zinc-200 bg-zinc-50 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <Mono color="amber">{result.sku_code}</Mono>
+                  <Mono color={confidenceTone(result.confidence_score)}>
+                    {((result.confidence_score ?? 0) * 100).toFixed(0)}%
+                  </Mono>
+                </div>
 
-            {singleResult.breakdown && (
-              <div className="mt-3 pt-2 border-t border-zinc-200 space-y-1">
-                <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">Breakdown</div>
-                {Object.entries(singleResult.breakdown as Record<string, number>).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-[11px]">
-                    <span className="text-zinc-500">{k.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-zinc-700">
-                      {k.includes('rate') || k.includes('margin') ? `${v}%` : `£${Number(v).toFixed(2)}`}
-                    </span>
+                <div className="grid gap-2 text-xs sm:grid-cols-4">
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Floor</span>
+                    <Mono color="red">£{Number(result.floor_price ?? 0).toFixed(2)}</Mono>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Target</span>
+                    <Mono color="teal">£{Number(result.target_price ?? 0).toFixed(2)}</Mono>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Ceiling</span>
+                    <Mono color="amber">£{Number(result.ceiling_price ?? 0).toFixed(2)}</Mono>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[10px] uppercase">Market</span>
+                    <Mono color={result.market_consensus != null ? 'teal' : 'amber'}>
+                      {result.market_consensus != null ? `£${Number(result.market_consensus).toFixed(2)}` : 'n/a'}
+                    </Mono>
+                  </div>
+                </div>
 
-            <div className="mt-2 pt-2 border-t border-zinc-200 flex justify-between text-[11px]">
-              <span className="text-zinc-500">Confidence</span>
-              <Mono color={(singleResult.confidence_score ?? 0) >= 0.7 ? 'teal' : 'amber'}>
-                {((singleResult.confidence_score ?? 0) * 100).toFixed(0)}%
-              </Mono>
-            </div>
+                {result.breakdown && (
+                  <div className="mt-3 grid gap-x-4 gap-y-1 border-t border-zinc-200 pt-2 text-[11px] sm:grid-cols-2">
+                    {Object.entries(result.breakdown as Record<string, number>).map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3">
+                        <span className="text-zinc-500">{k.replace(/_/g, ' ')}</span>
+                        <span className="font-mono text-zinc-700">
+                          {k.includes('rate') || k.includes('margin') || k.includes('pct')
+                            ? `${Number(v).toFixed(2)}%`
+                            : `£${Number(v).toFixed(2)}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </SurfaceCard>

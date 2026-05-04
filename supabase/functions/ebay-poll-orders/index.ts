@@ -31,6 +31,16 @@ function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutM
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+function cleanText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isEbayRelayEmail(value: unknown): boolean {
+  return typeof value === "string" && /@members\.ebay\./i.test(value);
+}
+
 /**
  * Normalise an eBay SKU to the canonical MPN.
  * - Strip dot-grade suffix:  75418-1.1  → 75418-1
@@ -298,26 +308,66 @@ Deno.serve(async (req) => {
       const contactAddress = (shipTo?.contactAddress ?? {}) as Record<string, unknown>;
 
       // Buyer info
-      const buyerUsername = buyer.username as string ?? "eBay Buyer";
-      const buyerEmail = (shipTo?.email as string) ?? null;
+      const buyerUsername = cleanText(buyer.username) ?? "eBay Buyer";
+      const buyerEmail = cleanText(shipTo?.email) ?? null;
+      const shippingName = cleanText(shipTo?.fullName) ?? buyerUsername;
+      const customerDisplayName = shippingName !== "eBay Buyer" ? shippingName : buyerUsername;
+      const addressLine1 = cleanText(contactAddress.addressLine1);
+      const addressLine2 = cleanText(contactAddress.addressLine2);
+      const addressCity = cleanText(contactAddress.city);
+      const addressCounty = cleanText(contactAddress.stateOrProvince);
+      const addressPostcode = cleanText(contactAddress.postalCode);
+      const addressCountry = cleanText(contactAddress.countryCode) ?? "GB";
 
       // ─── Upsert customer ───────────────────────────────
       let customerId: string | null = null;
-      const { data: existingCustomer } = await admin
+      let { data: existingCustomer } = await admin
         .from("customer")
-        .select("id")
-        .eq("display_name", buyerUsername)
+        .select("id, display_name, email, channel_ids, billing_line_1, billing_line_2, billing_city, billing_county, billing_postcode, billing_country")
+        .eq("channel_ids->>ebay", buyerUsername)
         .maybeSingle();
+
+      if (!existingCustomer) {
+        const { data: byDisplayName } = await admin
+          .from("customer")
+          .select("id, display_name, email, channel_ids, billing_line_1, billing_line_2, billing_city, billing_county, billing_postcode, billing_country")
+          .eq("display_name", buyerUsername)
+          .maybeSingle();
+        existingCustomer = byDisplayName;
+      }
 
       if (existingCustomer) {
         customerId = (existingCustomer as Record<string, unknown>).id as string;
+        const existing = existingCustomer as Record<string, unknown>;
+        const existingChannels = (existing.channel_ids ?? {}) as Record<string, unknown>;
+        await admin
+          .from("customer")
+          .update({
+            display_name: isEbayRelayEmail(existing.display_name) ? customerDisplayName : (cleanText(existing.display_name) ?? customerDisplayName),
+            email: cleanText(existing.email) ?? buyerEmail,
+            channel_ids: { ...existingChannels, ebay: buyerUsername },
+            billing_line_1: addressLine1 ?? existing.billing_line_1 ?? null,
+            billing_line_2: addressLine2 ?? existing.billing_line_2 ?? null,
+            billing_city: addressCity ?? existing.billing_city ?? null,
+            billing_county: addressCounty ?? existing.billing_county ?? null,
+            billing_postcode: addressPostcode ?? existing.billing_postcode ?? null,
+            billing_country: addressCountry ?? existing.billing_country ?? "GB",
+            active: true,
+          } as never)
+          .eq("id", customerId);
       } else {
         const { data: newCustomer, error: custErr } = await admin
           .from("customer")
           .insert({
-            display_name: buyerUsername,
+            display_name: customerDisplayName,
             email: buyerEmail,
             channel_ids: { ebay: buyerUsername },
+            billing_line_1: addressLine1,
+            billing_line_2: addressLine2,
+            billing_city: addressCity,
+            billing_county: addressCounty,
+            billing_postcode: addressPostcode,
+            billing_country: addressCountry,
           } as never)
           .select("id")
           .single();
@@ -347,6 +397,16 @@ Deno.serve(async (req) => {
           customer_id: customerId,
           origin_channel: "ebay",
           origin_reference: ebayOrderId,
+          guest_name: shippingName,
+          guest_email: buyerEmail,
+          shipping_name: shippingName,
+          shipping_line_1: addressLine1 ?? "",
+          shipping_line_2: addressLine2,
+          shipping_city: addressCity ?? "",
+          shipping_county: addressCounty,
+          shipping_postcode: addressPostcode ?? "",
+          shipping_country: addressCountry,
+          notes: `eBay buyer: ${buyerUsername} | Order: ${ebayOrderId}`,
           v2_status: "new",
           gross_total: grossTotal,
           tax_total: vatAmount,

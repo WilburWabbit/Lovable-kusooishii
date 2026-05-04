@@ -26,6 +26,15 @@ import {
 import { getEbayAccessToken } from "../_shared/ebay-auth.ts";
 import { LEGO_ANCESTOR_IDS } from "../_shared/channel-aspect-map.ts";
 import { resolveSpecsForProduct } from "../_shared/specs-resolver.ts";
+import { AiProviderError, callChatCompletion } from "../_shared/ai-provider.ts";
+import { resolveGmcTransformValue, validateGmcTransform } from "../_shared/gmc-product-input.ts";
+import {
+  DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+  GOOGLE_PRODUCT_TAXONOMY_VERSION,
+  normalizeGoogleProductCategoryTransformValues,
+  normalizeGoogleProductCategoryValue,
+  selectGoogleProductTaxonomyCandidates,
+} from "../_shared/google-product-taxonomy.ts";
 
 const EBAY_API = "https://api.ebay.com";
 const ASPECT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -37,6 +46,320 @@ const TREE_IDS: Record<string, string> = {
   EBAY_DE: "77",
   EBAY_AU: "15",
 };
+
+const GMC_MAPPING_AI_PROMPT = `You suggest Google Merchant Center mapping rules for Kuso Oishii, a UK LEGO resale commerce platform.
+
+Rules:
+- Return one suggestion for each requested GMC field where possible.
+- Use only the supplied canonical/source keys for canonical_key.
+- Use constant_value for fixed values and fallback defaults.
+- Use transform only for deterministic top-down JSON rules. Supported shape:
+  {"rules":[{"when":{"field":"product_type","op":"includes","value":"minifigure"},"value":"6058"}],"default":"3287"}
+- Supported condition ops: eq, neq, in, includes, exists, gt, gte, lt, lte.
+- Prefer direct app-mastered fields over constants.
+- For googleProductCategory, use only IDs from the supplied google_product_taxonomy candidates. Prefer gmc_product_category as the canonical source when available, and add a sensible deterministic fallback rule from the taxonomy candidates.
+- Do not invent product facts, identifiers, prices, or availability.
+- Notes and reasons must be short and operational.`;
+
+const GMC_TRANSFORM_COMPILER_AI_PROMPT = `You compile plain-English operator requests into deterministic Google Merchant Center mapping rule JSON for Kuso Oishii, a UK LEGO resale commerce platform.
+
+Rules:
+- Return a JSON transform object only in the provided tool arguments. Do not return JavaScript, Airtable formulas, SQL, regex code, or executable code.
+- The transform shape must be: {"rules":[{"when":{"field":"product_type","op":"in","value":["set","minifigure"]},"value":"3287"}],"default":"3287"}.
+- Use only supplied allowed_fields and allowed_ops.
+- Use op "in" when the request says one of several values, "includes" for substring-style text matching, and "eq" for exact values.
+- Rule values and the default must be strings matching the supplied target_field value contract.
+- For googleProductCategory only: use only IDs from the supplied google_product_taxonomy candidates when inferring categories. If the operator provides a category path, resolve it to the matching supplied ID.
+- For non-category fields: do not use Google taxonomy IDs unless the target value contract explicitly asks for one.
+- Keep the explanation short and operational.`;
+
+const GMC_TRANSFORM_ALLOWED_OPS = ["eq", "neq", "in", "includes", "exists", "gt", "gte", "lt", "lte"] as const;
+
+const GMC_PRODUCT_CATEGORY_RULE_FIELDS = [
+  "mpn",
+  "name",
+  "product_type",
+  "lego_theme",
+  "lego_subtheme",
+  "subtheme_name",
+  "piece_count",
+  "release_year",
+  "retired_flag",
+  "status",
+  "gmc_product_category",
+] as const;
+
+const GMC_RULE_SOURCE_FIELDS = [
+  ...GMC_PRODUCT_CATEGORY_RULE_FIELDS,
+  "sku_code",
+  "condition_grade",
+  "stock_count",
+  "listed_price",
+  "seo_title",
+  "seo_description",
+  "description",
+  "ean",
+  "upc",
+  "isbn",
+  "weight_kg",
+] as const;
+
+const GMC_RULE_TARGETS: Record<string, {
+  label: string;
+  value_contract: string;
+  examples: string[];
+}> = {
+  title: {
+    label: "Title",
+    value_contract: "String title override. Prefer canonical title mapping for dynamic titles; use rules only for controlled fallback titles.",
+    examples: ["LEGO Star Wars set", "LEGO collectible minifigure"],
+  },
+  description: {
+    label: "Description",
+    value_contract: "String description override. Prefer canonical description mapping for dynamic descriptions.",
+    examples: ["Retired LEGO set in inspected resale condition."],
+  },
+  link: {
+    label: "Product URL",
+    value_contract: "Absolute product URL string. Prefer canonical link mapping unless a deterministic fallback is required.",
+    examples: ["https://kusooishii.example/sets/75367-1"],
+  },
+  imageLink: {
+    label: "Primary image",
+    value_contract: "Absolute image URL string. Prefer canonical image_link mapping unless a deterministic fallback is required.",
+    examples: ["https://kusooishii.example/images/placeholder.jpg"],
+  },
+  "price.amountMicros": {
+    label: "Price amount micros",
+    value_contract: "Integer micros as a string. Example: GBP 19.99 is 19990000.",
+    examples: ["19990000", "49990000"],
+  },
+  "price.currencyCode": {
+    label: "Currency",
+    value_contract: "ISO 4217 currency code string.",
+    examples: ["GBP"],
+  },
+  availability: {
+    label: "Availability",
+    value_contract: "Google availability enum. Use one of: IN_STOCK, OUT_OF_STOCK, PREORDER, LIMITED_AVAILABILITY, BACKORDER.",
+    examples: ["IN_STOCK", "OUT_OF_STOCK"],
+  },
+  condition: {
+    label: "Condition",
+    value_contract: "Google condition enum. Use one of: NEW, USED, REFURBISHED.",
+    examples: ["NEW", "USED"],
+  },
+  brand: {
+    label: "Brand",
+    value_contract: "Brand string.",
+    examples: ["LEGO"],
+  },
+  mpn: {
+    label: "MPN",
+    value_contract: "Manufacturer part number string. Preserve the LEGO version suffix.",
+    examples: ["75367-1"],
+  },
+  gtin: {
+    label: "GTIN",
+    value_contract: "Barcode string containing EAN, UPC, or ISBN digits only where available.",
+    examples: ["5702017421476"],
+  },
+  identifierExists: {
+    label: "Identifier exists",
+    value_contract: "Boolean-like string. Use true when GTIN or brand+MPN exists; false only when no valid identifier exists.",
+    examples: ["true", "false"],
+  },
+  googleProductCategory: {
+    label: "Google product category",
+    value_contract: "Google product taxonomy ID as a string. Use only supplied google_product_taxonomy candidate IDs.",
+    examples: ["3287", "6058"],
+  },
+  productTypes: {
+    label: "Product type path",
+    value_contract: "Merchant-defined product type path string.",
+    examples: ["Toys > LEGO > Star Wars", "Toys > LEGO > Minifigures"],
+  },
+  itemGroupId: {
+    label: "Item group ID",
+    value_contract: "String grouping variants of the same item. Usually the versioned MPN.",
+    examples: ["75367-1"],
+  },
+  "shippingWeight.value": {
+    label: "Shipping weight",
+    value_contract: "Numeric weight as a string in the unit configured by shippingWeight.unit.",
+    examples: ["1.25", "750"],
+  },
+  "shippingWeight.unit": {
+    label: "Shipping weight unit",
+    value_contract: "Google weight unit string. Use one of: kg, g, lb, oz.",
+    examples: ["kg", "g"],
+  },
+};
+
+const GMC_RUNTIME_CANONICAL_ATTRIBUTES: Record<string, {
+  label: string;
+  attribute_group: "identity" | "physical" | "lifecycle" | "marketing" | "value" | "other";
+  data_type: "string" | "int" | "decimal" | "date" | "bool";
+  sort_order: number;
+}> = {
+  title: { label: "GMC Title", attribute_group: "marketing", data_type: "string", sort_order: 900 },
+  description: { label: "GMC Description", attribute_group: "marketing", data_type: "string", sort_order: 901 },
+  link: { label: "Product URL", attribute_group: "marketing", data_type: "string", sort_order: 902 },
+  image_link: { label: "Primary Image URL", attribute_group: "marketing", data_type: "string", sort_order: 903 },
+  price_amount_micros: { label: "Price Amount Micros", attribute_group: "value", data_type: "decimal", sort_order: 904 },
+  price_currency: { label: "Price Currency", attribute_group: "other", data_type: "string", sort_order: 905 },
+  availability_from_stock: { label: "Availability From Stock", attribute_group: "lifecycle", data_type: "string", sort_order: 906 },
+  condition_from_grade: { label: "Condition From Grade", attribute_group: "lifecycle", data_type: "string", sort_order: 907 },
+  brand: { label: "Brand", attribute_group: "identity", data_type: "string", sort_order: 908 },
+  gtin: { label: "GTIN", attribute_group: "identity", data_type: "string", sort_order: 909 },
+  identifier_exists: { label: "Identifier Exists", attribute_group: "identity", data_type: "string", sort_order: 910 },
+  gmc_product_category: { label: "Google Product Category", attribute_group: "marketing", data_type: "string", sort_order: 911 },
+  product_type_path: { label: "Product Type Path", attribute_group: "marketing", data_type: "string", sort_order: 912 },
+  weight_g: { label: "Weight", attribute_group: "physical", data_type: "decimal", sort_order: 913 },
+  stock_count: { label: "Stock Count", attribute_group: "lifecycle", data_type: "int", sort_order: 914 },
+  condition_grade: { label: "Condition Grade", attribute_group: "lifecycle", data_type: "int", sort_order: 915 },
+  lego_theme: { label: "LEGO Theme", attribute_group: "identity", data_type: "string", sort_order: 916 },
+  lego_subtheme: { label: "LEGO Subtheme", attribute_group: "identity", data_type: "string", sort_order: 917 },
+  subtheme_name: { label: "Subtheme Name", attribute_group: "identity", data_type: "string", sort_order: 918 },
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function cleanNullableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeTransform(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    JSON.parse(trimmed);
+    return trimmed;
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return null;
+}
+
+function parseAiToolObject(data: unknown): Record<string, unknown> {
+  const payload = asRecord(data);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const message = asRecord(asRecord(choices[0]).message);
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const args = asRecord(asRecord(toolCalls[0]).function).arguments;
+  if (args) return typeof args === "string" ? asRecord(JSON.parse(args)) : asRecord(args);
+  const content = cleanNullableString(message.content) ?? "{}";
+  return asRecord(JSON.parse(content));
+}
+
+function normalizeGmcSuggestion(
+  raw: unknown,
+  allowedFields: Set<string>,
+  allowedCanonicalKeys: Set<string>,
+) {
+  const row = asRecord(raw);
+  const aspectKey = cleanNullableString(row.aspect_key);
+  if (!aspectKey || !allowedFields.has(aspectKey)) return null;
+
+  const canonicalKey = cleanNullableString(row.canonical_key);
+  const safeCanonicalKey = canonicalKey && allowedCanonicalKeys.has(canonicalKey)
+    ? canonicalKey
+    : null;
+  let constantValue = cleanNullableString(row.constant_value);
+  let transform: string | null = null;
+  try {
+    let rawTransform = row.transform;
+    if (aspectKey === "googleProductCategory" && typeof rawTransform === "string") {
+      rawTransform = JSON.parse(rawTransform);
+    }
+    if (aspectKey === "googleProductCategory") {
+      rawTransform = normalizeGoogleProductCategoryTransformValues(rawTransform).transform;
+    }
+    transform = normalizeTransform(rawTransform);
+  } catch {
+    transform = null;
+  }
+  if (aspectKey === "googleProductCategory" && constantValue) {
+    constantValue = normalizeGoogleProductCategoryValue(constantValue) ?? constantValue;
+  }
+
+  if (!safeCanonicalKey && !constantValue && !transform) return null;
+
+  const confidence = cleanNullableString(row.confidence);
+  return {
+    channel: "gmc",
+    marketplace: "GB",
+    category_id: null,
+    aspect_key: aspectKey,
+    canonical_key: safeCanonicalKey,
+    constant_value: constantValue,
+    transform,
+    notes: cleanNullableString(row.notes),
+    confidence: confidence === "high" || confidence === "medium" || confidence === "low"
+      ? confidence
+      : "medium",
+    reason: cleanNullableString(row.reason) ?? "Suggested from current app data and GMC field semantics.",
+  };
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function gmcCategoryRuleSource(row: Record<string, unknown>): Record<string, unknown> {
+  const source: Record<string, unknown> = {};
+  for (const field of GMC_RULE_SOURCE_FIELDS) {
+    source[field] = row[field] ?? null;
+  }
+  return source;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(cleanNullableString).filter((item): item is string => Boolean(item))
+    : [];
+}
+
+async function ensureGmcRuntimeCanonicalAttribute(
+  admin: ReturnType<typeof createAdminClient>,
+  key: string,
+) {
+  const descriptor = GMC_RUNTIME_CANONICAL_ATTRIBUTES[key];
+  if (!descriptor) return;
+
+  const { data: existing, error: existingErr } = await admin
+    .from("canonical_attribute")
+    .select("key")
+    .eq("key", key)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (existing) return;
+
+  const { error } = await admin
+    .from("canonical_attribute")
+    .insert({
+      key,
+      label: descriptor.label,
+      attribute_group: descriptor.attribute_group,
+      editor: "readOnly",
+      data_type: descriptor.data_type,
+      unit: null,
+      db_column: null,
+      provider_chain: [{ provider: "derived", field: key }],
+      editable: false,
+      sort_order: descriptor.sort_order,
+      active: true,
+    });
+  if (error && !String(error.message).toLowerCase().includes("duplicate")) throw error;
+}
 
 function treeIdFor(marketplace: string): string {
   return TREE_IDS[marketplace] ?? "3";
@@ -610,23 +933,386 @@ Deno.serve(async (req) => {
       return jsonResponse({ mappings: data ?? [] });
     }
 
+    if (action === "compile-gmc-transform") {
+      const aspectKey = cleanNullableString(body.aspect_key ?? body.aspectKey);
+      if (!aspectKey) throw new Error("aspect_key is required");
+      const target = GMC_RULE_TARGETS[aspectKey];
+      if (!target) throw new Error(`compile-gmc-transform does not support ${aspectKey}`);
+
+      const prompt = cleanNullableString(body.prompt);
+      if (!prompt) throw new Error("prompt is required");
+
+      const sampleLimit = clampInt(body.sample_limit, 8, 1, 25);
+      const { data: products, error: productErr } = await admin
+        .from("product")
+        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, seo_title, seo_description, description, gmc_product_category, ean, upc, isbn, weight_kg")
+        .not("mpn", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(sampleLimit);
+      if (productErr) throw productErr;
+
+      const productSamples = ((products ?? []) as Record<string, unknown>[])
+        .map((row) => gmcCategoryRuleSource(row));
+      const taxonomyCandidates = selectGoogleProductTaxonomyCandidates({
+        prompt,
+        productSamples,
+        limit: 20,
+      });
+      const facts = {
+        aspect_key: aspectKey,
+        target_field: target,
+        prompt,
+        allowed_fields: GMC_RULE_SOURCE_FIELDS,
+        allowed_ops: GMC_TRANSFORM_ALLOWED_OPS,
+        google_product_taxonomy: aspectKey === "googleProductCategory"
+          ? {
+            version: GOOGLE_PRODUCT_TAXONOMY_VERSION,
+            candidates: taxonomyCandidates,
+            default_lego_category_id: DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+            instruction: "Use candidate IDs as rule values/defaults. Do not output category paths for googleProductCategory.",
+          }
+          : undefined,
+        product_samples: productSamples,
+        output_contract: {
+          transform_shape: {
+            rules: [
+              {
+                when: { field: "product_type", op: "in", value: ["example", "example"] },
+                value: target.examples[0] ?? "value",
+              },
+            ],
+            default: target.examples[0] ?? "value",
+          },
+          notes: [
+            "Every rule value must be a string.",
+            `Target value contract: ${target.value_contract}`,
+            "default is required.",
+            "No executable code is allowed.",
+          ],
+        },
+      };
+
+      const conditionSchema = {
+        type: "object",
+        properties: {
+          field: { type: "string", enum: [...GMC_RULE_SOURCE_FIELDS] },
+          op: { type: "string", enum: [...GMC_TRANSFORM_ALLOWED_OPS] },
+          value: {
+            type: ["string", "number", "boolean", "array"],
+            items: { type: ["string", "number", "boolean"] },
+          },
+          values: {
+            type: "array",
+            items: { type: ["string", "number", "boolean"] },
+          },
+        },
+        required: ["field", "op"],
+        additionalProperties: false,
+      };
+
+      let aiResult;
+      try {
+        aiResult = await callChatCompletion({
+          messages: [
+            { role: "system", content: GMC_TRANSFORM_COMPILER_AI_PROMPT },
+            {
+              role: "user",
+              content: `Compile this GMC ${aspectKey} rule request into the deterministic transform DSL.\n\nFacts JSON:\n${JSON.stringify(facts, null, 2)}`,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "compile_gmc_transform",
+                description: `Compile plain-English GMC ${target.label} mapping instructions into the approved JSON transform DSL.`,
+                parameters: {
+                  type: "object",
+                  properties: {
+                    transform: {
+                      type: "object",
+                      properties: {
+                        rules: {
+                          type: "array",
+                          minItems: 1,
+                          items: {
+                            type: "object",
+                            properties: {
+                              when: {
+                                anyOf: [
+                                  conditionSchema,
+                                  { type: "array", minItems: 1, items: conditionSchema },
+                                ],
+                              },
+                              value: { type: "string" },
+                            },
+                            required: ["when", "value"],
+                            additionalProperties: false,
+                          },
+                        },
+                        default: { type: "string" },
+                      },
+                      required: ["rules", "default"],
+                      additionalProperties: false,
+                    },
+                    explanation: { type: "string" },
+                    warnings: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                  },
+                  required: ["transform", "explanation", "warnings"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "compile_gmc_transform" } },
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) return jsonResponse({ error: e.userMessage }, e.status);
+        throw e;
+      }
+
+      const raw = parseAiToolObject(aiResult.data);
+      const normalizedTaxonomyTransform = aspectKey === "googleProductCategory"
+        ? normalizeGoogleProductCategoryTransformValues(raw.transform)
+        : { transform: raw.transform, warnings: [] };
+      const validation = validateGmcTransform(normalizedTaxonomyTransform.transform, {
+        allowedFields: GMC_RULE_SOURCE_FIELDS,
+        requireDefault: true,
+        requireStringValues: true,
+      });
+      if (!validation.ok || !validation.transform) {
+        throw new Error(`AI generated invalid GMC rule: ${validation.errors.join("; ")}`);
+      }
+
+      const sampleEvaluations = ((products ?? []) as Record<string, unknown>[]).map((row) => {
+        const source = gmcCategoryRuleSource(row);
+        const resolved = resolveGmcTransformValue(validation.transform, source);
+        return {
+          mpn: cleanNullableString(row.mpn) ?? "",
+          source,
+          value: typeof resolved === "string" && resolved.trim() ? resolved.trim() : null,
+        };
+      });
+
+      return jsonResponse({
+        transform: validation.transform,
+        explanation: cleanNullableString(raw.explanation) ?? "Compiled from the supplied operator prompt.",
+        warnings: [
+          ...normalizeStringArray(raw.warnings),
+          ...normalizedTaxonomyTransform.warnings,
+          ...validation.warnings,
+        ],
+        sample_evaluations: sampleEvaluations,
+        provider_used: aiResult.providerUsed,
+        model_used: aiResult.modelUsed,
+        fell_back: aiResult.fellBack,
+      });
+    }
+
+    if (action === "suggest-gmc-mappings") {
+      const requestedFields = Array.isArray(body.fields)
+        ? body.fields
+          .map((field: unknown) => {
+            const row = asRecord(field);
+            const aspectKey = cleanNullableString(row.aspectKey ?? row.aspect_key);
+            if (!aspectKey) return null;
+            return {
+              aspect_key: aspectKey,
+              label: cleanNullableString(row.label) ?? aspectKey,
+              required: row.required === true,
+              starter: {
+                canonical_key: cleanNullableString(row.defaultCanonical),
+                constant_value: cleanNullableString(row.defaultConstant),
+                transform: cleanNullableString(row.defaultTransform),
+              },
+            };
+          })
+          .filter(Boolean)
+        : [];
+      if (requestedFields.length === 0) throw new Error("fields array is required");
+
+      const bodyCanonicalKeys = Array.isArray(body.canonical_keys)
+        ? body.canonical_keys.map(cleanNullableString).filter(Boolean)
+        : [];
+      const { data: canonicalRows, error: canonicalErr } = await admin
+        .from("canonical_attribute")
+        .select("key, label, attribute_group, data_type, unit, db_column, provider_chain, active")
+        .eq("active", true)
+        .order("sort_order", { ascending: true });
+      if (canonicalErr) throw canonicalErr;
+
+      const canonicalCatalogue = (canonicalRows ?? []).map((row: any) => ({
+        key: row.key,
+        label: row.label,
+        group: row.attribute_group,
+        data_type: row.data_type,
+        unit: row.unit,
+        db_column: row.db_column,
+        provider_chain: row.provider_chain,
+      }));
+
+      const extraDerivedKeys = bodyCanonicalKeys
+        .filter((key: string) => !canonicalCatalogue.some((row: { key: string }) => row.key === key))
+        .map((key: string) => ({
+          key,
+          label: key.replace(/_/g, " "),
+          group: "derived",
+          data_type: "string",
+          unit: null,
+          db_column: null,
+          provider_chain: [{ provider: "derived", field: key }],
+        }));
+
+      const allowedCanonicalKeys = new Set<string>([
+        ...canonicalCatalogue.map((row: { key: string }) => row.key),
+        ...extraDerivedKeys.map((row: { key: string }) => row.key),
+      ]);
+      const allowedFields = new Set<string>(
+        requestedFields.map((field: any) => field.aspect_key),
+      );
+
+      const { data: existingMappings, error: mappingErr } = await admin
+        .from("channel_attribute_mapping")
+        .select("aspect_key, canonical_key, constant_value, transform, notes")
+        .eq("channel", "gmc")
+        .or("marketplace.eq.GB,marketplace.is.null")
+        .is("category_id", null);
+      if (mappingErr) throw mappingErr;
+
+      const { data: products, error: productErr } = await admin
+        .from("product")
+        .select("mpn, name, product_type, lego_theme, lego_subtheme, subtheme_name, piece_count, release_year, retired_flag, status, seo_title, seo_description, description, gmc_product_category, ean, upc, isbn, weight_kg")
+        .not("mpn", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(25);
+      if (productErr) throw productErr;
+
+      const productSamples = (products ?? []) as Record<string, unknown>[];
+      const taxonomyCandidates = selectGoogleProductTaxonomyCandidates({
+        productSamples,
+        limit: 20,
+      });
+      const promptFacts = {
+        channel: "gmc",
+        marketplace: "GB",
+        requested_fields: requestedFields,
+        current_mappings: existingMappings ?? [],
+        available_sources: [...canonicalCatalogue, ...extraDerivedKeys],
+        product_samples: productSamples,
+        google_product_taxonomy: {
+          version: GOOGLE_PRODUCT_TAXONOMY_VERSION,
+          candidates: taxonomyCandidates,
+          default_lego_category_id: DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID,
+          instruction: "Use candidate IDs as constants and transform rule values for googleProductCategory.",
+        },
+        category_guidance: [
+          "All products are LEGO resale stock.",
+          "Use gmc_product_category when app data already stores a product-specific category.",
+          `Common LEGO fallback ID: ${DEFAULT_LEGO_GOOGLE_PRODUCT_CATEGORY_ID}.`,
+          "Minifigure-specific fallback should use the best matching supplied taxonomy candidate ID.",
+        ],
+      };
+
+      let aiResult;
+      try {
+        aiResult = await callChatCompletion({
+          messages: [
+            { role: "system", content: GMC_MAPPING_AI_PROMPT },
+            {
+              role: "user",
+              content: `Suggest reviewable GMC mapping rules from this app data.\n\nFacts JSON:\n${JSON.stringify(promptFacts, null, 2)}`,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "suggest_gmc_mappings",
+                description: "Return reviewable GMC mapping suggestions.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    suggestions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          aspect_key: { type: "string" },
+                          canonical_key: { type: ["string", "null"] },
+                          constant_value: { type: ["string", "null"] },
+                          transform: { type: ["string", "null"] },
+                          notes: { type: ["string", "null"] },
+                          confidence: { type: "string", enum: ["high", "medium", "low"] },
+                          reason: { type: "string" },
+                        },
+                        required: [
+                          "aspect_key",
+                          "canonical_key",
+                          "constant_value",
+                          "transform",
+                          "notes",
+                          "confidence",
+                          "reason",
+                        ],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["suggestions"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "suggest_gmc_mappings" } },
+        }, { admin });
+      } catch (e) {
+        if (e instanceof AiProviderError) return jsonResponse({ error: e.userMessage }, e.status);
+        throw e;
+      }
+
+      const raw = parseAiToolObject(aiResult.data);
+      const suggestions = (Array.isArray(raw.suggestions) ? raw.suggestions : [])
+        .map((suggestion) => normalizeGmcSuggestion(suggestion, allowedFields, allowedCanonicalKeys))
+        .filter(Boolean);
+
+      return jsonResponse({
+        suggestions,
+        provider_used: aiResult.providerUsed,
+        model_used: aiResult.modelUsed,
+        fell_back: aiResult.fellBack,
+        sample_count: (products ?? []).length,
+      });
+    }
+
     if (action === "upsert-channel-mapping") {
       const row = body.mapping;
       if (!row?.channel || !row?.aspect_key) {
         throw new Error("channel and aspect_key are required");
       }
-      if (!row.canonical_key && !row.constant_value) {
-        throw new Error("Either canonical_key or constant_value must be set");
+      if (!row.canonical_key && !row.constant_value && !row.transform) {
+        throw new Error("Set canonical_key, constant_value, or transform");
+      }
+      if (row.channel === "gmc" && row.canonical_key) {
+        await ensureGmcRuntimeCanonicalAttribute(admin, String(row.canonical_key));
       }
       // Use a delete-then-insert to honour the partial unique index that
       // includes COALESCE(...) — Postgres ON CONFLICT can't target it.
-      await admin
+      let deleteQuery = admin
         .from("channel_attribute_mapping")
         .delete()
         .eq("channel", row.channel)
-        .eq("aspect_key", row.aspect_key)
-        .eq("marketplace", row.marketplace ?? null)
-        .eq("category_id", row.category_id ?? null);
+        .eq("aspect_key", row.aspect_key);
+      deleteQuery = row.marketplace == null
+        ? deleteQuery.is("marketplace", null)
+        : deleteQuery.eq("marketplace", row.marketplace);
+      deleteQuery = row.category_id == null
+        ? deleteQuery.is("category_id", null)
+        : deleteQuery.eq("category_id", row.category_id);
+      await deleteQuery;
       const { error } = await admin.from("channel_attribute_mapping").insert(row);
       if (error) throw error;
       return jsonResponse({ success: true });

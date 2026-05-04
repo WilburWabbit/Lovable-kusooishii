@@ -15,7 +15,7 @@ import { getStorefrontThemeName } from "@/lib/collectible-minifigs-theme";
 import { useSeoDocumentPageSeo } from "@/hooks/use-seo-document";
 import { absoluteUrl, breadcrumbJsonLd } from "@/lib/seo-jsonld";
 
-const UK_GEO_META = { region: "GB", placename: "United Kingdom" };
+const UK_GEO_META = { region: 'GB', placename: 'United Kingdom' } as const;
 
 interface ProductDetailRow {
   id: string;
@@ -52,6 +52,15 @@ interface MediaItem {
   url: string;
   alt: string;
   is_primary: boolean;
+}
+
+interface ProductMediaStorefrontRow {
+  id: string;
+  is_primary: boolean;
+  media_asset: {
+    original_url: string | null;
+    alt_text: string | null;
+  } | null;
 }
 
 export default function ProductDetailPage() {
@@ -172,7 +181,7 @@ export default function ProductDetailPage() {
         .select("include_catalog_img")
         .eq("id", product!.id)
         .maybeSingle();
-      return (data as any)?.include_catalog_img ?? false;
+      return (data as { include_catalog_img?: boolean | null } | null)?.include_catalog_img ?? false;
     },
     enabled: !!product?.id,
   });
@@ -181,13 +190,13 @@ export default function ProductDetailPage() {
   const { data: mediaItems = [] } = useQuery<MediaItem[]>({
     queryKey: ["product_media_storefront", product?.id],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("product_media")
         .select("id, sort_order, is_primary, media_asset:media_asset_id(original_url, alt_text)")
         .eq("product_id", product!.id)
         .order("sort_order", { ascending: true });
       if (error) throw error;
-      return (data ?? []).map((pm: any) => ({
+      return ((data ?? []) as unknown as ProductMediaStorefrontRow[]).map((pm) => ({
         id: pm.id,
         url: pm.media_asset?.original_url,
         alt: pm.media_asset?.alt_text ?? "",
@@ -293,7 +302,7 @@ export default function ProductDetailPage() {
       retired: product.retired_flag,
       yearReleased: product.release_year,
     });
-  }, [product, offers]);
+  }, [product, offers, primaryImageUrl, allImageUrls, themeName]);
 
   function buildCartProduct(p: ProductDetailRow, offer: Offer): Product {
     return {

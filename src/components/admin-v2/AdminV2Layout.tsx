@@ -37,7 +37,7 @@ export function AdminV2Layout({ children }: AdminV2LayoutProps) {
         >
           <Menu className="h-5 w-5" />
         </button>
-        <Link to="/admin/purchases" className="flex items-center gap-2">
+        <Link to="/admin/work-queue" className="flex items-center gap-2">
           <div className="w-6 h-6 rounded bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-xs font-extrabold text-zinc-900">
             K
           </div>

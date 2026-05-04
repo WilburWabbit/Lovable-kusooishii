@@ -10,6 +10,7 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 import { supabase } from "@/integrations/supabase/client";
 import { Download, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -345,10 +346,34 @@ export function PurchaseList() {
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.sortable !== false ? (
-                    <TableFilterInput
-                      value={prefs.filters[col.key] ?? ""}
-                      onChange={(v) => setFilter(col.key, v)}
-                    />
+                    col.key === "status" ? (
+                      <MultiSelectFilter
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(value) => setFilter(col.key, value)}
+                        placeholder="All statuses"
+                        options={[
+                          { value: "draft", label: "Draft" },
+                          { value: "recorded", label: "Recorded" },
+                        ]}
+                      />
+                    ) : col.key === "qboSyncStatus" ? (
+                      <MultiSelectFilter
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(value) => setFilter(col.key, value)}
+                        placeholder="All QBO"
+                        options={[
+                          { value: "pending", label: "Pending" },
+                          { value: "synced", label: "Synced" },
+                          { value: "error", label: "Error" },
+                          { value: "skipped", label: "Skipped" },
+                        ]}
+                      />
+                    ) : (
+                      <TableFilterInput
+                        value={prefs.filters[col.key] ?? ""}
+                        onChange={(v) => setFilter(col.key, v)}
+                      />
+                    )
                   ) : (
                     <span />
                   )}

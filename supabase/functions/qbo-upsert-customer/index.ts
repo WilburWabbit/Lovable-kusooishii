@@ -16,6 +16,32 @@ function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutM
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+function cleanText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isEbayRelayEmail(value: unknown): boolean {
+  return typeof value === "string" && /@members\.ebay\./i.test(value);
+}
+
+function isUsableDisplayName(value: unknown): value is string {
+  const cleaned = cleanText(value);
+  return !!cleaned && !isEbayRelayEmail(cleaned);
+}
+
+function splitPersonName(name: string | null): { firstName: string | null; lastName: string | null } {
+  if (!name || name.includes("@")) return { firstName: null, lastName: null };
+  const parts = name.split(" ").filter(Boolean);
+  if (parts.length === 0) return { firstName: null, lastName: null };
+  if (parts.length === 1) return { firstName: parts[0], lastName: null };
+  return {
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts[parts.length - 1],
+  };
+}
+
 async function ensureValidToken(
   admin: any,
   realmId: string,
@@ -92,6 +118,7 @@ Deno.serve(async (req) => {
       ebay_url,
       billing_address,
       queued_by,
+      sales_order_id,
     } = body;
 
     // Auth check - accepts either a logged-in user or an internal posting
@@ -124,6 +151,7 @@ Deno.serve(async (req) => {
 
     let customer: any = null;
     let userEmail: string | undefined;
+    let sourceOrder: Record<string, unknown> | null = null;
 
     // --- Step 1: Find or create local customer record ---
     if (customer_id) {
@@ -164,18 +192,56 @@ Deno.serve(async (req) => {
       customer = byUser;
     }
 
+    if (sales_order_id) {
+      const { data: order } = await admin
+        .from("sales_order")
+        .select("id, origin_channel, origin_reference, guest_name, guest_email, shipping_name, shipping_line_1, shipping_line_2, shipping_city, shipping_county, shipping_postcode, shipping_country")
+        .eq("id", sales_order_id)
+        .maybeSingle();
+      sourceOrder = order;
+    }
+
     // Use provided fields, falling back to existing customer record
-    const effectiveFirstName = first_name ?? customer?.first_name ?? null;
-    const effectiveLastName = last_name ?? customer?.last_name ?? null;
-    const effectiveEmail = (customer_id ? (body.email ?? customer?.email) : userEmail) ?? null;
+    const channelIds = (customer?.channel_ids ?? {}) as Record<string, unknown>;
+    const ebayUsername = cleanText(channelIds.ebay) ?? null;
+    const orderShippingName = cleanText(sourceOrder?.shipping_name);
+    const orderGuestName = cleanText(sourceOrder?.guest_name);
+    const preferredName =
+      cleanText(display_name)
+      ?? (isUsableDisplayName(orderShippingName) ? orderShippingName : null)
+      ?? (isUsableDisplayName(customer?.display_name) ? cleanText(customer.display_name) : null)
+      ?? ebayUsername
+      ?? (isUsableDisplayName(orderGuestName) ? orderGuestName : null)
+      ?? cleanText(company_name)
+      ?? null;
+    const splitName = splitPersonName(preferredName);
+    const effectiveFirstName = cleanText(first_name) ?? cleanText(customer?.first_name) ?? splitName.firstName;
+    const effectiveLastName = cleanText(last_name) ?? cleanText(customer?.last_name) ?? splitName.lastName;
+    const effectiveEmail = (customer_id ? (cleanText(body.email) ?? cleanText(customer?.email)) : userEmail) ?? null;
 
     // Build the display name
     const effectiveDisplayName =
-      display_name ||
+      cleanText(display_name) ||
       [effectiveFirstName, effectiveLastName].filter(Boolean).join(" ") ||
-      company_name ||
+      cleanText(company_name) ||
+      (isUsableDisplayName(customer?.display_name) ? cleanText(customer.display_name) : null) ||
+      ebayUsername ||
+      (isUsableDisplayName(orderGuestName) ? orderGuestName : null) ||
       effectiveEmail ||
       "Unknown";
+
+    const effectiveBillingAddress = billing_address ?? (
+      sourceOrder
+        ? {
+          line_1: sourceOrder.shipping_line_1,
+          line_2: sourceOrder.shipping_line_2,
+          city: sourceOrder.shipping_city,
+          county: sourceOrder.shipping_county,
+          postcode: sourceOrder.shipping_postcode,
+          country: sourceOrder.shipping_country,
+        }
+        : null
+    );
 
     // Prepare local customer data
     const customerData: Record<string, any> = {
@@ -185,8 +251,8 @@ Deno.serve(async (req) => {
       email: effectiveEmail,
       phone: phone ?? customer?.phone ?? null,
       mobile: mobile ?? customer?.mobile ?? null,
-      company_name: company_name ?? customer?.company_name ?? null,
-      web_addr: ebay_url ?? customer?.web_addr ?? null,
+      company_name: cleanText(company_name) ?? customer?.company_name ?? null,
+      web_addr: ebay_url ?? customer?.web_addr ?? (ebayUsername ? `https://www.ebay.co.uk/usr/${encodeURIComponent(ebayUsername)}` : null),
       active: true,
       synced_at: new Date().toISOString(),
     };
@@ -197,13 +263,13 @@ Deno.serve(async (req) => {
     }
 
     // Add billing address if provided
-    if (billing_address) {
-      customerData.billing_line_1 = billing_address.line_1 || null;
-      customerData.billing_line_2 = billing_address.line_2 || null;
-      customerData.billing_city = billing_address.city || null;
-      customerData.billing_county = billing_address.county || null;
-      customerData.billing_postcode = billing_address.postcode || null;
-      customerData.billing_country = billing_address.country || "GB";
+    if (effectiveBillingAddress || customer) {
+      customerData.billing_line_1 = cleanText(effectiveBillingAddress?.line_1) ?? customer?.billing_line_1 ?? null;
+      customerData.billing_line_2 = cleanText(effectiveBillingAddress?.line_2) ?? customer?.billing_line_2 ?? null;
+      customerData.billing_city = cleanText(effectiveBillingAddress?.city) ?? customer?.billing_city ?? null;
+      customerData.billing_county = cleanText(effectiveBillingAddress?.county) ?? customer?.billing_county ?? null;
+      customerData.billing_postcode = cleanText(effectiveBillingAddress?.postcode) ?? customer?.billing_postcode ?? null;
+      customerData.billing_country = cleanText(effectiveBillingAddress?.country) ?? customer?.billing_country ?? "GB";
     }
 
     // --- Step 2: Get QBO access token ---
@@ -219,7 +285,7 @@ Deno.serve(async (req) => {
     const qboPayload: Record<string, any> = {
       GivenName: effectiveFirstName || undefined,
       FamilyName: effectiveLastName || undefined,
-      CompanyName: company_name ?? customer?.company_name ?? undefined,
+      CompanyName: cleanText(company_name) ?? customer?.company_name ?? undefined,
       DisplayName: effectiveDisplayName,
     };
 
@@ -235,27 +301,27 @@ Deno.serve(async (req) => {
     if (customerData.web_addr) {
       qboPayload.WebAddr = { URI: customerData.web_addr };
     }
+    if (ebayUsername) {
+      qboPayload.Notes = `eBay username: ${ebayUsername}`;
+    }
 
-    // Add billing address to QBO payload
-    if (billing_address) {
+    // Add billing/shipping address to QBO payload using the resolved local
+    // customer data, so order-derived blanks cannot erase existing address lines.
+    if (
+      customerData.billing_line_1
+      || customerData.billing_city
+      || customerData.billing_postcode
+      || customerData.billing_country
+    ) {
       qboPayload.BillAddr = {
-        Line1: billing_address.line_1 || undefined,
-        Line2: billing_address.line_2 || undefined,
-        City: billing_address.city || undefined,
-        CountrySubDivisionCode: billing_address.county || undefined,
-        PostalCode: billing_address.postcode || undefined,
-        Country: billing_address.country || "GB",
+        Line1: customerData.billing_line_1 || undefined,
+        Line2: customerData.billing_line_2 || undefined,
+        City: customerData.billing_city || undefined,
+        CountrySubDivisionCode: customerData.billing_county || undefined,
+        PostalCode: customerData.billing_postcode || undefined,
+        Country: customerData.billing_country || "GB",
       };
-    } else if (customer) {
-      // Use existing billing address from customer record
-      qboPayload.BillAddr = {
-        Line1: customer.billing_line_1 || undefined,
-        Line2: customer.billing_line_2 || undefined,
-        City: customer.billing_city || undefined,
-        CountrySubDivisionCode: customer.billing_county || undefined,
-        PostalCode: customer.billing_postcode || undefined,
-        Country: customer.billing_country || "GB",
-      };
+      qboPayload.ShipAddr = qboPayload.BillAddr;
     }
 
     // --- Step 4: Create or update in QBO ---

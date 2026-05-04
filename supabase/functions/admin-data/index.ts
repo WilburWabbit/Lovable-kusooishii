@@ -6,7 +6,10 @@ class ValidationError extends Error {
 }
 
 const STOCK_MATCHABLE = ["available", "received", "graded"];
+const SALEABLE_STOCK_V2_STATUSES = ["graded", "listed", "restocked"];
+const SALEABLE_STOCK_STATUSES = ["available", "received", "graded", "listed", "restocked"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
+const CHANNELS_PENDING_OUTBOUND_CONNECTOR = new Set(["bricklink", "brickowl"]);
 
 function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
   const status = unit.status ?? "";
@@ -14,8 +17,331 @@ function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string
   return STOCK_MATCHABLE.includes(status) && !["sold", "written_off"].includes(v2Status);
 }
 
+type ChannelListingActionRow = {
+  id: string;
+  sku_id: string | null;
+  channel: string | null;
+  v2_channel: string | null;
+  v2_status: string | null;
+  offer_status: string | null;
+  listed_quantity: number | null;
+  external_listing_id: string | null;
+  external_sku: string | null;
+  availability_override: string | null;
+  availability_override_at: string | null;
+  availability_override_by: string | null;
+  synced_at: string | null;
+};
+
+const CHANNEL_ACTION_SELECT =
+  "id, sku_id, channel, v2_channel, v2_status, offer_status, listed_quantity, external_listing_id, external_sku, availability_override, availability_override_at, availability_override_by, synced_at";
+
+function normalizeListingChannel(listing: Pick<ChannelListingActionRow, "channel" | "v2_channel">): string {
+  const raw = (listing.channel ?? listing.v2_channel ?? "website").toLowerCase();
+  if (raw === "website") return "web";
+  return raw;
+}
+
+function isWebsiteListing(listing: Pick<ChannelListingActionRow, "channel" | "v2_channel">): boolean {
+  return normalizeListingChannel(listing) === "web";
+}
+
+async function countSaleableStock(admin: any, skuId: string): Promise<number> {
+  const { count, error } = await admin
+    .from("stock_unit")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", skuId)
+    .in("v2_status", SALEABLE_STOCK_V2_STATUSES);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function fetchChannelListingForAction(admin: any, listingId: string): Promise<ChannelListingActionRow> {
+  const { data, error } = await admin
+    .from("channel_listing")
+    .select(CHANNEL_ACTION_SELECT)
+    .eq("id", listingId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new ValidationError("channel listing not found");
+  return data as ChannelListingActionRow;
+}
+
+async function queueChannelListingCommand(
+  admin: any,
+  listingId: string,
+  commandType: "sync_quantity" | "end",
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await admin.rpc("queue_listing_command", {
+    p_channel_listing_id: listingId,
+    p_command_type: commandType,
+    p_actor_id: userId,
+  });
+
+  if (error) throw error;
+  return data ?? null;
+}
+
+async function findGmcListingsForSku(admin: any, skuId: string): Promise<ChannelListingActionRow[]> {
+  const { data, error } = await admin
+    .from("channel_listing")
+    .select(CHANNEL_ACTION_SELECT)
+    .eq("sku_id", skuId)
+    .in("channel", ["google_shopping", "gmc"]);
+
+  if (error) throw error;
+  return (data ?? []) as ChannelListingActionRow[];
+}
+
+async function cascadeWebsiteAvailabilityToGmc(
+  admin: any,
+  websiteListing: ChannelListingActionRow,
+  action: "manual_out_of_stock" | "clear_out_of_stock" | "delist",
+  userId: string,
+  now: string,
+): Promise<string[]> {
+  if (!isWebsiteListing(websiteListing) || !websiteListing.sku_id) return [];
+
+  const gmcListings = await findGmcListingsForSku(admin, websiteListing.sku_id);
+  const commandIds: string[] = [];
+  const restoredQuantity = action === "clear_out_of_stock"
+    ? await countSaleableStock(admin, websiteListing.sku_id)
+    : 0;
+
+  for (const gmcListing of gmcListings) {
+    if (action === "manual_out_of_stock") {
+      const { error } = await admin
+        .from("channel_listing")
+        .update({
+          availability_override: "manual_out_of_stock",
+          availability_override_at: now,
+          availability_override_by: userId,
+          listed_quantity: 0,
+          offer_status: "OUT_OF_STOCK",
+          synced_at: now,
+        })
+        .eq("id", gmcListing.id);
+      if (error) throw error;
+
+      const commandId = await queueChannelListingCommand(admin, gmcListing.id, "sync_quantity", userId);
+      if (commandId) commandIds.push(commandId);
+      const after = await fetchChannelListingForAction(admin, gmcListing.id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        "gmc_out_of_stock_cascaded_from_website",
+        gmcListing,
+        after,
+        commandId,
+        [],
+      );
+      continue;
+    }
+
+    if (action === "clear_out_of_stock") {
+      const { error } = await admin
+        .from("channel_listing")
+        .update({
+          availability_override: null,
+          availability_override_at: null,
+          availability_override_by: null,
+          listed_quantity: restoredQuantity,
+          offer_status: "PUBLISHED",
+          synced_at: now,
+        })
+        .eq("id", gmcListing.id);
+      if (error) throw error;
+
+      const commandId = await queueChannelListingCommand(admin, gmcListing.id, "sync_quantity", userId);
+      if (commandId) commandIds.push(commandId);
+      const after = await fetchChannelListingForAction(admin, gmcListing.id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        "gmc_out_of_stock_clear_cascaded_from_website",
+        gmcListing,
+        after,
+        commandId,
+        [],
+      );
+      continue;
+    }
+
+    const { error } = await admin
+      .from("channel_listing")
+      .update({
+        availability_override: null,
+        availability_override_at: null,
+        availability_override_by: null,
+        listed_quantity: 0,
+        offer_status: "END_QUEUED",
+        synced_at: now,
+      })
+      .eq("id", gmcListing.id);
+    if (error) throw error;
+
+    const commandId = await queueChannelListingCommand(admin, gmcListing.id, "end", userId);
+    if (commandId) commandIds.push(commandId);
+    const after = await fetchChannelListingForAction(admin, gmcListing.id);
+    await auditChannelAvailabilityAction(
+      admin,
+      userId,
+      "gmc_delist_cascaded_from_website",
+      gmcListing,
+      after,
+      commandId,
+      [],
+    );
+  }
+
+  return commandIds;
+}
+
+async function auditChannelAvailabilityAction(
+  admin: any,
+  userId: string,
+  triggerType: string,
+  before: ChannelListingActionRow,
+  after: ChannelListingActionRow,
+  commandId: string | null,
+  cascadedCommandIds: string[],
+) {
+  const { error } = await admin.from("audit_event").insert({
+    entity_type: "channel_listing",
+    entity_id: after.id,
+    trigger_type: triggerType,
+    actor_type: "user",
+    actor_id: userId,
+    source_system: "admin-data",
+    before_json: before,
+    after_json: after,
+    output_json: {
+      command_id: commandId,
+      cascaded_gmc_command_ids: cascadedCommandIds,
+    },
+  });
+
+  if (error) throw error;
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function normalizeCommerceChannel(channel: string | null | undefined): string {
+  return channel === "website" ? "web" : (channel ?? "web");
+}
+
+function normalizeQuote(raw: unknown, skuId: string, channel: string) {
+  const quote = (raw ?? {}) as Record<string, unknown>;
+  const feeComponents = (quote.fee_components ?? {}) as Record<string, unknown>;
+  return {
+    sku_id: String(quote.sku_id ?? skuId),
+    sku_code: quote.sku_code ?? null,
+    channel: String(quote.channel ?? channel),
+    floor_price: quote.floor_price == null ? null : Number(quote.floor_price),
+    target_price: quote.target_price == null ? null : Number(quote.target_price),
+    ceiling_price: quote.ceiling_price == null ? null : Number(quote.ceiling_price),
+    estimated_fees: quote.estimated_fees == null
+      ? (feeComponents.estimated_fees == null ? null : Number(feeComponents.estimated_fees))
+      : Number(quote.estimated_fees),
+    estimated_net: quote.estimated_net == null ? null : Number(quote.estimated_net),
+    cost_base: quote.cost_base == null ? null : Number(quote.cost_base),
+    carrying_value: quote.carrying_value == null
+      ? (quote.cogs_or_carrying_value == null ? null : Number(quote.cogs_or_carrying_value))
+      : Number(quote.carrying_value),
+    average_carrying_value: quote.average_carrying_value == null ? null : Number(quote.average_carrying_value),
+    stock_unit_count: quote.stock_unit_count == null ? 0 : Number(quote.stock_unit_count),
+    market_consensus: quote.market_consensus == null
+      ? (quote.market_consensus_price == null ? null : Number(quote.market_consensus_price))
+      : Number(quote.market_consensus),
+    condition_multiplier: quote.condition_multiplier == null ? null : Number(quote.condition_multiplier),
+    confidence_score: quote.confidence_score == null
+      ? (quote.confidence == null ? null : Number(quote.confidence))
+      : Number(quote.confidence_score),
+    blocking_reasons: Array.isArray(quote.blocking_reasons) ? quote.blocking_reasons : [],
+    warning_reasons: Array.isArray(quote.warning_reasons) ? quote.warning_reasons : [],
+    breakdown: quote.breakdown ?? {},
+    raw_quote: quote,
+  };
+}
+
+async function buildWebsiteListingPreflight(
+  admin: any,
+  skuId: string,
+  listedPrice?: number | null,
+) {
+  const { data: sku, error: skuErr } = await admin
+    .from("sku")
+    .select("id, sku_code, active_flag, saleable_flag")
+    .eq("id", skuId)
+    .single();
+  if (skuErr || !sku) throw new ValidationError("SKU not found");
+
+  const { data: stockUnits, error: stockErr } = await admin
+    .from("stock_unit")
+    .select("id, status, v2_status")
+    .eq("sku_id", skuId);
+  if (stockErr) throw stockErr;
+
+  const saleableStockCount = (stockUnits ?? []).filter((unit: Record<string, unknown>) => {
+    const status = String(unit.v2_status ?? unit.status ?? "");
+    return SALEABLE_STOCK_STATUSES.includes(status);
+  }).length;
+
+  const { data: rawQuote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+    p_sku_id: skuId,
+    p_channel: "web",
+    p_candidate_price: listedPrice && listedPrice > 0 ? listedPrice : null,
+  });
+  if (quoteErr) throw quoteErr;
+  const quote = normalizeQuote(rawQuote, skuId, "web");
+
+  const targetPrice = Number(quote.target_price ?? 0);
+  const floorPrice = Number(quote.floor_price ?? 0);
+  const finalPrice = listedPrice && listedPrice > 0 ? listedPrice : targetPrice;
+  const blockers: string[] = [];
+  const actions: string[] = [];
+
+  if (saleableStockCount <= 0) {
+    blockers.push("No saleable stock is available. Receive and grade stock before publishing.");
+    actions.push("receive_stock");
+  }
+  if (!sku.active_flag) {
+    blockers.push("SKU is inactive. Activate it before website publish.");
+    actions.push("activate_sku");
+  }
+  if (!sku.saleable_flag) {
+    blockers.push("SKU is not marked saleable.");
+    actions.push("activate_sku");
+  }
+  if (!finalPrice || finalPrice <= 0) {
+    blockers.push("No valid website target price is available. Recalculate pricing first.");
+    actions.push("recalculate_price");
+  }
+  if (floorPrice > 0 && finalPrice > 0 && finalPrice < floorPrice) {
+    blockers.push(`Website price £${finalPrice.toFixed(2)} is below floor £${floorPrice.toFixed(2)}.`);
+    actions.push("set_price");
+  }
+
+  return {
+    sku_id: skuId,
+    sku_code: sku.sku_code,
+    channel: "web",
+    can_publish: blockers.length === 0,
+    action_state: blockers.length === 0 ? "publish" : actions[0],
+    actions: [...new Set(actions)],
+    blockers,
+    warnings: quote.warning_reasons,
+    saleable_stock_count: saleableStockCount,
+    active_flag: Boolean(sku.active_flag),
+    saleable_flag: Boolean(sku.saleable_flag),
+    final_price: finalPrice > 0 ? Math.round(finalPrice * 100) / 100 : null,
+    quote,
+  };
 }
 
 /** Fully reset a QBO purchase: delete derived stock units, receipt lines, purchase batches/line items, then reset landing to pending */
@@ -484,10 +810,18 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = { success: true };
     } else if (action === "create-web-listing") {
-      const { sku_id, listed_price } = params;
+      const { sku_id, listed_price, listing_title, listing_description } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
 
-      // Fetch SKU details
+      const preflight = await buildWebsiteListingPreflight(
+        admin,
+        sku_id,
+        typeof listed_price === "number" ? listed_price : null,
+      );
+      if (!preflight.can_publish) {
+        throw new ValidationError(preflight.blockers[0] ?? "Website listing is blocked");
+      }
+
       const { data: sku, error: skuErr } = await admin
         .from("sku")
         .select("id, sku_code")
@@ -495,37 +829,11 @@ Deno.serve(async (req) => {
         .single();
       if (skuErr || !sku) throw new ValidationError("SKU not found");
 
-      const { data: pricingRows } = await admin
-        .from("v_current_sku_pricing")
-        .select("current_price, channel")
-        .eq("sku_id", sku_id)
-        .order("priced_at", { ascending: false, nullsFirst: false })
-        .limit(12);
-      const webPriceRow = ((pricingRows ?? []) as Record<string, unknown>[])
-        .sort((a, b) => {
-          const rank = (channel: unknown) => channel === "website" ? 4 : channel === "web" ? 3 : channel === "all" ? 2 : 1;
-          return rank(b.channel) - rank(a.channel);
-        })
-        .find((row) => Number(row.current_price ?? 0) > 0);
-
-      // Resolve price: caller-supplied > database
-      let finalPrice = (typeof listed_price === "number" && listed_price > 0)
-        ? listed_price
-        : Number(webPriceRow?.current_price ?? 0);
+      const finalPrice = Number(preflight.final_price ?? 0);
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
-
-      // Validate against the domain quote floor, not legacy listing columns.
-      const { data: quote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
-        p_sku_id: sku_id,
-        p_channel: "web",
-        p_candidate_price: finalPrice,
-      });
-      if (quoteErr) throw quoteErr;
-
-      const quoteFloor = Number((quote as Record<string, unknown> | null)?.floor_price ?? 0);
+      const quoteFloor = Number(preflight.quote.floor_price ?? 0);
       if (quoteFloor > 0 && finalPrice < quoteFloor) {
-        // Bump to the channel-net floor before creating the publish snapshot.
-        finalPrice = quoteFloor;
+        throw new ValidationError(`Cannot list: website price £${finalPrice.toFixed(2)} is below floor £${quoteFloor.toFixed(2)}.`);
       }
 
       // Sync resolved price back to SKU
@@ -538,16 +846,19 @@ Deno.serve(async (req) => {
           external_sku: sku.sku_code,
           sku_id: sku.id,
           listed_price: finalPrice,
-          listed_quantity: 0,
+          listed_quantity: preflight.saleable_stock_count,
           offer_status: "PUBLISHED",
-          listing_title: null,
-          listing_description: null,
+          v2_channel: "website",
+          v2_status: "live",
+          listing_title: typeof listing_title === "string" && listing_title.trim() ? listing_title.trim() : null,
+          listing_description: typeof listing_description === "string" && listing_description.trim() ? listing_description.trim() : null,
           price_floor: null,
           price_target: null,
           price_ceiling: null,
           confidence_score: null,
           pricing_notes: null,
           priced_at: null,
+          listed_at: new Date().toISOString(),
           synced_at: new Date().toISOString(),
         },
         { onConflict: "channel,external_sku", ignoreDuplicates: false }
@@ -555,6 +866,8 @@ Deno.serve(async (req) => {
       if (uErr) throw uErr;
 
       const listingId = webListing?.id;
+      let commandId: string | null = null;
+      let outboxProcess: Record<string, unknown> | null = null;
       if (listingId) {
         const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
           p_sku_id: sku.id,
@@ -564,14 +877,68 @@ Deno.serve(async (req) => {
         });
         if (snapshotErr) throw snapshotErr;
 
-        const { error: commandErr } = await admin.rpc("queue_listing_command", {
+        const { data: queuedCommandId, error: queuedCommandErr } = await admin.rpc("queue_listing_command", {
           p_channel_listing_id: listingId,
           p_command_type: "publish",
         });
-        if (commandErr) throw commandErr;
+        if (queuedCommandErr) throw queuedCommandErr;
+        commandId = queuedCommandId ?? null;
+
+        if (commandId) {
+          try {
+            const processRes = await fetch(`${supabaseUrl}/functions/v1/listing-command-process`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceRoleKey}`,
+                apikey: serviceRoleKey,
+              },
+              body: JSON.stringify({ commandId, trigger: "website_publish" }),
+            });
+            const processPayload = await processRes.json().catch(() => ({}));
+            outboxProcess = {
+              ok: processRes.ok,
+              status: processRes.status,
+              payload: processPayload,
+            };
+            if (!processRes.ok) {
+              console.warn("Immediate website listing outbox processing failed", processPayload);
+            }
+          } catch (err) {
+            outboxProcess = {
+              ok: false,
+              error: err instanceof Error ? err.message : "Unknown outbox processing error",
+            };
+            console.warn("Immediate website listing outbox processing failed", err);
+          }
+        }
       }
 
-      result = { success: true, listing_id: listingId };
+      result = {
+        success: true,
+        listing_id: listingId,
+        command_id: commandId,
+        outbox_process: outboxProcess,
+        preflight,
+        final_price: finalPrice,
+      };
+    } else if (action === "website-listing-preflight") {
+      const { sku_id, listed_price } = params;
+      if (!sku_id) throw new ValidationError("sku_id is required");
+      result = await buildWebsiteListingPreflight(
+        admin,
+        sku_id,
+        typeof listed_price === "number" ? listed_price : null,
+      );
+    } else if (action === "activate-sku") {
+      const { sku_id } = params;
+      if (!sku_id) throw new ValidationError("sku_id is required");
+      const { error } = await admin
+        .from("sku")
+        .update({ active_flag: true, saleable_flag: true })
+        .eq("id", sku_id);
+      if (error) throw error;
+      result = { success: true, sku_id };
     } else if (action === "remove-web-listing") {
       const { sku_id } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
@@ -595,6 +962,9 @@ Deno.serve(async (req) => {
             listed_quantity: 0,
             offer_status: "ENDED",
             v2_status: "ended",
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
             synced_at: endedAt,
           } as never)
           .in("id", listingIds);
@@ -613,6 +983,136 @@ Deno.serve(async (req) => {
 
         result = { success: true, ended: listingIds.length, command_ids: commandIds };
       }
+
+    /* ── Channel availability controls ── */
+
+    } else if (
+      action === "set-channel-out-of-stock" ||
+      action === "clear-channel-out-of-stock" ||
+      action === "delist-channel-listing"
+    ) {
+      const { listing_id } = params;
+      if (!listing_id) throw new ValidationError("listing_id is required");
+
+      const before = await fetchChannelListingForAction(admin, listing_id);
+      if (!before.sku_id) throw new ValidationError("channel listing is not linked to a SKU");
+
+      const channel = normalizeListingChannel(before);
+      if (CHANNELS_PENDING_OUTBOUND_CONNECTOR.has(channel)) {
+        throw new ValidationError(`${channel} outbound controls are not available yet`);
+      }
+
+      if (channel === "google_shopping" || channel === "gmc") {
+        throw new ValidationError("GMC availability is controlled by the Website listing");
+      }
+
+      const now = new Date().toISOString();
+      let commandType: "sync_quantity" | "end" = "sync_quantity";
+      let triggerType = "channel_out_of_stock_set";
+      let cascadedCommandIds: string[] = [];
+
+      if (action === "set-channel-out-of-stock") {
+        if (before.v2_status === "ended") {
+          throw new ValidationError("Cannot set an ended listing out of stock");
+        }
+
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: "manual_out_of_stock",
+            availability_override_at: now,
+            availability_override_by: userId,
+            listed_quantity: 0,
+            offer_status: "OUT_OF_STOCK",
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "manual_out_of_stock",
+            userId,
+            now,
+          );
+        }
+      } else if (action === "clear-channel-out-of-stock") {
+        const listedQuantity = await countSaleableStock(admin, before.sku_id);
+        const restoreOfferStatus =
+          String(before.offer_status ?? "").toLowerCase() === "out_of_stock"
+            ? "PUBLISHED"
+            : before.offer_status;
+
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
+            listed_quantity: listedQuantity,
+            offer_status: restoreOfferStatus,
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        triggerType = "channel_out_of_stock_cleared";
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "clear_out_of_stock",
+            userId,
+            now,
+          );
+        }
+      } else {
+        const { error } = await admin
+          .from("channel_listing")
+          .update({
+            availability_override: null,
+            availability_override_at: null,
+            availability_override_by: null,
+            listed_quantity: 0,
+            offer_status: "END_QUEUED",
+            synced_at: now,
+          })
+          .eq("id", listing_id);
+        if (error) throw error;
+
+        commandType = "end";
+        triggerType = "channel_listing_delist_queued";
+        if (isWebsiteListing(before)) {
+          cascadedCommandIds = await cascadeWebsiteAvailabilityToGmc(
+            admin,
+            before,
+            "delist",
+            userId,
+            now,
+          );
+        }
+      }
+
+      const commandId = await queueChannelListingCommand(admin, listing_id, commandType, userId);
+      const after = await fetchChannelListingForAction(admin, listing_id);
+      await auditChannelAvailabilityAction(
+        admin,
+        userId,
+        triggerType,
+        before,
+        after,
+        commandId,
+        cascadedCommandIds,
+      );
+
+      result = {
+        success: true,
+        listing_id,
+        command_id: commandId,
+        cascaded_gmc_command_ids: cascadedCommandIds,
+      };
 
     /* ── Media CRUD ── */
 
@@ -905,8 +1405,21 @@ Deno.serve(async (req) => {
     /* ── Pricing Engine ── */
 
     } else if (action === "calculate-pricing") {
-      const { sku_id, channel } = params;
-      if (!sku_id || !channel) throw new ValidationError("sku_id and channel are required");
+      const { sku_id, channel: requestedChannel } = params;
+      if (!sku_id || !requestedChannel) throw new ValidationError("sku_id and channel are required");
+      const channel = normalizeCommerceChannel(requestedChannel);
+
+      const { data: rawQuote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+        p_sku_id: sku_id,
+        p_channel: channel,
+        p_candidate_price: null,
+      });
+      if (quoteErr) throw quoteErr;
+      result = normalizeQuote(rawQuote, sku_id, channel);
+
+      // Retained only as dead-code reference while the pricing engine settles;
+      // the RPC above is the single active calculator for admin pricing.
+      if (false) {
 
       // 1. Get SKU + product info
       const { data: skuData } = await admin
@@ -929,6 +1442,12 @@ Deno.serve(async (req) => {
       const packagingCost = dm["packaging_cost"] ?? 0;
       const riskReserveRate = dm["risk_reserve_rate"] ?? 0;
       const condMultiplier = dm[`condition_multiplier_${skuData.condition_grade}`] ?? 1;
+
+      const { data: channelPricingConfig } = await admin
+        .from("channel_pricing_config")
+        .select("*")
+        .eq("channel", channel)
+        .maybeSingle();
 
       // 3. Get carrying value basis for pooled listings. The floor price uses
       // the highest eligible unit value unless a specific unit is reserved.
@@ -1082,6 +1601,25 @@ Deno.serve(async (req) => {
 
       const riskRate = riskReserveRate / 100;
       const effectiveMargin = Math.max(minMargin, 0.01);
+      const estimateGrossFees = (grossPrice: number): number => {
+        let totalFeesGross = 0;
+        for (const fee of fees ?? []) {
+          let base = grossPrice;
+          if (fee.applies_to === "sale_plus_shipping") base = grossPrice + shippingCost;
+          else if (fee.applies_to === "sale_price_inc_vat") base = grossPrice * 1.2;
+          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
+          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
+          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
+          totalFeesGross += amount;
+        }
+        return Math.round(totalFeesGross * 100) / 100;
+      };
+
+      const charmDown = (value: number): number => {
+        if (!Number.isFinite(value) || value <= 0) return 0;
+        const candidate = Math.floor(value) + 0.99;
+        return Math.round((candidate <= value ? candidate : candidate - 1) * 100) / 100;
+      };
 
       // VAT-aware floor: revenue = P/1.2, net fees = gross_fees/1.2
       // P >= 1.2 × (costBase + minProfit + fixedFees/1.2) / (1 - margin - feeRate - risk)
@@ -1091,16 +1629,7 @@ Deno.serve(async (req) => {
 
       // Post-check: verify floor covers all fees with min/max clamps (ex-VAT basis)
       for (let i = 0; i < 5; i++) {
-        let totalFeesGross = 0;
-        for (const fee of fees ?? []) {
-          let base = floorPrice;
-          if (fee.applies_to === "sale_plus_shipping") base = floorPrice + shippingCost;
-          else if (fee.applies_to === "sale_price_inc_vat") base = floorPrice * 1.2;
-          let amount = (base * ((fee.rate_percent ?? 0) / 100)) + (fee.fixed_amount ?? 0);
-          if (fee.min_amount != null && amount < fee.min_amount) amount = fee.min_amount;
-          if (fee.max_amount != null && amount > fee.max_amount) amount = fee.max_amount;
-          totalFeesGross += amount;
-        }
+        const totalFeesGross = estimateGrossFees(floorPrice);
         const netFees = totalFeesGross / 1.2;
         const riskReserve = (floorPrice / 1.2) * riskRate;
         const requiredExVat = costBase + minProfit + netFees + riskReserve;
@@ -1117,14 +1646,43 @@ Deno.serve(async (req) => {
       const ceilingPrice = Math.floor(ceilingBasis) + 0.99;
 
       let targetPrice: number;
+      let preUndercutMarketPrice: number | null = null;
+      let appliedMarketUndercut = 0;
+      let targetFloorClamped = false;
       if (marketConsensus != null) {
-        targetPrice = Math.floor(marketConsensus * condMultiplier) + 0.99;
+        preUndercutMarketPrice = marketConsensus * condMultiplier;
+        const minUndercutPct = Math.max(0, Number(channelPricingConfig?.market_undercut_min_pct ?? 0));
+        const minUndercutAmount = Math.max(0, Number(channelPricingConfig?.market_undercut_min_amount ?? 0));
+        const maxUndercutPct = channelPricingConfig?.market_undercut_max_pct == null
+          ? null
+          : Math.max(0, Number(channelPricingConfig.market_undercut_max_pct));
+        const maxUndercutAmount = channelPricingConfig?.market_undercut_max_amount == null
+          ? null
+          : Math.max(0, Number(channelPricingConfig.market_undercut_max_amount));
+        const minimumUndercut = Math.max(preUndercutMarketPrice * minUndercutPct, minUndercutAmount);
+        const maximumUndercutCandidates = [
+          maxUndercutPct == null ? null : preUndercutMarketPrice * maxUndercutPct,
+          maxUndercutAmount,
+        ].filter((value): value is number => value != null && value > 0);
+        const maximumUndercut = maximumUndercutCandidates.length > 0
+          ? Math.max(...maximumUndercutCandidates)
+          : null;
+        appliedMarketUndercut = maximumUndercut == null
+          ? minimumUndercut
+          : Math.min(minimumUndercut, maximumUndercut);
+        targetPrice = charmDown(preUndercutMarketPrice - appliedMarketUndercut);
         // Ensure target is at least the floor
-        if (targetPrice < floorPrice) targetPrice = floorPrice;
+        if (targetPrice < floorPrice) {
+          targetPrice = floorPrice;
+          targetFloorClamped = true;
+        }
       } else {
         // No market data — default target to ceiling price
         targetPrice = ceilingPrice;
       }
+
+      const estimatedFeesAtTarget = estimateGrossFees(targetPrice);
+      const estimatedNetAtTarget = Math.round((targetPrice - estimatedFeesAtTarget) * 100) / 100;
 
       // 8. Confidence score (0-1): based on data availability
       let confidence = 0;
@@ -1140,6 +1698,8 @@ Deno.serve(async (req) => {
         floor_price: floorPrice,
         target_price: targetPrice,
         ceiling_price: ceilingPrice,
+        estimated_fees: estimatedFeesAtTarget,
+        estimated_net: estimatedNetAtTarget,
         cost_base: Math.round(costBase * 100) / 100,
         carrying_value: Math.round(carryingValueBasis * 100) / 100,
         average_carrying_value: Math.round(avgCarrying * 100) / 100,
@@ -1154,17 +1714,29 @@ Deno.serve(async (req) => {
           shipping_cost: shippingCost,
           total_fee_rate: Math.round(effectiveFeeRate * 10000) / 100,
           fixed_fee_costs: Math.round(fixedFeeCosts * 100) / 100,
+          estimated_fees_at_target: estimatedFeesAtTarget,
+          estimated_net_at_target: estimatedNetAtTarget,
           risk_reserve_rate: riskReserveRate,
           min_profit: minProfit,
           min_margin: minMargin * 100,
           market_confidence: Math.round(marketConfidence * 100) / 100,
+          pre_undercut_market_price: preUndercutMarketPrice == null ? 0 : Math.round(preUndercutMarketPrice * 100) / 100,
+          market_undercut_min_pct: Number(channelPricingConfig?.market_undercut_min_pct ?? 0) * 100,
+          market_undercut_min_amount: Number(channelPricingConfig?.market_undercut_min_amount ?? 0),
+          market_undercut_max_pct: Number(channelPricingConfig?.market_undercut_max_pct ?? 0) * 100,
+          market_undercut_max_amount: Number(channelPricingConfig?.market_undercut_max_amount ?? 0),
+          applied_market_undercut: Math.round(appliedMarketUndercut * 100) / 100,
+          target_floor_clamped: targetFloorClamped ? 1 : 0,
         },
       };
+      }
 
     } else if (action === "batch-calculate-pricing") {
       const { channel: batchChannel } = params;
       // Default to "web" channel when not specified or "all"
-      const targetChannel = (batchChannel && batchChannel !== "all") ? batchChannel : "web";
+      const targetChannel = (batchChannel && batchChannel !== "all")
+        ? (batchChannel === "website" ? "web" : batchChannel)
+        : "web";
 
       // 1. Get all active SKUs with a product (orphan SKUs without product_id are excluded)
       const { data: activeSkus, error: skuErr } = await admin
@@ -1223,6 +1795,7 @@ Deno.serve(async (req) => {
 
       let auto_price_applied = false;
       let auto_price_reason = "";
+      let reviewQueueId: string | null = null;
 
       if (auto_price && price_target != null) {
         // Guard: reject zero/negative target
@@ -1249,6 +1822,27 @@ Deno.serve(async (req) => {
                 auto_price_reason = "No change needed";
               } else if (delta > 0) {
                 // Price increase
+                const pctDelta = currentPrice > 0 ? Math.abs(delta) / currentPrice : 0;
+                if (pctDelta > 0.10) {
+                  const { data: reviewRow, error: reviewErr } = await admin
+                    .from("pricing_recalc_review_queue")
+                    .insert({
+                      channel_listing_id: listing_id,
+                      sku_id: params.sku_id ?? null,
+                      channel: listing.channel,
+                      current_price: currentPrice,
+                      proposed_price: price_target,
+                      pct_change: pctDelta,
+                      direction: "increase",
+                      reason: "Auto recalculation exceeds 10% and requires authorise/edit review.",
+                      status: "pending",
+                    })
+                    .select("id")
+                    .single();
+                  if (reviewErr) throw reviewErr;
+                  reviewQueueId = reviewRow?.id ?? null;
+                  auto_price_reason = `Increase ${(pctDelta * 100).toFixed(1)}% queued for review`;
+                } else {
                 const pctOk = config.max_increase_pct == null || (delta / currentPrice) <= config.max_increase_pct;
                 const amtOk = config.max_increase_amount == null || delta <= config.max_increase_amount;
                 if (pctOk && amtOk) {
@@ -1258,9 +1852,31 @@ Deno.serve(async (req) => {
                 } else {
                   auto_price_reason = `Increase £${delta.toFixed(2)} exceeds threshold (max ${config.max_increase_pct != null ? (config.max_increase_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_increase_amount != null ? '£' + config.max_increase_amount : '∞'})`;
                 }
+                }
               } else {
                 // Price decrease
                 const absDelta = Math.abs(delta);
+                const pctDelta = currentPrice > 0 ? absDelta / currentPrice : 0;
+                if (pctDelta > 0.10) {
+                  const { data: reviewRow, error: reviewErr } = await admin
+                    .from("pricing_recalc_review_queue")
+                    .insert({
+                      channel_listing_id: listing_id,
+                      sku_id: params.sku_id ?? null,
+                      channel: listing.channel,
+                      current_price: currentPrice,
+                      proposed_price: price_target,
+                      pct_change: pctDelta,
+                      direction: "decrease",
+                      reason: "Auto recalculation exceeds 10% and requires authorise/edit review.",
+                      status: "pending",
+                    })
+                    .select("id")
+                    .single();
+                  if (reviewErr) throw reviewErr;
+                  reviewQueueId = reviewRow?.id ?? null;
+                  auto_price_reason = `Decrease ${(pctDelta * 100).toFixed(1)}% queued for review`;
+                } else {
                 const pctOk = config.max_decrease_pct == null || (absDelta / currentPrice) <= config.max_decrease_pct;
                 const amtOk = config.max_decrease_amount == null || absDelta <= config.max_decrease_amount;
                 if (pctOk && amtOk) {
@@ -1269,6 +1885,7 @@ Deno.serve(async (req) => {
                   auto_price_reason = `Auto-decreased from £${currentPrice} to £${price_target}`;
                 } else {
                   auto_price_reason = `Decrease £${absDelta.toFixed(2)} exceeds threshold (max ${config.max_decrease_pct != null ? (config.max_decrease_pct * 100).toFixed(0) + '%' : '∞'}/${config.max_decrease_amount != null ? '£' + config.max_decrease_amount : '∞'})`;
+                }
                 }
               }
             }
@@ -1327,7 +1944,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId };
+      result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId, review_queue_id: reviewQueueId };
 
     } else if (action === "list-channel-pricing-config") {
       const { data, error } = await admin.from("channel_pricing_config").select("*").order("channel");
@@ -1335,15 +1952,30 @@ Deno.serve(async (req) => {
       result = data;
 
     } else if (action === "upsert-channel-pricing-config") {
-      const { channel, auto_price_enabled, max_increase_pct, max_increase_amount, max_decrease_pct, max_decrease_amount } = params;
+      const {
+        channel,
+        auto_price_enabled,
+        max_increase_pct,
+        max_increase_amount,
+        max_decrease_pct,
+        max_decrease_amount,
+        market_undercut_min_pct,
+        market_undercut_min_amount,
+        market_undercut_max_pct,
+        market_undercut_max_amount,
+      } = params;
       if (!channel) throw new Error("channel is required");
       const { error } = await admin.from("channel_pricing_config").upsert({
-        channel,
+        channel: channel === "website" ? "web" : channel,
         auto_price_enabled: auto_price_enabled ?? false,
         max_increase_pct: max_increase_pct ?? null,
         max_increase_amount: max_increase_amount ?? null,
         max_decrease_pct: max_decrease_pct ?? null,
         max_decrease_amount: max_decrease_amount ?? null,
+        market_undercut_min_pct: market_undercut_min_pct ?? 0,
+        market_undercut_min_amount: market_undercut_min_amount ?? 0,
+        market_undercut_max_pct: market_undercut_max_pct ?? null,
+        market_undercut_max_amount: market_undercut_max_amount ?? null,
       }, { onConflict: "channel" });
       if (error) throw error;
       result = { success: true };
@@ -3135,6 +3767,285 @@ Deno.serve(async (req) => {
           landing_error: landingErrRes.error?.message ?? null,
         },
       };
+    } else if (action === "gmc-readiness") {
+      const limit = Math.min(Number(params.limit) || 250, 1000);
+      const [
+        connRes,
+        skuRes,
+        webListingRes,
+        gmcListingRes,
+        stockRes,
+        commandRes,
+        attrRes,
+      ] = await Promise.all([
+        admin
+          .from("google_merchant_connection")
+          .select("id, merchant_id, data_source, token_expires_at, updated_at")
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("sku")
+          .select("id, sku_code, condition_grade, active_flag, product_id, product:product_id(id, mpn, name, seo_title, seo_description, description, img_url, ean, upc, isbn, gmc_product_category, subtheme_name, weight_kg)")
+          .eq("active_flag", true)
+          .order("sku_code", { ascending: true })
+          .limit(limit),
+        admin
+          .from("channel_listing")
+          .select("id, sku_id, channel, external_sku, offer_status, v2_status, listed_price, listed_quantity, synced_at")
+          .eq("channel", "web"),
+        admin
+          .from("channel_listing")
+          .select("id, sku_id, channel, external_sku, external_listing_id, offer_status, v2_status, listed_price, listed_quantity, raw_data, synced_at")
+          .in("channel", ["google_shopping", "gmc"]),
+        admin
+          .from("stock_unit")
+          .select("sku_id, status, v2_status"),
+        admin
+          .from("v_outbound_command_with_references" as never)
+          .select("*")
+          .eq("entity_type" as never, "channel_listing")
+          .in("target_system" as never, ["google_shopping", "gmc"] as never)
+          .order("created_at" as never, { ascending: false })
+          .limit(500),
+        admin
+          .from("product_attribute")
+          .select("product_id, key, source_values_jsonb, chosen_source, custom_value")
+          .eq("namespace", "core")
+          .in("key", ["ean", "upc", "isbn"]),
+      ]);
+
+      if (connRes.error) throw connRes.error;
+      if (skuRes.error) throw skuRes.error;
+      if (webListingRes.error) throw webListingRes.error;
+      if (gmcListingRes.error) throw gmcListingRes.error;
+      if (stockRes.error) throw stockRes.error;
+      if (commandRes.error) throw commandRes.error;
+      if (attrRes.error) throw attrRes.error;
+
+      const conn = connRes.data as any;
+      const connected = Boolean(conn?.id);
+      const dataSourceConfigured = Boolean(conn?.data_source);
+      const tokenExpired = conn?.token_expires_at ? String(conn.token_expires_at) < new Date().toISOString() : null;
+
+      const webBySku = new Map<string, any>();
+      for (const listing of (webListingRes.data ?? []) as any[]) {
+        const live = listing.v2_status === "live" || ["live", "published", "PUBLISHED"].includes(String(listing.offer_status ?? ""));
+        if (live && listing.sku_id) webBySku.set(listing.sku_id, listing);
+      }
+
+      const gmcBySku = new Map<string, any>();
+      for (const listing of (gmcListingRes.data ?? []) as any[]) {
+        if (!listing.sku_id) continue;
+        const existing = gmcBySku.get(listing.sku_id);
+        if (!existing || String(listing.updated_at ?? listing.synced_at ?? "") > String(existing.updated_at ?? existing.synced_at ?? "")) {
+          gmcBySku.set(listing.sku_id, listing);
+        }
+      }
+
+      const stockBySku = new Map<string, number>();
+      for (const unit of (stockRes.data ?? []) as any[]) {
+        if (!unit.sku_id) continue;
+        const available = unit.status === "available" || ["graded", "listed", "restocked"].includes(String(unit.v2_status ?? ""));
+        if (available) stockBySku.set(unit.sku_id, (stockBySku.get(unit.sku_id) ?? 0) + 1);
+      }
+
+      const commandsByListing = new Map<string, any>();
+      for (const command of (commandRes.data ?? []) as any[]) {
+        const entityId = command.entity_id;
+        if (entityId && !commandsByListing.has(entityId)) commandsByListing.set(entityId, command);
+      }
+
+      const attrsByProduct = new Map<string, Record<string, any>>();
+      for (const attr of (attrRes.data ?? []) as any[]) {
+        if (!attr.product_id) continue;
+        const bucket = attrsByProduct.get(attr.product_id) ?? {};
+        bucket[attr.key] = attr;
+        attrsByProduct.set(attr.product_id, bucket);
+      }
+
+      const allSkus = (skuRes.data ?? []) as any[];
+      const productIds = Array.from(new Set(
+        allSkus
+          .map((sku) => {
+            const productRelation = sku.product;
+            const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
+            return product?.id ?? sku.product_id;
+          })
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ));
+      const primaryImageByProduct = new Map<string, string>();
+      if (productIds.length > 0) {
+        const { data: mediaRows, error: mediaErr } = await admin
+          .from("product_media")
+          .select("product_id, sort_order, is_primary, media_asset:media_asset_id(original_url)")
+          .in("product_id", productIds)
+          .order("product_id", { ascending: true })
+          .order("is_primary", { ascending: false })
+          .order("sort_order", { ascending: true });
+        if (mediaErr) throw mediaErr;
+        for (const mediaRow of (mediaRows ?? []) as Array<Record<string, unknown>>) {
+          const mediaProductId = typeof mediaRow.product_id === "string" ? mediaRow.product_id : "";
+          if (!mediaProductId || primaryImageByProduct.has(mediaProductId)) continue;
+          const asset = mediaRow.media_asset as Record<string, unknown> | null;
+          const url = typeof asset?.original_url === "string" ? asset.original_url.trim() : "";
+          if (url) primaryImageByProduct.set(mediaProductId, url);
+        }
+      }
+
+      const sourceSkus = allSkus.filter((sku) => webBySku.has(sku.id));
+      const excludedNoWebPage = allSkus.length - sourceSkus.length;
+
+      const rows = sourceSkus.map((sku) => {
+        const productRelation = sku.product;
+        const product = Array.isArray(productRelation) ? productRelation[0] : productRelation;
+        const productId = product?.id ?? sku.product_id;
+        const websitePrimaryImageUrl = primaryImageByProduct.get(productId) ?? null;
+        const webListing = webBySku.get(sku.id);
+        const gmcListing = gmcBySku.get(sku.id);
+        const latestCommand = gmcListing?.id ? commandsByListing.get(gmcListing.id) : null;
+        const price = Number(webListing?.listed_price ?? gmcListing?.listed_price ?? 0);
+        const stock = stockBySku.get(sku.id) ?? 0;
+        const barcode = product?.ean || product?.upc || product?.isbn || null;
+        const blocking: string[] = [];
+        const warnings: string[] = [];
+
+        if (!connected) blocking.push("Google Merchant is not connected");
+        if (!dataSourceConfigured) blocking.push("GMC data source is not configured");
+        if (tokenExpired === true) blocking.push("Google Merchant token is expired");
+        if (price <= 0) blocking.push("Missing listed price");
+        if (!product?.mpn) blocking.push("Missing MPN");
+        if (!product?.name && !product?.seo_title) blocking.push("Missing title");
+        if (!product?.seo_description && !product?.description) blocking.push("Missing description");
+        if (!websitePrimaryImageUrl) blocking.push("Missing website primary image");
+        if (!product?.gmc_product_category) warnings.push("Missing Google product category");
+        if (!barcode) warnings.push("Missing GTIN: publish will use LEGO + versioned MPN fallback");
+        if (stock <= 0) warnings.push("No available stock: publish will mark out of stock");
+        const commandError = latestCommand?.last_error ? String(latestCommand.last_error) : null;
+        if (commandError) warnings.push(commandError);
+
+        return {
+          sku_id: sku.id,
+          sku_code: sku.sku_code,
+          condition_grade: sku.condition_grade,
+          product_id: productId,
+          mpn: product?.mpn ?? null,
+          product_name: product?.name ?? null,
+          title: product?.seo_title ?? product?.name ?? null,
+          description: product?.seo_description ?? product?.description ?? null,
+          image_url: websitePrimaryImageUrl,
+          ean: product?.ean ?? null,
+          upc: product?.upc ?? null,
+          isbn: product?.isbn ?? null,
+          gmc_product_category: product?.gmc_product_category ?? null,
+          price,
+          stock_count: stock,
+          status: blocking.length > 0 ? "blocked" : warnings.length > 0 ? "warning" : "ready",
+          blocking,
+          warnings,
+          barcode_source_candidates: attrsByProduct.get(product?.id ?? sku.product_id) ?? {},
+          web_listing_id: webListing?.id ?? null,
+          gmc_listing_id: gmcListing?.id ?? null,
+          gmc_offer_status: gmcListing?.offer_status ?? null,
+          gmc_v2_status: gmcListing?.v2_status ?? null,
+          gmc_external_listing_id: gmcListing?.external_listing_id ?? null,
+          latest_command: latestCommand ? {
+            id: latestCommand.id,
+            status: latestCommand.status,
+            command_type: latestCommand.command_type,
+            retry_count: latestCommand.retry_count,
+            last_error: latestCommand.last_error,
+            next_attempt_at: latestCommand.next_attempt_at,
+            created_at: latestCommand.created_at,
+          } : null,
+        };
+      });
+
+      const ready = rows.filter((row) => row.status === "ready").length;
+      const warning = rows.filter((row) => row.status === "warning").length;
+      const blocked = rows.filter((row) => row.status === "blocked").length;
+
+      result = {
+        connection: {
+          connected,
+          merchant_id: conn?.merchant_id ?? null,
+          data_source: conn?.data_source ?? null,
+          token_expires_at: conn?.token_expires_at ?? null,
+          token_expired: tokenExpired,
+          last_updated: conn?.updated_at ?? null,
+        },
+        summary: { total: rows.length, ready, warning, blocked, excluded_no_web_page: excludedNoWebPage },
+        rows,
+      };
+    } else if (action === "gmc-publish-events") {
+      const limit = Math.min(Number(params.limit) || 100, 250);
+      const { data, error } = await admin
+        .from("v_outbound_command_with_references" as never)
+        .select("*")
+        .eq("entity_type" as never, "channel_listing")
+        .in("target_system" as never, ["google_shopping", "gmc"] as never)
+        .order("created_at" as never, { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      result = (data ?? []).map((row: any) => ({
+        id: row.id,
+        target_system: row.target_system,
+        command_type: row.command_type,
+        status: row.status,
+        retry_count: row.retry_count,
+        last_error: row.last_error,
+        next_attempt_at: row.next_attempt_at,
+        sent_at: row.sent_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        entity_id: row.entity_id,
+        sku_code: row.sku_code,
+        app_reference: row.app_reference,
+        external_listing_id: row.external_listing_id,
+        channel: row.channel,
+        response_payload: row.response_payload,
+      }));
+    } else if (action === "gmc-save-enrichment") {
+      const productId = params.product_id;
+      if (!productId) throw new ValidationError("product_id is required");
+      const patch: Record<string, unknown> = {};
+      for (const key of ["ean", "upc", "isbn", "gmc_product_category"]) {
+        if (Object.prototype.hasOwnProperty.call(params, key)) {
+          const value = params[key];
+          patch[key] = typeof value === "string" && value.trim() ? value.trim() : null;
+        }
+      }
+      if (Object.keys(patch).length === 0) throw new ValidationError("No enrichment fields supplied");
+      const { error } = await admin.from("product").update(patch).eq("id", productId);
+      if (error) throw error;
+
+      for (const key of ["ean", "upc", "isbn"]) {
+        if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+        const value = patch[key];
+        await admin
+          .from("product_attribute")
+          .delete()
+          .eq("product_id", productId)
+          .eq("namespace", "core")
+          .eq("key", key)
+          .is("channel", null)
+          .is("marketplace", null)
+          .is("category_id", null);
+        if (value) {
+          const { error: attrError } = await admin.from("product_attribute").insert({
+            product_id: productId,
+            namespace: "core",
+            key,
+            aspect_key: key,
+            value: String(value),
+            source: "manual",
+            chosen_source: "custom",
+            custom_value: String(value),
+          });
+          if (attrError) throw attrError;
+        }
+      }
+
+      result = { success: true, updated: patch };
     } else if (action === "list-transcripts") {
       const role = (params as { role?: string }).role;
       const search = (params as { search?: string }).search?.trim();

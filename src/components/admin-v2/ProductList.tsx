@@ -10,6 +10,7 @@ import { ColumnSelector } from "@/components/admin/ColumnSelector";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 import { BulkCategoryAssignDialog } from "./BulkCategoryAssignDialog";
 import { Download, Search, Tag } from "lucide-react";
 
@@ -428,15 +429,15 @@ export function ProductList() {
               {visibleCols.map((col) => (
                 <th key={col.key} className="px-3 py-1">
                   {col.key === "status" ? (
-                    <select
+                    <MultiSelectFilter
                       value={prefs.filters.status ?? ""}
-                      onChange={(e) => setFilter("status", e.target.value)}
-                      className="w-full px-1.5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    >
-                      <option value="">All</option>
-                      <option value="Active">Active</option>
-                      <option value="Ungraded">Ungraded</option>
-                    </select>
+                      onChange={(value) => setFilter("status", value)}
+                      placeholder="All statuses"
+                      options={[
+                        { value: "Active", label: "Active" },
+                        { value: "Ungraded", label: "Ungraded" },
+                      ]}
+                    />
                   ) : col.sortable !== false ? (
                     <TableFilterInput
                       value={prefs.filters[col.key] ?? ""}

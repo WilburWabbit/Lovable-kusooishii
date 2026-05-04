@@ -1,5 +1,5 @@
-import { ChevronDown } from "lucide-react";
 import type { OrderStatus } from "@/lib/types/admin";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 
 interface StatusFilterDropdownProps {
   value: string;
@@ -19,27 +19,14 @@ const STATUS_OPTIONS: { value: OrderStatus | ""; label: string }[] = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
+const FILTER_OPTIONS = STATUS_OPTIONS.filter(
+  (option): option is { value: OrderStatus; label: string } => Boolean(option.value),
+);
+
 /**
- * Status-specific column filter. Renders a native <select> styled to match
- * TableFilterInput. Writes the selected enum value (or empty string) into
- * the column's filter slot — filterRows substring-matches it against the
- * row's status string.
+ * Status-specific column filter. Fixed-value status columns use exact-match
+ * multi-select filters so operators can combine queues without text matching.
  */
 export function StatusFilterDropdown({ value, onChange }: StatusFilterDropdownProps) {
-  return (
-    <div className="relative w-full">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full pl-1.5 pr-5 py-1 text-[11px] font-normal border border-zinc-200 rounded bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
-      >
-        {STATUS_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400 pointer-events-none" />
-    </div>
-  );
+  return <MultiSelectFilter value={value} onChange={onChange} options={FILTER_OPTIONS} placeholder="All statuses" />;
 }

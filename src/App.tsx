@@ -44,6 +44,7 @@ const WelcomePage = lazy(() => import("./pages/WelcomePage"));
 
 // Lazy-load admin pages
 const PurchaseListPage = lazy(() => import("./pages/admin-v2/PurchaseListPage"));
+const WorkQueuePage = lazy(() => import("./pages/admin-v2/WorkQueuePage"));
 const NewPurchaseFormPage = lazy(() => import("./pages/admin-v2/NewPurchaseFormPage"));
 const BatchDetailPage = lazy(() => import("./pages/admin-v2/BatchDetailPage"));
 const ProductListPage = lazy(() => import("./pages/admin-v2/ProductListPage"));
@@ -56,16 +57,21 @@ const CustomerListPage = lazy(() => import("./pages/admin-v2/CustomerListPage"))
 const CustomerDetailPage = lazy(() => import("./pages/admin-v2/CustomerDetailPage"));
 const ChannelFeesPage = lazy(() => import("./pages/admin-v2/ChannelFeesPage"));
 const ShippingRatesPage = lazy(() => import("./pages/admin-v2/ShippingRatesPage"));
+const EbayStorefrontPage = lazy(() => import("./pages/admin-v2/EbayStorefrontPage"));
 const DataSyncPage = lazy(() => import("./pages/admin-v2/DataSyncPage"));
 const IntakePage = lazy(() => import("./pages/admin-v2/IntakePage"));
 const OperationsPage = lazy(() => import("./pages/admin-v2/OperationsPage"));
+const SettingsSystemPage = lazy(() => import("./pages/admin-v2/SettingsSystemPage"));
+const IntegrationsSettingsPage = lazy(() => import("./pages/admin-v2/IntegrationsSettingsPage"));
 const ChannelMappingsSettingsPage = lazy(() => import("./pages/admin-v2/ChannelMappingsSettingsPage"));
 const AppHealthPage = lazy(() => import("./pages/admin-v2/AppHealthPage"));
 const SeoGeoPage = lazy(() => import("./pages/admin-v2/SeoGeoPage"));
 const TranscriptsPage = lazy(() => import("./pages/admin-v2/TranscriptsPage"));
+const MarketingPlaceholderPage = lazy(() => import("./pages/admin-v2/MarketingPlaceholderPage"));
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
+const GmcAdminPage = lazy(() => import("./pages/admin-v2/GmcAdminPage"));
 
 // Lazy-load 404
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -149,6 +155,8 @@ const App = () => (
             <Route path="/account" element={<NoIndexRoute title="Account" description="Private Kuso Oishii member account area." path="/account"><AccountPage /></NoIndexRoute>} />
 
             {/* Admin */}
+            <Route path="/admin" element={<AdminRoute path="/admin"><Navigate to="/admin/work-queue" replace /></AdminRoute>} />
+            <Route path="/admin/work-queue" element={<AdminRoute path="/admin/work-queue"><WorkQueuePage /></AdminRoute>} />
             <Route path="/admin/purchases" element={<AdminRoute path="/admin/purchases"><PurchaseListPage /></AdminRoute>} />
             <Route path="/admin/purchases/new" element={<AdminRoute path="/admin/purchases/new"><NewPurchaseFormPage /></AdminRoute>} />
             <Route path="/admin/purchases/:batchId" element={<AdminRoute path="/admin/purchases"><BatchDetailPage /></AdminRoute>} />
@@ -160,14 +168,26 @@ const App = () => (
             <Route path="/admin/customers/:customerId" element={<AdminRoute path="/admin/customers"><CustomerDetailPage /></AdminRoute>} />
             <Route path="/admin/payouts" element={<AdminRoute path="/admin/payouts"><PayoutListPage /></AdminRoute>} />
             <Route path="/admin/payouts/:payoutId" element={<AdminRoute path="/admin/payouts"><PayoutDetailPage /></AdminRoute>} />
-            <Route path="/admin/pricing" element={<AdminRoute path="/admin/pricing"><ChannelFeesPage /></AdminRoute>} />
-            <Route path="/admin/shipping-rates" element={<AdminRoute path="/admin/shipping-rates"><ShippingRatesPage /></AdminRoute>} />
+            <Route path="/admin/pricing" element={<AdminRoute path="/admin/pricing"><Navigate to="/admin/settings/pricing" replace /></AdminRoute>} />
+            <Route path="/admin/shipping-rates" element={<AdminRoute path="/admin/shipping-rates"><Navigate to="/admin/settings/shipping-rates" replace /></AdminRoute>} />
             <Route path="/admin/data-sync" element={<AdminRoute path="/admin/data-sync"><DataSyncPage /></AdminRoute>} />
+            <Route path="/admin/gmc" element={<AdminRoute path="/admin/gmc"><GmcAdminPage /></AdminRoute>} />
             <Route path="/admin/intake" element={<AdminRoute path="/admin/intake"><IntakePage /></AdminRoute>} />
             <Route path="/admin/operations" element={<AdminRoute path="/admin/operations"><OperationsPage /></AdminRoute>} />
+            <Route path="/admin/settings" element={<AdminRoute path="/admin/settings"><SettingsSystemPage /></AdminRoute>} />
+            <Route path="/admin/settings/integrations" element={<AdminRoute path="/admin/settings/integrations"><IntegrationsSettingsPage /></AdminRoute>} />
+            <Route path="/admin/settings/pricing" element={<AdminRoute path="/admin/settings/pricing"><ChannelFeesPage /></AdminRoute>} />
+            <Route path="/admin/settings/shipping-rates" element={<AdminRoute path="/admin/settings/shipping-rates"><ShippingRatesPage /></AdminRoute>} />
             <Route path="/admin/settings/channel-mappings" element={<AdminRoute path="/admin/settings/channel-mappings"><ChannelMappingsSettingsPage /></AdminRoute>} />
             <Route path="/admin/settings/seo-geo" element={<AdminRoute path="/admin/settings/seo-geo"><SeoGeoPage /></AdminRoute>} />
             <Route path="/admin/settings/app-health" element={<AdminRoute path="/admin/settings/app-health"><AppHealthPage /></AdminRoute>} />
+            <Route path="/admin/settings/transcripts" element={<AdminRoute path="/admin/settings/transcripts"><TranscriptsPage /></AdminRoute>} />
+            <Route path="/admin/marketing/google-analytics" element={<AdminRoute path="/admin/marketing/google-analytics"><MarketingPlaceholderPage channel="google-analytics" /></AdminRoute>} />
+            <Route path="/admin/marketing/facebook" element={<AdminRoute path="/admin/marketing/facebook"><MarketingPlaceholderPage channel="facebook" /></AdminRoute>} />
+            <Route path="/admin/marketing/instagram" element={<AdminRoute path="/admin/marketing/instagram"><MarketingPlaceholderPage channel="instagram" /></AdminRoute>} />
+            <Route path="/admin/marketing/twitter" element={<AdminRoute path="/admin/marketing/twitter"><MarketingPlaceholderPage channel="twitter" /></AdminRoute>} />
+            <Route path="/admin/marketing/youtube" element={<AdminRoute path="/admin/marketing/youtube"><MarketingPlaceholderPage channel="youtube" /></AdminRoute>} />
+            <Route path="/admin/system/transcripts" element={<AdminRoute path="/admin/system/transcripts"><Navigate to="/admin/settings/transcripts" replace /></AdminRoute>} />
             <Route path="/admin/qbo-callback" element={<AdminRoute path="/admin/qbo-callback"><QboCallbackPage /></AdminRoute>} />
             <Route path="/admin/ebay-callback" element={<AdminRoute path="/admin/ebay-callback"><EbayCallbackPage /></AdminRoute>} />
             <Route path="/admin/gmc-callback" element={<AdminRoute path="/admin/gmc-callback"><GmcCallbackPage /></AdminRoute>} />

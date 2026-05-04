@@ -5,6 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeWithAuth } from '@/lib/invokeWithAuth';
 
 export interface PricingSetting {
   key: string;
@@ -14,6 +15,21 @@ export interface PricingSetting {
 }
 
 const QUERY_KEY = ['v2', 'pricing-settings'] as const;
+const CHANNEL_CONFIG_QUERY_KEY = ['v2', 'channel-pricing-config'] as const;
+
+export interface ChannelPricingConfig {
+  id?: string;
+  channel: string;
+  auto_price_enabled: boolean;
+  max_increase_pct: number | null;
+  max_increase_amount: number | null;
+  max_decrease_pct: number | null;
+  max_decrease_amount: number | null;
+  market_undercut_min_pct: number | null;
+  market_undercut_min_amount: number | null;
+  market_undercut_max_pct: number | null;
+  market_undercut_max_amount: number | null;
+}
 
 export function usePricingSettings() {
   return useQuery({
@@ -51,6 +67,31 @@ export function useUpdatePricingSetting() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
+export function useChannelPricingConfig() {
+  return useQuery({
+    queryKey: CHANNEL_CONFIG_QUERY_KEY,
+    queryFn: async () => invokeWithAuth<ChannelPricingConfig[]>('admin-data', {
+      action: 'list-channel-pricing-config',
+    }),
+  });
+}
+
+export function useUpdateChannelPricingConfig() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (config: ChannelPricingConfig) => {
+      await invokeWithAuth('admin-data', {
+        action: 'upsert-channel-pricing-config',
+        ...config,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: CHANNEL_CONFIG_QUERY_KEY });
     },
   });
 }

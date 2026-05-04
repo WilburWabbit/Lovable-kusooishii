@@ -20,6 +20,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import type { Payout } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, SectionHead } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 import { toast } from "sonner";
 import { Download, Search } from "lucide-react";
 
@@ -109,7 +110,7 @@ const COLUMNS: ColumnDef<PayoutRow>[] = [
     key: "qboSyncStatus",
     label: "QBO",
     defaultVisible: true,
-    sortable: false,
+    sortable: true,
     render: (r) => {
       const color =
         r.qboSyncStatus === "synced"
@@ -377,10 +378,44 @@ export function PayoutView() {
                 {visibleCols.map((col) => (
                   <th key={col.key} className="px-3 py-1">
                     {col.sortable !== false ? (
-                      <TableFilterInput
-                        value={prefs.filters[col.key] ?? ""}
-                        onChange={(v) => setFilter(col.key, v)}
-                      />
+                      col.key === "channel" ? (
+                        <MultiSelectFilter
+                          value={prefs.filters[col.key] ?? ""}
+                          onChange={(value) => setFilter(col.key, value)}
+                          placeholder="All channels"
+                          options={[
+                            { value: "ebay", label: "eBay" },
+                            { value: "stripe", label: "Stripe" },
+                            { value: "blue_bell", label: "Blue Bell" },
+                          ]}
+                        />
+                      ) : col.key === "reconciliationStatus" ? (
+                        <MultiSelectFilter
+                          value={prefs.filters[col.key] ?? ""}
+                          onChange={(value) => setFilter(col.key, value)}
+                          placeholder="All statuses"
+                          options={[
+                            { value: "pending", label: "Pending" },
+                            { value: "reconciled", label: "Reconciled" },
+                          ]}
+                        />
+                      ) : col.key === "qboSyncStatus" ? (
+                        <MultiSelectFilter
+                          value={prefs.filters[col.key] ?? ""}
+                          onChange={(value) => setFilter(col.key, value)}
+                          placeholder="All QBO"
+                          options={[
+                            { value: "pending", label: "Pending" },
+                            { value: "synced", label: "Synced" },
+                            { value: "error", label: "Error" },
+                          ]}
+                        />
+                      ) : (
+                        <TableFilterInput
+                          value={prefs.filters[col.key] ?? ""}
+                          onChange={(v) => setFilter(col.key, v)}
+                        />
+                      )
                     ) : (
                       <span />
                     )}

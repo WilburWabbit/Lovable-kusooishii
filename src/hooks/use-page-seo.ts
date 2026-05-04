@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 const SITE_NAME = 'Kuso Oishii';
-const BASE_URL = 'https://www.kusooishii.com';
+const BASE_URL = 'https://kusooishii.com';
 const SEO_OWNER = 'usePageSeo';
 
 export interface PageSeoOptions {

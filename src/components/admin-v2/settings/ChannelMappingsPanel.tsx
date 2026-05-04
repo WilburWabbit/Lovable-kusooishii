@@ -58,7 +58,11 @@ export function ChannelMappingsPanel() {
     categoryId,
     viewScope,
   );
-  const { data: canonicalAttrs } = useCanonicalAttributes();
+  const { data: canonicalAttrs = [], isLoading: canonicalAttrsLoading } = useCanonicalAttributes();
+  const canonicalKeySet = useMemo(
+    () => new Set(canonicalAttrs.map((attribute) => attribute.key)),
+    [canonicalAttrs],
+  );
   const { data: schemaResult } = useEbayCategoryAspects(categoryId, marketplace);
   const { data: productCategories } = useProductChannelCategories(channel, marketplace);
 
@@ -198,6 +202,16 @@ export function ChannelMappingsPanel() {
     if (!editing.canonical_key && !editing.constant_value) {
       toast.error("Set a canonical key or a constant value");
       return;
+    }
+    if (editing.canonical_key) {
+      if (canonicalAttrsLoading) {
+        toast.error("Canonical attributes are still loading");
+        return;
+      }
+      if (!canonicalKeySet.has(editing.canonical_key)) {
+        toast.error(`Unknown canonical attribute: ${editing.canonical_key}`);
+        return;
+      }
     }
     try {
       await upsert.mutateAsync(editing);
