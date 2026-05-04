@@ -304,9 +304,35 @@ function coerceAspectValue(aspectKey: string, value: unknown): unknown {
     if (typeof value === "boolean") return value;
     return ["true", "1", "yes"].includes(String(value).toLowerCase());
   }
+  if (aspectKey === "availability") {
+    const normalized = String(value).trim().toUpperCase().replace(/[\s-]+/g, "_");
+    const aliases: Record<string, string> = {
+      IN_STOCK: "IN_STOCK",
+      OUT_OF_STOCK: "OUT_OF_STOCK",
+      PREORDER: "PREORDER",
+      PRE_ORDER: "PREORDER",
+      LIMITED_AVAILABILITY: "LIMITED_AVAILABILITY",
+      BACKORDER: "BACKORDER",
+    };
+    return aliases[normalized] ?? value;
+  }
+  if (aspectKey === "condition") {
+    const normalized = String(value).trim().toUpperCase().replace(/[\s-]+/g, "_");
+    const aliases: Record<string, string> = {
+      NEW: "NEW",
+      USED: "USED",
+      REFURBISHED: "REFURBISHED",
+    };
+    return aliases[normalized] ?? value;
+  }
   if (aspectKey === "productTypes") {
     if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
     return [String(value)];
+  }
+  if (aspectKey === "gtin" || aspectKey === "gtins") {
+    const values = Array.isArray(value) ? value : [value];
+    const gtins = values.map((item) => cleanBarcode(item)).filter(Boolean);
+    return gtins.length > 0 ? gtins : undefined;
   }
   if (aspectKey === "shippingWeight.value") {
     const parsed = Number(value);
@@ -322,6 +348,12 @@ function coerceAspectValue(aspectKey: string, value: unknown): unknown {
 function setProductAspect(productPayload: Record<string, unknown>, aspectKey: string, value: unknown) {
   const coerced = coerceAspectValue(aspectKey, value);
   if (coerced === undefined) return;
+
+  if (aspectKey === "gtin" || aspectKey === "gtins") {
+    productPayload.gtins = coerced;
+    delete productPayload.identifierExists;
+    return;
+  }
 
   if (aspectKey === "price.amountMicros" || aspectKey === "price.currencyCode") {
     const price = typeof productPayload.price === "object" && productPayload.price
@@ -444,8 +476,8 @@ export function buildGmcProductInput(
   const conditionGrade = Number(sku.condition_grade ?? 3);
   const weightKg = Number(product.weight_kg ?? 0);
   const gtin = selectGmcGtin(product);
-  const availability = stockCount > 0 ? "in_stock" : "out_of_stock";
-  const condition = conditionGrade <= 2 ? "new" : "used";
+  const availability = stockCount > 0 ? "IN_STOCK" : "OUT_OF_STOCK";
+  const condition = conditionGrade <= 2 ? "NEW" : "USED";
   const productTypePath = cleanText(product.subtheme_name)
     ? `Toys > LEGO > ${cleanText(product.subtheme_name)}`
     : "Toys > LEGO";
@@ -455,7 +487,7 @@ export function buildGmcProductInput(
   if (!gtin.gtin) warnings.push("missing_gtin_using_brand_mpn");
   if (!gmcCategory) warnings.push("missing_gmc_product_category");
 
-  const productPayload: Record<string, unknown> = {
+  const productAttributes: Record<string, unknown> = {
     title,
     description,
     link: `${siteUrl}/sets/${encodeURIComponent(mpn)}`,
@@ -473,13 +505,13 @@ export function buildGmcProductInput(
   };
 
   if (gtin.gtin) {
-    productPayload.gtin = gtin.gtin;
+    productAttributes.gtins = [gtin.gtin];
   } else {
-    productPayload.identifierExists = false;
+    productAttributes.identifierExists = false;
   }
-  if (gmcCategory) productPayload.googleProductCategory = gmcCategory;
+  if (gmcCategory) productAttributes.googleProductCategory = gmcCategory;
   if (Number.isFinite(weightKg) && weightKg > 0) {
-    productPayload.shippingWeight = { value: weightKg, unit: "kg" };
+    productAttributes.shippingWeight = { value: weightKg, unit: "kg" };
   }
 
   const sourceValues = buildSourceValueMap({
@@ -500,19 +532,19 @@ export function buildGmcProductInput(
     identifierExists: Boolean(gtin.gtin),
     productTypePath,
   });
-  applyGmcMappings(productPayload, mappings, sourceValues, warnings);
+  applyGmcMappings(productAttributes, mappings, sourceValues, warnings);
 
-  const pricePayload = productPayload.price as Record<string, unknown> | undefined;
+  const pricePayload = productAttributes.price as Record<string, unknown> | undefined;
   const finalPriceAmountMicros = Number(pricePayload?.amountMicros ?? 0);
   if (!Number.isFinite(finalPriceAmountMicros) || finalPriceAmountMicros <= 0) {
     throw new Error(`Google Shopping listing ${skuCode} has no listed price`);
   }
-  if (!cleanText(productPayload.description)) throw new Error(`Google Shopping listing ${skuCode} has no description`);
-  if (!cleanText(productPayload.imageLink)) throw new Error(`Google Shopping listing ${skuCode} has no primary image`);
+  if (!cleanText(productAttributes.description)) throw new Error(`Google Shopping listing ${skuCode} has no description`);
+  if (!cleanText(productAttributes.imageLink)) throw new Error(`Google Shopping listing ${skuCode} has no primary image`);
 
   const finalWarnings = warnings.filter((warning) => {
-    if (warning === "missing_gtin_using_brand_mpn" && !isBlank(productPayload.gtin)) return false;
-    if (warning === "missing_gmc_product_category" && !isBlank(productPayload.googleProductCategory)) return false;
+    if (warning === "missing_gtin_using_brand_mpn" && !isBlank(productAttributes.gtins)) return false;
+    if (warning === "missing_gmc_product_category" && !isBlank(productAttributes.googleProductCategory)) return false;
     return true;
   });
 
@@ -521,8 +553,7 @@ export function buildGmcProductInput(
       offerId: skuCode,
       contentLanguage: "en",
       feedLabel: "GB",
-      channel: "ONLINE",
-      product: productPayload,
+      productAttributes,
     },
     warnings: finalWarnings,
   };

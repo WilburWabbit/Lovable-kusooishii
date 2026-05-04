@@ -3,12 +3,10 @@ import {
   Activity,
   ArrowUpDown,
   Bot,
-  FileSearch,
   Map,
   MessageSquare,
   Receipt,
   Settings,
-  Store,
   Truck,
 } from "lucide-react";
 
@@ -32,7 +30,6 @@ export const adminSettingsGroups: AdminSettingsGroup[] = [
     items: [
       { label: "Integrations", to: "/admin/settings/integrations", icon: Settings, detail: "QBO, Stripe, eBay, BrickEconomy, GMC, and AI provider credentials." },
       { label: "Data Sync", to: "/admin/data-sync", icon: ArrowUpDown, detail: "Staging errors, health checks, imports, and CSV sync controls." },
-      { label: "Google Merchant", to: "/admin/gmc", icon: Store, detail: "Merchant feed readiness and channel operation page." },
     ],
   },
   {
@@ -42,7 +39,6 @@ export const adminSettingsGroups: AdminSettingsGroup[] = [
       { label: "Pricing Rules", to: "/admin/settings/pricing", icon: Receipt, detail: "Channel fees, selling-cost defaults, and pricing automation actions." },
       { label: "Shipping Rates", to: "/admin/settings/shipping-rates", icon: Truck, detail: "Carrier rate tables used by fulfilment and pricing." },
       { label: "Channel Mappings", to: "/admin/settings/channel-mappings", icon: Map, detail: "Canonical attributes, item specifics, and condition mappings." },
-      { label: "SEO/GEO", to: "/admin/settings/seo-geo", icon: FileSearch, detail: "Search and generative answer optimisation documents." },
     ],
   },
   {

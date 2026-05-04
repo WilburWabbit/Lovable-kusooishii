@@ -44,15 +44,41 @@ describe("GMC product input mapping", () => {
 
   it("preserves the versioned MPN in the payload", () => {
     const { input } = buildGmcProductInput(baseListing, baseSku, { ...baseProduct, ean: "5012345678901" }, 2, "https://kuso.example");
-    expect((input.product as Record<string, unknown>).mpn).toBe("75367-1");
-    expect((input.product as Record<string, unknown>).itemGroupId).toBe("75367-1");
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.mpn).toBe("75367-1");
+    expect(productAttributes.itemGroupId).toBe("75367-1");
+    expect(productAttributes.gtins).toEqual(["5012345678901"]);
+    expect(input).not.toHaveProperty("channel");
   });
 
   it("uses brand and identifierExists=false when barcode is absent, with a warning", () => {
     const { input, warnings } = buildGmcProductInput(baseListing, baseSku, baseProduct, 1, "https://kuso.example");
-    expect((input.product as Record<string, unknown>).brand).toBe("LEGO");
-    expect((input.product as Record<string, unknown>).identifierExists).toBe(false);
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.brand).toBe("LEGO");
+    expect(productAttributes.identifierExists).toBe(false);
+    expect(productAttributes.availability).toBe("IN_STOCK");
+    expect(productAttributes.condition).toBe("USED");
     expect(warnings).toContain("missing_gtin_using_brand_mpn");
+  });
+
+  it("normalizes legacy mapping values to v1 enum and gtins fields", () => {
+    const { input } = buildGmcProductInput(
+      baseListing,
+      baseSku,
+      baseProduct,
+      0,
+      "https://kuso.example",
+      [
+        { aspect_key: "availability", constant_value: "out_of_stock" },
+        { aspect_key: "condition", constant_value: "used" },
+        { aspect_key: "gtin", constant_value: " 5012345678901 " },
+      ],
+    );
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.availability).toBe("OUT_OF_STOCK");
+    expect(productAttributes.condition).toBe("USED");
+    expect(productAttributes.gtins).toEqual(["5012345678901"]);
+    expect(productAttributes).not.toHaveProperty("identifierExists");
   });
 
   it("blocks payload creation when required publish fields are missing", () => {

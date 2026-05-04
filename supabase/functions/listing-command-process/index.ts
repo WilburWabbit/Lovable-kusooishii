@@ -20,7 +20,7 @@ const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 50;
 const MAX_RETRY_COUNT = 5;
 const EBAY_API = "https://api.ebay.com";
-const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1beta";
+const GMC_API_BASE = "https://merchantapi.googleapis.com/products/v1";
 
 type ListingCommand = {
   id: string;
@@ -94,6 +94,66 @@ async function parseJsonResponse(res: Response): Promise<Record<string, unknown>
   } catch {
     return { raw_response: text };
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringifyApiError(payload: Record<string, unknown>, fallback: string): string {
+  if (typeof payload.message === "string" && payload.message.trim()) return payload.message;
+  if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
+  if (isRecord(payload.error)) {
+    const error = payload.error;
+    const parts = [
+      typeof error.message === "string" && error.message.trim() ? error.message : null,
+      error.status ? `status=${String(error.status)}` : null,
+      error.code ? `code=${String(error.code)}` : null,
+      error.details ? `details=${JSON.stringify(error.details)}` : null,
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join(" ") : JSON.stringify(error);
+  }
+  if (typeof payload.raw_response === "string" && payload.raw_response.trim()) return payload.raw_response;
+  return fallback;
+}
+
+function toBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function getGmcDataSourceName(conn: GmcConnection): string | null {
+  const dataSource = conn.data_source?.trim();
+  if (!dataSource) return null;
+  if (dataSource.startsWith("accounts/")) return dataSource;
+  return `accounts/${conn.merchant_id}/dataSources/${dataSource}`;
+}
+
+function getGmcProductInputName(merchantId: string, externalListingId: string | null, offerId: string): string {
+  const storedName = externalListingId?.trim() ?? "";
+  const resourceMatch = storedName.match(/^accounts\/[^/]+\/productInputs\/(.+)$/);
+  if (resourceMatch) {
+    const rawSegment = resourceMatch[1] ?? "";
+    let decodedSegment = rawSegment;
+    try {
+      decodedSegment = decodeURIComponent(rawSegment);
+    } catch {
+      decodedSegment = rawSegment;
+    }
+    if (decodedSegment.startsWith("online~")) {
+      return `accounts/${merchantId}/productInputs/${toBase64Url(decodedSegment.replace(/^online~/, ""))}`;
+    }
+    if (decodedSegment.includes("~")) {
+      return `accounts/${merchantId}/productInputs/${toBase64Url(decodedSegment)}`;
+    }
+    return storedName;
+  }
+
+  const rawId = (storedName || offerId).replace(/^online~/, "");
+  const productInputId = rawId.includes("~") ? rawId : `en~GB~${rawId}`;
+  return `accounts/${merchantId}/productInputs/${toBase64Url(productInputId)}`;
 }
 
 async function recordListingCommandFailure(
@@ -686,7 +746,7 @@ async function ensureGmcToken(
 
   const payload = await parseJsonResponse(res);
   if (!res.ok) {
-    throw new Error(String(payload.error ?? payload.raw_response ?? `GMC token refresh failed [${res.status}]`));
+    throw new Error(stringifyApiError(payload, `GMC token refresh failed [${res.status}]`));
   }
 
   const accessToken = String(payload.access_token ?? "");
@@ -732,18 +792,27 @@ async function processGoogleShoppingCommand(
   if (!listing) throw new Error(`channel_listing ${command.entity_id} not found`);
 
   const listingRow = listing as Record<string, unknown>;
+  const dataSourceName = getGmcDataSourceName(conn);
 
   if (command.command_type === "end") {
     const externalListingId = listingRow.external_listing_id as string | null;
     if (externalListingId) {
+      if (!dataSourceName) {
+        throw new Error("No GMC data source configured on google_merchant_connection");
+      }
+      const productInputName = getGmcProductInputName(
+        conn.merchant_id,
+        externalListingId,
+        String(listingRow.external_sku ?? ""),
+      );
       const deleteRes = await fetchWithTimeout(
-        `${GMC_API_BASE}/accounts/${conn.merchant_id}/productInputs/${encodeURIComponent(externalListingId)}`,
+        `${GMC_API_BASE}/${productInputName}?dataSource=${encodeURIComponent(dataSourceName)}`,
         { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
         60_000,
       );
       if (!deleteRes.ok && deleteRes.status !== 404) {
         const payload = await parseJsonResponse(deleteRes);
-        throw new Error(String(payload.error ?? payload.raw_response ?? `GMC delete failed [${deleteRes.status}]`));
+        throw new Error(stringifyApiError(payload, `GMC delete failed [${deleteRes.status}]`));
       }
     }
 
@@ -787,9 +856,12 @@ async function processGoogleShoppingCommand(
   const stockCount = count ?? Number(listingRow.listed_quantity ?? 0);
   const gmcMappings = await getGmcMappings(admin);
   const { input: productInput, warnings } = buildGmcProductInput(listingRow, skuRow, product, stockCount, getSiteUrl(), gmcMappings);
+  if (!dataSourceName) {
+    throw new Error("No GMC data source configured on google_merchant_connection");
+  }
 
   const insertRes = await fetchWithTimeout(
-    `${GMC_API_BASE}/accounts/${conn.merchant_id}/productInputs:insert?dataSource=${encodeURIComponent(conn.data_source ?? "")}`,
+    `${GMC_API_BASE}/accounts/${conn.merchant_id}/productInputs:insert?dataSource=${encodeURIComponent(dataSourceName)}`,
     {
       method: "POST",
       headers: {
@@ -802,10 +874,14 @@ async function processGoogleShoppingCommand(
   );
   const payload = await parseJsonResponse(insertRes);
   if (!insertRes.ok) {
-    throw new Error(String(payload.error ?? payload.raw_response ?? `GMC insert failed [${insertRes.status}]`));
+    throw new Error(stringifyApiError(payload, `GMC insert failed [${insertRes.status}]`));
   }
 
-  const externalListingId = typeof payload.name === "string" ? payload.name : listingRow.external_listing_id ?? null;
+  const externalListingId = typeof payload.base64EncodedName === "string"
+    ? payload.base64EncodedName
+    : typeof payload.name === "string"
+      ? payload.name
+      : listingRow.external_listing_id ?? null;
   await admin
     .from("channel_listing")
     .update({

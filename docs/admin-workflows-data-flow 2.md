@@ -637,8 +637,13 @@ Admin UI ──→ gmc-auth (OAuth2 flow)
 Admin UI ──→ gmc-sync (action=publish_all)
                   │
                   ├─ Reads: sku, product, channel_listing (web), stock_unit
-                  ├─ Calls: Google Merchant API (/products/v1beta)
+                  ├─ Queues: outbound_command (target_system=google_shopping)
                   └─ Writes: channel_listing (channel=google_shopping, upsert)
+
+listing-command-process ──→ Google Merchant API (/products/v1)
+                  │
+                  ├─ Reads: outbound_command, channel_listing, sku, product, stock_unit
+                  └─ Writes: channel_listing, outbound_command, reconciliation_case
 
 Admin UI ──→ gmc-sync (action=sync_status)
                   │

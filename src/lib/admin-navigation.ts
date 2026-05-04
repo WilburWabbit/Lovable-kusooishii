@@ -1,11 +1,18 @@
 import type { ElementType } from "react";
 import {
+  BarChart3,
   ClipboardList,
+  Facebook,
+  FileSearch,
+  Instagram,
   Package,
   ShoppingBag,
+  Store,
+  Twitter,
   Users,
   Wallet,
   Settings,
+  Youtube,
 } from "lucide-react";
 
 export type AdminNavCountKey = "ungraded" | "actionNeeded";
@@ -68,6 +75,60 @@ export const adminSidebarSections: AdminNavSection[] = [
     ],
   },
   {
+    label: "Marketing",
+    items: [
+      {
+        icon: FileSearch,
+        label: "SEO/GEO",
+        to: "/admin/settings/seo-geo",
+        description: "Search, generative answer optimisation, sitemap, and structured data.",
+        match: ["/admin/settings/seo-geo"],
+      },
+      {
+        icon: Store,
+        label: "Google Merchant",
+        to: "/admin/gmc",
+        description: "Merchant feed readiness, mapping, publishing, and command recovery.",
+        match: ["/admin/gmc"],
+      },
+      {
+        icon: BarChart3,
+        label: "Google Analytics",
+        to: "/admin/marketing/google-analytics",
+        description: "Analytics reporting and campaign measurement workspace.",
+        match: ["/admin/marketing/google-analytics"],
+      },
+      {
+        icon: Facebook,
+        label: "Facebook",
+        to: "/admin/marketing/facebook",
+        description: "Facebook catalogue, campaign, and content controls.",
+        match: ["/admin/marketing/facebook"],
+      },
+      {
+        icon: Instagram,
+        label: "Instagram",
+        to: "/admin/marketing/instagram",
+        description: "Instagram shop, catalogue, and content controls.",
+        match: ["/admin/marketing/instagram"],
+      },
+      {
+        icon: Twitter,
+        label: "Twitter",
+        to: "/admin/marketing/twitter",
+        description: "Twitter channel publishing and campaign controls.",
+        match: ["/admin/marketing/twitter"],
+      },
+      {
+        icon: Youtube,
+        label: "YouTube",
+        to: "/admin/marketing/youtube",
+        description: "YouTube content planning and performance controls.",
+        match: ["/admin/marketing/youtube"],
+      },
+    ],
+  },
+  {
     label: "Admin",
     items: [
       {
@@ -75,7 +136,16 @@ export const adminSidebarSections: AdminNavSection[] = [
         label: "Settings/System",
         to: "/admin/settings",
         description: "Integrations, rules, mappings, diagnostics, and logs.",
-        match: ["/admin/settings", "/admin/data-sync", "/admin/gmc"],
+        match: [
+          "/admin/settings",
+          "/admin/settings/integrations",
+          "/admin/settings/pricing",
+          "/admin/settings/shipping-rates",
+          "/admin/settings/channel-mappings",
+          "/admin/settings/app-health",
+          "/admin/settings/transcripts",
+          "/admin/data-sync",
+        ],
       },
     ],
   },

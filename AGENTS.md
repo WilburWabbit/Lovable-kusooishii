@@ -62,6 +62,24 @@ This is a **LEGO resale commerce platform** — a full-stack web application wit
 - Do NOT build monolithic receive-validate-process-write Edge Functions
 - For migrations that may be run through Lovable SQL, do NOT use dollar-quoted function bodies (`$$` or `$function$`). Use single-quoted function bodies with doubled internal quotes, because Lovable's SQL runner can misparse dollar-quoted PL/pgSQL as an unterminated string.
 
+## Lovable Deployment Checks
+
+Whenever Lovable or any external agent receives, pulls, imports, or applies an external commit, it must check for database and Edge Function deployment work before declaring the change complete.
+
+1. Inspect the incoming commit/diff for new or changed files under `supabase/migrations/`.
+2. Run every new migration that has not already been applied, in timestamp/name order. If a migration cannot be executed, stop and report the exact filename and error.
+3. Inspect the incoming commit/diff for new or changed files under `supabase/functions/`.
+4. Deploy every new or changed Edge Function directory. The function name is the directory name immediately under `supabase/functions/`.
+5. After execution, report:
+   - migrations run
+   - migrations skipped because they were already applied
+   - Edge Functions deployed
+   - any failures or manual follow-up required
+
+When Codex or another agent creates a commit or push from this repository, its handoff message should include a Lovable-ready prompt listing the migrations that need to be run and Edge Functions that need to be deployed.
+
+Codex does not have access to Lovable's Supabase project or deployment controls for this app. Codex must prepare code, migrations, and deployment instructions, then hand off the actual migration execution and Edge Function deployment to Lovable or the project owner.
+
 ## Integration Architecture Patterns
 
 > Full analysis: `docs/knowledgebase/docs/qbo-integration-lessons.md`
