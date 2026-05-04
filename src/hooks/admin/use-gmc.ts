@@ -92,6 +92,7 @@ export interface GmcPublishResult {
 }
 
 export type GmcStatus = {
+  configured?: boolean;
   connected: boolean;
   expired?: boolean | null;
   merchant_id?: string | null;
@@ -100,8 +101,22 @@ export type GmcStatus = {
   last_updated?: string | null;
 };
 
+export type GmcDeveloperRegistrationStatus = {
+  success?: boolean;
+  registered: boolean;
+  needs_registration?: boolean;
+  merchant_id?: string | null;
+  developer_email?: string | null;
+  gcp_ids?: string[];
+  registration?: Record<string, unknown> | null;
+  error?: string | null;
+  error_metadata?: Record<string, unknown> | null;
+  checked_at?: string | null;
+};
+
 export const gmcKeys = {
   status: ["admin", "gmc", "status"] as const,
+  developerRegistration: ["admin", "gmc", "developer-registration"] as const,
   readiness: ["admin", "gmc", "readiness"] as const,
   events: ["admin", "gmc", "events"] as const,
 };
@@ -112,6 +127,19 @@ export function useGmcStatus() {
     queryFn: async (): Promise<GmcStatus> => {
       const data = await invokeWithAuth<GmcStatus>("gmc-auth", { action: "status" });
       return data && !("error" in data) ? data : { connected: false };
+    },
+  });
+}
+
+export function useGmcDeveloperRegistration(enabled = true) {
+  return useQuery({
+    queryKey: gmcKeys.developerRegistration,
+    enabled,
+    retry: false,
+    queryFn: async (): Promise<GmcDeveloperRegistrationStatus> => {
+      return invokeWithAuth<GmcDeveloperRegistrationStatus>("gmc-auth", {
+        action: "developer_registration_status",
+      });
     },
   });
 }
@@ -141,6 +169,7 @@ export function useGmcMutations() {
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: gmcKeys.status }),
+      queryClient.invalidateQueries({ queryKey: gmcKeys.developerRegistration }),
       queryClient.invalidateQueries({ queryKey: gmcKeys.readiness }),
       queryClient.invalidateQueries({ queryKey: gmcKeys.events }),
     ]);
@@ -163,6 +192,15 @@ export function useGmcMutations() {
 
   const refreshToken = useMutation({
     mutationFn: async () => invokeWithAuth("gmc-auth", { action: "refresh" }),
+    onSuccess: invalidate,
+  });
+
+  const registerDeveloper = useMutation({
+    mutationFn: async (developerEmail: string) =>
+      invokeWithAuth<GmcDeveloperRegistrationStatus>("gmc-auth", {
+        action: "register_developer",
+        developer_email: developerEmail,
+      }),
     onSuccess: invalidate,
   });
 
@@ -250,6 +288,7 @@ export function useGmcMutations() {
     saveConfig,
     disconnect,
     refreshToken,
+    registerDeveloper,
     publishAll,
     syncStatus,
     runCommand,

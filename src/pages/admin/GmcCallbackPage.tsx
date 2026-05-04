@@ -42,7 +42,7 @@ export default function GmcCallbackPage() {
         localStorage.removeItem("gmc_data_source");
         setStatus("success");
         setMessage("Successfully connected to Google Merchant Centre!");
-        setTimeout(() => navigate("/admin/settings/integrations"), 2000);
+        setTimeout(() => navigate("/admin/settings/integrations?entity=google"), 2000);
       } catch (err) {
         setStatus("error");
         setMessage(err instanceof Error ? err.message : "Failed to connect");

@@ -942,413 +942,424 @@ export default function SeoGeoPage() {
           <Metric label="In Sitemap" value={counts.sitemap} tone="green" />
         </div>
 
-        <SurfaceCard>
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <CheckSquare className="h-4 w-4 text-amber-600" />
-                <SectionHead>Bulk Create & Review</SectionHead>
-              </div>
-              <p className="mt-1 max-w-3xl text-xs text-zinc-500">
-                Batch SEO/GEO drafts across selected document families, then review, edit, save, or approve each revision.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleBulkApply("save")}
-                disabled={bulkAction !== null || bulkGenerating || bulkIncludedCount === 0}
-              >
-                {bulkAction === "save" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save selected drafts
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => handleBulkApply("publish")}
-                disabled={bulkAction !== null || bulkGenerating || bulkIncludedCount === 0}
-              >
-                {bulkAction === "publish" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                Approve selected
-              </Button>
-            </div>
-          </div>
+        <Tabs defaultValue="regular" className="space-y-5">
+          <TabsList className="bg-zinc-100">
+            <TabsTrigger value="regular">Regular Create</TabsTrigger>
+            <TabsTrigger value="bulk">Bulk Create</TabsTrigger>
+          </TabsList>
 
-          <div className="mt-4 grid gap-5 xl:grid-cols-[380px_1fr]">
-            <div className="grid gap-4">
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">Document Types</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {DOCUMENT_TYPE_OPTIONS.map((option) => (
-                    <BulkFilterToggle
-                      key={option.value}
-                      label={option.label}
-                      checked={bulkTypes.includes(option.value)}
-                      onCheckedChange={(checked) => toggleBulkType(option.value, checked)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">Statuses</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {BULK_STATUS_OPTIONS.map((option) => (
-                    <BulkFilterToggle
-                      key={option.value}
-                      label={option.label}
-                      checked={bulkStatuses.includes(option.value)}
-                      onCheckedChange={(checked) => toggleBulkStatus(option.value, checked)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                <Input
-                  value={bulkQuery}
-                  onChange={(event) => setBulkQuery(event.target.value)}
-                  placeholder="Filter bulk candidates..."
-                  className="pl-9"
-                />
-              </div>
-
-              <div className="rounded-md border border-zinc-200">
-                <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-2">
-                  <span className="text-xs font-semibold text-zinc-700">{bulkCandidates.length} candidates</span>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={selectAllBulkCandidates}>
-                      Select shown
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearBulkSelection}>
-                      Clear
-                    </Button>
+          <TabsContent value="regular" className="mt-0">
+            <div className="grid gap-5 xl:grid-cols-[480px_1fr]">
+              <SurfaceCard className="min-h-[720px]" noPadding>
+                <div className="border-b border-zinc-200 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <SectionHead>Documents</SectionHead>
+                    <span className="text-xs text-zinc-500">{filtered.length} shown</span>
                   </div>
-                </div>
-                <div className="max-h-[320px] overflow-auto">
-                  {bulkCandidates.map((record) => (
-                    <label
-                      key={record.id}
-                      className="flex cursor-pointer gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0 hover:bg-zinc-50"
-                    >
-                      <Checkbox
-                        checked={bulkSelection.has(record.id)}
-                        onCheckedChange={(checked) => toggleBulkSelection(record.id, checked === true)}
-                        className="mt-0.5"
+                  <div className="grid gap-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                      <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search product name, MPN, theme, route..."
+                        className="pl-9"
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="mb-1 flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-[10px] uppercase text-zinc-500">{record.document_type}</span>
-                          {statusBadge(record)}
-                        </span>
-                        <span className="block truncate text-[12px] font-semibold text-zinc-900">{displayTitle(record)}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{displaySubtitle(record)}</span>
-                      </span>
-                    </label>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as SeoDocumentType | "all")}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All document types</SelectItem>
+                          <SelectItem value="route">Routes</SelectItem>
+                          <SelectItem value="product">Products</SelectItem>
+                          <SelectItem value="theme">Themes</SelectItem>
+                          <SelectItem value="collection">Collections</SelectItem>
+                          <SelectItem value="system">System</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as SeoStatusFilter)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All statuses</SelectItem>
+                          <SelectItem value="draft">Drafts</SelectItem>
+                          <SelectItem value="missing">Needs content</SelectItem>
+                          <SelectItem value="indexable">Indexable</SelectItem>
+                          <SelectItem value="noindex">Noindex</SelectItem>
+                          <SelectItem value="sitemap">In sitemap</SelectItem>
+                          <SelectItem value="hidden">Hidden</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="max-h-[620px] overflow-auto">
+                  {isLoading ? <div className="p-4 text-sm text-zinc-500">Loading SEO documents...</div> : null}
+                  {filtered.map((record) => (
+                    <button
+                      key={record.id}
+                      type="button"
+                      onClick={() => setSelectedId(record.id)}
+                      className={`block w-full border-b border-zinc-100 px-4 py-3 text-left transition-colors ${
+                        selected?.id === record.id ? "bg-amber-50" : "hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[11px] uppercase text-zinc-500">{record.document_type}</span>
+                        {statusBadge(record)}
+                        {record.document_type === "product" && record.product?.status ? (
+                          <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
+                            {record.product.status}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="truncate text-[13px] font-semibold text-zinc-900">
+                        {displayTitle(record)}
+                      </div>
+                      <div className="mt-1 truncate text-[11px] text-zinc-500">
+                        {displaySubtitle(record)}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-[10px] text-zinc-400">
+                        {record.revision?.canonical_path ?? record.route_path ?? record.document_key}
+                      </div>
+                    </button>
                   ))}
-                  {bulkCandidates.length === 0 ? (
-                    <div className="p-3 text-sm text-zinc-500">No matching bulk candidates.</div>
+                  {!isLoading && filtered.length === 0 ? (
+                    <div className="p-4 text-sm text-zinc-500">No SEO documents match this filter.</div>
                   ) : null}
                 </div>
-              </div>
+              </SurfaceCard>
 
-              <Button onClick={handleBulkGenerate} disabled={bulkGenerating || bulkAction !== null || bulkSelectedRecords.length === 0}>
-                {bulkGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                {bulkGenerating ? "Generating..." : `Generate ${bulkSelectedRecords.length || ""} selected`}
-              </Button>
-            </div>
-
-            <div className="min-w-0">
-              <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-zinc-800">
-                    {bulkReviewItems.length > 0
-                      ? `${bulkReadyCount} ready · ${bulkIncludedCount} selected for approval`
-                      : "No generated drafts yet"}
-                  </div>
-                  {bulkErrorCount > 0 ? (
-                    <div className="flex items-center gap-1 text-xs font-semibold text-red-600">
-                      <XCircle className="h-3.5 w-3.5" />
-                      {bulkErrorCount} failed
-                    </div>
-                  ) : null}
-                </div>
-                {bulkReviewItems.length > 0 ? (
-                  <Progress value={bulkProgressValue} className="mt-3 h-2" />
-                ) : null}
-              </div>
-
-              <div className="grid gap-3">
-                {bulkReviewItems.map(({ record, result }) => (
-                  <BulkResultCard
-                    key={record.id}
-                    record={record}
-                    result={result}
-                    disabled={bulkGenerating || bulkAction !== null}
-                    onIncludedChange={(included) => setBulkResultIncluded(record.id, included)}
-                    onEditorChange={(update) => updateBulkEditor(record.id, update)}
-                    onSave={() => handleBulkApply("save", [record.id])}
-                    onPublish={() => handleBulkApply("publish", [record.id])}
-                  />
-                ))}
-                {bulkReviewItems.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500">
-                    Generated drafts will appear here for review.
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </SurfaceCard>
-
-        <div className="grid gap-5 xl:grid-cols-[480px_1fr]">
-          <SurfaceCard className="min-h-[720px]" noPadding>
-            <div className="border-b border-zinc-200 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <SectionHead>Documents</SectionHead>
-                <span className="text-xs text-zinc-500">{filtered.length} shown</span>
-              </div>
-              <div className="grid gap-2">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search product name, MPN, theme, route..."
-                    className="pl-9"
-                  />
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as SeoDocumentType | "all")}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All document types</SelectItem>
-                      <SelectItem value="route">Routes</SelectItem>
-                      <SelectItem value="product">Products</SelectItem>
-                      <SelectItem value="theme">Themes</SelectItem>
-                      <SelectItem value="collection">Collections</SelectItem>
-                      <SelectItem value="system">System</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as SeoStatusFilter)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="draft">Drafts</SelectItem>
-                      <SelectItem value="missing">Needs content</SelectItem>
-                      <SelectItem value="indexable">Indexable</SelectItem>
-                      <SelectItem value="noindex">Noindex</SelectItem>
-                      <SelectItem value="sitemap">In sitemap</SelectItem>
-                      <SelectItem value="hidden">Hidden</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            <div className="max-h-[620px] overflow-auto">
-              {isLoading ? <div className="p-4 text-sm text-zinc-500">Loading SEO documents...</div> : null}
-              {filtered.map((record) => (
-                <button
-                  key={record.id}
-                  type="button"
-                  onClick={() => setSelectedId(record.id)}
-                  className={`block w-full border-b border-zinc-100 px-4 py-3 text-left transition-colors ${
-                    selected?.id === record.id ? "bg-amber-50" : "hover:bg-zinc-50"
-                  }`}
-                >
-                  <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[11px] uppercase text-zinc-500">{record.document_type}</span>
-                    {statusBadge(record)}
-                    {record.document_type === "product" && record.product?.status ? (
-                      <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
-                        {record.product.status}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="truncate text-[13px] font-semibold text-zinc-900">
-                    {displayTitle(record)}
-                  </div>
-                  <div className="mt-1 truncate text-[11px] text-zinc-500">
-                    {displaySubtitle(record)}
-                  </div>
-                  <div className="mt-1 truncate font-mono text-[10px] text-zinc-400">
-                    {record.revision?.canonical_path ?? record.route_path ?? record.document_key}
-                  </div>
-                </button>
-              ))}
-              {!isLoading && filtered.length === 0 ? (
-                <div className="p-4 text-sm text-zinc-500">No SEO documents match this filter.</div>
-              ) : null}
-            </div>
-          </SurfaceCard>
-
-          <SurfaceCard>
-            {!selectedView || !editor ? (
-              <div className="text-sm text-zinc-500">Select a document to edit.</div>
-            ) : (
-              <div className="grid gap-5">
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate text-base font-bold text-zinc-900">{displayTitle(selectedView)}</h2>
-                      {statusBadge(selectedView)}
-                    </div>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {displaySubtitle(selectedView)}
-                    </p>
-                    <p className="mt-1 text-[11px] text-zinc-400">
-                      {selectedView.revision?.status === "draft" ? "Saved draft" : "Published revision"} {selectedView.revision?.revision_number ?? "none"} · {selectedView.revision?.source ?? "unpublished"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {selected.draft_revision || selected.published_revision ? (
-                      <div className="flex rounded-md border border-zinc-200 bg-white p-0.5">
-                        <Button
-                          variant={revisionView === "published" ? "default" : "ghost"}
-                          size="sm"
-                          className="h-8 px-2.5"
-                          disabled={!selected.published_revision}
-                          onClick={() => setRevisionView("published")}
-                        >
-                          Published
+              <SurfaceCard>
+                {!selectedView || !editor ? (
+                  <div className="text-sm text-zinc-500">Select a document to edit.</div>
+                ) : (
+                  <div className="grid gap-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="truncate text-base font-bold text-zinc-900">{displayTitle(selectedView)}</h2>
+                          {statusBadge(selectedView)}
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {displaySubtitle(selectedView)}
+                        </p>
+                        <p className="mt-1 text-[11px] text-zinc-400">
+                          {selectedView.revision?.status === "draft" ? "Saved draft" : "Published revision"} {selectedView.revision?.revision_number ?? "none"} · {selectedView.revision?.source ?? "unpublished"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selected.draft_revision || selected.published_revision ? (
+                          <div className="flex rounded-md border border-zinc-200 bg-white p-0.5">
+                            <Button
+                              variant={revisionView === "published" ? "default" : "ghost"}
+                              size="sm"
+                              className="h-8 px-2.5"
+                              disabled={!selected.published_revision}
+                              onClick={() => setRevisionView("published")}
+                            >
+                              Published
+                            </Button>
+                            <Button
+                              variant={revisionView === "draft" ? "default" : "ghost"}
+                              size="sm"
+                              className="h-8 px-2.5"
+                              disabled={!selected.draft_revision}
+                              onClick={() => setRevisionView("draft")}
+                            >
+                              Draft
+                            </Button>
+                          </div>
+                        ) : null}
+                        {editor.canonical_path ? (
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={editor.canonical_path} target="_blank" rel="noreferrer">
+                              <ExternalLink className="mr-2 h-4 w-4" /> View Page
+                            </a>
+                          </Button>
+                        ) : null}
+                        <Button variant="outline" size="sm" onClick={() => generate.mutate()} disabled={generate.isPending}>
+                          {generate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                          {generate.isPending ? "Generating..." : "Generate Draft"}
                         </Button>
-                        <Button
-                          variant={revisionView === "draft" ? "default" : "ghost"}
-                          size="sm"
-                          className="h-8 px-2.5"
-                          disabled={!selected.draft_revision}
-                          onClick={() => setRevisionView("draft")}
-                        >
-                          Draft
+                        <Button variant="outline" size="sm" onClick={() => saveDraft.mutate()} disabled={saveDraft.isPending || publish.isPending}>
+                          <Save className="mr-2 h-4 w-4" /> {saveDraft.isPending ? "Saving..." : "Save Draft"}
+                        </Button>
+                        <Button size="sm" onClick={() => publish.mutate()} disabled={publish.isPending || saveDraft.isPending}>
+                          <Save className="mr-2 h-4 w-4" /> {publish.isPending ? "Publishing..." : "Publish Revision"}
                         </Button>
                       </div>
-                    ) : null}
-                    {editor.canonical_path ? (
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={editor.canonical_path} target="_blank" rel="noreferrer">
-                          <ExternalLink className="mr-2 h-4 w-4" /> View Page
-                        </a>
-                      </Button>
-                    ) : null}
-                    <Button variant="outline" size="sm" onClick={() => generate.mutate()} disabled={generate.isPending}>
-                      {generate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      {generate.isPending ? "Generating..." : "Generate Draft"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => saveDraft.mutate()} disabled={saveDraft.isPending || publish.isPending}>
-                      <Save className="mr-2 h-4 w-4" /> {saveDraft.isPending ? "Saving..." : "Save Draft"}
-                    </Button>
-                    <Button size="sm" onClick={() => publish.mutate()} disabled={publish.isPending || saveDraft.isPending}>
-                      <Save className="mr-2 h-4 w-4" /> {publish.isPending ? "Publishing..." : "Publish Revision"}
-                    </Button>
+                    </div>
+
+                    <PreviewPanel record={selectedView} editor={editor} />
+
+                    <Tabs defaultValue="content" className="space-y-4">
+                      <TabsList className="bg-zinc-100">
+                        <TabsTrigger value="content">Content</TabsTrigger>
+                        <TabsTrigger value="discovery">Discovery</TabsTrigger>
+                        <TabsTrigger value="json">JSON Payloads</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="content" className="space-y-4">
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <Field label="Title Tag">
+                            <Input value={editor.title_tag} onChange={(event) => setEditor({ ...editor, title_tag: event.target.value })} maxLength={80} />
+                            <p className="mt-1 text-[11px] text-zinc-500">{editor.title_tag.length}/60 target</p>
+                          </Field>
+                          <Field label="Canonical Path">
+                            <Input value={editor.canonical_path} onChange={(event) => setEditor({ ...editor, canonical_path: event.target.value })} />
+                          </Field>
+                          <Field label="Meta Description" className="lg:col-span-2">
+                            <Textarea value={editor.meta_description} onChange={(event) => setEditor({ ...editor, meta_description: event.target.value })} rows={4} />
+                            <p className="mt-1 text-[11px] text-zinc-500">{editor.meta_description.length}/160 target</p>
+                          </Field>
+                          <Field label="Keywords" className="lg:col-span-2">
+                            <Input value={editor.keywords} onChange={(event) => setEditor({ ...editor, keywords: event.target.value })} placeholder="comma, separated, terms" />
+                          </Field>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="discovery" className="space-y-4">
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <Field label="Indexation">
+                            <Select value={editor.indexation_policy} onValueChange={(value) => {
+                              const next = value as SeoIndexationPolicy;
+                              setEditor({
+                                ...editor,
+                                indexation_policy: next,
+                                robots_directive: next === "noindex" ? "noindex, nofollow" : "index, follow",
+                                sitemap_include: next === "index" ? editor.sitemap_include : false,
+                              });
+                            }}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="index">Index</SelectItem>
+                                <SelectItem value="noindex">Noindex</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field label="Robots Directive">
+                            <Input value={editor.robots_directive} onChange={(event) => setEditor({ ...editor, robots_directive: event.target.value })} />
+                          </Field>
+                        </div>
+
+                        <div className="grid gap-4 lg:grid-cols-[160px_1fr_1fr_120px]">
+                          <Field label="Sitemap">
+                            <div className="flex h-10 items-center gap-2">
+                              <Switch
+                                checked={editor.sitemap_include}
+                                disabled={editor.indexation_policy === "noindex"}
+                                onCheckedChange={(checked) => setEditor({ ...editor, sitemap_include: checked })}
+                              />
+                              <span className="text-sm text-zinc-600">{editor.sitemap_include ? "Included" : "Excluded"}</span>
+                            </div>
+                          </Field>
+                          <Field label="Family">
+                            <Input value={editor.sitemap_family} onChange={(event) => setEditor({ ...editor, sitemap_family: event.target.value })} />
+                          </Field>
+                          <Field label="Changefreq">
+                            <Select value={editor.sitemap_changefreq} onValueChange={(value) => setEditor({ ...editor, sitemap_changefreq: value })}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="daily">Daily</SelectItem>
+                                <SelectItem value="weekly">Weekly</SelectItem>
+                                <SelectItem value="monthly">Monthly</SelectItem>
+                                <SelectItem value="yearly">Yearly</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field label="Priority">
+                            <Input value={editor.sitemap_priority} onChange={(event) => setEditor({ ...editor, sitemap_priority: event.target.value })} />
+                          </Field>
+                        </div>
+
+                        <Field label="Change Summary">
+                          <Input value={editor.change_summary} onChange={(event) => setEditor({ ...editor, change_summary: event.target.value })} placeholder="What changed and why?" />
+                        </Field>
+                      </TabsContent>
+
+                      <TabsContent value="json" className="space-y-4">
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <JsonField label="Breadcrumbs JSON" value={editor.breadcrumbs} onChange={(value) => setEditor({ ...editor, breadcrumbs: value })} />
+                          <JsonField label="Structured Data JSON-LD" value={editor.structured_data} onChange={(value) => setEditor({ ...editor, structured_data: value })} />
+                          <JsonField label="Image Metadata JSON" value={editor.image_metadata} onChange={(value) => setEditor({ ...editor, image_metadata: value })} />
+                          <JsonField label="GEO Metadata JSON" value={editor.geo} onChange={(value) => setEditor({ ...editor, geo: value })} />
+                        </div>
+                      </TabsContent>
+                    </Tabs>
                   </div>
+                )}
+              </SurfaceCard>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="bulk" className="mt-0">
+            <SurfaceCard>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CheckSquare className="h-4 w-4 text-amber-600" />
+                    <SectionHead>Bulk Create & Review</SectionHead>
+                  </div>
+                  <p className="mt-1 max-w-3xl text-xs text-zinc-500">
+                    Batch SEO/GEO drafts across selected document families, then review, edit, save, or approve each revision.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleBulkApply("save")}
+                    disabled={bulkAction !== null || bulkGenerating || bulkIncludedCount === 0}
+                  >
+                    {bulkAction === "save" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save selected drafts
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleBulkApply("publish")}
+                    disabled={bulkAction !== null || bulkGenerating || bulkIncludedCount === 0}
+                  >
+                    {bulkAction === "publish" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    Approve selected
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-5 xl:grid-cols-[380px_1fr]">
+                <div className="grid gap-4">
+                  <div>
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">Document Types</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {DOCUMENT_TYPE_OPTIONS.map((option) => (
+                        <BulkFilterToggle
+                          key={option.value}
+                          label={option.label}
+                          checked={bulkTypes.includes(option.value)}
+                          onCheckedChange={(checked) => toggleBulkType(option.value, checked)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">Statuses</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {BULK_STATUS_OPTIONS.map((option) => (
+                        <BulkFilterToggle
+                          key={option.value}
+                          label={option.label}
+                          checked={bulkStatuses.includes(option.value)}
+                          onCheckedChange={(checked) => toggleBulkStatus(option.value, checked)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                    <Input
+                      value={bulkQuery}
+                      onChange={(event) => setBulkQuery(event.target.value)}
+                      placeholder="Filter bulk candidates..."
+                      className="pl-9"
+                    />
+                  </div>
+
+                  <div className="rounded-md border border-zinc-200">
+                    <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-2">
+                      <span className="text-xs font-semibold text-zinc-700">{bulkCandidates.length} candidates</span>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={selectAllBulkCandidates}>
+                          Select shown
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearBulkSelection}>
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="max-h-[320px] overflow-auto">
+                      {bulkCandidates.map((record) => (
+                        <label
+                          key={record.id}
+                          className="flex cursor-pointer gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0 hover:bg-zinc-50"
+                        >
+                          <Checkbox
+                            checked={bulkSelection.has(record.id)}
+                            onCheckedChange={(checked) => toggleBulkSelection(record.id, checked === true)}
+                            className="mt-0.5"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="mb-1 flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[10px] uppercase text-zinc-500">{record.document_type}</span>
+                              {statusBadge(record)}
+                            </span>
+                            <span className="block truncate text-[12px] font-semibold text-zinc-900">{displayTitle(record)}</span>
+                            <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{displaySubtitle(record)}</span>
+                          </span>
+                        </label>
+                      ))}
+                      {bulkCandidates.length === 0 ? (
+                        <div className="p-3 text-sm text-zinc-500">No matching bulk candidates.</div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <Button onClick={handleBulkGenerate} disabled={bulkGenerating || bulkAction !== null || bulkSelectedRecords.length === 0}>
+                    {bulkGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {bulkGenerating ? "Generating..." : `Generate ${bulkSelectedRecords.length || ""} selected`}
+                  </Button>
                 </div>
 
-                <PreviewPanel record={selectedView} editor={editor} />
-
-                <Tabs defaultValue="content" className="space-y-4">
-                  <TabsList className="bg-zinc-100">
-                    <TabsTrigger value="content">Content</TabsTrigger>
-                    <TabsTrigger value="discovery">Discovery</TabsTrigger>
-                    <TabsTrigger value="json">JSON Payloads</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="content" className="space-y-4">
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Field label="Title Tag">
-                        <Input value={editor.title_tag} onChange={(event) => setEditor({ ...editor, title_tag: event.target.value })} maxLength={80} />
-                        <p className="mt-1 text-[11px] text-zinc-500">{editor.title_tag.length}/60 target</p>
-                      </Field>
-                      <Field label="Canonical Path">
-                        <Input value={editor.canonical_path} onChange={(event) => setEditor({ ...editor, canonical_path: event.target.value })} />
-                      </Field>
-                      <Field label="Meta Description" className="lg:col-span-2">
-                        <Textarea value={editor.meta_description} onChange={(event) => setEditor({ ...editor, meta_description: event.target.value })} rows={4} />
-                        <p className="mt-1 text-[11px] text-zinc-500">{editor.meta_description.length}/160 target</p>
-                      </Field>
-                      <Field label="Keywords" className="lg:col-span-2">
-                        <Input value={editor.keywords} onChange={(event) => setEditor({ ...editor, keywords: event.target.value })} placeholder="comma, separated, terms" />
-                      </Field>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="discovery" className="space-y-4">
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Field label="Indexation">
-                        <Select value={editor.indexation_policy} onValueChange={(value) => {
-                          const next = value as SeoIndexationPolicy;
-                          setEditor({
-                            ...editor,
-                            indexation_policy: next,
-                            robots_directive: next === "noindex" ? "noindex, nofollow" : "index, follow",
-                            sitemap_include: next === "index" ? editor.sitemap_include : false,
-                          });
-                        }}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="index">Index</SelectItem>
-                            <SelectItem value="noindex">Noindex</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Robots Directive">
-                        <Input value={editor.robots_directive} onChange={(event) => setEditor({ ...editor, robots_directive: event.target.value })} />
-                      </Field>
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-[160px_1fr_1fr_120px]">
-                      <Field label="Sitemap">
-                        <div className="flex h-10 items-center gap-2">
-                          <Switch
-                            checked={editor.sitemap_include}
-                            disabled={editor.indexation_policy === "noindex"}
-                            onCheckedChange={(checked) => setEditor({ ...editor, sitemap_include: checked })}
-                          />
-                          <span className="text-sm text-zinc-600">{editor.sitemap_include ? "Included" : "Excluded"}</span>
+                <div className="min-w-0">
+                  <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-zinc-800">
+                        {bulkReviewItems.length > 0
+                          ? `${bulkReadyCount} ready · ${bulkIncludedCount} selected for approval`
+                          : "No generated drafts yet"}
+                      </div>
+                      {bulkErrorCount > 0 ? (
+                        <div className="flex items-center gap-1 text-xs font-semibold text-red-600">
+                          <XCircle className="h-3.5 w-3.5" />
+                          {bulkErrorCount} failed
                         </div>
-                      </Field>
-                      <Field label="Family">
-                        <Input value={editor.sitemap_family} onChange={(event) => setEditor({ ...editor, sitemap_family: event.target.value })} />
-                      </Field>
-                      <Field label="Changefreq">
-                        <Select value={editor.sitemap_changefreq} onValueChange={(value) => setEditor({ ...editor, sitemap_changefreq: value })}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="daily">Daily</SelectItem>
-                            <SelectItem value="weekly">Weekly</SelectItem>
-                            <SelectItem value="monthly">Monthly</SelectItem>
-                            <SelectItem value="yearly">Yearly</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Priority">
-                        <Input value={editor.sitemap_priority} onChange={(event) => setEditor({ ...editor, sitemap_priority: event.target.value })} />
-                      </Field>
+                      ) : null}
                     </div>
+                    {bulkReviewItems.length > 0 ? (
+                      <Progress value={bulkProgressValue} className="mt-3 h-2" />
+                    ) : null}
+                  </div>
 
-                    <Field label="Change Summary">
-                      <Input value={editor.change_summary} onChange={(event) => setEditor({ ...editor, change_summary: event.target.value })} placeholder="What changed and why?" />
-                    </Field>
-                  </TabsContent>
-
-                  <TabsContent value="json" className="space-y-4">
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <JsonField label="Breadcrumbs JSON" value={editor.breadcrumbs} onChange={(value) => setEditor({ ...editor, breadcrumbs: value })} />
-                      <JsonField label="Structured Data JSON-LD" value={editor.structured_data} onChange={(value) => setEditor({ ...editor, structured_data: value })} />
-                      <JsonField label="Image Metadata JSON" value={editor.image_metadata} onChange={(value) => setEditor({ ...editor, image_metadata: value })} />
-                      <JsonField label="GEO Metadata JSON" value={editor.geo} onChange={(value) => setEditor({ ...editor, geo: value })} />
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                  <div className="grid gap-3">
+                    {bulkReviewItems.map(({ record, result }) => (
+                      <BulkResultCard
+                        key={record.id}
+                        record={record}
+                        result={result}
+                        disabled={bulkGenerating || bulkAction !== null}
+                        onIncludedChange={(included) => setBulkResultIncluded(record.id, included)}
+                        onEditorChange={(update) => updateBulkEditor(record.id, update)}
+                        onSave={() => handleBulkApply("save", [record.id])}
+                        onPublish={() => handleBulkApply("publish", [record.id])}
+                      />
+                    ))}
+                    {bulkReviewItems.length === 0 ? (
+                      <div className="rounded-md border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500">
+                        Generated drafts will appear here for review.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-            )}
-          </SurfaceCard>
-        </div>
+            </SurfaceCard>
+          </TabsContent>
+        </Tabs>
       </div>
     </AdminV2Layout>
   );
