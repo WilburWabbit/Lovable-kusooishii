@@ -1,6 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { buildGmcProductInput, type GmcMappingRule } from "../_shared/gmc-product-input.ts";
+import { buildGmcProductInput, normalizeGmcSiteUrl, type GmcMappingRule } from "../_shared/gmc-product-input.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,6 +49,41 @@ function stringifyApiError(payload: Record<string, unknown>, fallback: string): 
   }
   if (typeof payload.raw_response === "string" && payload.raw_response.trim()) return payload.raw_response;
   return fallback;
+}
+
+async function getWebsitePrimaryImageUrl(
+  supabaseAdmin: SupabaseClient,
+  productId: unknown,
+): Promise<string | null> {
+  const id = typeof productId === "string" ? productId.trim() : "";
+  if (!id) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("product_media")
+    .select("sort_order, is_primary, media_asset:media_asset_id(original_url)")
+    .eq("product_id", id)
+    .order("is_primary", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const row = data as Record<string, unknown> | null;
+  const asset = row?.media_asset as Record<string, unknown> | null;
+  const url = typeof asset?.original_url === "string" ? asset.original_url.trim() : "";
+  return url || null;
+}
+
+function withWebsitePrimaryImage(
+  product: Record<string, unknown>,
+  imageUrl: string | null,
+): Record<string, unknown> {
+  return {
+    ...product,
+    primary_image_url: imageUrl,
+    img_url: imageUrl,
+  };
 }
 
 function countriesForStatus(status: Record<string, unknown>, key: string): string[] {
@@ -136,7 +171,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const siteUrl = Deno.env.get("SITE_URL") || supabaseUrl.replace(".supabase.co", "");
+    const siteUrl = normalizeGmcSiteUrl(Deno.env.get("SITE_URL") || supabaseUrl);
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
     const body = await req.json();
@@ -283,6 +318,13 @@ Deno.serve(async (req) => {
           skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_mpn" });
           continue;
         }
+        const websitePrimaryImageUrl = await getWebsitePrimaryImageUrl(supabaseAdmin, product.id);
+        if (!websitePrimaryImageUrl) {
+          skipped++;
+          skippedDetails.push({ sku_id: sku.id, sku_code: sku.sku_code, reason: "missing_website_primary_image" });
+          continue;
+        }
+        const productForGmc = withWebsitePrimaryImage(product, websitePrimaryImageUrl);
 
         const stockCount = stockMap.get(sku.id) || 0;
         const webListing = webListingBySku.get(sku.id);
@@ -300,7 +342,7 @@ Deno.serve(async (req) => {
               listed_price: listedPrice,
             },
             sku as Record<string, unknown>,
-            product,
+            productForGmc,
             stockCount,
             siteUrl,
             gmcMappings,

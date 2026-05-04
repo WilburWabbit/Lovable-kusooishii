@@ -51,6 +51,42 @@ describe("GMC product input mapping", () => {
     expect(input).not.toHaveProperty("channel");
   });
 
+  it("uses the public storefront URL, website primary image, and numeric GMC category id", () => {
+    const { input } = buildGmcProductInput(
+      baseListing,
+      baseSku,
+      {
+        ...baseProduct,
+        img_url: "https://cdn.rebrickable.com/media/sets/75367-1.jpg",
+        primary_image_url: "https://www.kusooishii.com/images/75367-1-primary.jpg",
+        gmc_product_category: "3805, Construction Set Toys",
+      },
+      2,
+      "https://gcgrwujfyurgetvqlmbf",
+    );
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.link).toBe("https://www.kusooishii.com/sets/75367-1");
+    expect(productAttributes.imageLink).toBe("https://www.kusooishii.com/images/75367-1-primary.jpg");
+    expect(productAttributes.googleProductCategory).toBe("3805");
+  });
+
+  it("normalizes mapped storefront links and GMC category labels", () => {
+    const { input } = buildGmcProductInput(
+      baseListing,
+      baseSku,
+      baseProduct,
+      2,
+      "https://kuso.example",
+      [
+        { aspect_key: "link", constant_value: "https://gcgrwujfyurgetvqlmbf.supabase.co/sets/75367-1" },
+        { aspect_key: "googleProductCategory", constant_value: "3805, Construction Set Toys" },
+      ],
+    );
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.link).toBe("https://www.kusooishii.com/sets/75367-1");
+    expect(productAttributes.googleProductCategory).toBe("3805");
+  });
+
   it("uses brand and identifierExists=false when barcode is absent, with a warning", () => {
     const { input, warnings } = buildGmcProductInput(baseListing, baseSku, baseProduct, 1, "https://kuso.example");
     const productAttributes = input.productAttributes as Record<string, unknown>;
