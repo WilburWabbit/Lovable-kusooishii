@@ -1280,6 +1280,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "channel_listing_current_price_decision_snapshot_id_fkey"
+            columns: ["current_price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["price_decision_snapshot_id"]
+          },
+          {
             foreignKeyName: "channel_listing_sku_id_fkey"
             columns: ["sku_id"]
             isOneToOne: false
@@ -1298,6 +1305,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "channel_listing_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -3050,6 +3064,13 @@ export type Database = {
             referencedColumns: ["sku_id"]
           },
           {
+            foreignKeyName: "market_price_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["sku_id"]
+          },
+          {
             foreignKeyName: "market_price_snapshot_source_id_fkey"
             columns: ["source_id"]
             isOneToOne: false
@@ -3146,6 +3167,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "market_signal_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
           {
@@ -3829,6 +3857,13 @@ export type Database = {
             referencedRelation: "v_current_sku_pricing"
             referencedColumns: ["sku_id"]
           },
+          {
+            foreignKeyName: "price_audit_log_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["sku_id"]
+          },
         ]
       }
       price_decision_snapshot: {
@@ -3949,6 +3984,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "price_decision_snapshot_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["channel_listing_id"]
+          },
+          {
             foreignKeyName: "price_decision_snapshot_channel_price_policy_id_fkey"
             columns: ["channel_price_policy_id"]
             isOneToOne: false
@@ -3988,6 +4030,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "price_decision_snapshot_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -4050,11 +4099,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "price_override_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["channel_listing_id"]
+          },
+          {
             foreignKeyName: "price_override_price_decision_snapshot_id_fkey"
             columns: ["price_decision_snapshot_id"]
             isOneToOne: false
             referencedRelation: "price_decision_snapshot"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_override_price_decision_snapshot_id_fkey"
+            columns: ["price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["price_decision_snapshot_id"]
           },
           {
             foreignKeyName: "price_override_sku_id_fkey"
@@ -4075,6 +4138,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "price_override_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -4250,6 +4320,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "pricing_recalc_review_queue_channel_listing_id_fkey"
+            columns: ["channel_listing_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["channel_listing_id"]
+          },
+          {
             foreignKeyName: "pricing_recalc_review_queue_sku_id_fkey"
             columns: ["sku_id"]
             isOneToOne: false
@@ -4268,6 +4345,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "pricing_recalc_review_queue_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -4647,6 +4731,13 @@ export type Database = {
             referencedRelation: "product"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "product_attribute_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["product_id"]
+          },
         ]
       }
       product_media: {
@@ -4688,6 +4779,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "product"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_media_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -5752,6 +5850,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_order_line_price_decision_snapshot_id_fkey"
+            columns: ["price_decision_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["price_decision_snapshot_id"]
+          },
+          {
             foreignKeyName: "sales_order_line_sales_order_id_fkey"
             columns: ["sales_order_id"]
             isOneToOne: false
@@ -5833,6 +5938,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
           {
@@ -6617,6 +6729,13 @@ export type Database = {
             referencedRelation: "product"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "sku_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["product_id"]
+          },
         ]
       }
       source_field_mapping: {
@@ -6879,6 +6998,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "stock_allocation_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -7272,6 +7398,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "stock_unit_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -7796,6 +7929,13 @@ export type Database = {
             referencedRelation: "product"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "sku_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["product_id"]
+          },
         ]
       }
       unit_profit_view: {
@@ -8311,6 +8451,13 @@ export type Database = {
             referencedColumns: ["sku_id"]
           },
           {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
+            referencedColumns: ["sku_id"]
+          },
+          {
             foreignKeyName: "sales_order_line_stock_unit_id_fkey"
             columns: ["stock_unit_id"]
             isOneToOne: false
@@ -8385,6 +8532,47 @@ export type Database = {
           stripe_reference: string | null
           target_system: string | null
           updated_at: string | null
+        }
+        Relationships: []
+      }
+      v_price_transparency_current: {
+        Row: {
+          blocking_reasons: Json | null
+          calculation_version: string | null
+          ceiling_price: number | null
+          channel: string | null
+          channel_listing_id: string | null
+          condition_grade: Database["public"]["Enums"]["condition_grade"] | null
+          confidence_score: number | null
+          current_price: number | null
+          expected_margin_amount: number | null
+          expected_margin_rate: number | null
+          floor_price: number | null
+          highest_unit_carrying_value: number | null
+          inputs: Json | null
+          latest_override_id: string | null
+          listed_price: number | null
+          listing_status:
+            | Database["public"]["Enums"]["v2_channel_listing_status"]
+            | null
+          market_consensus_price: number | null
+          mpn: string | null
+          override_at: string | null
+          override_price: number | null
+          override_reason_code: string | null
+          override_reason_note: string | null
+          override_required: boolean | null
+          override_type: string | null
+          pooled_carrying_value: number | null
+          price_decision_snapshot_id: string | null
+          priced_at: string | null
+          product_id: string | null
+          product_name: string | null
+          recommendation: string | null
+          sku_code: string | null
+          sku_id: string | null
+          stock_unit_count: number | null
+          target_price: number | null
         }
         Relationships: []
       }
@@ -8772,6 +8960,13 @@ export type Database = {
             columns: ["sku_id"]
             isOneToOne: false
             referencedRelation: "v_current_sku_pricing"
+            referencedColumns: ["sku_id"]
+          },
+          {
+            foreignKeyName: "sales_order_line_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "v_price_transparency_current"
             referencedColumns: ["sku_id"]
           },
         ]
@@ -9306,6 +9501,15 @@ export type Database = {
         }[]
       }
       commerce_quote_price: {
+        Args: {
+          p_candidate_price?: number
+          p_channel?: string
+          p_sales_program_code?: string
+          p_sku_id: string
+        }
+        Returns: Json
+      }
+      commerce_quote_price_highest_unit_legacy: {
         Args: {
           p_candidate_price?: number
           p_channel?: string
