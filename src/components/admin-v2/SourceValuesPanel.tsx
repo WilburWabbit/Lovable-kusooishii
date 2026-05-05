@@ -14,8 +14,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 
-type SourceKey = "bricklink" | "brickowl" | "brickset" | "brickeconomy";
-const SOURCES: SourceKey[] = ["bricklink", "brickowl", "brickset", "brickeconomy"];
+type SourceKey = "bricklink" | "brickset" | "brickeconomy";
+const SOURCES: SourceKey[] = ["bricklink", "brickset", "brickeconomy"];
 
 type ChosenKey = SourceKey | "custom" | "none";
 
@@ -33,7 +33,6 @@ interface CanonicalRow {
 
 const SOURCE_LABEL: Record<SourceKey, string> = {
   bricklink: "BrickLink",
-  brickowl: "BrickOwl",
   brickset: "Brickset",
   brickeconomy: "BrickEconomy",
 };
@@ -43,10 +42,10 @@ function valuesDiffer(values: Array<string | null | undefined>): boolean {
   return new Set(present).size > 1;
 }
 
-// Sources fanned out by "Refresh from sources". BrickEconomy intentionally
-// excluded — pricing/value data is on its own protected pipeline.
-type SyncSource = "bricklink" | "brickowl" | "brickset";
-const SYNC_SOURCES: SyncSource[] = ["bricklink", "brickowl", "brickset"];
+// Sources fanned out by "Refresh from sources". BrickEconomy is cache-hydrated
+// separately from the latest stored BrickEconomy collection snapshot.
+type SyncSource = "bricklink" | "brickset";
+const SYNC_SOURCES: SyncSource[] = ["bricklink", "brickset"];
 
 type SyncStatus = "pending" | "running" | "ok" | "skipped" | "failed";
 interface SyncProgressRow {
@@ -57,6 +56,17 @@ interface SyncProgressRow {
   configured?: boolean;
   error?: string;
   durationMs?: number;
+}
+
+interface BrickEconomyHydrateResult {
+  source: "brickeconomy";
+  cache_hit: boolean;
+  fetched: boolean;
+  configured: boolean;
+  stored: boolean;
+  attribute_writes: number;
+  synced_at: string | null;
+  error?: string | null;
 }
 
 export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: string }) {
@@ -100,6 +110,26 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
     enabled: !!productId,
   });
 
+  const brickEconomyQ = useQuery({
+    queryKey: ["brickeconomy-source-cache", productId, mpn],
+    enabled: !!productId && !!mpn,
+    staleTime: 300_000,
+    retry: false,
+    queryFn: async (): Promise<BrickEconomyHydrateResult> => invokeWithAuth<BrickEconomyHydrateResult>("admin-data", {
+      action: "hydrate-brickeconomy-source-values",
+      product_id: productId,
+      mpn,
+    }),
+  });
+
+  useEffect(() => {
+    if (!brickEconomyQ.data) return;
+    if (brickEconomyQ.data.attribute_writes > 0) {
+      setHydratedFor(null);
+      void qc.invalidateQueries({ queryKey: ["product-source-values", productId] });
+    }
+  }, [brickEconomyQ.data, productId, qc]);
+
   const rows = useMemo(() => {
     const canonical = canonicalQ.data ?? [];
     const byKey = new Map<string, RawAttrRow>();
@@ -109,7 +139,6 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
       const sv = a?.source_values_jsonb ?? {};
       const perSource: Record<SourceKey, string | null> = {
         bricklink: sv.bricklink?.value ?? null,
-        brickowl: sv.brickowl?.value ?? null,
         brickset: sv.brickset?.value ?? null,
         brickeconomy: sv.brickeconomy?.value ?? null,
       };
@@ -150,7 +179,6 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
     // Seed pending state for all sources
     const initial: Record<SyncSource, SyncProgressRow> = {
       bricklink: { status: "pending" },
-      brickowl: { status: "pending" },
       brickset: { status: "pending" },
     };
     setProgress(initial);
@@ -355,7 +383,7 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
         </div>
       )}
 
-      {canonicalQ.isLoading || attrsQ.isLoading ? (
+      {canonicalQ.isLoading || attrsQ.isLoading || (brickEconomyQ.isFetching && rows.length === 0) ? (
         <div className="text-[12px] text-zinc-500 py-4">Loading source snapshot…</div>
       ) : rows.length === 0 ? (
         <div className="text-[12px] text-zinc-500 py-4">

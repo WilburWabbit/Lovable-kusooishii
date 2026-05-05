@@ -29,6 +29,33 @@ const STATUS_COLORS: Record<string, string> = {
   "Stale snapshot": "#F59E0B",
 };
 
+const CONTRIBUTOR_COLORS: Record<string, string> = {
+  pooled_carrying_value: "#475569",
+  packaging_cost: "#2563EB",
+  delivery_cost: "#0EA5E9",
+  estimated_channel_fees: "#7C3AED",
+  channel_fees: "#7C3AED",
+  payment_fees: "#A855F7",
+  channel_fee_input_vat_reclaim: "#22C55E",
+  risk_reserve: "#F97316",
+  minimum_profit: "#16A34A",
+  margin_uplift: "#14B8A6",
+  output_vat_payable: "#B91C1C",
+  market_consensus: "#F59E0B",
+  brickeconomy_rrp: "#2563EB",
+  condition_adjusted_rrp: "#0891B2",
+  market_weighted_rrp_undercut: "#EF4444",
+  condition_adjusted_market: "#0891B2",
+  demand_multiplier: "#6366F1",
+  age_multiplier: "#8B5CF6",
+  turnaround_multiplier: "#0D9488",
+  channel_undercut: "#EF4444",
+  target_price: "#14B8A6",
+  target_output_vat: "#B91C1C",
+  target_net_receipts: "#0D9488",
+  floor_gap: "#DC2626",
+};
+
 function money(value: number | string | null | undefined) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   return `£${Number(value).toFixed(2)}`;
@@ -71,6 +98,18 @@ function statusColor(status: string) {
   return STATUS_COLORS[status] ?? "#71717A";
 }
 
+function contributorColor(part: PriceContributor) {
+  const amount = Number(part.amount);
+  if (part.key === "floor_gap" && Number.isFinite(amount) && amount >= 0) return "#16A34A";
+  if (part.key === "target_net_position" && Number.isFinite(amount)) return amount < 0 ? "#EF4444" : "#16A34A";
+  if (CONTRIBUTOR_COLORS[part.key]) return CONTRIBUTOR_COLORS[part.key];
+  if (amount < 0) return "#EF4444";
+  if (part.kind === "profit" || part.kind === "margin" || part.kind === "result") return "#14B8A6";
+  if (part.kind === "market") return "#F59E0B";
+  if (part.kind === "rule") return "#6366F1";
+  return "#71717A";
+}
+
 export function PriceContributionBar({ contributors }: { contributors: PriceContributor[] }) {
   const usable = contributors.filter((part) => Number.isFinite(Number(part.amount)) && Number(part.amount) !== 0);
   const total = usable.reduce((sum, part) => sum + Math.abs(Number(part.amount)), 0);
@@ -84,18 +123,11 @@ export function PriceContributionBar({ contributors }: { contributors: PriceCont
       {usable.map((part) => {
         const amount = Number(part.amount);
         const width = `${Math.max(3, (Math.abs(amount) / total) * 100)}%`;
-        const color = amount < 0
-          ? "#EF4444"
-          : part.kind === "profit" || part.kind === "margin" || part.kind === "result"
-            ? "#14B8A6"
-            : part.kind === "market"
-              ? "#F59E0B"
-              : "#71717A";
         return (
           <div
             key={part.key}
             className="h-full"
-            style={{ width, backgroundColor: color }}
+            style={{ width, backgroundColor: contributorColor(part) }}
             title={`${part.label}: ${money(amount)}`}
           />
         );
@@ -104,22 +136,106 @@ export function PriceContributionBar({ contributors }: { contributors: PriceCont
   );
 }
 
-function ContributorTable({ contributors }: { contributors: PriceContributor[] }) {
+export function ContributorTable({ contributors }: { contributors: PriceContributor[] }) {
   return (
     <div className="overflow-hidden rounded border border-zinc-200">
       <table className="w-full text-[11px]">
         <tbody>
-          {contributors.map((part) => (
-            <tr key={part.key} className="border-t border-zinc-100 first:border-t-0">
-              <td className="px-2 py-1.5 text-zinc-600">{part.label}</td>
-              <td className="px-2 py-1.5 text-right">
-                <Mono color={Number(part.amount) < 0 ? "red" : "default"}>{money(part.amount)}</Mono>
-              </td>
-            </tr>
-          ))}
+          {contributors.map((part) => {
+            const color = contributorColor(part);
+            return (
+              <tr key={part.key} className="border-t border-zinc-100 first:border-t-0">
+                <td className="px-2 py-1.5 text-zinc-600">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      aria-label={`Color key for ${part.label}`}
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span>{part.label}</span>
+                  </span>
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <Mono color={Number(part.amount) < 0 ? "red" : "default"}>{money(part.amount)}</Mono>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function VatPositionPanel({ quote }: { quote: PriceChannelTransparency["quote"] }) {
+  const vat = quote.vat_position;
+  if (!vat) {
+    return (
+      <SurfaceCard className="p-3">
+        <SectionHead>VAT Position</SectionHead>
+        <p className="mt-2 text-xs text-zinc-500">No VAT breakdown is attached to this price decision.</p>
+      </SurfaceCard>
+    );
+  }
+
+  const netPosition = Number(vat.net_position_after_vat ?? 0);
+  const vatRate = vat.vat_rate_percent == null ? "VAT" : `VAT ${Number(vat.vat_rate_percent).toFixed(1)}%`;
+
+  return (
+    <SurfaceCard className="p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <SectionHead>VAT Position</SectionHead>
+        <Mono>{vatRate}</Mono>
+      </div>
+      <div className="grid gap-2 text-[11px] sm:grid-cols-4">
+        <Metric label="Paid/Recover" value={money(vat.cost_basis_net_paid)} />
+        <Metric label="Received Gross" value={money(vat.sale_price_gross)} tone="amber" />
+        <Metric label="Receipts Ex VAT" value={money(vat.sale_receipts_net_of_vat)} tone="teal" />
+        <Metric label="Net Position" value={money(vat.net_position_after_vat)} tone={netPosition < 0 ? "red" : "teal"} />
+      </div>
+      <div className="mt-3 overflow-hidden rounded border border-zinc-200">
+        <table className="w-full text-[11px]">
+          <tbody>
+            <tr className="border-t border-zinc-100 first:border-t-0">
+              <td className="px-2 py-1.5 text-zinc-600">Cost basis to recover</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.cost_basis_net_paid)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Customer/channel pays</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.sale_price_gross)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Output VAT payable</td>
+              <td className="px-2 py-1.5 text-right"><Mono color="red">{money(vat.sale_output_vat)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Receipts after VAT</td>
+              <td className="px-2 py-1.5 text-right"><Mono color="teal">{money(vat.sale_receipts_net_of_vat)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Channel fees paid gross</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.channel_fees_gross_paid)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Fee VAT reclaim</td>
+              <td className="px-2 py-1.5 text-right">
+                <Mono color="teal">
+                  {vat.channel_fee_input_vat_reclaim == null ? "—" : `-${money(vat.channel_fee_input_vat_reclaim)}`}
+                </Mono>
+              </td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Net after VAT and fees</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.estimated_net_after_vat_and_fees)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100 bg-zinc-50">
+              <td className="px-2 py-1.5 font-semibold text-zinc-700">Net position after VAT, fees, cost and risk</td>
+              <td className="px-2 py-1.5 text-right"><Mono color={netPosition < 0 ? "red" : "teal"}>{money(vat.net_position_after_vat)}</Mono></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </SurfaceCard>
   );
 }
 
@@ -196,6 +312,8 @@ function PriceExplanationPanel({ selected, mpn }: { selected: SelectedChannel; m
           <ContributorTable contributors={targetContributors} />
         </div>
       </SurfaceCard>
+
+      <VatPositionPanel quote={quote} />
 
       <SurfaceCard className="p-3">
         <SectionHead>Cost Basis</SectionHead>

@@ -23,6 +23,10 @@ const priceTransparencyMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260505103000_price_transparency_pool_wac.sql"),
   "utf8",
 );
+const vatPriceTransparencyMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260505124500_price_transparency_vat_position.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
@@ -31,8 +35,20 @@ const channelsTab = readFileSync(
   join(repoRoot, "src/components/admin-v2/ChannelsTab.tsx"),
   "utf8",
 );
+const channelListingsHook = readFileSync(
+  join(repoRoot, "src/hooks/admin/use-channel-listings.ts"),
+  "utf8",
+);
 const productDetail = readFileSync(
   join(repoRoot, "src/components/admin-v2/ProductDetail.tsx"),
+  "utf8",
+);
+const sourceValuesPanel = readFileSync(
+  join(repoRoot, "src/components/admin-v2/SourceValuesPanel.tsx"),
+  "utf8",
+);
+const channelValueMatrix = readFileSync(
+  join(repoRoot, "src/components/admin-v2/ChannelValueMatrix.tsx"),
   "utf8",
 );
 const pricingTransparencyTab = readFileSync(
@@ -94,10 +110,36 @@ describe("pricing engine contract", () => {
     expect(priceTransparencyMigration).not.toContain("$$");
   });
 
-  it("allows market targets below floor while requiring final-price override evidence", () => {
-    expect(priceTransparencyMigration).toContain("v_target_below_floor := true");
-    expect(priceTransparencyMigration).toContain("''target_floor_clamped'', 0");
-    expect(priceTransparencyMigration).not.toContain("v_target := ROUND(v_floor, 2);\\n  END IF;\\n\\n  IF p_candidate_price");
+  it("makes price transparency VAT-aware on gross listing prices", () => {
+    expect(vatPriceTransparencyMigration).toContain("commerce_quote_price_pool_wac_no_vat");
+    expect(vatPriceTransparencyMigration).toContain("v_floor_net_receipts := ROUND(v_floor / v_vat_multiplier, 2)");
+    expect(vatPriceTransparencyMigration).toContain("v_floor_output_vat := ROUND(v_floor - v_floor_net_receipts, 2)");
+    expect(vatPriceTransparencyMigration).toContain("''output_vat_payable''");
+    expect(vatPriceTransparencyMigration).toContain("''channel_fee_input_vat_reclaim''");
+    expect(vatPriceTransparencyMigration).toContain("''vat_position''");
+    expect(vatPriceTransparencyMigration).toContain("''net_position_after_vat''");
+    expect(vatPriceTransparencyMigration).toContain("''pool_wac_vat_transparency_v1''");
+    expect(vatPriceTransparencyMigration).toContain("estimated_net_after_vat");
+    expect(vatPriceTransparencyMigration).not.toContain("$$");
+    expect(adminData).toContain("vat_position: quote.vat_position ?? null");
+  });
+
+  it("bases target price on BrickEconomy RRP and never returns a target below floor", () => {
+    expect(vatPriceTransparencyMigration).toContain("FROM public.brickeconomy_collection bec");
+    expect(vatPriceTransparencyMigration).toContain("v_condition_adjusted_rrp := ROUND(GREATEST(v_brickeconomy_rrp * v_condition_multiplier, 0), 2)");
+    expect(vatPriceTransparencyMigration).toContain("v_market_gap := ROUND(GREATEST(v_condition_adjusted_rrp - v_market_consensus, 0), 2)");
+    expect(vatPriceTransparencyMigration).toContain("WHEN v_market_confidence > 1 THEN v_market_confidence / 100");
+    expect(vatPriceTransparencyMigration).toContain("v_market_weighted_undercut := ROUND(v_market_gap * v_market_weight, 2)");
+    expect(vatPriceTransparencyMigration).toContain("v_target := ROUND(GREATEST(v_target, v_floor), 2)");
+    expect(vatPriceTransparencyMigration).toContain("''brickeconomy_rrp''");
+    expect(vatPriceTransparencyMigration).toContain("''condition_adjusted_rrp''");
+    expect(vatPriceTransparencyMigration).toContain("''market_weighted_rrp_undercut''");
+    expect(vatPriceTransparencyMigration).toContain("''market_target_below_floor'', 0");
+    expect(adminData).toContain("brickeconomy_rrp: quote.brickeconomy_rrp == null ? null : Number(quote.brickeconomy_rrp)");
+    expect(adminData).toContain("condition_adjusted_rrp: quote.condition_adjusted_rrp == null ? null : Number(quote.condition_adjusted_rrp)");
+  });
+
+  it("still requires final-price override evidence for manual prices below floor", () => {
     expect(channelsTab).toContain("Below-floor price override");
     expect(channelsTab).toContain("Publishing will require an override reason");
     expect(channelsTab).toContain("allowBelowFloor");
@@ -120,12 +162,12 @@ describe("pricing engine contract", () => {
       floor = (carrying + packaging + shipping + fees + risk + minProfit) / (1 - minMargin);
     }
 
-    const market = 29.18;
-    const target = Math.floor(market) - 0.01;
+    const marketBasedTarget = Math.floor(29.18) - 0.01;
+    const target = Math.max(marketBasedTarget, floor);
 
     expect(floor).toBeGreaterThan(35);
     expect(floor).toBeLessThan(45);
-    expect(target).toBeLessThan(floor);
+    expect(target).toBeGreaterThanOrEqual(floor);
   });
 
   it("routes admin pricing through the canonical quote RPC", () => {
@@ -182,12 +224,39 @@ describe("pricing engine contract", () => {
     expect(adminData).toContain("Cannot list: website price");
   });
 
+  it("suppresses pending BrickLink and BrickOwl sales channels from pricing and channel tabs", () => {
+    expect(adminData).toContain('const PRICE_TRANSPARENCY_CHANNELS = ["web", "ebay"];');
+    expect(adminData).not.toContain('const PRICE_TRANSPARENCY_CHANNELS = ["web", "ebay", "bricklink", "brickowl"];');
+    expect(channelsTab).not.toContain('{ key: "bricklink", label: "BrickLink"');
+    expect(channelsTab).not.toContain('{ key: "brickowl", label: "BrickOwl"');
+    expect(productDetail).not.toContain('{ key: "bricklink", priceChannel: "bricklink"');
+    expect(productDetail).not.toContain('{ key: "brickowl", priceChannel: "brickowl"');
+    expect(channelListingsHook).not.toContain("pricingChannel: 'bricklink'");
+    expect(channelListingsHook).not.toContain("pricingChannel: 'brickowl'");
+  });
+
+  it("suppresses BrickOwl as a specifications source while cache-hydrating BrickEconomy", () => {
+    expect(sourceValuesPanel).toContain('type SourceKey = "bricklink" | "brickset" | "brickeconomy"');
+    expect(sourceValuesPanel).not.toContain('"brickowl"');
+    expect(channelValueMatrix).not.toContain('"brickowl"');
+    expect(sourceValuesPanel).toContain('"brickeconomy-source-cache"');
+    expect(sourceValuesPanel).toContain('"hydrate-brickeconomy-source-values"');
+    expect(adminData).toContain('action === "hydrate-brickeconomy-source-values"');
+    expect(adminData).toContain('BRICKECONOMY_API_BASE');
+    expect(adminData).toContain('.from("brickeconomy_collection")');
+    expect(adminData).toContain('.from("landing_raw_brickeconomy")');
+    expect(adminData).toContain('source_values_jsonb: merged');
+  });
+
   it("adds the product pricing tab and explanation surface", () => {
     expect(productDetail).toContain('{ key: "pricing", label: "Pricing" }');
     expect(productDetail).toContain("<PricingTransparencyTab");
     expect(pricingTransparencyTab).toContain("PriceContributionBar");
+    expect(pricingTransparencyTab).toContain("brickeconomy_rrp");
+    expect(pricingTransparencyTab).toContain("market_weighted_rrp_undercut");
     expect(pricingTransparencyTab).toContain("Floor Contributors");
     expect(pricingTransparencyTab).toContain("Target Rules");
+    expect(pricingTransparencyTab).toContain("VAT Position");
     expect(pricingTransparencyTab).toContain("Source Evidence");
     expect(pricingTransparencyTab).toContain("Manual Override");
     expect(pricingTransparencyTab).toContain("useRecordPriceOverride");

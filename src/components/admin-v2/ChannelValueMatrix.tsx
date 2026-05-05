@@ -5,7 +5,7 @@
 //
 // For each canonical attribute (excluding the BrickEconomy-locked "value"
 // group), shows the chosen canonical value alongside columns per sales
-// channel (web, eBay, BrickLink, BrickOwl). Each channel cell:
+// channel (web, eBay, BrickLink). Each channel cell:
 //   • Indicates whether the canonical value is natively accepted by the
 //     channel for the resolved category (eBay-only constraint today).
 //   • Lets staff pick an alternative from the channel's allowed-values
@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 
-type ChannelKey = "web" | "ebay" | "bricklink" | "brickowl";
+type ChannelKey = "web" | "ebay" | "bricklink";
 
 interface ChannelDef {
   key: ChannelKey;
@@ -36,7 +36,6 @@ const CHANNELS: ChannelDef[] = [
   { key: "web", label: "Web", hasSchema: false },
   { key: "ebay", label: "eBay", hasSchema: true },
   { key: "bricklink", label: "BrickLink", hasSchema: false },
-  { key: "brickowl", label: "BrickOwl", hasSchema: false },
 ];
 
 interface CanonicalRow {
@@ -68,7 +67,7 @@ interface SchemaAttr {
   allows_custom: boolean;
 }
 
-const PROVIDER_PRIORITY = ["bricklink", "brickowl", "brickset", "brickeconomy"] as const;
+const PROVIDER_PRIORITY = ["bricklink", "brickset", "brickeconomy"] as const;
 
 /** Resolve canonical value the same way the SourceValuesPanel saves it. */
 function resolveCanonical(row: CoreAttrRow | undefined): string | null {
@@ -228,7 +227,6 @@ export function ChannelValueMatrix({
           web: { override: null, effective: null },
           ebay: { override: null, effective: null },
           bricklink: { override: null, effective: null },
-          brickowl: { override: null, effective: null },
         };
         for (const ch of CHANNELS) {
           const o = overrideByKey.get(`${c.key}|${ch.key}`);

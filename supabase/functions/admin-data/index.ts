@@ -11,6 +11,9 @@ const SALEABLE_STOCK_V2_STATUSES = ["graded", "listed", "restocked"];
 const SALEABLE_STOCK_STATUSES = ["available", "received", "graded", "listed", "restocked"];
 const VALID_SALE_STATUSES = ["complete", "paid", "shipped", "packed", "picking", "awaiting_dispatch"];
 const CHANNELS_PENDING_OUTBOUND_CONNECTOR = new Set(["bricklink", "brickowl"]);
+const BRICKECONOMY_API_BASE = "https://www.brickeconomy.com/api/v1";
+const BRICKECONOMY_DAILY_QUOTA = 100;
+const FETCH_TIMEOUT_MS = 30_000;
 
 function isAvailableStockUnit(unit: { status?: string | null; v2_status?: string | null }): boolean {
   const status = unit.status ?? "";
@@ -45,6 +48,12 @@ function normalizeListingChannel(listing: Pick<ChannelListingActionRow, "channel
 
 function isWebsiteListing(listing: Pick<ChannelListingActionRow, "channel" | "v2_channel">): boolean {
   return normalizeListingChannel(listing) === "web";
+}
+
+function fetchWithTimeout(url: string | URL, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 async function countSaleableStock(admin: any, skuId: string): Promise<number> {
@@ -259,13 +268,17 @@ function normalizeQuote(raw: unknown, skuId: string, channel: string) {
     market_consensus: quote.market_consensus == null
       ? (quote.market_consensus_price == null ? null : Number(quote.market_consensus_price))
       : Number(quote.market_consensus),
+    brickeconomy_rrp: quote.brickeconomy_rrp == null ? null : Number(quote.brickeconomy_rrp),
+    condition_adjusted_rrp: quote.condition_adjusted_rrp == null ? null : Number(quote.condition_adjusted_rrp),
     condition_multiplier: quote.condition_multiplier == null ? null : Number(quote.condition_multiplier),
     confidence_score: quote.confidence_score == null
       ? (quote.confidence == null ? null : Number(quote.confidence))
       : Number(quote.confidence_score),
+    target_floor_clamped: quote.target_floor_clamped ?? null,
     blocking_reasons: Array.isArray(quote.blocking_reasons) ? quote.blocking_reasons : [],
     warning_reasons: Array.isArray(quote.warning_reasons) ? quote.warning_reasons : [],
     cost_basis: quote.cost_basis ?? null,
+    vat_position: quote.vat_position ?? null,
     floor_contributors: Array.isArray(quote.floor_contributors) ? quote.floor_contributors : [],
     target_contributors: Array.isArray(quote.target_contributors) ? quote.target_contributors : [],
     breakdown: quote.breakdown ?? {},
@@ -348,7 +361,7 @@ async function buildWebsiteListingPreflight(
   };
 }
 
-const PRICE_TRANSPARENCY_CHANNELS = ["web", "ebay", "bricklink", "brickowl"];
+const PRICE_TRANSPARENCY_CHANNELS = ["web", "ebay"];
 
 function normalizedPriceChannel(channel: string | null | undefined): string {
   if (!channel) return "web";
@@ -566,6 +579,322 @@ async function buildPriceTransparency(admin: any, params: Record<string, unknown
       latest_priced_at: latestPricedAt,
     },
     variants,
+  };
+}
+
+function baseLegoNumber(mpn: string): string {
+  return mpn.split(".")[0]?.replace(/-\d+$/, "") ?? mpn;
+}
+
+function versionedMpn(mpn: string): string {
+  const clean = mpn.split(".")[0] ?? mpn;
+  return clean.includes("-") ? clean : `${clean}-1`;
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+async function findBrickEconomyCollectionRow(admin: any, product: Record<string, any>, mpn: string) {
+  const cleanMpn = versionedMpn(mpn);
+  const base = baseLegoNumber(mpn);
+  const candidates = Array.from(new Set([
+    product.brickeconomy_id,
+    product.set_number,
+    cleanMpn,
+    base,
+    `${base}-1`,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)));
+
+  if (candidates.length === 0) return null;
+
+  const { data, error } = await admin
+    .from("brickeconomy_collection")
+    .select("*")
+    .in("item_number", candidates)
+    .order("synced_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+function brickEconomyPayloadToCollectionRow(payload: Record<string, any>, product: Record<string, any>, mpn: string, now: string) {
+  const setNumber = baseLegoNumber(mpn);
+  const currency = String(payload.currency ?? "GBP").toUpperCase();
+  const retailKey = currency === "USD" ? "retail_price_us"
+    : currency === "EUR" ? "retail_price_eu"
+      : currency === "CAD" ? "retail_price_ca"
+        : currency === "AUD" ? "retail_price_au"
+          : "retail_price_uk";
+
+  return {
+    item_type: product.product_type === "minifig" ? "minifig" : "set",
+    item_number: versionedMpn(mpn),
+    name: payload.name ?? product.name ?? null,
+    theme: payload.theme ?? null,
+    subtheme: payload.subtheme ?? null,
+    year: numberOrNull(payload.year),
+    pieces_count: numberOrNull(payload.pieces_count ?? payload.piece_count ?? payload.pieces),
+    minifigs_count: numberOrNull(payload.minifigs_count ?? payload.minifig_count),
+    condition: payload.condition ?? null,
+    collection_name: payload.collection_name ?? null,
+    acquired_date: payload.acquired_date ?? payload.aquired_date ?? null,
+    paid_price: numberOrNull(payload.paid_price ?? payload.paidPrice),
+    current_value: numberOrNull(payload.current_value ?? payload.currentValue ?? payload.current_value_new ?? payload.current_value_used),
+    growth: numberOrNull(payload.growth),
+    retail_price: numberOrNull(payload.retail_price ?? payload.retailPrice ?? payload[retailKey] ?? payload.retail_price_uk),
+    released_date: stringOrNull(payload.released_date ?? payload.releasedDate),
+    retired_date: stringOrNull(payload.retired_date ?? payload.retiredDate),
+    currency: currency || "GBP",
+    synced_at: now,
+    _history_item_number: setNumber,
+    _raw_payload: payload,
+  };
+}
+
+async function fetchAndStoreBrickEconomyCollectionRow(admin: any, product: Record<string, any>, mpn: string) {
+  const apiKey = Deno.env.get("BRICKECONOMY_API_KEY");
+  if (!apiKey) {
+    return { row: null, configured: false, fetched: false, error: "BRICKECONOMY_API_KEY not configured" };
+  }
+
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const { count } = await admin
+    .from("audit_event")
+    .select("id", { count: "exact", head: true })
+    .eq("entity_type", "brickeconomy_sync")
+    .gte("created_at", todayStart.toISOString());
+  if ((count ?? 0) >= BRICKECONOMY_DAILY_QUOTA) {
+    return { row: null, configured: true, fetched: false, error: "BrickEconomy daily API quota reached" };
+  }
+
+  const setNumber = baseLegoNumber(mpn);
+  const url = `${BRICKECONOMY_API_BASE}/set/${encodeURIComponent(setNumber)}?currency=GBP`;
+  const res = await fetchWithTimeout(url, {
+    headers: {
+      "x-apikey": apiKey,
+      "User-Agent": "KusoOishiiAdmin/1.0",
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    return { row: null, configured: true, fetched: false, error: `BrickEconomy API [${res.status}]: ${text}` };
+  }
+
+  const raw = await res.json();
+  const payload = (raw.data ?? raw) as Record<string, any>;
+  const now = new Date().toISOString();
+  const landingExternalId = `spec_hydrate_set_${setNumber}`;
+
+  const { data: landing } = await admin
+    .from("landing_raw_brickeconomy")
+    .upsert({
+      external_id: landingExternalId,
+      entity_type: "set",
+      raw_payload: raw,
+      status: "pending",
+      received_at: now,
+    }, { onConflict: "external_id" })
+    .select("id")
+    .maybeSingle();
+
+  const rowWithPrivate = brickEconomyPayloadToCollectionRow(payload, product, mpn, now);
+  const { _history_item_number, _raw_payload, ...collectionRow } = rowWithPrivate;
+  const existing = await findBrickEconomyCollectionRow(admin, product, mpn);
+  let storedRow = collectionRow;
+
+  if (existing?.id) {
+    const { data, error } = await admin
+      .from("brickeconomy_collection")
+      .update(collectionRow)
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    storedRow = data;
+  } else {
+    const { data, error } = await admin
+      .from("brickeconomy_collection")
+      .insert(collectionRow)
+      .select("*")
+      .single();
+    if (error) throw error;
+    storedRow = data;
+  }
+
+  await admin.from("brickeconomy_catalog_item").upsert({
+    mpn: collectionRow.item_number,
+    name: collectionRow.name,
+    theme: collectionRow.theme,
+    subtheme: collectionRow.subtheme,
+    release_year: collectionRow.year,
+    piece_count: collectionRow.pieces_count,
+    minifig_count: collectionRow.minifigs_count,
+    raw_attributes: {
+      name: collectionRow.name,
+      theme: collectionRow.theme,
+      subtheme: collectionRow.subtheme,
+      year: collectionRow.year,
+      pieces_count: collectionRow.pieces_count,
+      minifigs_count: collectionRow.minifigs_count,
+    },
+    fetched_at: now,
+  }, { onConflict: "mpn" });
+
+  const today = now.slice(0, 10);
+  const { data: existingHistory } = await admin
+    .from("brickeconomy_price_history")
+    .select("id")
+    .eq("item_type", collectionRow.item_type)
+    .eq("item_number", _history_item_number)
+    .eq("source", "individual")
+    .gte("recorded_at", `${today}T00:00:00Z`)
+    .lt("recorded_at", `${today}T23:59:59.999Z`)
+    .maybeSingle();
+  const historyRow = {
+    item_type: collectionRow.item_type,
+    item_number: _history_item_number,
+    current_value: collectionRow.current_value,
+    growth: collectionRow.growth,
+    retail_price: collectionRow.retail_price,
+    currency: collectionRow.currency,
+    source: "individual",
+    recorded_at: now,
+  };
+  if (existingHistory?.id) {
+    await admin.from("brickeconomy_price_history").update(historyRow).eq("id", existingHistory.id);
+  } else {
+    await admin.from("brickeconomy_price_history").insert(historyRow);
+  }
+
+  await admin.from("audit_event").insert({
+    entity_type: "brickeconomy_sync",
+    entity_id: setNumber,
+    trigger_type: "brickeconomy_sync",
+    actor_type: "system",
+    source_system: "admin-data:hydrate-brickeconomy-source-values",
+    correlation_id: crypto.randomUUID(),
+    after_json: { set_number: setNumber, api_calls: 1, source: "specifications_tab_cache_miss" },
+  });
+
+  if (landing?.id) {
+    await admin
+      .from("landing_raw_brickeconomy")
+      .update({ status: "committed", processed_at: new Date().toISOString() })
+      .eq("id", landing.id);
+  }
+
+  return { row: storedRow, configured: true, fetched: true, error: null };
+}
+
+async function mirrorBrickEconomySourceValues(admin: any, productId: string, row: Record<string, any>): Promise<number> {
+  const { data: mappings, error: mappingError } = await admin
+    .from("source_field_mapping")
+    .select("source_field, canonical_key, canonical_attribute:canonical_key(attribute_group)")
+    .eq("source", "brickeconomy");
+  if (mappingError) throw mappingError;
+
+  const safeMappings = (mappings ?? []).filter((mapping: any) =>
+    mapping.canonical_attribute?.attribute_group !== "value"
+  );
+  if (safeMappings.length === 0) return 0;
+
+  let writes = 0;
+  for (const mapping of safeMappings) {
+    const sourceField = String(mapping.source_field);
+    const canonicalKey = String(mapping.canonical_key);
+    const raw = row[sourceField] ?? row.raw_attributes?.[sourceField] ?? null;
+    const stringValue = raw == null ? null : String(raw);
+
+    const { data: existing, error: existingError } = await admin
+      .from("product_attribute")
+      .select("id, source_values_jsonb")
+      .eq("product_id", productId)
+      .eq("namespace", "core")
+      .eq("key", canonicalKey)
+      .is("channel", null)
+      .is("marketplace", null)
+      .is("category_id", null)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const merged = {
+      ...((existing?.source_values_jsonb as Record<string, unknown>) ?? {}),
+      brickeconomy: { value: stringValue, fetched_at: row.synced_at ?? new Date().toISOString() },
+    };
+
+    if (existing?.id) {
+      const { error } = await admin
+        .from("product_attribute")
+        .update({ source_values_jsonb: merged })
+        .eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await admin.from("product_attribute").insert({
+        product_id: productId,
+        namespace: "core",
+        key: canonicalKey,
+        source: "brickeconomy",
+        source_values_jsonb: merged,
+      });
+      if (error) throw error;
+    }
+    writes++;
+  }
+  return writes;
+}
+
+async function hydrateBrickEconomySourceValues(admin: any, params: Record<string, unknown>) {
+  const productId = typeof params.product_id === "string" ? params.product_id : "";
+  const requestedMpn = typeof params.mpn === "string" ? params.mpn.trim() : "";
+  if (!productId && !requestedMpn) throw new ValidationError("product_id or mpn is required");
+
+  let product: Record<string, any> | null = null;
+  let productQuery = admin
+    .from("product")
+    .select("id, mpn, name, set_number, product_type, brickeconomy_id");
+  productQuery = productId ? productQuery.eq("id", productId) : productQuery.eq("mpn", requestedMpn);
+  const { data: productData, error: productError } = await productQuery.maybeSingle();
+  if (productError) throw productError;
+  product = productData ?? (productId ? { id: productId, mpn: requestedMpn } : null);
+  if (!product?.id || !product?.mpn) throw new ValidationError("product not found");
+
+  let row = await findBrickEconomyCollectionRow(admin, product, product.mpn);
+  let fetched = false;
+  let configured = true;
+  let fetchError: string | null = null;
+
+  if (!row) {
+    const fetchedResult = await fetchAndStoreBrickEconomyCollectionRow(admin, product, product.mpn);
+    row = fetchedResult.row;
+    fetched = fetchedResult.fetched;
+    configured = fetchedResult.configured;
+    fetchError = fetchedResult.error ?? null;
+  }
+
+  const attributeWrites = row ? await mirrorBrickEconomySourceValues(admin, product.id, row) : 0;
+  return {
+    source: "brickeconomy",
+    product_id: product.id,
+    mpn: product.mpn,
+    item_number: row?.item_number ?? null,
+    cache_hit: Boolean(row && !fetched),
+    fetched,
+    configured,
+    stored: Boolean(row),
+    attribute_writes: attributeWrites,
+    synced_at: row?.synced_at ?? null,
+    error: fetchError,
   };
 }
 
@@ -3965,6 +4294,8 @@ Deno.serve(async (req) => {
       const { data, error } = await query;
       if (error) throw error;
       result = data ?? [];
+    } else if (action === "hydrate-brickeconomy-source-values") {
+      result = await hydrateBrickEconomySourceValues(admin, params);
     } else if (action === "save-product-attributes") {
       // params: { product_id, namespace, attributes, source?,
       //           channel?, marketplace?, category_id? }
