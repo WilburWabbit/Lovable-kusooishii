@@ -152,16 +152,22 @@ describe("pricing engine contract", () => {
   });
 
   it("corrects floor to VAT-aware break-even only", () => {
+    const floorBlock = correctedVatPricingMigration.split("v_floor_contributors := jsonb_build_array(")[1].split("v_target_contributors := jsonb_build_array(")[0];
     expect(correctedVatPricingMigration).toContain("Floor is break-even only");
     expect(correctedVatPricingMigration).toContain("v_stock_cost_gross := COALESCE(NULLIF(v_quote->>''carrying_value''");
     expect(correctedVatPricingMigration).toContain("v_stock_cost_net := ROUND(v_stock_cost_gross / v_vat_multiplier, 2)");
     expect(correctedVatPricingMigration).toContain("v_packaging_net := ROUND(v_packaging_gross / v_vat_multiplier, 2)");
     expect(correctedVatPricingMigration).toContain("v_delivery_net := ROUND(v_delivery_gross / v_vat_multiplier, 2)");
     expect(correctedVatPricingMigration).toContain("v_floor := ROUND(GREATEST((v_break_even_base_net + v_floor_fees_net + v_program_commission) * v_vat_multiplier, 0), 2)");
+    expect(correctedVatPricingMigration).toContain("v_floor := ROUND(v_floor_price_before_target_vat + v_target_output_vat, 2)");
     expect(correctedVatPricingMigration).toContain("''floor_break_even_net_position''");
-    expect(correctedVatPricingMigration).not.toContain("''key'', ''risk_reserve'', ''label'', ''Risk reserve'', ''amount'', v_floor");
-    expect(correctedVatPricingMigration).not.toContain("''key'', ''minimum_profit'', ''label'', ''Minimum profit''");
-    expect(correctedVatPricingMigration).not.toContain("''key'', ''margin_uplift'', ''label'', ''Margin uplift''");
+    expect(floorBlock).toContain("''stock_input_vat_reclaim''");
+    expect(floorBlock).toContain("''packaging_input_vat_reclaim''");
+    expect(floorBlock).toContain("''delivery_input_vat_reclaim''");
+    expect(floorBlock).toContain("''target_output_vat''");
+    expect(floorBlock).not.toContain("''risk_reserve''");
+    expect(floorBlock).not.toContain("''minimum_profit''");
+    expect(floorBlock).not.toContain("''margin_uplift''");
     expect(correctedVatPricingMigration).not.toContain("$$");
   });
 
@@ -173,7 +179,13 @@ describe("pricing engine contract", () => {
     expect(correctedVatPricingMigration).toContain("v_market_weighted_undercut := ROUND(v_market_gap * v_market_weight, 2)");
     expect(correctedVatPricingMigration).toContain("v_target_profit_safeguard_price");
     expect(correctedVatPricingMigration).toContain("v_target_margin_safeguard_price");
+    expect(correctedVatPricingMigration).toContain("''key'', ''risk_reserve'', ''label'', ''Risk reserve''");
+    expect(correctedVatPricingMigration).toContain("''key'', ''minimum_profit'', ''label'', ''Minimum profit''");
+    expect(correctedVatPricingMigration).toContain("''key'', ''margin_uplift'', ''label'', ''Margin uplift''");
     expect(correctedVatPricingMigration).toContain("v_target := ROUND(GREATEST(");
+    expect(correctedVatPricingMigration).toContain("v_ceiling := ROUND(GREATEST(");
+    expect(correctedVatPricingMigration).toContain("COALESCE(v_raw_rrp_gross, 0)");
+    expect(correctedVatPricingMigration).toContain("COALESCE(v_raw_market_consensus_gross, 0)");
     expect(correctedVatPricingMigration).toContain("''target_anchor_gross''");
     expect(correctedVatPricingMigration).toContain("''raw_market_consensus_gross''");
     expect(correctedVatPricingMigration).toContain("''calculation_basis'', ''pool_wac_vat_break_even_floor_v1''");
@@ -379,6 +391,9 @@ describe("pricing engine contract", () => {
     expect(pricingTransparencyTab).toContain("PriceContributionBar");
     expect(pricingTransparencyTab).toContain("brickeconomy_rrp");
     expect(pricingTransparencyTab).toContain("market_weighted_rrp_undercut");
+    expect(pricingTransparencyTab).toContain("Break-even floor");
+    expect(pricingTransparencyTab).toContain("Commercial target");
+    expect(pricingTransparencyTab).toContain("Market ceiling");
     expect(pricingTransparencyTab).toContain("Floor Contributors");
     expect(pricingTransparencyTab).toContain("Target Rules");
     expect(pricingTransparencyTab).toContain("VAT Position");
