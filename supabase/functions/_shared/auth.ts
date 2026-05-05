@@ -37,7 +37,18 @@ function constantTimeEqual(left: string, right: string): boolean {
 export function verifyServiceRoleJWT(token: string, supabaseUrl: string): boolean {
   if (!token || !supabaseUrl) return false;
 
-  const parts = token.trim().split(".");
+  const trimmed = token.trim();
+
+  // New API-key format (sb_secret_..., sb_publishable_... etc).
+  // For service-role bypass, accept only secret-class tokens that match the
+  // runtime SUPABASE_SERVICE_ROLE_KEY (constant-time compare).
+  if (trimmed.startsWith("sb_")) {
+    const runtimeKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    if (!runtimeKey) return false;
+    return constantTimeEqual(trimmed, runtimeKey);
+  }
+
+  const parts = trimmed.split(".");
   if (parts.length !== 3) return false;
 
   try {
