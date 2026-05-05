@@ -31,20 +31,34 @@ const STATUS_COLORS: Record<string, string> = {
 
 const CONTRIBUTOR_COLORS: Record<string, string> = {
   pooled_carrying_value: "#475569",
+  stock_cost_gross_paid: "#475569",
+  stock_input_vat_reclaim: "#22C55E",
   packaging_cost: "#2563EB",
+  packaging_gross_paid: "#2563EB",
+  packaging_input_vat_reclaim: "#22C55E",
   delivery_cost: "#0EA5E9",
+  delivery_gross_paid: "#0EA5E9",
+  delivery_input_vat_reclaim: "#22C55E",
   estimated_channel_fees: "#7C3AED",
   channel_fees: "#7C3AED",
   payment_fees: "#A855F7",
   channel_fee_input_vat_reclaim: "#22C55E",
+  program_commission: "#A855F7",
+  floor_break_even_net_position: "#14B8A6",
   risk_reserve: "#F97316",
   minimum_profit: "#16A34A",
   margin_uplift: "#14B8A6",
   output_vat_payable: "#B91C1C",
+  raw_rrp_gross: "#2563EB",
+  raw_market_consensus_gross: "#F59E0B",
+  target_anchor_gross: "#0F766E",
   market_consensus: "#F59E0B",
   brickeconomy_rrp: "#2563EB",
+  condition_adjusted_anchor: "#0891B2",
   condition_adjusted_rrp: "#0891B2",
   market_weighted_rrp_undercut: "#EF4444",
+  target_profit_safeguard_price: "#16A34A",
+  target_margin_safeguard_price: "#14B8A6",
   condition_adjusted_market: "#0891B2",
   demand_multiplier: "#6366F1",
   age_multiplier: "#8B5CF6",
@@ -180,6 +194,7 @@ function VatPositionPanel({ quote }: { quote: PriceChannelTransparency["quote"] 
 
   const netPosition = Number(vat.net_position_after_vat ?? 0);
   const vatRate = vat.vat_rate_percent == null ? "VAT" : `VAT ${Number(vat.vat_rate_percent).toFixed(1)}%`;
+  const actualCostsNet = vat.actual_costs_net_after_reclaim ?? vat.cost_basis_net_paid;
 
   return (
     <SurfaceCard className="p-3">
@@ -188,7 +203,7 @@ function VatPositionPanel({ quote }: { quote: PriceChannelTransparency["quote"] 
         <Mono>{vatRate}</Mono>
       </div>
       <div className="grid gap-2 text-[11px] sm:grid-cols-4">
-        <Metric label="Paid/Recover" value={money(vat.cost_basis_net_paid)} />
+        <Metric label="Costs Ex VAT" value={money(actualCostsNet)} />
         <Metric label="Received Gross" value={money(vat.sale_price_gross)} tone="amber" />
         <Metric label="Receipts Ex VAT" value={money(vat.sale_receipts_net_of_vat)} tone="teal" />
         <Metric label="Net Position" value={money(vat.net_position_after_vat)} tone={netPosition < 0 ? "red" : "teal"} />
@@ -197,8 +212,20 @@ function VatPositionPanel({ quote }: { quote: PriceChannelTransparency["quote"] 
         <table className="w-full text-[11px]">
           <tbody>
             <tr className="border-t border-zinc-100 first:border-t-0">
-              <td className="px-2 py-1.5 text-zinc-600">Cost basis to recover</td>
-              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.cost_basis_net_paid)}</Mono></td>
+              <td className="px-2 py-1.5 text-zinc-600">Stock cost paid gross</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(vat.stock_cost_gross_paid)}</Mono></td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Stock VAT reclaim</td>
+              <td className="px-2 py-1.5 text-right">
+                <Mono color="teal">
+                  {vat.stock_input_vat_reclaim == null ? "—" : `-${money(vat.stock_input_vat_reclaim)}`}
+                </Mono>
+              </td>
+            </tr>
+            <tr className="border-t border-zinc-100">
+              <td className="px-2 py-1.5 text-zinc-600">Actual costs after VAT reclaim</td>
+              <td className="px-2 py-1.5 text-right"><Mono>{money(actualCostsNet)}</Mono></td>
             </tr>
             <tr className="border-t border-zinc-100">
               <td className="px-2 py-1.5 text-zinc-600">Customer/channel pays</td>

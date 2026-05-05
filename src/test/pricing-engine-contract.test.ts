@@ -31,6 +31,10 @@ const riskReservePercentFixMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260505133000_fix_vat_risk_reserve_percent_regression.sql"),
   "utf8",
 );
+const correctedVatPricingMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260505143000_correct_pricing_floor_target_vat.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
@@ -145,6 +149,91 @@ describe("pricing engine contract", () => {
     expect(riskReservePercentFixMigration).not.toContain("WHEN v_raw_risk_rate > 1 THEN v_raw_risk_rate / 100");
     expect(riskReservePercentFixMigration).not.toContain("ELSE v_raw_risk_rate");
     expect(riskReservePercentFixMigration).not.toContain("$$");
+  });
+
+  it("corrects floor to VAT-aware break-even only", () => {
+    expect(correctedVatPricingMigration).toContain("Floor is break-even only");
+    expect(correctedVatPricingMigration).toContain("v_stock_cost_gross := COALESCE(NULLIF(v_quote->>''carrying_value''");
+    expect(correctedVatPricingMigration).toContain("v_stock_cost_net := ROUND(v_stock_cost_gross / v_vat_multiplier, 2)");
+    expect(correctedVatPricingMigration).toContain("v_packaging_net := ROUND(v_packaging_gross / v_vat_multiplier, 2)");
+    expect(correctedVatPricingMigration).toContain("v_delivery_net := ROUND(v_delivery_gross / v_vat_multiplier, 2)");
+    expect(correctedVatPricingMigration).toContain("v_floor := ROUND(GREATEST((v_break_even_base_net + v_floor_fees_net + v_program_commission) * v_vat_multiplier, 0), 2)");
+    expect(correctedVatPricingMigration).toContain("''floor_break_even_net_position''");
+    expect(correctedVatPricingMigration).not.toContain("''key'', ''risk_reserve'', ''label'', ''Risk reserve'', ''amount'', v_floor");
+    expect(correctedVatPricingMigration).not.toContain("''key'', ''minimum_profit'', ''label'', ''Minimum profit''");
+    expect(correctedVatPricingMigration).not.toContain("''key'', ''margin_uplift'', ''label'', ''Margin uplift''");
+    expect(correctedVatPricingMigration).not.toContain("$$");
+  });
+
+  it("corrects target to anchor on the higher gross RRP or market consensus with safeguards", () => {
+    expect(correctedVatPricingMigration).toContain("v_raw_rrp_gross := CASE");
+    expect(correctedVatPricingMigration).toContain("v_raw_market_consensus_gross := CASE");
+    expect(correctedVatPricingMigration).toContain("v_target_anchor_gross := GREATEST(v_raw_rrp_gross, v_raw_market_consensus_gross)");
+    expect(correctedVatPricingMigration).toContain("v_condition_adjusted_anchor := ROUND(GREATEST(v_target_anchor_gross * v_condition_multiplier, 0), 2)");
+    expect(correctedVatPricingMigration).toContain("v_market_weighted_undercut := ROUND(v_market_gap * v_market_weight, 2)");
+    expect(correctedVatPricingMigration).toContain("v_target_profit_safeguard_price");
+    expect(correctedVatPricingMigration).toContain("v_target_margin_safeguard_price");
+    expect(correctedVatPricingMigration).toContain("v_target := ROUND(GREATEST(");
+    expect(correctedVatPricingMigration).toContain("''target_anchor_gross''");
+    expect(correctedVatPricingMigration).toContain("''raw_market_consensus_gross''");
+    expect(correctedVatPricingMigration).toContain("''calculation_basis'', ''pool_wac_vat_break_even_floor_v1''");
+    expect(correctedVatPricingMigration).toContain("calculation_version = ''pool_wac_vat_break_even_floor_v1''");
+  });
+
+  it("models VAT reclaim and target safeguards numerically", () => {
+    const vatMultiplier = 1.2;
+    const stockGross = 12;
+    const packagingGross = 1.2;
+    const deliveryGross = 2.4;
+    const feeRate = 0.12;
+    const fixedFeeGross = 0.3;
+    const minProfit = 1;
+    const minMargin = 0.1;
+    const riskRate = 0.005;
+
+    const stockNet = stockGross / vatMultiplier;
+    const packagingNet = packagingGross / vatMultiplier;
+    const deliveryNet = deliveryGross / vatMultiplier;
+    const breakEvenBaseNet = stockNet + packagingNet + deliveryNet;
+    expect(breakEvenBaseNet).toBeLessThan(stockGross + packagingGross + deliveryGross);
+
+    let floorGross = breakEvenBaseNet * vatMultiplier;
+    for (let i = 0; i < 10; i += 1) {
+      const feesGross = floorGross * feeRate + fixedFeeGross;
+      const feesNet = feesGross / vatMultiplier;
+      floorGross = (breakEvenBaseNet + feesNet) * vatMultiplier;
+    }
+    const floorFeesGross = floorGross * feeRate + fixedFeeGross;
+    const floorNetPosition = floorGross / vatMultiplier - floorFeesGross / vatMultiplier - breakEvenBaseNet;
+    expect(Math.abs(floorNetPosition)).toBeLessThan(0.01);
+
+    let marginSafeguard = floorGross;
+    for (let i = 0; i < 10; i += 1) {
+      const feesNet = (marginSafeguard * feeRate + fixedFeeGross) / vatMultiplier;
+      marginSafeguard = ((breakEvenBaseNet + feesNet) / (1 - minMargin)) * vatMultiplier;
+    }
+    let profitSafeguard = floorGross;
+    for (let i = 0; i < 10; i += 1) {
+      const feesNet = (profitSafeguard * feeRate + fixedFeeGross) / vatMultiplier;
+      profitSafeguard = (breakEvenBaseNet + feesNet + minProfit) * vatMultiplier;
+    }
+
+    const rawRrpGross = 25;
+    const rawMarketGross = 30;
+    const conditionMultiplier = 0.8;
+    const anchor = Math.max(rawRrpGross, rawMarketGross);
+    const adjustedAnchor = anchor * conditionMultiplier;
+    const marketGap = Math.max(adjustedAnchor - rawMarketGross, 0);
+    const undercut = marketGap * 0.5;
+    const marketTarget = adjustedAnchor - undercut;
+    const target = Math.max(marketTarget, floorGross, profitSafeguard, marginSafeguard);
+    const targetRisk = (target / vatMultiplier) * riskRate;
+
+    expect(anchor).toBe(rawMarketGross);
+    expect(target).toBeGreaterThanOrEqual(floorGross);
+    expect(target).toBeGreaterThanOrEqual(profitSafeguard);
+    expect(target).toBeGreaterThanOrEqual(marginSafeguard);
+    expect(targetRisk).toBeGreaterThan(0);
   });
 
   it("bases target price on BrickEconomy RRP and never returns a target below floor", () => {
