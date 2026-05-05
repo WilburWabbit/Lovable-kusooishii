@@ -11,6 +11,8 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.47.1
 export type ProviderName =
   | "product"
   | "brickeconomy"
+  | "bricklink"
+  | "brickset"
   | "catalog"
   | "rebrickable"
   | "theme"
@@ -81,7 +83,24 @@ export interface ProviderBundle {
   rebrickable: Record<string, unknown> | null;
   minifigs: SetMinifigRow[];
   fieldOverrides: Record<string, unknown>;
+  sourceAttributes: Record<string, SourceAttributePreference>;
 }
+
+const SOURCE_VALUE_PRIORITY = ["brickeconomy", "bricklink", "brickset"] as const;
+const IMAGE_URL_KEY = "image_url";
+
+interface SourceAttributeValue {
+  value: string | null;
+  fetched_at?: string;
+}
+
+interface SourceAttributePreference {
+  source_values_jsonb?: Record<string, SourceAttributeValue> | null;
+  chosen_source?: string | null;
+  custom_value?: string | null;
+}
+
+type SourceAttributePreferenceRow = SourceAttributePreference & { key?: string };
 
 // ─── Load every provider for a product ──────────────────────
 
@@ -104,6 +123,7 @@ export async function loadProviderBundle(
       rebrickable: null,
       minifigs: [],
       fieldOverrides: {},
+      sourceAttributes: {},
     };
   }
 
@@ -180,6 +200,25 @@ export async function loadProviderBundle(
     }
   }
 
+  const { data: sourceAttributeRows } = await admin
+    .from("product_attribute")
+    .select("key, source_values_jsonb, chosen_source, custom_value")
+    .eq("product_id", productId)
+    .eq("namespace", "core")
+    .is("channel", null)
+    .is("marketplace", null)
+    .is("category_id", null);
+
+  const sourceAttributes: Record<string, SourceAttributePreference> = {};
+  for (const row of (sourceAttributeRows ?? []) as SourceAttributePreferenceRow[]) {
+    if (!row.key || row.key === IMAGE_URL_KEY) continue;
+    sourceAttributes[row.key] = {
+      source_values_jsonb: row.source_values_jsonb ?? null,
+      chosen_source: row.chosen_source ?? null,
+      custom_value: row.custom_value ?? null,
+    };
+  }
+
   return {
     product: productRow,
     theme: themeRow,
@@ -188,7 +227,43 @@ export async function loadProviderBundle(
     rebrickable: rebrickableRow,
     minifigs: minifigRows,
     fieldOverrides,
+    sourceAttributes,
   };
+}
+
+function sourceAttributeSelection(
+  attr: CanonicalAttributeRow,
+  bundle: ProviderBundle,
+): { raw: unknown; source: ResolvedCanonicalValue["source"]; sourceField: string | null; suppressFallback?: boolean } | null {
+  if (attr.key === IMAGE_URL_KEY) return null;
+  const preference = bundle.sourceAttributes[attr.key];
+  if (!preference) return null;
+
+  const chosen = preference.chosen_source;
+  if (chosen === "none") return { raw: null, source: "none", sourceField: null, suppressFallback: true };
+  if (chosen === "custom") {
+    const custom = preference.custom_value;
+    return isEmpty(custom) ? null : { raw: custom, source: "override", sourceField: "custom_value" };
+  }
+
+  const values = preference.source_values_jsonb ?? {};
+  const sourceOrder = SOURCE_VALUE_PRIORITY as readonly string[];
+  const orderedSources = chosen && sourceOrder.includes(chosen)
+    ? [chosen]
+    : sourceOrder;
+
+  for (const source of orderedSources) {
+    const value = values[source]?.value;
+    if (!isEmpty(value)) {
+      return {
+        raw: value,
+        source: source as ResolvedCanonicalValue["source"],
+        sourceField: "source_values_jsonb",
+      };
+    }
+  }
+
+  return null;
 }
 
 // ─── Walk the provider chain to resolve one attribute ──────
@@ -309,14 +384,29 @@ export function resolveAttribute(
   let raw: unknown = null;
   let source: ResolvedCanonicalValue["source"] = "none";
   let sourceField: string | null = null;
+  let suppressFallback = false;
 
-  for (const step of attr.provider_chain ?? []) {
-    const v = readFromProvider(step, bundle, attr);
-    if (!isEmpty(v)) {
-      raw = v;
-      source = step.provider;
-      sourceField = step.field;
-      break;
+  const sourceAttribute = sourceAttributeSelection(attr, bundle);
+  if (sourceAttribute) {
+    raw = sourceAttribute.raw;
+    source = sourceAttribute.source;
+    sourceField = sourceAttribute.sourceField;
+    suppressFallback = sourceAttribute.suppressFallback === true;
+  }
+
+  if (raw == null && source !== "none") {
+    source = "none";
+  }
+
+  if (!suppressFallback && source === "none" && raw == null) {
+    for (const step of attr.provider_chain ?? []) {
+      const v = readFromProvider(step, bundle, attr);
+      if (!isEmpty(v)) {
+        raw = v;
+        source = step.provider;
+        sourceField = step.field;
+        break;
+      }
     }
   }
 

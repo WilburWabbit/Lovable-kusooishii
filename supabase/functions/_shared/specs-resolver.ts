@@ -50,6 +50,8 @@ export interface SpecRow extends AspectRow {
   autoSource:
     | "product"
     | "brickeconomy"
+    | "bricklink"
+    | "brickset"
     | "catalog"
     | "rebrickable"
     | "theme"
