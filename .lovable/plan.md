@@ -1,57 +1,61 @@
-## Why the latest eBay orders haven't reached QBO
 
-The two most recent eBay orders are sitting **queued but unprocessed**:
+## Plan to fix the failing cron jobs
 
-| Order | Customer | qbo_sync_status | Posting intents |
-|---|---|---|---|
-| KO-0009654 (John Bromiley, 2026-05-05) | not yet in QBO | `pending` | `upsert_customer` + `create_sales_receipt` both `pending` |
-| KO-0009653 (Simone Lewis, 2026-05-04) | not yet in QBO | `pending` | `upsert_customer` + `create_sales_receipt` both `pending` |
+### 1. Add a safe way to sync the cron Vault service-role key
 
-The intents were correctly enqueued by `queue_qbo_posting_intents_for_order`. They are **not failing** — they are never being picked up. There are **180 pending posting_intent rows** in total (only 133 have ever posted).
+Create a migration that extends the existing admin-only helper so it can upsert:
 
-### Root cause
+- `service_role_key`
+- existing allowed cron secrets remain supported
 
-The cron job that drains the QBO posting outbox is:
+This migration will not hardcode the service-role key. It will only allow the backend bootstrap function to write the current runtime key into Vault securely.
 
-```
-subledger-qbo-posting-outbox-processor  (every 5 min)
-  → SELECT public.invoke_subledger_scheduled_job('qbo_posting_outbox', ...)
-  → calls edge function: subledger-scheduled-jobs
-```
+### 2. Update `bootstrap-cron-vault`
 
-Every recent invocation of `subledger-scheduled-jobs` is erroring with:
+Update the existing `bootstrap-cron-vault` Edge Function so it writes these values into Vault from runtime environment variables:
 
-```
-Unauthorized — invalid scheduled job secret
-  at authenticateInternalSchedule
-  at requireAutomationActor
-```
+- `service_role_key` from `SUPABASE_SERVICE_ROLE_KEY`
+- `internal_cron_secret` from `INTERNAL_CRON_SECRET`
+- `subledger_scheduled_jobs_secret` from `SUBLEDGER_SCHEDULED_JOBS_SECRET` or `INTERNAL_CRON_SECRET`
+- optionally confirm `supabase_url` exists
 
-So the outbox never runs `accounting-posting-intents-process`, and `posting_intent` rows for both new eBay orders stay `pending` forever. (The separate `qbo-process-pending` cron that runs every minute is healthy — but that one only handles inbound landing tables, not the outbound QBO posting outbox.)
+Also harden its auth check so it validates service-role JWTs properly instead of accepting any three-part JWT-shaped token.
 
-The `qbo_posting_outbox` job is comparing an incoming secret against a Lovable-managed value (likely `INTERNAL_CRON_SECRET` / scheduled-job secret) and the value the DB function is sending no longer matches the value the edge function expects — typical drift after a key rotation or after the secret was changed on only one side.
+### 3. Deploy affected Edge Functions
 
-## Plan
+Redeploy the functions involved in the current cron failures:
 
-### 1. Fix the auth mismatch on the scheduled job
-- Inspect `supabase/functions/subledger-scheduled-jobs/index.ts` (`authenticateInternalSchedule`) to confirm exactly which env var/secret it expects (e.g. `INTERNAL_CRON_SECRET` or a dedicated scheduled-jobs secret).
-- Inspect `public.invoke_subledger_scheduled_job` to see which Vault secret name it pulls and which header it sends.
-- Align the two: prefer the existing pattern used by `qbo-process-pending-safety-net` (header `x-internal-shared-secret`, secret `INTERNAL_CRON_SECRET`). Update either the SQL function or the edge function so both sides read the same Lovable-managed secret. No Vault drift copies.
-- Redeploy `subledger-scheduled-jobs`.
+- `bootstrap-cron-vault`
+- `qbo-process-pending`
+- `subledger-scheduled-jobs`
+- `ebay-retry-order`
 
-### 2. Drain the backlog manually once
-- After the fix, invoke `accounting-posting-intents-process` (or trigger `subledger-scheduled-jobs` for `qbo_posting_outbox`) with a larger `batch_size` to clear the 180 pending intents in dependency order (customers before sales receipts).
-- Verify KO-0009653 and KO-0009654:
-  - `customer.qbo_customer_id` populated for both Simone Lewis and John Bromiley
-  - `sales_order.qbo_sales_receipt_id` populated and `qbo_sync_status = 'synced'`
-  - corresponding `posting_intent` rows flipped to `posted`
+This ensures the shared service-role JWT validation code is bundled into each deployed function.
 
-### 3. Confirm steady state
-- Wait one cron cycle (5 min) and confirm `subledger-scheduled-jobs` logs show success, not "invalid scheduled job secret".
-- Spot-check `posting_intent` pending count is trending toward zero and not regrowing.
+### 4. Run the bootstrap sync
 
-### Notes / non-goals
-- No schema changes required.
-- Do not touch `qbo-process-pending` — it's healthy.
-- Do not byte-compare service-role keys; keep using the JWT verifier / shared-secret pattern already in `_shared/auth.ts`.
-- If `INTERNAL_CRON_SECRET` was rotated and a stale copy is in `vault.decrypted_secrets`, remove the Vault copy and have the SQL function read the canonical secret only.
+Invoke `bootstrap-cron-vault` once using the internal cron secret you provided, so the database Vault `service_role_key` is overwritten with the actual current runtime service-role key.
+
+### 5. Validate with real cron-path calls
+
+Run targeted validation using the same path cron uses:
+
+- call `public.invoke_subledger_scheduled_job(...)`
+- manually enqueue or wait for `qbo-process-pending-safety-net`
+- manually enqueue or wait for `ebay-retry-order-every-5min`
+
+Then check:
+
+- `net._http_response` for new `200`/successful responses
+- Edge Function logs for absence of `Unauthorized`, `invalid token`, and `Forbidden`
+- `cron.job_run_details` remains successful
+
+### 6. Report results
+
+I’ll report:
+
+- migrations run
+- migrations skipped/already applied
+- Edge Functions deployed
+- validation responses from `net._http_response`
+- any remaining failures or follow-up required
