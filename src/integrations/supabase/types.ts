@@ -9305,7 +9305,7 @@ export type Database = {
           years: number[]
         }[]
       }
-      commerce_quote_price: {
+      commerce_quote_price_highest_unit_legacy: {
         Args: {
           p_candidate_price?: number
           p_channel?: string
