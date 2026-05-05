@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, BarChart3, Clock, Eye, ShieldAlert } from "lucide-react";
 import {
-  Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
+  Sheet,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { usePriceTransparency, type PriceChannelTransparency, type PriceContributor } from "@/hooks/admin/use-price-transparency";
+import { usePriceTransparency, useRecordPriceOverride, type PriceChannelTransparency, type PriceContributor } from "@/hooks/admin/use-price-transparency";
 import { Badge, GradeBadge, Mono, SectionHead, SurfaceCard } from "./ui-primitives";
+import { toast } from "sonner";
 
 interface PricingTransparencyTabProps {
   mpn: string;
@@ -122,11 +123,48 @@ function ContributorTable({ contributors }: { contributors: PriceContributor[] }
   );
 }
 
-function PriceExplanationPanel({ selected }: { selected: SelectedChannel }) {
+function PriceExplanationPanel({ selected, mpn }: { selected: SelectedChannel; mpn: string }) {
   const quote = selected.row.quote;
   const floorContributors = quote.floor_contributors ?? [];
   const targetContributors = quote.target_contributors ?? [];
   const warnings = [...(quote.warning_reasons ?? []), ...(quote.blocking_reasons ?? [])];
+  const recordOverride = useRecordPriceOverride();
+  const [overridePrice, setOverridePrice] = useState(
+    selected.row.final_price == null ? "" : Number(selected.row.final_price).toFixed(2),
+  );
+  const [reasonCode, setReasonCode] = useState("operator_override");
+  const [reasonNote, setReasonNote] = useState("");
+  const parsedOverridePrice = Number(overridePrice);
+  const floorPrice = quote.floor_price == null ? null : Number(quote.floor_price);
+  const overrideBelowFloor = Number.isFinite(parsedOverridePrice)
+    && floorPrice != null
+    && floorPrice > 0
+    && parsedOverridePrice < floorPrice;
+
+  const submitOverride = async () => {
+    if (!Number.isFinite(parsedOverridePrice) || parsedOverridePrice <= 0) {
+      toast.error("Enter a valid override price");
+      return;
+    }
+    if (!reasonCode.trim()) {
+      toast.error("Override reason is required");
+      return;
+    }
+
+    try {
+      await recordOverride.mutateAsync({
+        mpn,
+        skuId: quote.sku_id,
+        channel: selected.row.channel,
+        listingPrice: parsedOverridePrice,
+        reasonCode,
+        reasonNote: reasonNote.trim() || null,
+      });
+      toast.success("Price override recorded and reprice queued");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Price override failed");
+    }
+  };
 
   return (
     <div className="grid gap-4">
@@ -212,6 +250,63 @@ function PriceExplanationPanel({ selected }: { selected: SelectedChannel }) {
           </div>
         </SurfaceCard>
       )}
+
+      <SurfaceCard className="p-3">
+        <SectionHead>Manual Override</SectionHead>
+        <div className="mt-3 grid gap-3">
+          <div className="grid gap-2 sm:grid-cols-[1fr_1fr]">
+            <label className="grid gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Listing price
+              <input
+                value={overridePrice}
+                onChange={(event) => setOverridePrice(event.target.value)}
+                inputMode="decimal"
+                className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-zinc-900"
+              />
+            </label>
+            <label className="grid gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Reason code
+              <select
+                value={reasonCode}
+                onChange={(event) => setReasonCode(event.target.value)}
+                className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-zinc-900"
+              >
+                <option value="operator_override">Operator override</option>
+                <option value="clearance">Clearance</option>
+                <option value="defect_disclosure">Defect disclosure</option>
+                <option value="market_test">Market test</option>
+                <option value="customer_commitment">Customer commitment</option>
+              </select>
+            </label>
+          </div>
+          <label className="grid gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            Note
+            <textarea
+              value={reasonNote}
+              onChange={(event) => setReasonNote(event.target.value)}
+              rows={3}
+              className="resize-y rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-zinc-900"
+              placeholder="Record the operator rationale for this listing price"
+            />
+          </label>
+          {overrideBelowFloor && (
+            <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700">
+              <ShieldAlert className="h-3.5 w-3.5" />
+              This override is below floor and will be queued with below-floor approval evidence.
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={submitOverride}
+              disabled={!reasonCode.trim() || recordOverride.isPending}
+              className="rounded bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {recordOverride.isPending ? "Queueing..." : "Record override"}
+            </button>
+          </div>
+        </div>
+      </SurfaceCard>
     </div>
   );
 }
@@ -359,7 +454,11 @@ export function PricingTransparencyTab({ mpn }: PricingTransparencyTabProps) {
                   Floor, target, market evidence, and override state for grade {selected.grade}.
                 </SheetDescription>
               </SheetHeader>
-              <PriceExplanationPanel selected={selected} />
+              <PriceExplanationPanel
+                key={`${selected.row.quote.sku_id}:${selected.row.channel}`}
+                selected={selected}
+                mpn={mpn}
+              />
             </>
           )}
         </SheetContent>

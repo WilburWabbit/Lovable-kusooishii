@@ -19,12 +19,24 @@ const rebalancePricingMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260503193000_rebalance_pricing_floor_target.sql"),
   "utf8",
 );
+const priceTransparencyMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260505103000_price_transparency_pool_wac.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
 );
 const channelsTab = readFileSync(
   join(repoRoot, "src/components/admin-v2/ChannelsTab.tsx"),
+  "utf8",
+);
+const productDetail = readFileSync(
+  join(repoRoot, "src/components/admin-v2/ProductDetail.tsx"),
+  "utf8",
+);
+const pricingTransparencyTab = readFileSync(
+  join(repoRoot, "src/components/admin-v2/PricingTransparencyTab.tsx"),
   "utf8",
 );
 const marketRefresh = readFileSync(
@@ -65,6 +77,32 @@ describe("pricing engine contract", () => {
     expect(rebalancePricingMigration).not.toContain("v_floor := ROUND((1.2 *");
   });
 
+  it("switches the authoritative floor basis to pooled WAC while exposing highest-unit risk", () => {
+    expect(priceTransparencyMigration).toContain("basis_strategy'', ''pool_wac");
+    expect(priceTransparencyMigration).toContain("AVG(NULLIF(COALESCE(su.carrying_value, su.landed_cost, 0), 0))");
+    expect(priceTransparencyMigration).toContain("MAX(COALESCE(su.carrying_value, su.landed_cost, 0))");
+    expect(priceTransparencyMigration).toContain("highest_unit_carrying_value");
+    expect(priceTransparencyMigration).toContain("v_non_fee_costs := ROUND(v_pooled_carrying_value + v_packaging_cost + v_delivery_cost, 2)");
+  });
+
+  it("stores full explanation data with durable price snapshots", () => {
+    expect(priceTransparencyMigration).toContain("floor_contributors");
+    expect(priceTransparencyMigration).toContain("target_contributors");
+    expect(priceTransparencyMigration).toContain("cost_basis");
+    expect(priceTransparencyMigration).toContain("''pool_wac_transparency_v1''");
+    expect(priceTransparencyMigration).toContain("CREATE OR REPLACE VIEW public.v_price_transparency_current");
+    expect(priceTransparencyMigration).not.toContain("$$");
+  });
+
+  it("allows market targets below floor while requiring final-price override evidence", () => {
+    expect(priceTransparencyMigration).toContain("v_target_below_floor := true");
+    expect(priceTransparencyMigration).toContain("''target_floor_clamped'', 0");
+    expect(priceTransparencyMigration).not.toContain("v_target := ROUND(v_floor, 2);\\n  END IF;\\n\\n  IF p_candidate_price");
+    expect(channelsTab).toContain("Below-floor price override");
+    expect(channelsTab).toContain("Publishing will require an override reason");
+    expect(channelsTab).toContain("allowBelowFloor");
+  });
+
   it("keeps the 40478-1.2 style economics in a plausible range", () => {
     const carrying = 26.76;
     const packaging = 0.05;
@@ -94,6 +132,14 @@ describe("pricing engine contract", () => {
     expect(adminData).toContain('action === "calculate-pricing"');
     expect(adminData).toContain('admin.rpc("commerce_quote_price"');
     expect(adminData).toContain("normalizeQuote(rawQuote, sku_id, channel)");
+  });
+
+  it("exposes Product 360 price transparency and override actions through admin-data", () => {
+    expect(adminData).toContain('action === "get-price-transparency"');
+    expect(adminData).toContain("buildPriceTransparency(admin, params)");
+    expect(adminData).toContain('action === "record-price-override"');
+    expect(adminData).toContain('from("price_override")');
+    expect(adminData).toContain('p_allow_below_floor: overrideType === "below_floor"');
   });
 
   it("blocks website publish through a preflight with explicit operator actions", () => {
@@ -134,6 +180,17 @@ describe("pricing engine contract", () => {
     expect(channelsTab).not.toContain("readOnly");
     expect(adminData).toContain("const finalPrice = listedPrice && listedPrice > 0 ? listedPrice : targetPrice");
     expect(adminData).toContain("Cannot list: website price");
+  });
+
+  it("adds the product pricing tab and explanation surface", () => {
+    expect(productDetail).toContain('{ key: "pricing", label: "Pricing" }');
+    expect(productDetail).toContain("<PricingTransparencyTab");
+    expect(pricingTransparencyTab).toContain("PriceContributionBar");
+    expect(pricingTransparencyTab).toContain("Floor Contributors");
+    expect(pricingTransparencyTab).toContain("Target Rules");
+    expect(pricingTransparencyTab).toContain("Source Evidence");
+    expect(pricingTransparencyTab).toContain("Manual Override");
+    expect(pricingTransparencyTab).toContain("useRecordPriceOverride");
   });
 
   it("coalesces market signal source metadata in both function copies", () => {

@@ -431,7 +431,7 @@ async function buildPriceTransparency(admin: any, params: Record<string, unknown
   if (overrideRes.error) throw overrideRes.error;
   if (marketRes.error) throw marketRes.error;
 
-  const listings = ((listingRes.data ?? []) as Array<Record<string, any>>)
+  const listings: Array<Record<string, any> & { normalized_channel: string }> = ((listingRes.data ?? []) as Array<Record<string, any>>)
     .map((row) => ({ ...row, normalized_channel: normalizedPriceChannel(row.channel ?? row.v2_channel) }))
     .sort((a, b) => {
       const liveDiff = (a.v2_status === "live" ? 0 : 1) - (b.v2_status === "live" ? 0 : 1);
