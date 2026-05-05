@@ -9518,7 +9518,27 @@ export type Database = {
         }
         Returns: Json
       }
+      commerce_quote_price_pool_wac_no_vat: {
+        Args: {
+          p_candidate_price?: number
+          p_channel?: string
+          p_sales_program_code?: string
+          p_sku_id: string
+        }
+        Returns: Json
+      }
       create_price_decision_snapshot: {
+        Args: {
+          p_actor_id?: string
+          p_candidate_price?: number
+          p_channel?: string
+          p_channel_listing_id?: string
+          p_sales_program_code?: string
+          p_sku_id: string
+        }
+        Returns: string
+      }
+      create_price_decision_snapshot_pool_wac_no_vat: {
         Args: {
           p_actor_id?: string
           p_candidate_price?: number
