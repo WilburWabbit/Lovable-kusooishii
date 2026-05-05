@@ -7,6 +7,7 @@ import { PhotosTab } from "./tabs/PhotosTab";
 import { CopyTab } from "./tabs/CopyTab";
 import { MinifigsTab } from "./tabs/MinifigsTab";
 import { ChannelsTab } from "./ChannelsTab";
+import { PricingTransparencyTab } from "./PricingTransparencyTab";
 import { SpecificationsTab } from "./SpecificationsTab";
 import { BrickEconomyPriceChart } from "./BrickEconomyPriceChart";
 import type { Channel, ProductVariant, ProductVariantPricing } from "@/lib/types/admin";
@@ -15,7 +16,7 @@ interface ProductDetailProps {
   mpn: string;
 }
 
-type TabKey = "stock" | "photos" | "copy" | "minifigs" | "channels" | "specs" | "market";
+type TabKey = "stock" | "photos" | "copy" | "minifigs" | "pricing" | "channels" | "specs" | "market";
 const HEADER_CHANNELS: Array<{ key: Channel; priceChannel: string; label: string }> = [
   { key: "website", priceChannel: "web", label: "Web" },
   { key: "ebay", priceChannel: "ebay", label: "eBay" },
@@ -57,6 +58,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
     { key: "photos", label: "Photos" },
     { key: "copy", label: "Copy & SEO" },
     { key: "minifigs", label: "Minifigs" },
+    { key: "pricing", label: "Pricing" },
     { key: "channels", label: "Channels" },
     { key: "specs", label: "Specifications" },
     { key: "market", label: "Market Data" },
@@ -171,6 +173,7 @@ export function ProductDetail({ mpn }: ProductDetailProps) {
       {activeTab === "photos" && <PhotosTab product={product} />}
       {activeTab === "copy" && <CopyTab product={product} />}
       {activeTab === "minifigs" && <MinifigsTab product={product} />}
+      {activeTab === "pricing" && <PricingTransparencyTab mpn={mpn} />}
       {activeTab === "channels" && <ChannelsTab variants={product.variants} product={product} />}
       {activeTab === "specs" && <SpecificationsTab product={product} />}
       {activeTab === "market" && <BrickEconomyPriceChart mpn={mpn} itemType={product.productType === "minifig" ? "minifig" : "set"} />}

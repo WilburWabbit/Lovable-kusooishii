@@ -15,6 +15,15 @@ import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/typ
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
 import { toast } from "sonner";
 import { generateEbayTitle } from "@/lib/utils/generate-ebay-title";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ShieldAlert } from "lucide-react";
 
 interface ChannelsTabProps {
   variants: ProductVariant[];
@@ -37,6 +46,11 @@ function normalizedChannel(channel: Channel | string | null | undefined): Channe
 
 type ChannelFormState = { title: string; description: string; price: string };
 type ChannelDirtyState = { title: boolean; description: boolean; price: boolean };
+type OverrideRequest = {
+  channel: { key: Channel; label: string };
+  price: number;
+  floorPrice: number;
+};
 
 const cleanDirtyState: ChannelDirtyState = { title: false, description: false, price: false };
 
@@ -67,6 +81,9 @@ function VariantChannelsCard({
   const channelAction = useChannelListingAction();
   const activateSku = useActivateSku();
   const queryClient = useQueryClient();
+  const [overrideRequest, setOverrideRequest] = useState<OverrideRequest | null>(null);
+  const [overrideReasonCode, setOverrideReasonCode] = useState("operator_override");
+  const [overrideReasonNote, setOverrideReasonNote] = useState("");
 
   const listingsByChannel = useMemo(() => {
     const map = new Map<string, ChannelListing>();
@@ -152,17 +169,27 @@ function VariantChannelsCard({
     }));
   };
 
-  const handlePublish = async (ch: { key: Channel; label: string }) => {
+  const isOnlyBelowFloorWebsiteBlock = (blockers: string[]) =>
+    blockers.length > 0 && blockers.every((blocker) => blocker.includes("is below floor"));
+
+  const handlePublish = async (
+    ch: { key: Channel; label: string },
+    override?: { reasonCode: string; reasonNote?: string | null },
+  ) => {
     const state = channelState[ch.key];
     const listing = listingsByChannel.get(ch.key);
     const pricing = pricingByChannel?.get(ch.key);
+    const allowBelowFloor = Boolean(override);
     if (pricing && pricing.sku_id !== variant.id) {
       toast.error(`${ch.label} pricing quote does not match ${variant.sku}`);
       return;
     }
     if (ch.key === "website" && webPreflight && !webPreflight.can_publish) {
-      toast.error(webPreflight.blockers[0] ?? "Website listing is blocked");
-      return;
+      const canOverrideBlock = allowBelowFloor && isOnlyBelowFloorWebsiteBlock(webPreflight.blockers);
+      if (!canOverrideBlock) {
+        toast.error(webPreflight.blockers[0] ?? "Website listing is blocked");
+        return;
+      }
     }
     if (!state?.title?.trim()) {
       toast.error(`${ch.label} listing title is required`);
@@ -177,12 +204,23 @@ function VariantChannelsCard({
 
     const floorPrice = pricing?.floor_price ?? listing?.priceFloor ?? null;
     if (floorPrice != null && price < floorPrice) {
-      toast.error(`${ch.label} price is below its channel floor`);
+      if (!allowBelowFloor) {
+        setOverrideRequest({ channel: ch, price, floorPrice });
+        return;
+      }
+      if (!override?.reasonCode?.trim()) {
+        toast.error("Override reason is required");
+        return;
+      }
+    }
+
+    if (allowBelowFloor && !override?.reasonCode?.trim()) {
+      toast.error("Override reason is required");
       return;
     }
 
     const priceDirty = dirtyRef.current[ch.key]?.price ?? false;
-    if (pricing?.quote_error && (!priceDirty || floorPrice == null || price < floorPrice)) {
+    if (pricing?.quote_error && (!priceDirty || floorPrice == null || (price < floorPrice && !allowBelowFloor))) {
       toast.error(`${ch.label} pricing quote must be fixed before publishing`);
       return;
     }
@@ -196,9 +234,13 @@ function VariantChannelsCard({
         listingPrice: price,
         estimatedFees: pricing?.estimated_fees ?? undefined,
         estimatedNet: pricing?.estimated_net ?? undefined,
-        allowBelowFloor: false,
+        allowBelowFloor,
+        overrideReasonCode: override?.reasonCode,
+        overrideReasonNote: override?.reasonNote ?? undefined,
       });
       toast.success(`Queued ${variant.sku} for ${ch.label}`);
+      setOverrideRequest(null);
+      setOverrideReasonNote("");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Publish failed";
       toast.error(message);
@@ -247,6 +289,7 @@ function VariantChannelsCard({
   };
 
   return (
+    <>
     <SurfaceCard>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2.5">
@@ -276,6 +319,9 @@ function VariantChannelsCard({
           const belowFloor = floorPrice != null && price > 0 && price < floorPrice;
           const titleEmpty = !state.title?.trim();
           const websiteBlocked = ch.key === "website" && webPreflight ? !webPreflight.can_publish : false;
+          const websiteHardBlocked = ch.key === "website" && webPreflight
+            ? !webPreflight.can_publish && !isOnlyBelowFloorWebsiteBlock(webPreflight.blockers)
+            : false;
           const preflightChecking = ch.key === "website" && webPreflightLoading;
           const manualAboveKnownFloor = dirty.price && price > 0 && floorPrice != null && price >= floorPrice;
           const quoteReady = Boolean(pricing && !pricingError);
@@ -283,9 +329,8 @@ function VariantChannelsCard({
             && !webPreflightLoading
             && !titleEmpty
             && price > 0
-            && !belowFloor
-            && !websiteBlocked
-            && (quoteReady || manualAboveKnownFloor);
+            && !websiteHardBlocked
+            && (quoteReady || manualAboveKnownFloor || belowFloor);
           const stockCount = ch.key === "website" ? webPreflight?.saleable_stock_count : pricing?.stock_unit_count;
           const confidence = pricing?.confidence_score == null ? null : Math.round(Number(pricing.confidence_score) * 100);
           const manualOutOfStock = listing?.availabilityOverride === "manual_out_of_stock";
@@ -420,7 +465,7 @@ function VariantChannelsCard({
               {/* Warnings */}
               {belowFloor && (
                 <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-[11px] font-medium text-red-700">
-                  Price is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Update the price or pricing controls before publishing.
+                  Price is below the {ch.label} floor (£{floorPrice!.toFixed(2)}). Publishing will require an override reason.
                 </div>
               )}
 
@@ -572,5 +617,76 @@ function VariantChannelsCard({
         })}
       </div>
     </SurfaceCard>
+    <Dialog open={!!overrideRequest} onOpenChange={(open) => !open && setOverrideRequest(null)}>
+      <DialogContent className="bg-white text-zinc-900 sm:max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-red-500" />
+            <DialogTitle>Below-floor price override</DialogTitle>
+          </div>
+          <DialogDescription>
+            {overrideRequest
+              ? `${variant.sku} on ${overrideRequest.channel.label}: £${overrideRequest.price.toFixed(2)} is below the £${overrideRequest.floorPrice.toFixed(2)} floor.`
+              : "This price is below the current floor."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Reason code
+            </label>
+            <select
+              value={overrideReasonCode}
+              onChange={(event) => setOverrideReasonCode(event.target.value)}
+              className="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs"
+            >
+              <option value="operator_override">Operator override</option>
+              <option value="clearance">Clearance</option>
+              <option value="defect_disclosure">Defect disclosure</option>
+              <option value="market_test">Market test</option>
+              <option value="customer_commitment">Customer commitment</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Note
+            </label>
+            <textarea
+              value={overrideReasonNote}
+              onChange={(event) => setOverrideReasonNote(event.target.value)}
+              rows={3}
+              className="w-full resize-y rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs"
+              placeholder="Add the operator rationale for this listing price"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => setOverrideRequest(null)}
+            className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!overrideReasonCode.trim() || publishListing.isPending}
+            onClick={() => {
+              if (!overrideRequest) return;
+              handlePublish(overrideRequest.channel, {
+                reasonCode: overrideReasonCode,
+                reasonNote: overrideReasonNote.trim() || null,
+              });
+            }}
+            className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {publishListing.isPending ? "Queueing..." : "Override and publish"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

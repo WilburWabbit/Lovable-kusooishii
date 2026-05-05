@@ -43,6 +43,10 @@ export interface ChannelPricingQuote {
   warning_reasons?: string[];
   quote_error?: string;
   sku_code?: string;
+  cost_basis?: Record<string, unknown> | null;
+  floor_contributors?: Array<Record<string, unknown>>;
+  target_contributors?: Array<Record<string, unknown>>;
+  raw_quote?: Record<string, unknown>;
   breakdown?: Record<string, number>;
 }
 
@@ -387,6 +391,9 @@ export function usePublishListing() {
           listed_price: listingPrice,
           listing_title: listingTitle,
           listing_description: listingDescription,
+          allow_below_floor: !!allowBelowFloor,
+          override_reason_code: overrideReasonCode,
+          override_reason_note: overrideReasonNote,
         });
         return { ...result, sku_id: skuId };
       }

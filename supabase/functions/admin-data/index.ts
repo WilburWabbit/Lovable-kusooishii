@@ -1,5 +1,6 @@
 // Redeployed: 2026-03-23
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { buildGmcCheckoutLink } from "../_shared/gmc-product-input.ts";
 
 class ValidationError extends Error {
   constructor(message: string) { super(message); this.name = "ValidationError"; }
@@ -264,6 +265,9 @@ function normalizeQuote(raw: unknown, skuId: string, channel: string) {
       : Number(quote.confidence_score),
     blocking_reasons: Array.isArray(quote.blocking_reasons) ? quote.blocking_reasons : [],
     warning_reasons: Array.isArray(quote.warning_reasons) ? quote.warning_reasons : [],
+    cost_basis: quote.cost_basis ?? null,
+    floor_contributors: Array.isArray(quote.floor_contributors) ? quote.floor_contributors : [],
+    target_contributors: Array.isArray(quote.target_contributors) ? quote.target_contributors : [],
     breakdown: quote.breakdown ?? {},
     raw_quote: quote,
   };
@@ -341,6 +345,227 @@ async function buildWebsiteListingPreflight(
     saleable_flag: Boolean(sku.saleable_flag),
     final_price: finalPrice > 0 ? Math.round(finalPrice * 100) / 100 : null,
     quote,
+  };
+}
+
+const PRICE_TRANSPARENCY_CHANNELS = ["web", "ebay", "bricklink", "brickowl"];
+
+function normalizedPriceChannel(channel: string | null | undefined): string {
+  if (!channel) return "web";
+  return channel === "website" ? "web" : channel;
+}
+
+function mapByKey<T>(rows: T[], keyFn: (row: T) => string | null | undefined): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (key) map.set(key, row);
+  }
+  return map;
+}
+
+async function buildPriceTransparency(admin: any, params: Record<string, unknown>) {
+  const mpn = typeof params.mpn === "string" ? params.mpn.trim() : "";
+  const skuIdFilter = typeof params.sku_id === "string" ? params.sku_id : null;
+  const channelFilter = typeof params.channel === "string" ? normalizedPriceChannel(params.channel) : null;
+  if (!mpn && !skuIdFilter) throw new ValidationError("mpn or sku_id is required");
+
+  let product: Record<string, unknown> | null = null;
+  let skuQuery = admin
+    .from("sku")
+    .select("id, sku_code, mpn, condition_grade, product_id, active_flag, saleable_flag, product:product_id(id, mpn, name, theme:theme_id(name))")
+    .order("sku_code");
+
+  if (skuIdFilter) {
+    skuQuery = skuQuery.eq("id", skuIdFilter);
+  } else {
+    const { data: productRow, error: productErr } = await admin
+      .from("product")
+      .select("id, mpn, name, theme:theme_id(name)")
+      .eq("mpn", mpn)
+      .maybeSingle();
+    if (productErr) throw productErr;
+    if (!productRow) throw new ValidationError(`Product ${mpn} not found`);
+    product = productRow;
+    skuQuery = skuQuery.eq("product_id", productRow.id);
+  }
+
+  const { data: skuRows, error: skuErr } = await skuQuery;
+  if (skuErr) throw skuErr;
+  const skus = (skuRows ?? []) as Array<Record<string, any>>;
+  if (skus.length === 0) throw new ValidationError("No SKUs found for price transparency");
+  if (!product) {
+    const joined = Array.isArray(skus[0].product) ? skus[0].product[0] : skus[0].product;
+    product = joined ?? null;
+  }
+
+  const skuIds = skus.map((sku) => sku.id as string);
+  const channels = channelFilter ? [channelFilter] : PRICE_TRANSPARENCY_CHANNELS;
+
+  const [listingRes, snapshotRes, overrideRes, marketRes] = await Promise.all([
+    admin
+      .from("channel_listing")
+      .select("id, sku_id, channel, v2_channel, v2_status, offer_status, listed_price, listed_quantity, external_listing_id, external_url, current_price_decision_snapshot_id, listed_at, updated_at, created_at")
+      .in("sku_id", skuIds),
+    admin
+      .from("price_decision_snapshot")
+      .select("*")
+      .in("sku_id", skuIds)
+      .in("channel", channels)
+      .order("created_at", { ascending: false }),
+    admin
+      .from("price_override")
+      .select("*")
+      .in("sku_id", skuIds)
+      .in("channel", channels)
+      .order("created_at", { ascending: false }),
+    admin
+      .from("market_price_snapshot")
+      .select("id, sku_id, source_id, channel, price, confidence_score, freshness_score, sample_size, captured_at, source:source_id(source_code, name)")
+      .in("sku_id", skuIds)
+      .order("captured_at", { ascending: false })
+      .limit(300),
+  ]);
+  if (listingRes.error) throw listingRes.error;
+  if (snapshotRes.error) throw snapshotRes.error;
+  if (overrideRes.error) throw overrideRes.error;
+  if (marketRes.error) throw marketRes.error;
+
+  const listings = ((listingRes.data ?? []) as Array<Record<string, any>>)
+    .map((row) => ({ ...row, normalized_channel: normalizedPriceChannel(row.channel ?? row.v2_channel) }))
+    .sort((a, b) => {
+      const liveDiff = (a.v2_status === "live" ? 0 : 1) - (b.v2_status === "live" ? 0 : 1);
+      if (liveDiff !== 0) return liveDiff;
+      return new Date(b.listed_at ?? b.updated_at ?? b.created_at ?? 0).getTime()
+        - new Date(a.listed_at ?? a.updated_at ?? a.created_at ?? 0).getTime();
+    });
+  const snapshots = (snapshotRes.data ?? []) as Array<Record<string, any>>;
+  const overrides = (overrideRes.data ?? []) as Array<Record<string, any>>;
+  const marketRows = (marketRes.data ?? []) as Array<Record<string, any>>;
+
+  const listingBySkuChannel = mapByKey(listings, (row) => `${row.sku_id}:${row.normalized_channel}`);
+  const snapshotBySkuChannel = mapByKey(snapshots, (row) => `${row.sku_id}:${row.channel}`);
+  const overrideBySkuChannel = mapByKey(overrides, (row) => `${row.sku_id}:${row.channel}`);
+
+  const variants = [];
+  let confidenceTotal = 0;
+  let confidenceCount = 0;
+  let overrideCount = 0;
+  let staleSnapshotCount = 0;
+  let latestPricedAt: string | null = null;
+  let marketTotal = 0;
+  let marketCount = 0;
+  const gradeSet = new Set<string>();
+  const sourceSet = new Set<string>();
+
+  for (const sku of skus) {
+    const grade = String(sku.condition_grade ?? "");
+    if (grade) gradeSet.add(grade);
+    const channelRows = [];
+
+    for (const channel of channels) {
+      const { data: rawQuote, error: quoteErr } = await admin.rpc("commerce_quote_price", {
+        p_sku_id: sku.id,
+        p_channel: channel,
+        p_candidate_price: null,
+      });
+      if (quoteErr) throw quoteErr;
+      const quote = normalizeQuote(rawQuote, sku.id, channel);
+      const listing = listingBySkuChannel.get(`${sku.id}:${channel}`) ?? null;
+      const snapshot = snapshotBySkuChannel.get(`${sku.id}:${channel}`) ?? null;
+      const override = overrideBySkuChannel.get(`${sku.id}:${channel}`) ?? null;
+      const floor = Number(quote.floor_price ?? snapshot?.floor_price ?? 0);
+      const listedPrice = listing?.listed_price == null ? null : Number(listing.listed_price);
+      const finalPrice = listedPrice ?? (quote.target_price == null ? null : Number(quote.target_price));
+      const confidence = quote.confidence_score == null ? null : Number(quote.confidence_score);
+      const pricedAt = snapshot?.created_at ?? null;
+      const ageHours = pricedAt ? Math.max(0, (Date.now() - new Date(pricedAt).getTime()) / 36e5) : null;
+      const isStale = ageHours == null || ageHours > 72;
+      const belowFloor = finalPrice != null && floor > 0 && finalPrice < floor;
+      const manual = Boolean(override) || (listedPrice != null && quote.target_price != null && Math.abs(listedPrice - Number(quote.target_price)) >= 0.01);
+      const overrideStatus = override
+        ? (override.override_type === "below_floor" ? "Below floor" : "Manual")
+        : belowFloor
+          ? "Below floor"
+          : manual
+            ? "Manual"
+            : isStale
+              ? "Stale snapshot"
+              : "Auto";
+      const relatedMarket = marketRows
+        .filter((row) => row.sku_id === sku.id && [channel, "all", "legacy"].includes(row.channel))
+        .slice(0, 8);
+
+      if (confidence != null) {
+        confidenceTotal += confidence;
+        confidenceCount += 1;
+      }
+      if (pricedAt && (!latestPricedAt || pricedAt > latestPricedAt)) latestPricedAt = pricedAt;
+      if (override) overrideCount += 1;
+      if (isStale) staleSnapshotCount += 1;
+      for (const row of relatedMarket) {
+        if (row.price != null) {
+          marketTotal += Number(row.price);
+          marketCount += 1;
+        }
+        const source = Array.isArray(row.source) ? row.source[0] : row.source;
+        if (source?.source_code) sourceSet.add(source.source_code);
+      }
+
+      channelRows.push({
+        channel,
+        channel_label: channel === "web" ? "Website" : channel === "ebay" ? "eBay" : channel === "bricklink" ? "BrickLink" : "BrickOwl",
+        listing,
+        snapshot,
+        override,
+        override_status: overrideStatus,
+        below_floor: belowFloor,
+        manual,
+        stale_snapshot: isStale,
+        snapshot_age_hours: ageHours,
+        final_price: finalPrice,
+        margin_amount: quote.raw_quote?.expected_net_margin ?? snapshot?.expected_margin_amount ?? null,
+        margin_rate: quote.raw_quote?.expected_net_margin_rate ?? snapshot?.expected_margin_rate ?? null,
+        quote,
+        market_snapshots: relatedMarket,
+      });
+    }
+
+    const firstQuote = channelRows[0]?.quote;
+    variants.push({
+      sku_id: sku.id,
+      sku_code: sku.sku_code,
+      mpn: sku.mpn,
+      condition_grade: sku.condition_grade,
+      active_flag: Boolean(sku.active_flag),
+      saleable_flag: Boolean(sku.saleable_flag),
+      stock_count: firstQuote?.stock_unit_count ?? 0,
+      pooled_carrying_value: (firstQuote?.cost_basis as any)?.pooled_carrying_value ?? firstQuote?.average_carrying_value ?? firstQuote?.carrying_value ?? null,
+      highest_unit_carrying_value: (firstQuote?.cost_basis as any)?.highest_unit_carrying_value ?? (firstQuote?.breakdown as any)?.highest_unit_carrying_value ?? null,
+      exposure_over_pool: (firstQuote?.cost_basis as any)?.exposure_over_pool ?? null,
+      channels: channelRows,
+    });
+  }
+
+  return {
+    product: {
+      id: product?.id ?? null,
+      mpn: product?.mpn ?? mpn,
+      name: product?.name ?? null,
+      theme: Array.isArray(product?.theme) ? product?.theme?.[0]?.name ?? null : (product?.theme as any)?.name ?? null,
+    },
+    summary: {
+      sku_count: variants.length,
+      channel_count: channels.length,
+      grade_spread: [...gradeSet].sort().join(", "),
+      average_confidence: confidenceCount > 0 ? confidenceTotal / confidenceCount : null,
+      average_market_price: marketCount > 0 ? marketTotal / marketCount : null,
+      source_count: sourceSet.size,
+      override_count: overrideCount,
+      stale_snapshot_count: staleSnapshotCount,
+      latest_priced_at: latestPricedAt,
+    },
+    variants,
   };
 }
 
@@ -810,7 +1035,15 @@ Deno.serve(async (req) => {
       if (error) throw error;
       result = { success: true };
     } else if (action === "create-web-listing") {
-      const { sku_id, listed_price, listing_title, listing_description } = params;
+      const {
+        sku_id,
+        listed_price,
+        listing_title,
+        listing_description,
+        allow_below_floor,
+        override_reason_code,
+        override_reason_note,
+      } = params;
       if (!sku_id) throw new ValidationError("sku_id is required");
 
       const preflight = await buildWebsiteListingPreflight(
@@ -819,7 +1052,13 @@ Deno.serve(async (req) => {
         typeof listed_price === "number" ? listed_price : null,
       );
       if (!preflight.can_publish) {
-        throw new ValidationError(preflight.blockers[0] ?? "Website listing is blocked");
+        const nonOverrideBlockers = preflight.blockers.filter((blocker: string) => !blocker.includes("is below floor"));
+        if (nonOverrideBlockers.length > 0 || !allow_below_floor) {
+          throw new ValidationError(preflight.blockers[0] ?? "Website listing is blocked");
+        }
+        if (typeof override_reason_code !== "string" || !override_reason_code.trim()) {
+          throw new ValidationError("Override reason is required for a below-floor website price.");
+        }
       }
 
       const { data: sku, error: skuErr } = await admin
@@ -833,7 +1072,12 @@ Deno.serve(async (req) => {
       if (!finalPrice || finalPrice <= 0) throw new ValidationError("Cannot list: SKU has no valid price. Calculate pricing first.");
       const quoteFloor = Number(preflight.quote.floor_price ?? 0);
       if (quoteFloor > 0 && finalPrice < quoteFloor) {
-        throw new ValidationError(`Cannot list: website price £${finalPrice.toFixed(2)} is below floor £${quoteFloor.toFixed(2)}.`);
+        if (!allow_below_floor) {
+          throw new ValidationError(`Cannot list: website price £${finalPrice.toFixed(2)} is below floor £${quoteFloor.toFixed(2)}.`);
+        }
+        if (typeof override_reason_code !== "string" || !override_reason_code.trim()) {
+          throw new ValidationError("Override reason is required for a below-floor website price.");
+        }
       }
 
       // Sync resolved price back to SKU
@@ -869,17 +1113,39 @@ Deno.serve(async (req) => {
       let commandId: string | null = null;
       let outboxProcess: Record<string, unknown> | null = null;
       if (listingId) {
-        const { error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+        const { data: snapshotId, error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
           p_sku_id: sku.id,
           p_channel: "web",
           p_channel_listing_id: listingId,
           p_candidate_price: finalPrice,
+          p_actor_id: userId,
         });
         if (snapshotErr) throw snapshotErr;
+
+        if (quoteFloor > 0 && finalPrice < quoteFloor) {
+          const { error: overrideErr } = await admin.from("price_override").insert({
+            price_decision_snapshot_id: snapshotId,
+            sku_id: sku.id,
+            channel_listing_id: listingId,
+            channel: "web",
+            override_type: "below_floor",
+            old_price: preflight.quote.target_price ?? null,
+            new_price: finalPrice,
+            reason_code: String(override_reason_code).trim(),
+            reason_note: typeof override_reason_note === "string" && override_reason_note.trim()
+              ? override_reason_note.trim()
+              : null,
+            approved_by: userId,
+            performed_by: userId,
+          });
+          if (overrideErr) throw overrideErr;
+        }
 
         const { data: queuedCommandId, error: queuedCommandErr } = await admin.rpc("queue_listing_command", {
           p_channel_listing_id: listingId,
           p_command_type: "publish",
+          p_actor_id: userId,
+          p_allow_below_floor: !!allow_below_floor,
         });
         if (queuedCommandErr) throw queuedCommandErr;
         commandId = queuedCommandId ?? null;
@@ -1403,6 +1669,9 @@ Deno.serve(async (req) => {
       };
 
     /* ── Pricing Engine ── */
+
+    } else if (action === "get-price-transparency") {
+      result = await buildPriceTransparency(admin, params);
 
     } else if (action === "calculate-pricing") {
       const { sku_id, channel: requestedChannel } = params;
@@ -1945,6 +2214,141 @@ Deno.serve(async (req) => {
       }
 
       result = { success: true, auto_price_applied, auto_price_reason, snapshot_id: snapshotId, command_id: commandId, review_queue_id: reviewQueueId };
+
+    } else if (action === "record-price-override") {
+      const {
+        sku_id,
+        channel: rawChannel,
+        listing_price,
+        reason_code,
+        reason_note,
+        listing_title,
+        listing_description,
+      } = params;
+      if (!sku_id) throw new ValidationError("sku_id is required");
+      if (!rawChannel) throw new ValidationError("channel is required");
+      const channel = normalizedPriceChannel(String(rawChannel));
+      const newPrice = Number(listing_price);
+      if (!Number.isFinite(newPrice) || newPrice <= 0) throw new ValidationError("listing_price must be a positive number");
+      if (typeof reason_code !== "string" || !reason_code.trim()) {
+        throw new ValidationError("Override reason is required");
+      }
+
+      const { data: skuRow, error: skuLookupErr } = await admin
+        .from("sku")
+        .select("id, sku_code")
+        .eq("id", sku_id)
+        .single();
+      if (skuLookupErr || !skuRow) throw new ValidationError("SKU not found");
+
+      const { data: existingRows, error: existingErr } = await admin
+        .from("channel_listing")
+        .select("id, listed_price, listing_title, v2_status, updated_at, created_at")
+        .eq("sku_id", sku_id)
+        .in("channel", [channel, rawChannel]);
+      if (existingErr) throw existingErr;
+
+      const candidates = ((existingRows ?? []) as Array<Record<string, any>>).sort((a, b) => {
+        const liveDiff = (a.v2_status === "live" ? 0 : 1) - (b.v2_status === "live" ? 0 : 1);
+        if (liveDiff !== 0) return liveDiff;
+        return new Date(b.updated_at ?? b.created_at ?? 0).getTime()
+          - new Date(a.updated_at ?? a.created_at ?? 0).getTime();
+      });
+
+      const listingUpdates: Record<string, unknown> = {
+        sku_id,
+        channel,
+        v2_channel: channel === "web" ? "website" : channel,
+        external_sku: skuRow.sku_code,
+        listed_price: newPrice,
+        fee_adjusted_price: newPrice,
+        synced_at: new Date().toISOString(),
+      };
+      if (typeof listing_title === "string") listingUpdates.listing_title = listing_title.trim() || null;
+      if (typeof listing_description === "string") listingUpdates.listing_description = listing_description.trim() || null;
+
+      let listingId: string;
+      const oldPrice = candidates[0]?.listed_price == null ? null : Number(candidates[0].listed_price);
+      if (candidates[0]?.id) {
+        const { data: updated, error: updErr } = await admin
+          .from("channel_listing")
+          .update(listingUpdates)
+          .eq("id", candidates[0].id)
+          .select("id")
+          .single();
+        if (updErr) throw updErr;
+        listingId = updated.id;
+      } else {
+        const { data: inserted, error: insErr } = await admin
+          .from("channel_listing")
+          .insert({
+            ...listingUpdates,
+            listed_quantity: 0,
+            offer_status: "DRAFT",
+            v2_status: "draft",
+          })
+          .select("id")
+          .single();
+        if (insErr) throw insErr;
+        listingId = inserted.id;
+      }
+
+      const { data: snapshotId, error: snapshotErr } = await admin.rpc("create_price_decision_snapshot", {
+        p_sku_id: sku_id,
+        p_channel: channel,
+        p_channel_listing_id: listingId,
+        p_candidate_price: newPrice,
+        p_actor_id: userId,
+      });
+      if (snapshotErr) throw snapshotErr;
+
+      const { data: snapshotRow } = await admin
+        .from("price_decision_snapshot")
+        .select("floor_price")
+        .eq("id", snapshotId)
+        .maybeSingle();
+      const floorPrice = snapshotRow?.floor_price == null ? null : Number(snapshotRow.floor_price);
+      const overrideType = floorPrice != null && newPrice < floorPrice ? "below_floor" : "manual_price";
+
+      const { data: overrideRow, error: overrideErr } = await admin
+        .from("price_override")
+        .insert({
+          price_decision_snapshot_id: snapshotId,
+          sku_id,
+          channel_listing_id: listingId,
+          channel,
+          override_type: overrideType,
+          old_price: oldPrice,
+          new_price: newPrice,
+          reason_code: reason_code.trim(),
+          reason_note: typeof reason_note === "string" && reason_note.trim() ? reason_note.trim() : null,
+          approved_by: userId,
+          performed_by: userId,
+        })
+        .select("id")
+        .single();
+      if (overrideErr) throw overrideErr;
+
+      const { data: commandId, error: commandErr } = await admin.rpc("queue_listing_command", {
+        p_channel_listing_id: listingId,
+        p_command_type: "reprice",
+        p_actor_id: userId,
+        p_allow_below_floor: overrideType === "below_floor",
+      });
+      if (commandErr) throw commandErr;
+
+      if (channel === "web") {
+        await admin.from("sku").update({ price: newPrice }).eq("id", sku_id);
+      }
+
+      result = {
+        success: true,
+        listing_id: listingId,
+        snapshot_id: snapshotId,
+        override_id: overrideRow.id,
+        command_id: commandId ?? null,
+        override_type: overrideType,
+      };
 
     } else if (action === "list-channel-pricing-config") {
       const { data, error } = await admin.from("channel_pricing_config").select("*").order("channel");
@@ -3948,6 +4352,7 @@ Deno.serve(async (req) => {
           gmc_offer_status: gmcListing?.offer_status ?? null,
           gmc_v2_status: gmcListing?.v2_status ?? null,
           gmc_external_listing_id: gmcListing?.external_listing_id ?? null,
+          checkout_link_template: buildGmcCheckoutLink(Deno.env.get("SITE_URL"), sku.sku_code),
           latest_command: latestCommand ? {
             id: latestCommand.id,
             status: latestCommand.status,

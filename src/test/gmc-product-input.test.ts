@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGmcCheckoutLink,
   buildGmcProductInput,
   resolveGmcTransformValue,
   selectGmcGtin,
@@ -68,6 +69,34 @@ describe("GMC product input mapping", () => {
     expect(productAttributes.link).toBe("https://www.kusooishii.com/sets/75367-1");
     expect(productAttributes.imageLink).toBe("https://www.kusooishii.com/images/75367-1-primary.jpg");
     expect(productAttributes.googleProductCategory).toBe("3805");
+    expect(input.customAttributes).toEqual([
+      {
+        name: "checkout_link_template",
+        value: "https://www.kusooishii.com/cart?sku=75367-1.3",
+      },
+    ]);
+  });
+
+  it("emits checkout_link_template using the SKU code and normalized public site URL", () => {
+    expect(buildGmcCheckoutLink("https://gcgrwujfyurgetvqlmbf.supabase.co", "75367-1.3")).toBe(
+      "https://www.kusooishii.com/cart?sku=75367-1.3",
+    );
+
+    const { input } = buildGmcProductInput(
+      baseListing,
+      { sku_code: "75367-1.4", condition_grade: 4 },
+      baseProduct,
+      2,
+      "https://kuso.example",
+    );
+    const productAttributes = input.productAttributes as Record<string, unknown>;
+    expect(productAttributes.link).toBe("https://kuso.example/sets/75367-1");
+    expect(input.customAttributes).toEqual([
+      {
+        name: "checkout_link_template",
+        value: "https://kuso.example/cart?sku=75367-1.4",
+      },
+    ]);
   });
 
   it("normalizes mapped storefront links and GMC category labels", () => {

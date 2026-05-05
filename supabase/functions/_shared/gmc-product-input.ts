@@ -107,6 +107,13 @@ function normalizeStorefrontLink(value: unknown): string {
   }
 }
 
+export function buildGmcCheckoutLink(siteUrl: unknown, skuCode: unknown): string {
+  const siteBaseUrl = normalizeGmcSiteUrl(siteUrl);
+  const sku = cleanText(skuCode);
+  if (!sku) return "";
+  return `${siteBaseUrl}/cart?sku=${encodeURIComponent(sku)}`;
+}
+
 export function selectGmcGtin(product: GmcProductSource): { gtin: string | null; source: "ean" | "upc" | "isbn" | null } {
   const candidates: Array<["ean" | "upc" | "isbn", unknown]> = [
     ["ean", product.ean],
@@ -530,6 +537,7 @@ export function buildGmcProductInput(
     : "Toys > LEGO";
   const priceAmountMicros = String(Math.round(Math.max(0, price) * 1_000_000));
   const warnings: string[] = [];
+  const checkoutLinkTemplate = buildGmcCheckoutLink(siteBaseUrl, skuCode);
 
   if (!gtin.gtin) warnings.push("missing_gtin_using_brand_mpn");
   if (!gmcCategory) warnings.push("missing_gmc_product_category");
@@ -601,6 +609,12 @@ export function buildGmcProductInput(
       contentLanguage: "en",
       feedLabel: "GB",
       productAttributes,
+      customAttributes: [
+        {
+          name: "checkout_link_template",
+          value: checkoutLinkTemplate,
+        },
+      ],
     },
     warnings: finalWarnings,
   };
