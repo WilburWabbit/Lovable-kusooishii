@@ -1771,7 +1771,7 @@ Deno.serve(async (req) => {
     // match against SUPABASE_SERVICE_ROLE_KEY; Lovable key rotation can make
     // stored or forwarded service-role JWTs drift from the function env value.
     const isInternal = verifyInternalSharedSecret(req) ||
-      (req.headers.get("x-webhook-trigger") === "true" && verifyServiceRoleJWT(token, supabaseUrl));
+      verifyServiceRoleJWT(token, supabaseUrl);
 
     if (!isInternal) {
       const { data: { user }, error: userError } = await admin.auth.getUser(token);
