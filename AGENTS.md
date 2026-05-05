@@ -70,8 +70,12 @@ Service-role misuse to avoid:
 
 - Do NOT authenticate internal callers by byte-comparing bearer tokens to `Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")` (for example, `token === serviceRoleKey`). This breaks after key rotation when a valid service-role JWT in another caller no longer byte-matches the function environment.
 - For service-role bypasses, decode the JWT and verify `role === "service_role"` and `ref === <project-ref-from-SUPABASE_URL>`. The existing good pattern is in `supabase/functions/qbo-process-pending/index.ts`; new or refactored code should centralize this as `verifyServiceRoleJWT()` in `supabase/functions/_shared/auth.ts`.
-- Do NOT store Lovable-managed service-role keys in `vault.decrypted_secrets` or read Vault copies such as `service_role_key` or `email_queue_service_role_key` for `pg_cron`. Vault copies drift after Lovable rotates the key.
-- Prefer cron and internal scheduled calls to use `Authorization: Bearer <anon key>` for the Supabase gateway plus an `x-internal-shared-secret` header checked against a Lovable-managed secret such as `INTERNAL_CRON_SECRET`.
+- For `pg_cron` → Edge Function calls, use the vault-stored `service_role_key` as the `Authorization: Bearer` token. Read it inline in each `cron.schedule()` SQL body:
+  ```sql
+  (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key' LIMIT 1)
+  ```
+  The vault row must be seeded once (e.g. `SELECT vault.create_secret('<value>', 'service_role_key')`). Every new cron job must follow this pattern — do NOT introduce anon key + `x-internal-shared-secret` for cron auth. That pattern requires coordinated setup of both vault rows and Edge Function env vars and is operationally fragile.
+- Edge Functions called by cron must accept service-role JWT. Use `verifyServiceRoleJWT()` from `supabase/functions/_shared/auth.ts` — do NOT byte-compare the raw token to `SUPABASE_SERVICE_ROLE_KEY`.
 - Webhook receivers still must land raw payloads and return quickly. Auth cleanup must preserve the land -> stage -> validate -> map -> promote architecture and must not inline processing into receivers.
 
 ## Integration Architecture Patterns
