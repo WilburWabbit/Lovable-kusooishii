@@ -312,10 +312,15 @@ function PriceExplanationPanel({ selected, mpn }: { selected: SelectedChannel; m
   return (
     <div className="grid gap-4">
       <div className="grid gap-2 sm:grid-cols-4">
-        <Metric label="Final" value={money(selected.row.final_price)} tone={selected.row.below_floor ? "red" : "teal"} />
-        <Metric label="Floor" value={money(quote.floor_price)} tone="red" />
-        <Metric label="Target" value={money(quote.target_price)} tone="teal" />
-        <Metric label="Ceiling" value={money(quote.ceiling_price)} tone="amber" />
+        <Metric
+          label="Listing price"
+          value={money(selected.row.final_price)}
+          tone={selected.row.below_floor ? "red" : "default"}
+          caption={selected.row.override_status}
+        />
+        <Metric label="Break-even floor" value={money(quote.floor_price)} caption="Cost recovery" />
+        <Metric label="Commercial target" value={money(quote.target_price)} tone="teal" caption="Rules + safeguards" />
+        <Metric label="Market ceiling" value={money(quote.ceiling_price)} tone="amber" caption="RRP/market high" />
       </div>
 
       <SurfaceCard className="p-3">
@@ -456,11 +461,22 @@ function PriceExplanationPanel({ selected, mpn }: { selected: SelectedChannel; m
   );
 }
 
-function Metric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "teal" | "amber" | "red" }) {
+function Metric({
+  label,
+  value,
+  tone = "default",
+  caption,
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "teal" | "amber" | "red";
+  caption?: string | null;
+}) {
   return (
     <div className="rounded border border-zinc-200 bg-zinc-50 px-2.5 py-2">
       <div className="mb-0.5 text-[10px] font-medium uppercase text-zinc-500">{label}</div>
       <Mono color={tone} className="text-[13px]">{value}</Mono>
+      {caption ? <div className="mt-0.5 text-[10px] text-zinc-500">{caption}</div> : null}
     </div>
   );
 }

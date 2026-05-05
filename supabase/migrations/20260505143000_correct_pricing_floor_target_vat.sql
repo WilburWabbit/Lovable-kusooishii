@@ -92,6 +92,7 @@ DECLARE
   v_floor_fee_input_vat NUMERIC := 0;
   v_floor_net_receipts NUMERIC := 0;
   v_floor_output_vat NUMERIC := 0;
+  v_floor_price_before_target_vat NUMERIC := 0;
   v_floor_break_even_net_position NUMERIC := 0;
 
   v_target_profit_safeguard_price NUMERIC := 0;
@@ -107,6 +108,7 @@ DECLARE
   v_target_fees_net NUMERIC := 0;
   v_target_fee_input_vat NUMERIC := 0;
   v_target_risk_reserve NUMERIC := 0;
+  v_target_margin_uplift NUMERIC := 0;
   v_target_net_position NUMERIC := 0;
   v_target_floor_clamped BOOLEAN := false;
   v_target_safeguard_clamped BOOLEAN := false;
@@ -394,11 +396,6 @@ BEGIN
   v_target_floor_clamped := COALESCE(v_market_target, 0) < v_floor;
   v_target_safeguard_clamped := COALESCE(v_market_target, 0) < GREATEST(v_target_profit_safeguard_price, v_target_margin_safeguard_price);
 
-  v_ceiling := floor(GREATEST(v_target, v_floor, COALESCE(v_condition_adjusted_anchor, v_target_anchor_gross, 0))) + 0.99;
-  IF v_ceiling < v_target THEN
-    v_ceiling := v_target;
-  END IF;
-
   IF p_candidate_price IS NOT NULL AND p_candidate_price > 0 THEN
     v_gross_price := ROUND(p_candidate_price, 2);
   ELSE
@@ -459,6 +456,18 @@ BEGIN
   v_target_fee_input_vat := ROUND(v_target_fees_gross - v_target_fees_net, 2);
   v_target_risk_reserve := ROUND(v_target_net_receipts * v_risk_rate, 2);
   v_target_net_position := ROUND(v_target_net_receipts - v_target_fees_net - v_target_risk_reserve - v_program_commission - v_break_even_base_net, 2);
+  v_target_margin_uplift := ROUND(GREATEST(v_target_net_position - v_min_profit, 0), 2);
+
+  v_floor_price_before_target_vat := v_floor;
+  v_floor := ROUND(v_floor_price_before_target_vat + v_target_output_vat, 2);
+  v_floor_net_receipts := ROUND(v_floor / v_vat_multiplier, 2);
+  v_floor_output_vat := ROUND(v_floor - v_floor_net_receipts, 2);
+  v_floor_break_even_net_position := ROUND(v_floor_net_receipts - v_floor_fees_net - v_program_commission - v_break_even_base_net, 2);
+  v_ceiling := ROUND(GREATEST(
+    COALESCE(v_raw_rrp_gross, 0),
+    COALESCE(v_raw_market_consensus_gross, 0),
+    v_floor
+  ), 2);
 
   SELECT COALESCE(jsonb_agg(to_jsonb(value)), ''[]''::jsonb)
   INTO v_blocking
@@ -484,7 +493,7 @@ BEGIN
     jsonb_build_object(''key'', ''estimated_channel_fees'', ''label'', ''Channel fees paid (gross)'', ''amount'', v_floor_fees_gross, ''kind'', ''cost''),
     jsonb_build_object(''key'', ''channel_fee_input_vat_reclaim'', ''label'', ''Fee VAT reclaim'', ''amount'', v_floor_fee_input_vat * -1, ''kind'', ''vat''),
     jsonb_build_object(''key'', ''program_commission'', ''label'', ''Program commission'', ''amount'', v_program_commission, ''kind'', ''cost''),
-    jsonb_build_object(''key'', ''output_vat_payable'', ''label'', ''Output VAT payable'', ''amount'', v_floor_output_vat, ''kind'', ''vat''),
+    jsonb_build_object(''key'', ''target_output_vat'', ''label'', ''Target sale output VAT payable'', ''amount'', v_target_output_vat, ''kind'', ''vat''),
     jsonb_build_object(''key'', ''floor_break_even_net_position'', ''label'', ''Break-even net position'', ''amount'', v_floor_break_even_net_position, ''kind'', ''result'')
   );
 
@@ -494,6 +503,9 @@ BEGIN
     jsonb_build_object(''key'', ''target_anchor_gross'', ''label'', ''Chosen anchor before condition'', ''amount'', COALESCE(v_target_anchor_gross, 0), ''kind'', ''market''),
     jsonb_build_object(''key'', ''condition_adjusted_anchor'', ''label'', ''Condition-adjusted anchor'', ''amount'', COALESCE(v_condition_adjusted_anchor, 0), ''kind'', ''market''),
     jsonb_build_object(''key'', ''market_weighted_rrp_undercut'', ''label'', ''Market-weighted undercut'', ''amount'', ROUND(v_applied_market_undercut * -1, 2), ''kind'', ''rule''),
+    jsonb_build_object(''key'', ''risk_reserve'', ''label'', ''Risk reserve'', ''amount'', v_target_risk_reserve, ''kind'', ''cost''),
+    jsonb_build_object(''key'', ''minimum_profit'', ''label'', ''Minimum profit'', ''amount'', ROUND(v_min_profit, 2), ''kind'', ''profit''),
+    jsonb_build_object(''key'', ''margin_uplift'', ''label'', ''Margin uplift'', ''amount'', v_target_margin_uplift, ''kind'', ''margin''),
     jsonb_build_object(''key'', ''target_profit_safeguard_price'', ''label'', ''Minimum profit safeguard'', ''amount'', ROUND(v_target_profit_safeguard_price, 2), ''kind'', ''profit''),
     jsonb_build_object(''key'', ''target_margin_safeguard_price'', ''label'', ''Minimum margin safeguard'', ''amount'', ROUND(v_target_margin_safeguard_price, 2), ''kind'', ''margin''),
     jsonb_build_object(''key'', ''target_price'', ''label'', ''Target price (gross)'', ''amount'', ROUND(v_target, 2), ''kind'', ''result''),
@@ -516,7 +528,7 @@ BEGIN
       ''output_vat'', v_output_vat,
       ''floor_price'', ROUND(v_floor, 2),
       ''target_price'', ROUND(v_target, 2),
-      ''ceiling_price'', ROUND(GREATEST(v_ceiling, v_target, v_floor), 2),
+      ''ceiling_price'', ROUND(v_ceiling, 2),
       ''expected_gross_margin'', ROUND(v_gross_price - v_stock_cost_gross, 2),
       ''expected_net_margin'', v_expected_margin,
       ''expected_net_margin_rate'', v_expected_margin_rate,
@@ -602,12 +614,15 @@ BEGIN
         ''delivery_input_vat_reclaim'', v_delivery_input_vat,
         ''delivery_net_cost'', v_delivery_net,
         ''floor_output_vat'', v_floor_output_vat,
+        ''floor_price_before_target_vat'', v_floor_price_before_target_vat,
         ''floor_net_receipts'', v_floor_net_receipts,
         ''floor_fees_gross'', v_floor_fees_gross,
         ''floor_fees_net'', v_floor_fees_net,
         ''floor_break_even_net_position'', v_floor_break_even_net_position,
         ''target_output_vat'', v_target_output_vat,
         ''target_net_receipts'', v_target_net_receipts,
+        ''target_risk_reserve'', v_target_risk_reserve,
+        ''target_margin_uplift'', v_target_margin_uplift,
         ''target_profit_safeguard_price'', v_target_profit_safeguard_price,
         ''target_margin_safeguard_price'', v_target_margin_safeguard_price,
         ''raw_rrp_gross'', v_raw_rrp_gross,
