@@ -70,13 +70,145 @@ Service-role misuse to avoid:
 
 - Do NOT authenticate internal callers by byte-comparing bearer tokens to `Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")` (for example, `token === serviceRoleKey`). This breaks after key rotation when a valid service-role JWT in another caller no longer byte-matches the function environment.
 - For service-role bypasses, decode the JWT and verify `role === "service_role"` and `ref === <project-ref-from-SUPABASE_URL>`. The existing good pattern is in `supabase/functions/qbo-process-pending/index.ts`; new or refactored code should centralize this as `verifyServiceRoleJWT()` in `supabase/functions/_shared/auth.ts`.
-- For `pg_cron` → Edge Function calls, use the vault-stored `service_role_key` as the `Authorization: Bearer` token. Read it inline in each `cron.schedule()` SQL body:
-  ```sql
-  (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key' LIMIT 1)
-  ```
-  The vault row must be seeded once (e.g. `SELECT vault.create_secret('<value>', 'service_role_key')`). Every new cron job must follow this pattern — do NOT introduce anon key + `x-internal-shared-secret` for cron auth. That pattern requires coordinated setup of both vault rows and Edge Function env vars and is operationally fragile.
-- Edge Functions called by cron must accept service-role JWT. Use `verifyServiceRoleJWT()` from `supabase/functions/_shared/auth.ts` — do NOT byte-compare the raw token to `SUPABASE_SERVICE_ROLE_KEY`.
 - Webhook receivers still must land raw payloads and return quickly. Auth cleanup must preserve the land -> stage -> validate -> map -> promote architecture and must not inline processing into receivers.
+
+## Cron Jobs (pg_cron → Edge Function) — End-to-End Pattern
+
+This is the canonical, working pattern for every scheduled job. It survives Supabase API-key rotations and the new `sb_secret_*` / `sb_publishable_*` key format.
+
+### Architecture
+
+```
+pg_cron (cron.schedule)
+   │  Authorization: Bearer <vault.service_role_key>
+   ▼
+Edge Function
+   │  verifyServiceRoleJWT(token, SUPABASE_URL)  ← from _shared/auth.ts
+   ▼
+Business logic (uses createAdminClient())
+```
+
+Two secrets must stay in sync:
+
+| Where | Name | Source of truth |
+|---|---|---|
+| Edge Function env | `SUPABASE_SERVICE_ROLE_KEY` | Lovable runtime (auto-injected) |
+| Postgres Vault | `service_role_key` | Synced by `bootstrap-cron-vault` |
+
+The bootstrap function copies the runtime env value into Vault so cron always sends the current key.
+
+### One-time setup (per project)
+
+1. **Vault helper RPC** — `public.admin_set_cron_vault_secret(p_name, p_value)` (SECURITY DEFINER, granted to `service_role` only). Allowed names: `internal_cron_secret`, `subledger_scheduled_jobs_secret`, `service_role_key`. Seed Vault rows once with `SELECT vault.create_secret('<placeholder>', '<name>')` if missing.
+2. **`bootstrap-cron-vault` Edge Function** — reads `SUPABASE_SERVICE_ROLE_KEY` and `INTERNAL_CRON_SECRET` from env and upserts them into Vault via the RPC. Authn accepts either the `x-internal-shared-secret` header or a valid service-role token (validated via `verifyServiceRoleJWT`).
+3. **Run bootstrap** after every key rotation:
+   ```bash
+   curl -X POST "$SUPABASE_URL/functions/v1/bootstrap-cron-vault" \
+     -H "x-internal-shared-secret: $INTERNAL_CRON_SECRET"
+   ```
+
+### Shared auth helper (`supabase/functions/_shared/auth.ts`)
+
+`verifyServiceRoleJWT(token, supabaseUrl)` accepts BOTH formats:
+
+- **New API-key format** (`sb_secret_…`): constant-time compare against the runtime `SUPABASE_SERVICE_ROLE_KEY`.
+- **Legacy/asymmetric JWT**: decode payload, require `role === "service_role"` AND (`ref === <project-ref>` OR `iss` host starts with the project ref).
+
+Never byte-compare a raw bearer token to `SUPABASE_SERVICE_ROLE_KEY` directly in a function — always go through this helper.
+
+### Scheduling a job (SQL — use `supabase--insert`, NOT `migration`)
+
+Cron schedules contain project-specific URLs and must NOT live in migration files (they would run on every remix).
+
+```sql
+SELECT cron.schedule(
+  'my-job-every-5min',
+  '*/5 * * * *',
+  $cron$
+  SELECT net.http_post(
+    url := rtrim(
+      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'supabase_url' LIMIT 1),
+      '/'
+    ) || '/functions/v1/my-function',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (
+        SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key' LIMIT 1
+      )
+    ),
+    body := '{}'::jsonb
+  );
+  $cron$
+);
+```
+
+Notes:
+- Read `service_role_key` and `supabase_url` from `vault.decrypted_secrets` **inline in the schedule body** so each tick picks up the current value.
+- Do NOT hardcode the anon key or use `x-internal-shared-secret` for cron — that pattern is fragile and is being phased out.
+- `vault.decrypted_secrets` is blocked from `read_query`; verify Vault contents indirectly by triggering a job and inspecting `net._http_response`.
+
+### Edge Function template for a cron-callable function
+
+```typescript
+import { verifyInternalSharedSecret, verifyServiceRoleJWT } from "../_shared/auth.ts";
+import { corsHeaders, createAdminClient } from "../_shared/qbo-helpers.ts";
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
+
+  const isInternal =
+    verifyInternalSharedSecret(req) ||           // human/admin-triggered with shared secret
+    verifyServiceRoleJWT(token, supabaseUrl);    // pg_cron or service-to-service
+
+  if (!isInternal) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const admin = createAdminClient();
+  // … business logic …
+});
+```
+
+For functions that fan out to other Edge Functions (e.g. `subledger-scheduled-jobs`), forward the runtime `SUPABASE_SERVICE_ROLE_KEY` as the `Authorization: Bearer` token — the receiving function's `verifyServiceRoleJWT` will accept it.
+
+### Verification checklist (run after any change to cron auth)
+
+1. Deploy: `bootstrap-cron-vault` + every cron-target function + `_shared/auth.ts` consumers.
+2. Run `bootstrap-cron-vault` to refresh Vault.
+3. Trigger the cron HTTP path manually:
+   ```sql
+   SELECT net.http_post(
+     url := rtrim((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='supabase_url' LIMIT 1),'/')
+            || '/functions/v1/<fn>',
+     headers := jsonb_build_object(
+       'Content-Type','application/json',
+       'Authorization','Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='service_role_key' LIMIT 1)
+     ),
+     body := '{}'::jsonb
+   );
+   ```
+4. Inspect `net._http_response` for the returned `id` — expect 200 (or 207 with job-level results), never 401/403.
+5. Check `cron.job_run_details` for `status='succeeded'` on the next tick.
+6. Check Edge Function logs for absence of `Unauthorized — invalid token`.
+
+### Common failure modes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| 401 `Unauthorized` from cron after key rotation | Vault `service_role_key` is stale | Re-run `bootstrap-cron-vault` |
+| 401 with `sb_secret_…` token | Function uses old `verifyServiceRoleJWT` that only accepts JWTs | Redeploy function so it picks up the updated `_shared/auth.ts` |
+| 400 `Unauthorized` with valid token | Function still byte-compares to `SUPABASE_SERVICE_ROLE_KEY` | Replace with `verifyServiceRoleJWT()` |
+| Cron `succeeded` but `net._http_response.status_code` is 4xx | Auth fails inside Edge Function | Check function logs; usually a stale deployment |
+
 
 ## Integration Architecture Patterns
 
