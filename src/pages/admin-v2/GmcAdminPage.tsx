@@ -199,6 +199,8 @@ function readinessAccessor(row: GmcReadinessRow, key: string): unknown {
       return `${row.ean ?? ""} ${row.upc ?? ""} ${row.isbn ?? ""} ${row.gmc_product_category ?? ""}`;
     case "issues":
       return issueText(row);
+    case "checkout":
+      return row.checkout_link_template ?? "";
     case "price":
       return row.price;
     case "stock":
@@ -239,7 +241,7 @@ function ReadinessTable({
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] text-left text-sm">
+        <table className="w-full min-w-[1320px] text-left text-sm">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-4 py-2 font-semibold">
@@ -259,6 +261,7 @@ function ReadinessTable({
               <SortableTableHead columnKey="stock" label="Stock" sortKey={sortKey} sortDir={sortDir} onToggleSort={toggleSort} align="right" />
               <SortableTableHead columnKey="identity" label="Identity" sortKey={sortKey} sortDir={sortDir} onToggleSort={toggleSort} />
               <SortableTableHead columnKey="issues" label="Issues" sortKey={sortKey} sortDir={sortDir} onToggleSort={toggleSort} />
+              <SortableTableHead columnKey="checkout" label="Checkout" sortKey={sortKey} sortDir={sortDir} onToggleSort={toggleSort} />
               <th className="px-4 py-2 font-semibold">Actions</th>
             </tr>
             <tr className="border-t border-zinc-200 normal-case tracking-normal">
@@ -270,13 +273,14 @@ function ReadinessTable({
               <th className="px-3 py-2"><TableFilterInput value={filters.stock ?? ""} onChange={(value) => setFilter("stock", value)} placeholder="Stock" /></th>
               <th className="px-3 py-2"><TableFilterInput value={filters.identity ?? ""} onChange={(value) => setFilter("identity", value)} placeholder="EAN/UPC/GMC" /></th>
               <th className="px-4 py-2"><TableFilterInput value={filters.issues ?? ""} onChange={(value) => setFilter("issues", value)} placeholder="Issue" /></th>
+              <th className="px-4 py-2"><TableFilterInput value={filters.checkout ?? ""} onChange={(value) => setFilter("checkout", value)} placeholder="Cart URL" /></th>
               <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {processedRows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No active SKUs match the current view.</td>
+                <td colSpan={10} className="px-4 py-8 text-center text-zinc-500">No active SKUs match the current view.</td>
               </tr>
             ) : processedRows.map((row) => {
               const canPick = row.status !== "blocked";
@@ -318,6 +322,19 @@ function ReadinessTable({
                     <div>GMC <Mono>{row.gmc_product_category ?? "-"}</Mono></div>
                   </td>
                   <td className="max-w-[360px] px-4 py-3 text-xs text-zinc-600">{issueText(row)}</td>
+                  <td className="px-4 py-3">
+                    {row.checkout_link_template ? (
+                      <a
+                        href={row.checkout_link_template}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-zinc-200 px-2 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Cart
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : "-"}
+                  </td>
                   <td className="px-4 py-3">
                     {href ? (
                       <Link

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePageSeo } from "@/hooks/use-page-seo";
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Minus, Plus, Trash2, ShoppingBag, Loader2, Truck, Store, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,6 +12,8 @@ import { StorefrontLayout } from '@/components/StorefrontLayout';
 import { trackBeginCheckout } from '@/lib/gtm-ecommerce';
 import { toast } from 'sonner';
 import { GRADE_LABELS_NUMERIC } from '@/lib/grades';
+import { supabase } from '@/integrations/supabase/client';
+import { applyCartPrefill, loadCartPrefillProduct, parseCartPrefillParams } from '@/lib/cart-prefill';
 
 const shippingOptions = [
 { id: 'standard', label: 'Standard', carrier: 'Evri', price: 0, est: '3–5 working days' },
@@ -40,9 +42,12 @@ function BeerIcon() {
 
 export default function CartPage() {
   usePageSeo({ title: 'Cart', description: 'Review your LEGO® basket before checkout.', path: '/cart', noIndex: true });
-  const { cart, updateQuantity, removeFromCart, cartTotal } = useStore();
+  const { cart, addToCart, updateQuantity, removeFromCart, cartTotal } = useStore();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [selectedShipping, setSelectedShipping] = useState('standard');
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const processedPrefillRef = useRef<string | null>(null);
 
   const availableOptions = shippingOptions;
   const selectedOption = availableOptions.find((o) => o.id === selectedShipping) ?? availableOptions[0];
@@ -54,6 +59,52 @@ export default function CartPage() {
   // VAT calculation: merchandise (after discount) + VAT-liable shipping are all gross (inc. 20% VAT)
   const vatableAmount = (subtotal - collectionDiscount) + shippingPrice;
   const vatAmount = Math.round((vatableAmount - vatableAmount / 1.2) * 100) / 100;
+
+  useEffect(() => {
+    const request = parseCartPrefillParams(searchParams);
+    if (!request) return;
+
+    const key = `${request.skuCode}:${request.quantity}`;
+    if (processedPrefillRef.current === key) return;
+    processedPrefillRef.current = key;
+
+    let cancelled = false;
+    async function prefillCart() {
+      try {
+        const result = await loadCartPrefillProduct(supabase, request.skuCode);
+        if (cancelled) return;
+        if (!result.ok) {
+          toast.error("That set is not available for checkout right now.");
+          navigate("/cart", { replace: true });
+          return;
+        }
+
+        const quantity = applyCartPrefill({
+          product: result.product,
+          quantity: request.quantity,
+          cart,
+          addToCart,
+          updateQuantity,
+        });
+        if (quantity > 0) {
+          toast.success(`${result.product.name} added to your cart.`);
+        } else {
+          toast.error("That set is out of stock right now.");
+        }
+        navigate("/cart", { replace: true });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Cart prefill error:", err);
+        toast.error("We couldn't add that set to your cart. Please try again.");
+        navigate("/cart", { replace: true });
+      }
+    }
+
+    prefillCart();
+    return () => {
+      cancelled = true;
+    };
+  }, [addToCart, cart, navigate, searchParams, updateQuantity]);
 
   const handleCheckout = async () => {
     setIsCheckingOut(true);

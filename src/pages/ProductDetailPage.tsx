@@ -245,6 +245,7 @@ export default function ProductDetailPage() {
       price: offer.price,
       availability: offer.stock_count > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       url: canonicalProductUrl,
+      checkoutPageURLTemplate: absoluteUrl(`/cart?sku=${encodeURIComponent(offer.sku_code)}`),
     }));
 
   useSeoDocumentPageSeo(product?.mpn ? `product:${product.mpn}` : undefined, {

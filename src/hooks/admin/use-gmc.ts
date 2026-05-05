@@ -38,6 +38,7 @@ export interface GmcReadinessRow {
   gmc_offer_status: string | null;
   gmc_v2_status: string | null;
   gmc_external_listing_id: string | null;
+  checkout_link_template: string | null;
   latest_command: {
     id: string;
     status: string;
