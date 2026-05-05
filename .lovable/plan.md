@@ -1,38 +1,57 @@
+## Why the latest eBay orders haven't reached QBO
 
-## Pending work since the last applied state
+The two most recent eBay orders are sitting **queued but unprocessed**:
 
-### Migrations to apply (3, in order)
+| Order | Customer | qbo_sync_status | Posting intents |
+|---|---|---|---|
+| KO-0009654 (John Bromiley, 2026-05-05) | not yet in QBO | `pending` | `upsert_customer` + `create_sales_receipt` both `pending` |
+| KO-0009653 (Simone Lewis, 2026-05-04) | not yet in QBO | `pending` | `upsert_customer` + `create_sales_receipt` both `pending` |
 
-The applied watermark is `20260504131707`. Three files are sitting unapplied (Lovable stores them with the last digit truncated, so newer-timestamped files can already be applied while older ones remain pending — this is the case here):
+The intents were correctly enqueued by `queue_qbo_posting_intents_for_order`. They are **not failing** — they are never being picked up. There are **180 pending posting_intent rows** in total (only 133 have ever posted).
 
-1. `20260504101500_migrate_gmc_outbox_to_merchant_api_v1.sql` — resets stuck `outbound_command` rows for `google_shopping`/`gmc` whose `last_error` was masked as `[object Object]`, and reopens the matching `reconciliation_case` rows. Pure data update, idempotent.
-2. `20260504115458_repair_storefront_discovery_publish_pipeline.sql` — drops/recreates `public.browse_catalog(...)` and related storefront discovery functions (single-quoted bodies, Lovable-safe).
-3. `20260504130000_channel_listing_availability_override.sql` — adds `availability_override*` columns to `channel_listing` plus a CHECK constraint, an index, and updates `queue_listing_command(...)` to honor manual out-of-stock holds.
+### Root cause
 
-Migration `20260504131708` (cron auth helper) is already applied.
+The cron job that drains the QBO posting outbox is:
 
-### Edge Functions to redeploy
+```
+subledger-qbo-posting-outbox-processor  (every 5 min)
+  → SELECT public.invoke_subledger_scheduled_job('qbo_posting_outbox', ...)
+  → calls edge function: subledger-scheduled-jobs
+```
 
-From the most recent commit `acdc0b3f "Harden Lovable Supabase cron auth"`:
+Every recent invocation of `subledger-scheduled-jobs` is erroring with:
 
-- `auto-markdown-prices`
-- `auto-progress-orders`
-- `ebay-retry-order`
-- `process-email-queue`
-- `qbo-process-pending`
-- `rebrickable-sync`
+```
+Unauthorized — invalid scheduled job secret
+  at authenticateInternalSchedule
+  at requireAutomationActor
+```
 
-The earlier commit `7c37c9f2` touched ~22 functions and was already deployed in the previous loop. I will not redeploy those again unless the new commit's edits to `_shared/auth.ts` or `_shared/qbo-helpers.ts` require it — `git diff` shows only the 6 functions above changed in this commit and `_shared/*` is unchanged since the prior deploy, so no fan-out redeploy is needed.
+So the outbox never runs `accounting-posting-intents-process`, and `posting_intent` rows for both new eBay orders stay `pending` forever. (The separate `qbo-process-pending` cron that runs every minute is healthy — but that one only handles inbound landing tables, not the outbound QBO posting outbox.)
 
-## Execution
+The `qbo_posting_outbox` job is comparing an incoming secret against a Lovable-managed value (likely `INTERNAL_CRON_SECRET` / scheduled-job secret) and the value the DB function is sending no longer matches the value the edge function expects — typical drift after a key rotation or after the secret was changed on only one side.
 
-1. Apply the 3 migrations in timestamp order.
-2. Deploy the 6 Edge Functions in parallel.
-3. Verify:
-   - `supabase_migrations.schema_migrations` contains the 3 new versions.
-   - All 6 functions report successful deployment.
-   - `process-email-queue` config still has `verify_jwt = true` (no change).
-   - Tail edge function logs for `qbo-process-pending` and `subledger-scheduled-jobs` to confirm the cron-auth `Unauthorized` errors stop (or report them clearly if Vault `cron_shared_secret` mismatch persists from the prior loop — that is a separate, already-flagged issue).
-4. Report applied migrations, deployed functions, and any failures.
+## Plan
 
-No canonical data, order state, or staging rows will be modified beyond what the GMC outbox reset migration explicitly does (which is its purpose).
+### 1. Fix the auth mismatch on the scheduled job
+- Inspect `supabase/functions/subledger-scheduled-jobs/index.ts` (`authenticateInternalSchedule`) to confirm exactly which env var/secret it expects (e.g. `INTERNAL_CRON_SECRET` or a dedicated scheduled-jobs secret).
+- Inspect `public.invoke_subledger_scheduled_job` to see which Vault secret name it pulls and which header it sends.
+- Align the two: prefer the existing pattern used by `qbo-process-pending-safety-net` (header `x-internal-shared-secret`, secret `INTERNAL_CRON_SECRET`). Update either the SQL function or the edge function so both sides read the same Lovable-managed secret. No Vault drift copies.
+- Redeploy `subledger-scheduled-jobs`.
+
+### 2. Drain the backlog manually once
+- After the fix, invoke `accounting-posting-intents-process` (or trigger `subledger-scheduled-jobs` for `qbo_posting_outbox`) with a larger `batch_size` to clear the 180 pending intents in dependency order (customers before sales receipts).
+- Verify KO-0009653 and KO-0009654:
+  - `customer.qbo_customer_id` populated for both Simone Lewis and John Bromiley
+  - `sales_order.qbo_sales_receipt_id` populated and `qbo_sync_status = 'synced'`
+  - corresponding `posting_intent` rows flipped to `posted`
+
+### 3. Confirm steady state
+- Wait one cron cycle (5 min) and confirm `subledger-scheduled-jobs` logs show success, not "invalid scheduled job secret".
+- Spot-check `posting_intent` pending count is trending toward zero and not regrowing.
+
+### Notes / non-goals
+- No schema changes required.
+- Do not touch `qbo-process-pending` — it's healthy.
+- Do not byte-compare service-role keys; keep using the JWT verifier / shared-secret pattern already in `_shared/auth.ts`.
+- If `INTERNAL_CRON_SECRET` was rotated and a stale copy is in `vault.decrypted_secrets`, remove the Vault copy and have the SQL function read the canonical secret only.
