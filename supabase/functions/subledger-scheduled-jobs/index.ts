@@ -63,6 +63,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 function authenticateInternalSchedule(req: Request): string | null {
   const expected = Deno.env.get("SUBLEDGER_SCHEDULED_JOBS_SECRET")
     ?? Deno.env.get("SUBLEDGER_CRON_SECRET")
+    ?? Deno.env.get("INTERNAL_CRON_SECRET")
     ?? "";
   const provided = req.headers.get("x-internal-shared-secret")
     ?? req.headers.get("x-internal-secret")
