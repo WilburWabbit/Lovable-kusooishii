@@ -28,8 +28,11 @@ export interface PriceQuoteDetail {
   highest_unit_carrying_value?: number | null;
   stock_unit_count: number;
   market_consensus: number | null;
+  brickeconomy_rrp?: number | null;
+  condition_adjusted_rrp?: number | null;
   condition_multiplier: number | null;
   confidence_score: number | null;
+  target_floor_clamped?: boolean | null;
   blocking_reasons: string[];
   warning_reasons: string[];
   cost_basis?: {
@@ -39,9 +42,44 @@ export interface PriceQuoteDetail {
     unit_count?: number;
     exposure_over_pool?: number;
   } | null;
+  vat_position?: {
+    vat_rate_percent?: number;
+    brickeconomy_rrp?: number | null;
+    condition_adjusted_rrp?: number | null;
+    market_weighted_rrp_undercut?: number | null;
+    sale_price_gross?: number;
+    sale_output_vat?: number;
+    sale_receipts_net_of_vat?: number;
+    channel_fees_gross_paid?: number;
+    channel_fee_input_vat_reclaim?: number;
+    channel_fees_net_cost?: number;
+    cost_basis_net_paid?: number;
+    estimated_cash_after_fees?: number;
+    estimated_net_after_vat_and_fees?: number;
+    risk_reserve_net?: number;
+    program_commission?: number;
+    net_position_after_vat?: number;
+    floor?: {
+      gross_price?: number;
+      output_vat?: number;
+      receipts_net_of_vat?: number;
+      channel_fees_gross?: number;
+      channel_fee_input_vat_reclaim?: number;
+      channel_fees_net?: number;
+      net_position?: number;
+    };
+    target?: {
+      gross_price?: number;
+      output_vat?: number;
+      receipts_net_of_vat?: number;
+      channel_fees_gross?: number;
+      channel_fees_net?: number;
+      net_position?: number;
+    };
+  } | null;
   floor_contributors?: PriceContributor[];
   target_contributors?: PriceContributor[];
-  breakdown?: Record<string, number>;
+  breakdown?: Record<string, unknown>;
   raw_quote?: Record<string, unknown>;
 }
 

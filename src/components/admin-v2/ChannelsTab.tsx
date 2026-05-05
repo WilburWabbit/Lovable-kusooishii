@@ -33,11 +33,7 @@ interface ChannelsTabProps {
 const CHANNELS: { key: Channel; label: string; titleLimit: number }[] = [
   { key: "ebay", label: "eBay", titleLimit: 80 },
   { key: "website", label: "Website", titleLimit: 200 },
-  { key: "bricklink", label: "BrickLink", titleLimit: 200 },
-  { key: "brickowl", label: "BrickOwl", titleLimit: 200 },
 ];
-
-const DISABLED_CONNECTORS = new Set<Channel>(["bricklink", "brickowl"]);
 
 function normalizedChannel(channel: Channel | string | null | undefined): Channel {
   if (channel === "web") return "website";
@@ -334,11 +330,9 @@ function VariantChannelsCard({
           const stockCount = ch.key === "website" ? webPreflight?.saleable_stock_count : pricing?.stock_unit_count;
           const confidence = pricing?.confidence_score == null ? null : Math.round(Number(pricing.confidence_score) * 100);
           const manualOutOfStock = listing?.availabilityOverride === "manual_out_of_stock";
-          const connectorDisabled = DISABLED_CONNECTORS.has(ch.key);
           const listingEnded = status === "ended";
           const delistQueued = String(listing?.offerStatus ?? "").toLowerCase() === "end_queued";
-          const actionDisabled = !listing || connectorDisabled || listingEnded || delistQueued || channelAction.isPending;
-          const connectorMessage = connectorDisabled ? "Connector not available yet" : undefined;
+          const actionDisabled = !listing || listingEnded || delistQueued || channelAction.isPending;
 
           // Check if live listing has fallen below floor
           const liveAndBelowFloor = status === "live" && listing?.listingPrice != null
@@ -569,7 +563,6 @@ function VariantChannelsCard({
                     )
                   }
                   disabled={actionDisabled}
-                  title={connectorMessage}
                   className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {manualOutOfStock ? "Clear OOS" : "Set OOS"}
@@ -577,15 +570,11 @@ function VariantChannelsCard({
                 <button
                   onClick={() => handleAvailabilityAction(ch, listing, "delist-channel-listing")}
                   disabled={actionDisabled}
-                  title={connectorMessage}
                   className="rounded border border-red-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Delist
                 </button>
               </div>
-              {connectorDisabled && (
-                <div className="mt-1 text-[10px] text-zinc-500">Connector not available yet</div>
-              )}
 
               {ch.key === "website" && (
                 <div className="mt-2 rounded border border-zinc-200 bg-white px-2 py-1.5">

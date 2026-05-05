@@ -20,8 +20,6 @@ type TabKey = "stock" | "photos" | "copy" | "minifigs" | "pricing" | "channels" 
 const HEADER_CHANNELS: Array<{ key: Channel; priceChannel: string; label: string }> = [
   { key: "website", priceChannel: "web", label: "Web" },
   { key: "ebay", priceChannel: "ebay", label: "eBay" },
-  { key: "bricklink", priceChannel: "bricklink", label: "BrickLink" },
-  { key: "brickowl", priceChannel: "brickowl", label: "BrickOwl" },
 ];
 
 function normalizedPricingChannel(channel: string | null | undefined) {

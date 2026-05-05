@@ -199,8 +199,6 @@ export function useVariantChannelPricing(skuId: string | undefined, skuCode?: st
       const channels: Array<{ key: Channel; pricingChannel: string }> = [
         { key: 'ebay', pricingChannel: 'ebay' },
         { key: 'website', pricingChannel: 'web' },
-        { key: 'bricklink', pricingChannel: 'bricklink' },
-        { key: 'brickowl', pricingChannel: 'brickowl' },
       ];
 
       const entries = await Promise.all(

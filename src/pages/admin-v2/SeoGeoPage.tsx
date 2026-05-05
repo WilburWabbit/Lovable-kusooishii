@@ -18,7 +18,7 @@ import { absoluteUrl } from "@/lib/seo-jsonld";
 
 type SeoDocumentType = "route" | "product" | "theme" | "collection" | "system";
 type SeoIndexationPolicy = "index" | "noindex";
-type SeoStatusFilter = "all" | "draft" | "missing" | "indexable" | "noindex" | "sitemap" | "hidden";
+type SeoStatusFilter = "all" | "published" | "draft" | "missing" | "indexable" | "noindex" | "sitemap" | "hidden";
 type BulkStatusFilter = Exclude<SeoStatusFilter, "all">;
 type BulkDraftStage = "generating" | "ready" | "saving" | "saved" | "publishing" | "published" | "error";
 
@@ -166,6 +166,11 @@ interface DbResponse<T = unknown> {
   error: DbError | null;
 }
 
+interface SeoRevisionMutationResult {
+  id: string;
+  revision_number: number;
+}
+
 interface QueryBuilder extends PromiseLike<DbResponse> {
   select(columns: string): QueryBuilder;
   order(column: string, options?: { ascending?: boolean }): QueryBuilder;
@@ -195,6 +200,7 @@ const DOCUMENT_TYPE_OPTIONS: Array<{ value: SeoDocumentType; label: string }> = 
 ];
 
 const BULK_STATUS_OPTIONS: Array<{ value: BulkStatusFilter; label: string }> = [
+  { value: "published", label: "Published" },
   { value: "draft", label: "Drafts" },
   { value: "missing", label: "Needs content" },
   { value: "indexable", label: "Indexable" },
@@ -345,17 +351,40 @@ function displaySubtitle(record: SeoDocumentWithRevision) {
   return record.revision?.canonical_path ?? record.route_path ?? record.entity_reference ?? record.document_key;
 }
 
+function revisionHasRequiredContent(revision: SeoRevisionRow | null) {
+  return Boolean(revision?.title_tag?.trim() && revision?.meta_description?.trim());
+}
+
 function statusKind(record: SeoDocumentWithRevision): Exclude<SeoStatusFilter, "all"> {
-  if (record.revision?.status === "draft") return "draft";
-  if (!record.revision || !record.revision.title_tag || !record.revision.meta_description) return "missing";
+  if (record.draft_revision || record.revision?.status === "draft") return "draft";
+  if (record.published_revision || (record.status === "published" && record.published_revision_id)) return "published";
+  if (!record.revision || !revisionHasRequiredContent(record.revision)) return "missing";
   if (record.revision.indexation_policy === "noindex") return "noindex";
   if (record.revision.sitemap?.include) return "sitemap";
   if (record.revision.indexation_policy === "index") return "indexable";
   return "hidden";
 }
 
+function matchesStatusFilter(record: SeoDocumentWithRevision, filter: BulkStatusFilter) {
+  const primaryRevision = record.published_revision ?? record.draft_revision ?? record.revision;
+  if (filter === "published") {
+    return statusKind(record) === "published";
+  }
+  if (filter === "draft") {
+    return Boolean(record.draft_revision) || record.revision?.status === "draft";
+  }
+  if (filter === "missing") {
+    return !record.draft_revision && !record.published_revision && !revisionHasRequiredContent(record.revision);
+  }
+  if (filter === "indexable") return primaryRevision?.indexation_policy === "index";
+  if (filter === "noindex") return primaryRevision?.indexation_policy === "noindex";
+  if (filter === "sitemap") return primaryRevision?.sitemap?.include === true;
+  return statusKind(record) === "hidden";
+}
+
 function statusBadge(record: SeoDocumentWithRevision) {
   const status = statusKind(record);
+  if (status === "published") return <Badge label="Published" color="#16A34A" small />;
   if (status === "draft") return <Badge label="Draft" color="#D97706" small />;
   if (status === "missing") return <Badge label="Needs content" color="#D97706" small />;
   if (status === "noindex") return <Badge label="Noindex" color="#DC2626" small />;
@@ -487,8 +516,9 @@ async function saveSeoRevisionDraft(record: SeoDocumentWithRevision, state: SeoE
     .single();
 
   if (revisionError) throw revisionError;
-  const revisionRow = revision as { id: string } | null;
+  const revisionRow = revision as SeoRevisionMutationResult | null;
   if (!revisionRow?.id) throw new Error("Saved draft was not returned");
+  return revisionRow;
 }
 
 async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEditorState) {
@@ -500,8 +530,60 @@ async function publishSeoRevision(record: SeoDocumentWithRevision, state: SeoEdi
     .single();
 
   if (revisionError) throw revisionError;
-  const revisionRow = revision as { id: string } | null;
+  const revisionRow = revision as SeoRevisionMutationResult | null;
   if (!revisionRow?.id) throw new Error("Published revision was not returned");
+  return revisionRow;
+}
+
+function revisionRowFromEditor(
+  record: SeoDocumentWithRevision,
+  state: SeoEditorState,
+  result: SeoRevisionMutationResult,
+  status: "draft" | "published",
+): SeoRevisionRow {
+  const canonicalPath = state.canonical_path.trim();
+  const canonicalUrl = absoluteUrl(canonicalPath);
+  const titleTag = state.title_tag.trim();
+  const metaDescription = state.meta_description.trim();
+  const currentRevision = record.revision;
+  return {
+    id: result.id,
+    seo_document_id: record.id,
+    revision_number: result.revision_number,
+    status,
+    canonical_path: canonicalPath,
+    canonical_url: canonicalUrl,
+    title_tag: titleTag,
+    meta_description: metaDescription,
+    indexation_policy: state.indexation_policy,
+    robots_directive: state.robots_directive.trim() || (state.indexation_policy === "noindex" ? "noindex, nofollow" : "index, follow"),
+    open_graph: {
+      ...(currentRevision?.open_graph ?? {}),
+      title: titleTag,
+      description: metaDescription,
+      url: canonicalUrl,
+    },
+    twitter_card: {
+      ...(currentRevision?.twitter_card ?? {}),
+      title: titleTag,
+      description: metaDescription,
+    },
+    breadcrumbs: parseJsonField("breadcrumbs", state.breadcrumbs),
+    structured_data: parseJsonField("structured data", state.structured_data),
+    image_metadata: parseJsonField("image metadata", state.image_metadata),
+    sitemap: {
+      include: state.sitemap_include,
+      family: state.sitemap_family.trim() || record.document_type,
+      changefreq: state.sitemap_changefreq,
+      priority: priorityFromInput(state.sitemap_priority),
+    },
+    geo: parseJsonField("GEO metadata", state.geo),
+    keywords: state.keywords.split(",").map((keyword) => keyword.trim()).filter(Boolean),
+    source: "admin_ui",
+    change_summary: state.change_summary.trim() || (status === "published" ? "Published from SEO/GEO admin." : "Saved from SEO/GEO admin."),
+    published_at: status === "published" ? new Date().toISOString() : null,
+    created_at: new Date().toISOString(),
+  };
 }
 
 export default function SeoGeoPage() {
@@ -559,7 +641,7 @@ export default function SeoGeoPage() {
     const needle = query.trim().toLowerCase();
     return data.filter((record) => {
       if (typeFilter !== "all" && record.document_type !== typeFilter) return false;
-      if (statusFilter !== "all" && statusKind(record) !== statusFilter) return false;
+      if (statusFilter !== "all" && !matchesStatusFilter(record, statusFilter)) return false;
       if (!needle) return true;
       return [
         record.document_key,
@@ -577,11 +659,12 @@ export default function SeoGeoPage() {
 
   const counts = useMemo(() => ({
     total: data.length,
-    draft: data.filter((record) => record.revision?.status === "draft").length,
-    missing: data.filter((record) => statusKind(record) === "missing").length,
-    indexable: data.filter((record) => record.revision?.indexation_policy === "index").length,
-    noindex: data.filter((record) => record.revision?.indexation_policy === "noindex").length,
-    sitemap: data.filter((record) => record.revision?.sitemap?.include === true).length,
+    published: data.filter((record) => matchesStatusFilter(record, "published")).length,
+    draft: data.filter((record) => matchesStatusFilter(record, "draft")).length,
+    missing: data.filter((record) => matchesStatusFilter(record, "missing")).length,
+    indexable: data.filter((record) => matchesStatusFilter(record, "indexable")).length,
+    noindex: data.filter((record) => matchesStatusFilter(record, "noindex")).length,
+    sitemap: data.filter((record) => matchesStatusFilter(record, "sitemap")).length,
   }), [data]);
 
   const recordsById = useMemo(() => new Map(data.map((record) => [record.id, record])), [data]);
@@ -600,7 +683,7 @@ export default function SeoGeoPage() {
     const needle = bulkQuery.trim().toLowerCase();
     return data.filter((record) => {
       if (bulkTypes.length > 0 && !bulkTypes.includes(record.document_type)) return false;
-      if (bulkStatuses.length > 0 && !bulkStatuses.includes(statusKind(record))) return false;
+      if (bulkStatuses.length > 0 && !bulkStatuses.some((status) => matchesStatusFilter(record, status))) return false;
       if (!needle) return true;
       return [
         record.document_key,
@@ -699,6 +782,39 @@ export default function SeoGeoPage() {
     setBulkResults((current) => {
       const result = current[recordId];
       return result ? { ...current, [recordId]: { ...result, ...update } } : current;
+    });
+  };
+
+  const patchSeoDocumentRevision = (
+    record: SeoDocumentWithRevision,
+    state: SeoEditorState,
+    result: SeoRevisionMutationResult,
+    action: "save" | "publish",
+  ) => {
+    const nextRevision = revisionRowFromEditor(record, state, result, action === "publish" ? "published" : "draft");
+    queryClient.setQueryData<SeoDocumentWithRevision[]>(["admin", "seo-documents"], (current) => {
+      if (!current) return current;
+      return current.map((row) => {
+        if (row.id !== record.id) return row;
+        if (action === "publish") {
+          return {
+            ...row,
+            status: "published",
+            published_revision_id: nextRevision.id,
+            revision: nextRevision,
+            draft_revision: null,
+            published_revision: nextRevision,
+            updated_at: nextRevision.published_at ?? row.updated_at,
+          };
+        }
+        return {
+          ...row,
+          status: row.published_revision_id ? row.status : "draft",
+          revision: nextRevision,
+          draft_revision: nextRevision,
+          updated_at: nextRevision.created_at,
+        };
+      });
     });
   };
 
@@ -811,8 +927,10 @@ export default function SeoGeoPage() {
 
     markBulkResult(recordId, { stage: action === "save" ? "saving" : "publishing", error: null });
     try {
-      if (action === "save") await saveSeoRevisionDraft(record, result.editor);
-      else await publishSeoRevision(record, result.editor);
+      const revision = action === "save"
+        ? await saveSeoRevisionDraft(record, result.editor)
+        : await publishSeoRevision(record, result.editor);
+      patchSeoDocumentRevision(record, result.editor, revision, action);
       markBulkResult(recordId, {
         stage: action === "save" ? "saved" : "published",
         included: action === "publish" ? false : result.included,
@@ -832,7 +950,7 @@ export default function SeoGeoPage() {
       .map(({ record }) => record.id);
 
     if (ids.length === 0) {
-      toast.error(action === "save" ? "Select drafts to save" : "Select drafts to approve");
+      toast.error(action === "save" ? "Select drafts to save" : "Select drafts to publish");
       return;
     }
 
@@ -850,7 +968,7 @@ export default function SeoGeoPage() {
       }
 
       if (appliedCount > 0) {
-        toast.success(action === "save" ? `Saved ${appliedCount} draft${appliedCount === 1 ? "" : "s"}` : `Approved ${appliedCount} revision${appliedCount === 1 ? "" : "s"}`);
+        toast.success(action === "save" ? `Saved ${appliedCount} draft${appliedCount === 1 ? "" : "s"}` : `Published ${appliedCount} revision${appliedCount === 1 ? "" : "s"}`);
         await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
         if (action === "publish") await queryClient.invalidateQueries({ queryKey: ["seo_document"] });
       }
@@ -863,9 +981,11 @@ export default function SeoGeoPage() {
   const publish = useMutation({
     mutationFn: async () => {
       if (!selectedView || !editor) throw new Error("Select an SEO document first");
-      await publishSeoRevision(selectedView, editor);
+      const revision = await publishSeoRevision(selectedView, editor);
+      return { record: selectedView, state: editor, revision };
     },
-    onSuccess: async () => {
+    onSuccess: async ({ record, state, revision }) => {
+      patchSeoDocumentRevision(record, state, revision, "publish");
       toast.success("SEO/GEO revision published");
       await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
       await queryClient.invalidateQueries({ queryKey: ["seo_document"] });
@@ -876,9 +996,11 @@ export default function SeoGeoPage() {
   const saveDraft = useMutation({
     mutationFn: async () => {
       if (!selectedView || !editor) throw new Error("Select an SEO document first");
-      await saveSeoRevisionDraft(selectedView, editor);
+      const revision = await saveSeoRevisionDraft(selectedView, editor);
+      return { record: selectedView, state: editor, revision };
     },
-    onSuccess: async () => {
+    onSuccess: async ({ record, state, revision }) => {
+      patchSeoDocumentRevision(record, state, revision, "save");
       toast.success("SEO/GEO draft saved");
       await queryClient.invalidateQueries({ queryKey: ["admin", "seo-documents"] });
     },
@@ -934,8 +1056,9 @@ export default function SeoGeoPage() {
           </SurfaceCard>
         ) : null}
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
           <Metric label="Documents" value={counts.total} tone="neutral" />
+          <Metric label="Published" value={counts.published} tone="green" />
           <Metric label="Drafts" value={counts.draft} tone="amber" />
           <Metric label="Indexable" value={counts.indexable} tone="blue" />
           <Metric label="Noindex" value={counts.noindex} tone="red" />
@@ -986,6 +1109,7 @@ export default function SeoGeoPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All statuses</SelectItem>
+                          <SelectItem value="published">Published</SelectItem>
                           <SelectItem value="draft">Drafts</SelectItem>
                           <SelectItem value="missing">Needs content</SelectItem>
                           <SelectItem value="indexable">Indexable</SelectItem>
@@ -1207,7 +1331,7 @@ export default function SeoGeoPage() {
                     <SectionHead>Bulk Create & Review</SectionHead>
                   </div>
                   <p className="mt-1 max-w-3xl text-xs text-zinc-500">
-                    Batch SEO/GEO drafts across selected document families, then review, edit, save, or approve each revision.
+                    Batch SEO/GEO drafts across selected document families, then review, edit, save as drafts, or approve and publish in one action.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1226,7 +1350,7 @@ export default function SeoGeoPage() {
                     disabled={bulkAction !== null || bulkGenerating || bulkIncludedCount === 0}
                   >
                     {bulkAction === "publish" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                    Approve selected
+                    Approve & publish selected
                   </Button>
                 </div>
               </div>
@@ -1321,7 +1445,7 @@ export default function SeoGeoPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-zinc-800">
                         {bulkReviewItems.length > 0
-                          ? `${bulkReadyCount} ready · ${bulkIncludedCount} selected for approval`
+                          ? `${bulkReadyCount} ready · ${bulkIncludedCount} selected for action`
                           : "No generated drafts yet"}
                       </div>
                       {bulkErrorCount > 0 ? (
@@ -1379,8 +1503,8 @@ function bulkStageBadge(stage: BulkDraftStage) {
   if (stage === "ready") return <Badge label="Ready" color="#16A34A" small />;
   if (stage === "saving") return <Badge label="Saving" color="#2563EB" small />;
   if (stage === "saved") return <Badge label="Draft saved" color="#D97706" small />;
-  if (stage === "publishing") return <Badge label="Approving" color="#2563EB" small />;
-  if (stage === "published") return <Badge label="Approved" color="#16A34A" small />;
+  if (stage === "publishing") return <Badge label="Publishing" color="#2563EB" small />;
+  if (stage === "published") return <Badge label="Published" color="#16A34A" small />;
   return <Badge label="Error" color="#DC2626" small />;
 }
 
@@ -1435,7 +1559,7 @@ function BulkResultCard({
           </Button>
           <Button size="sm" onClick={onPublish} disabled={!canApply}>
             {result.stage === "publishing" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-            Approve
+            Approve & Publish
           </Button>
         </div>
       </div>
