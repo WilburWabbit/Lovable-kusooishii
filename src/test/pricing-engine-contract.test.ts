@@ -27,6 +27,10 @@ const vatPriceTransparencyMigration = readFileSync(
   join(repoRoot, "supabase/migrations/20260505124500_price_transparency_vat_position.sql"),
   "utf8",
 );
+const riskReservePercentFixMigration = readFileSync(
+  join(repoRoot, "supabase/migrations/20260505133000_fix_vat_risk_reserve_percent_regression.sql"),
+  "utf8",
+);
 const adminData = readFileSync(
   join(repoRoot, "supabase/functions/admin-data/index.ts"),
   "utf8",
@@ -49,6 +53,14 @@ const sourceValuesPanel = readFileSync(
 );
 const channelValueMatrix = readFileSync(
   join(repoRoot, "src/components/admin-v2/ChannelValueMatrix.tsx"),
+  "utf8",
+);
+const canonicalResolver = readFileSync(
+  join(repoRoot, "supabase/functions/_shared/canonical-resolver.ts"),
+  "utf8",
+);
+const multiSourceSync = readFileSync(
+  join(repoRoot, "supabase/functions/_shared/multi-source-sync.ts"),
   "utf8",
 );
 const pricingTransparencyTab = readFileSync(
@@ -122,6 +134,17 @@ describe("pricing engine contract", () => {
     expect(vatPriceTransparencyMigration).toContain("estimated_net_after_vat");
     expect(vatPriceTransparencyMigration).not.toContain("$$");
     expect(adminData).toContain("vat_position: quote.vat_position ?? null");
+  });
+
+  it("keeps VAT-aware risk reserve rates as operator-entered percentages", () => {
+    expect(riskReservePercentFixMigration).toContain("0.5 means 0.5%");
+    expect(riskReservePercentFixMigration).toContain("v_raw_risk_rate := NULLIF(v_breakdown->>''risk_reserve_rate'', '''')::numeric");
+    expect(riskReservePercentFixMigration).toContain("v_risk_rate := GREATEST(COALESCE(v_raw_risk_rate, 0), 0) / 100");
+    expect(riskReservePercentFixMigration).toContain("''calculation_basis'', ''pool_wac_vat_risk_percent_fix_v1''");
+    expect(riskReservePercentFixMigration).toContain("calculation_version = ''pool_wac_vat_risk_percent_fix_v1''");
+    expect(riskReservePercentFixMigration).not.toContain("WHEN v_raw_risk_rate > 1 THEN v_raw_risk_rate / 100");
+    expect(riskReservePercentFixMigration).not.toContain("ELSE v_raw_risk_rate");
+    expect(riskReservePercentFixMigration).not.toContain("$$");
   });
 
   it("bases target price on BrickEconomy RRP and never returns a target below floor", () => {
@@ -236,7 +259,7 @@ describe("pricing engine contract", () => {
   });
 
   it("suppresses BrickOwl as a specifications source while cache-hydrating BrickEconomy", () => {
-    expect(sourceValuesPanel).toContain('type SourceKey = "bricklink" | "brickset" | "brickeconomy"');
+    expect(sourceValuesPanel).toContain('type SourceKey = "brickeconomy" | "bricklink" | "brickset"');
     expect(sourceValuesPanel).not.toContain('"brickowl"');
     expect(channelValueMatrix).not.toContain('"brickowl"');
     expect(sourceValuesPanel).toContain('"brickeconomy-source-cache"');
@@ -246,6 +269,19 @@ describe("pricing engine contract", () => {
     expect(adminData).toContain('.from("brickeconomy_collection")');
     expect(adminData).toContain('.from("landing_raw_brickeconomy")');
     expect(adminData).toContain('source_values_jsonb: merged');
+  });
+
+  it("auto-selects specification source values by priority without changing image source snapshots", () => {
+    expect(sourceValuesPanel).toContain('const SOURCES: SourceKey[] = ["brickeconomy", "bricklink", "brickset"];');
+    expect(sourceValuesPanel).toContain("function firstAvailableSource");
+    expect(sourceValuesPanel).toContain("effectiveChosen = edit.chosen || r.autoChosen");
+    expect(sourceValuesPanel).toContain('const IMAGE_URL_KEY = "image_url"');
+    expect(canonicalResolver).toContain('const SOURCE_VALUE_PRIORITY = ["brickeconomy", "bricklink", "brickset"] as const');
+    expect(canonicalResolver).toContain("sourceAttributeSelection");
+    expect(canonicalResolver).toContain('if (attr.key === IMAGE_URL_KEY) return null');
+    expect(canonicalResolver).toContain('if (chosen === "none") return { raw: null, source: "none", sourceField: null, suppressFallback: true }');
+    expect(multiSourceSync).not.toContain("ATTRIBUTE_KEYS_EXCLUDED_FROM_SOURCE_SELECTION");
+    expect(adminData).not.toContain('String(mapping.canonical_key) !== "image_url"');
   });
 
   it("adds the product pricing tab and explanation surface", () => {

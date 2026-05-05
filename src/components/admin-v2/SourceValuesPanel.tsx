@@ -14,8 +14,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { invokeWithAuth } from "@/lib/invokeWithAuth";
 import { SurfaceCard, SectionHead } from "./ui-primitives";
 
-type SourceKey = "bricklink" | "brickset" | "brickeconomy";
-const SOURCES: SourceKey[] = ["bricklink", "brickset", "brickeconomy"];
+type SourceKey = "brickeconomy" | "bricklink" | "brickset";
+const SOURCES: SourceKey[] = ["brickeconomy", "bricklink", "brickset"];
+const SOURCE_PRIORITY = SOURCES;
+const IMAGE_URL_KEY = "image_url";
 
 type ChosenKey = SourceKey | "custom" | "none";
 
@@ -32,14 +34,21 @@ interface CanonicalRow {
 }
 
 const SOURCE_LABEL: Record<SourceKey, string> = {
+  brickeconomy: "BrickEconomy",
   bricklink: "BrickLink",
   brickset: "Brickset",
-  brickeconomy: "BrickEconomy",
 };
 
 function valuesDiffer(values: Array<string | null | undefined>): boolean {
   const present = values.filter((v) => v != null && String(v).trim() !== "").map((v) => String(v).trim().toLowerCase());
   return new Set(present).size > 1;
+}
+
+function firstAvailableSource(perSource: Record<SourceKey, string | null>): SourceKey | null {
+  return SOURCE_PRIORITY.find((source) => {
+    const value = perSource[source];
+    return value != null && String(value).trim() !== "";
+  }) ?? null;
 }
 
 // Sources fanned out by "Refresh from sources". BrickEconomy is cache-hydrated
@@ -138,22 +147,24 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
       const a = byKey.get(c.key);
       const sv = a?.source_values_jsonb ?? {};
       const perSource: Record<SourceKey, string | null> = {
+        brickeconomy: sv.brickeconomy?.value ?? null,
         bricklink: sv.bricklink?.value ?? null,
         brickset: sv.brickset?.value ?? null,
-        brickeconomy: sv.brickeconomy?.value ?? null,
       };
       const conflict = valuesDiffer(Object.values(perSource));
       const anyValue = Object.values(perSource).some((v) => v != null && String(v).trim() !== "");
+      const autoChosen = firstAvailableSource(perSource);
       return {
         key: c.key,
         label: c.label,
         perSource,
         conflict,
         anyValue,
+        autoChosen,
         chosen: (a?.chosen_source ?? null) as string | null,
         custom: a?.custom_value ?? null,
       };
-    }).filter((r) => r.anyValue);
+    }).filter((r) => r.anyValue && r.key !== IMAGE_URL_KEY);
   }, [canonicalQ.data, attrsQ.data]);
 
   // Hydrate edit buffer from server data once per dataset
@@ -304,7 +315,8 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
           <p className="text-[11px] text-zinc-500 mt-1">
             Snapshot from each external source. Pick which source feeds the canonical
             value per attribute, or set a custom override. Pricing data is sourced
-            solely from BrickEconomy and shown elsewhere.
+            solely from BrickEconomy and shown elsewhere. Blank choices auto-select
+            the first available value in source priority order.
           </p>
         </div>
         <button
@@ -396,7 +408,10 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
               <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
                 <th className="py-1.5 pr-2 font-medium">Attribute</th>
                 {SOURCES.map((s) => (
-                  <th key={s} className="py-1.5 px-2 font-medium">{SOURCE_LABEL[s]}</th>
+                  <th key={s} className="py-1.5 px-2 font-medium">
+                    {SOURCE_LABEL[s]}
+                    <span className="ml-1 text-zinc-400">P{SOURCES.indexOf(s) + 1}</span>
+                  </th>
                 ))}
                 <th className="py-1.5 px-2 font-medium">Custom override</th>
                 <th className="py-1.5 px-2 font-medium">Chosen</th>
@@ -410,6 +425,7 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
                   (edit.chosen || "") !== (r.chosen ?? "") ||
                   (edit.chosen === "custom" && (edit.custom ?? "") !== (r.custom ?? ""));
                 const isCustomChosen = edit.chosen === "custom";
+                const effectiveChosen = edit.chosen || r.autoChosen;
                 return (
                   <tr key={r.key} className="border-b border-zinc-100 align-top">
                     <td className="py-1.5 pr-2 font-medium text-zinc-800">
@@ -427,7 +443,7 @@ export function SourceValuesPanel({ productId, mpn }: { productId: string; mpn: 
                     </td>
                     {SOURCES.map((s) => {
                       const v = r.perSource[s];
-                      const isChosen = edit.chosen === s;
+                      const isChosen = effectiveChosen === s;
                       const empty = v == null || v === "";
                       return (
                         <td

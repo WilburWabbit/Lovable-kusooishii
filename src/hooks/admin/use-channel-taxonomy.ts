@@ -28,6 +28,8 @@ export interface ResolvedAspect {
 export type CanonicalProvider =
   | "product"
   | "brickeconomy"
+  | "bricklink"
+  | "brickset"
   | "catalog"
   | "rebrickable"
   | "theme"
