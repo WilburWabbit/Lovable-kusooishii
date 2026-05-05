@@ -47,9 +47,25 @@ export interface PriceQuoteDetail {
     brickeconomy_rrp?: number | null;
     condition_adjusted_rrp?: number | null;
     market_weighted_rrp_undercut?: number | null;
+    raw_rrp_gross?: number | null;
+    raw_market_consensus_gross?: number | null;
+    target_anchor_gross?: number | null;
+    condition_adjusted_anchor?: number | null;
+    target_profit_safeguard_price?: number | null;
+    target_margin_safeguard_price?: number | null;
     sale_price_gross?: number;
     sale_output_vat?: number;
     sale_receipts_net_of_vat?: number;
+    stock_cost_gross_paid?: number;
+    stock_input_vat_reclaim?: number;
+    stock_cost_net_after_reclaim?: number;
+    packaging_gross_paid?: number;
+    packaging_input_vat_reclaim?: number;
+    packaging_net_cost?: number;
+    delivery_gross_paid?: number;
+    delivery_input_vat_reclaim?: number;
+    delivery_net_cost?: number;
+    actual_costs_net_after_reclaim?: number;
     channel_fees_gross_paid?: number;
     channel_fee_input_vat_reclaim?: number;
     channel_fees_net_cost?: number;
@@ -66,6 +82,7 @@ export interface PriceQuoteDetail {
       channel_fees_gross?: number;
       channel_fee_input_vat_reclaim?: number;
       channel_fees_net?: number;
+      break_even_net_position?: number;
       net_position?: number;
     };
     target?: {
@@ -73,7 +90,9 @@ export interface PriceQuoteDetail {
       output_vat?: number;
       receipts_net_of_vat?: number;
       channel_fees_gross?: number;
+      channel_fee_input_vat_reclaim?: number;
       channel_fees_net?: number;
+      risk_reserve_net?: number;
       net_position?: number;
     };
   } | null;
