@@ -1391,6 +1391,8 @@ export type Database = {
           max_decrease_pct: number | null
           max_increase_amount: number | null
           max_increase_pct: number | null
+          price_issue_tolerance_amount: number
+          price_issue_tolerance_pct: number
           updated_at: string
         }
         Insert: {
@@ -1405,6 +1407,8 @@ export type Database = {
           max_decrease_pct?: number | null
           max_increase_amount?: number | null
           max_increase_pct?: number | null
+          price_issue_tolerance_amount?: number
+          price_issue_tolerance_pct?: number
           updated_at?: string
         }
         Update: {
@@ -1419,6 +1423,8 @@ export type Database = {
           max_decrease_pct?: number | null
           max_increase_amount?: number | null
           max_increase_pct?: number | null
+          price_issue_tolerance_amount?: number
+          price_issue_tolerance_pct?: number
           updated_at?: string
         }
         Relationships: []
@@ -3352,6 +3358,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      operations_issue_suppression: {
+        Row: {
+          action: string | null
+          created_at: string
+          created_by: string | null
+          evidence: Json
+          expires_at: string | null
+          id: string
+          issue_key: string
+          reason: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          action?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidence?: Json
+          expires_at?: string | null
+          id?: string
+          issue_key: string
+          reason: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          action?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidence?: Json
+          expires_at?: string | null
+          id?: string
+          issue_key?: string
+          reason?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       outbound_command: {
         Row: {
