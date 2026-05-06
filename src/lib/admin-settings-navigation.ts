@@ -47,7 +47,7 @@ export const adminSettingsGroups: AdminSettingsGroup[] = [
     items: [
       { label: "App Health", to: "/admin/settings/app-health", icon: Activity, detail: "Schema, roles, settings, recent audit events, and landing errors." },
       { label: "Transcripts", to: "/admin/settings/transcripts", icon: MessageSquare, detail: "Review and export captured operational transcripts." },
-      { label: "Schedules & Jobs", to: "/admin/operations", icon: Bot, detail: "Scheduled job evidence, posting queues, and reconciliation controls." },
+      { label: "Issue Inbox", to: "/admin/operations", icon: Bot, detail: "Actionable transaction, customer, inventory, product, and integration issues." },
     ],
   },
 ];
