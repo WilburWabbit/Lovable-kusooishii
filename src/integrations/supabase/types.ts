@@ -8357,6 +8357,39 @@ export type Database = {
           },
         ]
       }
+      v_operations_issue_inbox: {
+        Row: {
+          amount_actual: number | null
+          amount_expected: number | null
+          confidence: number | null
+          created_at: string | null
+          domain: string | null
+          evidence: Json | null
+          id: string | null
+          issue_key: string | null
+          issue_type: string | null
+          primary_action: string | null
+          primary_entity_id: string | null
+          primary_entity_type: string | null
+          primary_reference: string | null
+          recommended_action: string | null
+          secondary_actions: Json | null
+          secondary_reference: string | null
+          severity: string | null
+          sort_rank: number | null
+          source_id: string | null
+          source_system: string | null
+          source_table: string | null
+          status: string | null
+          target_label: string | null
+          target_route: string | null
+          title: string | null
+          updated_at: string | null
+          variance_amount: number | null
+          why_it_matters: string | null
+        }
+        Relationships: []
+      }
       v_order_line_economics: {
         Row: {
           cogs_amount: number | null
@@ -9860,6 +9893,15 @@ export type Database = {
       refresh_sku_cost_rollups: { Args: { p_sku_id?: string }; Returns: number }
       release_stock_allocation_for_order_line: {
         Args: { p_reason?: string; p_sales_order_line_id: string }
+        Returns: Json
+      }
+      resolve_operations_issue: {
+        Args: {
+          p_action?: string
+          p_evidence?: Json
+          p_issue_id: string
+          p_note?: string
+        }
         Returns: Json
       }
       resolve_reconciliation_case: {
