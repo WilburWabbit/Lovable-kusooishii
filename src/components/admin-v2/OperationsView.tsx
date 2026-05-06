@@ -417,7 +417,7 @@ export function OperationsView() {
         </div>
       </SurfaceCard>
 
-      <AdminDetailTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+      <AdminDetailTabs tabs={tabs} activeTab={activeTab} onChange={(key) => setActiveTab(key as typeof activeTab)} />
 
       {isLoading ? (
         <SurfaceCard className="flex min-h-[260px] items-center justify-center">
