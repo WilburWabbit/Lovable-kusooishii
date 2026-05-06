@@ -120,9 +120,9 @@ export function buildMetaCatalogItem(
     description: truncate(description, 5000),
     image_url: imageUrl,
     inventory: Math.max(0, Math.floor(stockCount)),
-    item_group_id: mpn,
     name: truncate(title, 150),
     price: price.toFixed(2),
+    retailer_product_group_id: mpn,
     url,
   };
 
