@@ -92,6 +92,7 @@ function MetaCatalogPanel({
   onCheckBatchStatus,
   lastResult,
   isLoading,
+  errorMessage,
 }: {
   connected: boolean;
   catalogId: string;
@@ -113,6 +114,7 @@ function MetaCatalogPanel({
   onCheckBatchStatus: (run: MetaCatalogSyncRun, handle: string) => void;
   lastResult: MetaSyncResult | null;
   isLoading: boolean;
+  errorMessage?: string | null;
 }) {
   const [filter, setFilter] = useState<"syncable" | "all" | "blocked">("syncable");
   const visibleRows = useMemo(() => {
@@ -231,7 +233,12 @@ function MetaCatalogPanel({
           <span>Price</span>
           <span>Notes</span>
         </div>
-        {isLoading ? (
+        {errorMessage ? (
+          <div className="flex items-center gap-2 px-3 py-4 text-xs text-red-600">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {errorMessage}
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center gap-2 px-3 py-4 text-xs text-zinc-500">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Loading catalog rows...
@@ -554,6 +561,7 @@ export function MetaSettingsCard() {
         onCheckBatchStatus={checkBatchStatus}
         lastResult={lastSyncResult}
         isLoading={readiness.isLoading}
+        errorMessage={readiness.error instanceof Error ? readiness.error.message : null}
       />
 
       <div className="mt-4 border-t border-zinc-200 pt-3">

@@ -13,6 +13,7 @@ import { buildMetaCatalogItem } from "../_shared/meta-product-input.ts";
 
 const DEFAULT_PUBLIC_SITE_URL = "https://www.kusooishii.com";
 const META_BATCH_SIZE = 50;
+const SUPABASE_FILTER_CHUNK_SIZE = 50;
 const SALEABLE_STOCK_V2_STATUSES = ["graded", "listed", "restocked"];
 const SALEABLE_STOCK_STATUSES = ["available", "received", "graded", "listed", "restocked"];
 
@@ -92,6 +93,50 @@ function boundedLimit(value: unknown): number | null {
   return Math.max(1, Math.min(500, Math.floor(number)));
 }
 
+function chunkArray<T>(values: T[], size = SUPABASE_FILTER_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function fetchRowsInChunks<T>(
+  label: string,
+  values: string[],
+  queryChunk: (chunk: string[]) => PromiseLike<{
+    data: unknown[] | null;
+    error: { message?: string } | null;
+  }>,
+): Promise<T[]> {
+  const uniqueValues = [...new Set(values.filter(Boolean))];
+  const rows: T[] = [];
+
+  for (const chunk of chunkArray(uniqueValues)) {
+    const { data, error } = await queryChunk(chunk);
+    if (error) throw new Error(`Failed to fetch ${label}: ${error.message ?? "unknown"}`);
+    rows.push(...((data ?? []) as T[]));
+  }
+
+  return rows;
+}
+
+async function updateMetaListingsByExternalSku(
+  admin: ReturnType<typeof createAdminClient>,
+  externalSkus: string[],
+  values: Record<string, unknown>,
+) {
+  const uniqueExternalSkus = [...new Set(externalSkus.filter(Boolean))];
+  for (const chunk of chunkArray(uniqueExternalSkus)) {
+    const { error } = await admin
+      .from("channel_listing")
+      .update(values as never)
+      .eq("channel" as never, "meta")
+      .in("external_sku" as never, chunk as never);
+    if (error) console.warn("Failed to update Meta channel listings", error);
+  }
+}
+
 function normalizeSiteUrl(value: unknown): string {
   const raw = asString(value);
   if (!raw) return DEFAULT_PUBLIC_SITE_URL;
@@ -114,16 +159,19 @@ async function getWebsitePrimaryImageUrls(
   const byProduct = new Map<string, string>();
   if (uniqueProductIds.length === 0) return byProduct;
 
-  const { data, error } = await admin
-    .from("product_media")
-    .select("product_id, sort_order, is_primary, media_asset:media_asset_id(original_url)")
-    .in("product_id" as never, uniqueProductIds as never)
-    .order("is_primary" as never, { ascending: false })
-    .order("sort_order" as never, { ascending: true });
+  const mediaRows = await fetchRowsInChunks<Record<string, unknown>>(
+    "product media",
+    uniqueProductIds,
+    (chunk) =>
+      admin
+        .from("product_media")
+        .select("product_id, sort_order, is_primary, media_asset:media_asset_id(original_url)")
+        .in("product_id" as never, chunk as never)
+        .order("is_primary" as never, { ascending: false })
+        .order("sort_order" as never, { ascending: true }),
+  );
 
-  if (error) throw error;
-
-  for (const row of (data ?? []) as Record<string, unknown>[]) {
+  for (const row of mediaRows) {
     const productId = asString(row.product_id);
     if (!productId || byProduct.has(productId)) continue;
     const asset = row.media_asset as Record<string, unknown> | null;
@@ -257,50 +305,56 @@ async function prepareCatalogRows(
   const productIds = skus.map((sku) => asString(sku.product_id)).filter((value): value is string => Boolean(value));
 
   const [
-    { data: webListings, error: webListingError },
-    { data: metaListings, error: metaListingError },
-    { data: stockUnits, error: stockUnitError },
+    webListings,
+    metaListings,
+    stockUnits,
     imageUrlsByProduct,
   ] = await Promise.all([
-    skuIds.length > 0
-      ? admin
+    fetchRowsInChunks<WebListing>(
+      "web listings",
+      skuIds,
+      (chunk) =>
+        admin
           .from("channel_listing")
           .select("id, sku_id, offer_status, v2_status, listed_price, availability_override, availability_override_at, availability_override_by")
           .eq("channel" as never, "web")
-          .in("sku_id" as never, skuIds as never)
-      : Promise.resolve({ data: [], error: null }),
-    skuIds.length > 0
-      ? admin
+          .in("sku_id" as never, chunk as never),
+    ),
+    fetchRowsInChunks<MetaListing>(
+      "Meta listings",
+      skuIds,
+      (chunk) =>
+        admin
           .from("channel_listing")
           .select("id, sku_id, external_sku, external_listing_id, offer_status, v2_status, listed_quantity, synced_at")
           .eq("channel" as never, "meta")
-          .in("sku_id" as never, skuIds as never)
-      : Promise.resolve({ data: [], error: null }),
-    skuIds.length > 0
-      ? admin
+          .in("sku_id" as never, chunk as never),
+    ),
+    fetchRowsInChunks<Record<string, unknown>>(
+      "stock units",
+      skuIds,
+      (chunk) =>
+        admin
           .from("stock_unit")
           .select("sku_id, status, v2_status")
-          .in("sku_id" as never, skuIds as never)
-      : Promise.resolve({ data: [], error: null }),
+          .in("sku_id" as never, chunk as never),
+    ),
     getWebsitePrimaryImageUrls(admin, productIds),
   ]);
-  if (webListingError) throw new Error(`Failed to fetch web listings: ${webListingError.message}`);
-  if (metaListingError) throw new Error(`Failed to fetch Meta listings: ${metaListingError.message}`);
-  if (stockUnitError) throw new Error(`Failed to fetch stock units: ${stockUnitError.message}`);
 
   const webListingBySku = new Map<string, WebListing>();
-  for (const listing of (webListings ?? []) as WebListing[]) {
+  for (const listing of webListings) {
     if (!listing.sku_id || !isLiveWebListing(listing)) continue;
     webListingBySku.set(String(listing.sku_id), listing);
   }
 
   const metaListingBySku = new Map<string, MetaListing>();
-  for (const listing of (metaListings ?? []) as MetaListing[]) {
+  for (const listing of metaListings) {
     if (listing.sku_id) metaListingBySku.set(String(listing.sku_id), listing);
   }
 
   const stockMap = new Map<string, number>();
-  for (const stockUnit of (stockUnits ?? []) as Record<string, unknown>[]) {
+  for (const stockUnit of stockUnits) {
     const status = String(stockUnit.status ?? "").toLowerCase();
     const v2Status = String(stockUnit.v2_status ?? "").toLowerCase();
     const isSaleable = SALEABLE_STOCK_V2_STATUSES.includes(v2Status) || SALEABLE_STOCK_STATUSES.includes(status);
@@ -509,11 +563,10 @@ async function syncCatalog(req: Request, body: Record<string, unknown>) {
         } catch (err) {
           const message = err instanceof Error ? err.message : "unknown";
           errorDetails.push(message);
-          await admin
-            .from("channel_listing")
-            .update({ offer_status: "sync_error", synced_at: new Date().toISOString() } as never)
-            .eq("channel" as never, "meta")
-            .in("external_sku" as never, batchSkuCodes as never);
+          await updateMetaListingsByExternalSku(admin, batchSkuCodes, {
+            offer_status: "sync_error",
+            synced_at: new Date().toISOString(),
+          });
           await landMetaResponse(admin, {
             sync_run_id: runId,
             operation: "catalog_items_batch",
@@ -526,11 +579,10 @@ async function syncCatalog(req: Request, body: Record<string, unknown>) {
       }
 
       if (sentSkuCodes.length > 0) {
-        await admin
-          .from("channel_listing")
-          .update({ offer_status: batchHandles.length > 0 ? "sync_sent" : "synced", synced_at: new Date().toISOString() } as never)
-          .eq("channel" as never, "meta")
-          .in("external_sku" as never, sentSkuCodes as never);
+        await updateMetaListingsByExternalSku(admin, sentSkuCodes, {
+          offer_status: batchHandles.length > 0 ? "sync_sent" : "synced",
+          synced_at: new Date().toISOString(),
+        });
       }
     }
 
@@ -625,18 +677,16 @@ async function checkBatchStatus(req: Request, body: Record<string, unknown>) {
       const invalidSet = new Set(invalidIds);
       const successfulSkuCodes = sentSkuCodes.filter((skuCode) => !invalidSet.has(skuCode));
       if (successfulSkuCodes.length > 0) {
-        await admin
-          .from("channel_listing")
-          .update({ offer_status: "synced", synced_at: new Date().toISOString() } as never)
-          .eq("channel" as never, "meta")
-          .in("external_sku" as never, successfulSkuCodes as never);
+        await updateMetaListingsByExternalSku(admin, successfulSkuCodes, {
+          offer_status: "synced",
+          synced_at: new Date().toISOString(),
+        });
       }
       if (invalidIds.length > 0) {
-        await admin
-          .from("channel_listing")
-          .update({ offer_status: "sync_error", synced_at: new Date().toISOString() } as never)
-          .eq("channel" as never, "meta")
-          .in("external_sku" as never, invalidIds as never);
+        await updateMetaListingsByExternalSku(admin, invalidIds, {
+          offer_status: "sync_error",
+          synced_at: new Date().toISOString(),
+        });
       }
     }
 
