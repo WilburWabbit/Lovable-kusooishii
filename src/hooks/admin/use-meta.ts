@@ -39,13 +39,73 @@ export type MetaSyncResult = {
   success: boolean;
   status: string;
   catalog_id: string;
+  run_id?: string;
   dry_run: boolean;
   prepared: number;
   sent: number;
   skipped: number;
   errors: number;
+  batch_handles?: string[];
   skippedDetails?: Array<Record<string, unknown>>;
   errorDetails?: string[];
+};
+
+export type MetaCatalogReadinessStatus = "ready" | "warning" | "blocked";
+
+export type MetaCatalogReadinessRow = {
+  sku_id: string;
+  sku_code: string;
+  product_id: string | null;
+  mpn: string | null;
+  product_name: string | null;
+  condition_grade: number | string | null;
+  price: number | null;
+  stock_count: number;
+  status: MetaCatalogReadinessStatus;
+  blocking: string[];
+  warnings: string[];
+  image_url: string | null;
+  web_listing_id: string | null;
+  meta_listing_id: string | null;
+  meta_offer_status: string | null;
+  meta_synced_at: string | null;
+};
+
+export type MetaCatalogSyncRun = {
+  id: string;
+  catalog_id: string;
+  status: string;
+  total_items: number;
+  sent_items: number;
+  skipped_items: number;
+  error_items: number;
+  dry_run: boolean;
+  summary: Record<string, unknown> | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export type MetaCatalogReadinessResponse = {
+  catalog_id: string;
+  graph_version: string;
+  summary: {
+    total: number;
+    ready: number;
+    warning: number;
+    blocked: number;
+    syncable: number;
+    out_of_stock: number;
+  };
+  rows: MetaCatalogReadinessRow[];
+  recent_runs: MetaCatalogSyncRun[];
+};
+
+export type MetaBatchStatusResult = {
+  success: boolean;
+  catalog_id: string;
+  handle: string;
+  status: string | null;
+  payload: Record<string, unknown>;
 };
 
 export type MetaCampaignResult = {
@@ -56,6 +116,7 @@ export type MetaCampaignResult = {
 
 export const metaKeys = {
   status: ["admin", "meta", "status"] as const,
+  readiness: (catalogId?: string | null) => ["admin", "meta", "readiness", catalogId ?? "default"] as const,
 };
 
 export function useMetaStatus() {
@@ -86,9 +147,27 @@ export function useMetaStatus() {
   });
 }
 
+export function useMetaCatalogReadiness(catalogId?: string | null, enabled = true) {
+  return useQuery({
+    queryKey: metaKeys.readiness(catalogId),
+    enabled: enabled && Boolean(catalogId),
+    queryFn: async (): Promise<MetaCatalogReadinessResponse> =>
+      invokeWithAuth<MetaCatalogReadinessResponse>("meta-sync", {
+        action: "catalog_readiness",
+        catalog_id: catalogId ?? null,
+      }),
+    refetchInterval: 30_000,
+  });
+}
+
 export function useMetaMutations() {
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: metaKeys.status });
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: metaKeys.status }),
+      queryClient.invalidateQueries({ queryKey: ["admin", "meta", "readiness"] }),
+    ]);
+  };
 
   const connect = useMutation({
     mutationFn: async () => {
@@ -122,11 +201,23 @@ export function useMetaMutations() {
   });
 
   const syncCatalog = useMutation({
-    mutationFn: async (input?: { catalogId?: string | null; dryRun?: boolean }) =>
+    mutationFn: async (input?: { catalogId?: string | null; dryRun?: boolean; skuIds?: string[] }) =>
       invokeWithAuth<MetaSyncResult>("meta-sync", {
         action: "sync_catalog",
         catalog_id: input?.catalogId ?? null,
         dry_run: input?.dryRun ?? false,
+        sku_ids: input?.skuIds,
+      }),
+    onSuccess: invalidate,
+  });
+
+  const checkBatchStatus = useMutation({
+    mutationFn: async (input: { catalogId?: string | null; handle: string; runId?: string | null }) =>
+      invokeWithAuth<MetaBatchStatusResult>("meta-sync", {
+        action: "check_batch_status",
+        catalog_id: input.catalogId ?? null,
+        handle: input.handle,
+        sync_run_id: input.runId ?? null,
       }),
     onSuccess: invalidate,
   });
@@ -146,5 +237,5 @@ export function useMetaMutations() {
     onSuccess: invalidate,
   });
 
-  return { connect, refreshAssets, saveDefaults, syncCatalog, createPausedCampaign, disconnect };
+  return { connect, refreshAssets, saveDefaults, syncCatalog, checkBatchStatus, createPausedCampaign, disconnect };
 }
