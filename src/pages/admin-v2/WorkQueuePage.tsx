@@ -9,6 +9,7 @@ import { useOrders } from "@/hooks/admin/use-orders";
 import { useOperationsIssues } from "@/hooks/admin/use-operations";
 import {
   getIssueActionLabel,
+  getIssueNavigationRoute,
   getIssueSeverityColor,
   humanizeToken,
   issueDomainColors,
@@ -144,7 +145,7 @@ export default function WorkQueuePage() {
             <EmptyQueue />
           ) : (
             visibleIssues.map((issue) => (
-              <Link key={issue.id} to={issue.targetRoute ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
+              <Link key={issue.id} to={getIssueNavigationRoute(issue) ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-zinc-900">{issue.title}</span>
@@ -171,7 +172,7 @@ export default function WorkQueuePage() {
             <EmptyQueue />
           ) : (
             urgentIssues.slice(0, 6).map((issue) => (
-              <Link key={issue.id} to={issue.targetRoute ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
+              <Link key={issue.id} to={getIssueNavigationRoute(issue) ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
                 <div>
                   <div className="text-sm font-medium text-zinc-900">{issue.primaryReference ?? issue.title}</div>
                   <div className="max-w-lg truncate text-xs text-zinc-500">{issue.recommendedAction}</div>
