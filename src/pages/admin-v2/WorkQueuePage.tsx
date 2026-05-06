@@ -1,12 +1,18 @@
 import type { ElementType, ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, ClipboardList, PackageCheck, Receipt, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, PackageCheck, Receipt, ShieldCheck, Truck } from "lucide-react";
 import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { AdminPageHeader } from "@/components/admin-v2/admin-patterns";
 import { Badge, Mono, SurfaceCard } from "@/components/admin-v2/ui-primitives";
 import { useBatchUnitSummaries, usePurchaseBatches } from "@/hooks/admin/use-purchase-batches";
 import { useOrders } from "@/hooks/admin/use-orders";
-import { useListingCommands, useReconciliationInbox } from "@/hooks/admin/use-operations";
+import { useOperationsIssues } from "@/hooks/admin/use-operations";
+import {
+  getIssueActionLabel,
+  getIssueSeverityColor,
+  humanizeToken,
+  issueDomainColors,
+} from "@/lib/operations-issues";
 
 function formatDate(value: string | null) {
   if (!value) return "-";
@@ -61,8 +67,7 @@ export default function WorkQueuePage() {
   const { data: batches = [] } = usePurchaseBatches();
   const { data: summaryMap } = useBatchUnitSummaries();
   const { data: orders = [] } = useOrders();
-  const { data: cases = [] } = useReconciliationInbox();
-  const { data: commands = [] } = useListingCommands();
+  const { data: issues = [] } = useOperationsIssues();
 
   const ungradedBatches = batches
     .map((batch) => ({ batch, summary: summaryMap?.get(batch.id) }))
@@ -73,10 +78,8 @@ export default function WorkQueuePage() {
     ["needs_allocation", "awaiting_shipment", "return_pending"].includes(order.status),
   );
 
-  const openCases = cases.filter((item) => ["open", "in_progress", "blocked"].includes(item.status));
-  const failedCommands = commands.filter((command) => ["failed", "pending"].includes(command.status));
-  const visibleCases = openCases.slice(0, 6);
-  const visibleCommands = failedCommands.slice(0, 6);
+  const visibleIssues = issues.slice(0, 8);
+  const urgentIssues = issues.filter((issue) => issue.severity === "critical" || issue.severity === "high");
 
   return (
     <AdminV2Layout>
@@ -131,44 +134,49 @@ export default function WorkQueuePage() {
         </QueueSection>
 
         <QueueSection
-          title="Exceptions"
-          description="Open reconciliation cases requiring evidence, retry, or operator resolution."
+          title="Issue Inbox"
+          description="Operational problems with evidence and a next action."
           href="/admin/operations"
-          icon={AlertTriangle}
-          count={openCases.length}
+          icon={ShieldCheck}
+          count={issues.length}
         >
-          {visibleCases.length === 0 ? (
+          {visibleIssues.length === 0 ? (
             <EmptyQueue />
           ) : (
-            visibleCases.map((item) => (
-              <Link key={item.id} to={item.targetRoute ?? "/admin/operations"} className="flex items-center justify-between px-4 py-3 hover:bg-zinc-50">
+            visibleIssues.map((issue) => (
+              <Link key={issue.id} to={issue.targetRoute ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
                 <div>
-                  <div className="text-sm font-medium text-zinc-900">{item.targetLabel ?? item.caseType.replace(/_/g, " ")}</div>
-                  <div className="max-w-lg truncate text-xs text-zinc-500">{item.nextStep ?? item.recommendedAction ?? "Review and resolve"}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-zinc-900">{issue.title}</span>
+                    <Badge label={humanizeToken(issue.domain)} color={issueDomainColors[issue.domain]} small />
+                  </div>
+                  <div className="mt-1 max-w-lg truncate text-xs text-zinc-500">
+                    {issue.primaryReference ?? issue.targetLabel ?? issue.sourceSystem} · {getIssueActionLabel(issue.primaryAction)}
+                  </div>
                 </div>
-                <Badge label={item.severity} color={item.severity === "critical" || item.severity === "high" ? "#DC2626" : "#D97706"} small />
+                <Badge label={issue.severity} color={getIssueSeverityColor(issue.severity)} small />
               </Link>
             ))
           )}
         </QueueSection>
 
         <QueueSection
-          title="Channel Outbox"
-          description="Listing commands waiting to run or needing retry."
+          title="Urgent Issues"
+          description="High-severity safeguards from transactions, stock, products, and integrations."
           href="/admin/operations"
-          icon={ClipboardList}
-          count={failedCommands.length}
+          icon={AlertTriangle}
+          count={urgentIssues.length}
         >
-          {visibleCommands.length === 0 ? (
+          {urgentIssues.length === 0 ? (
             <EmptyQueue />
           ) : (
-            visibleCommands.map((command) => (
-              <Link key={command.id} to="/admin/operations" className="flex items-center justify-between px-4 py-3 hover:bg-zinc-50">
+            urgentIssues.slice(0, 6).map((issue) => (
+              <Link key={issue.id} to={issue.targetRoute ?? "/admin/operations"} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50">
                 <div>
-                  <div className="text-sm font-medium text-zinc-900">{command.skuCode ?? command.appReference ?? command.id.slice(0, 8)}</div>
-                  <div className="text-xs text-zinc-500">{command.targetSystem} · {command.commandType.replace(/_/g, " ")}</div>
+                  <div className="text-sm font-medium text-zinc-900">{issue.primaryReference ?? issue.title}</div>
+                  <div className="max-w-lg truncate text-xs text-zinc-500">{issue.recommendedAction}</div>
                 </div>
-                <Badge label={command.status} color={command.status === "failed" ? "#DC2626" : "#D97706"} small />
+                <Badge label={getIssueActionLabel(issue.primaryAction)} color="#18181B" small />
               </Link>
             ))
           )}

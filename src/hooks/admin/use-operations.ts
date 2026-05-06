@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const operationsKeys = {
   all: ["v2", "operations"] as const,
+  issues: ["v2", "operations", "issues"] as const,
   reconciliation: ["v2", "operations", "reconciliation"] as const,
   reconciliationNotes: (caseId: string) => ["v2", "operations", "reconciliation", caseId, "notes"] as const,
   health: ["v2", "operations", "rolling-health"] as const,
@@ -46,6 +47,37 @@ export interface ReconciliationInboxCase {
   ebayReference: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OperationsIssue {
+  id: string;
+  issueKey: string;
+  domain: "transactions" | "customers" | "inventory" | "products" | "integrations";
+  issueType: string;
+  severity: string;
+  status: string;
+  confidence: number;
+  sourceSystem: string;
+  sourceTable: string;
+  sourceId: string | null;
+  primaryEntityType: string | null;
+  primaryEntityId: string | null;
+  primaryReference: string | null;
+  secondaryReference: string | null;
+  title: string;
+  whyItMatters: string;
+  evidence: Record<string, unknown>;
+  recommendedAction: string;
+  primaryAction: string;
+  secondaryActions: string[];
+  targetRoute: string | null;
+  targetLabel: string | null;
+  amountExpected: number | null;
+  amountActual: number | null;
+  varianceAmount: number | null;
+  createdAt: string;
+  updatedAt: string;
+  sortRank: number;
 }
 
 export interface PostingIntentRow {
@@ -259,6 +291,37 @@ const mapCase = (row: Record<string, unknown>): ReconciliationInboxCase => ({
   updatedAt: row.updated_at as string,
 });
 
+const mapIssue = (row: Record<string, unknown>): OperationsIssue => ({
+  id: row.id as string,
+  issueKey: row.issue_key as string,
+  domain: row.domain as OperationsIssue["domain"],
+  issueType: row.issue_type as string,
+  severity: row.severity as string,
+  status: row.status as string,
+  confidence: Number(row.confidence ?? 0),
+  sourceSystem: row.source_system as string,
+  sourceTable: row.source_table as string,
+  sourceId: (row.source_id as string | null) ?? null,
+  primaryEntityType: (row.primary_entity_type as string | null) ?? null,
+  primaryEntityId: (row.primary_entity_id as string | null) ?? null,
+  primaryReference: (row.primary_reference as string | null) ?? null,
+  secondaryReference: (row.secondary_reference as string | null) ?? null,
+  title: row.title as string,
+  whyItMatters: row.why_it_matters as string,
+  evidence: ((row.evidence as Record<string, unknown> | null) ?? {}),
+  recommendedAction: row.recommended_action as string,
+  primaryAction: row.primary_action as string,
+  secondaryActions: Array.isArray(row.secondary_actions) ? (row.secondary_actions as string[]) : [],
+  targetRoute: (row.target_route as string | null) ?? null,
+  targetLabel: (row.target_label as string | null) ?? null,
+  amountExpected: row.amount_expected == null ? null : Number(row.amount_expected),
+  amountActual: row.amount_actual == null ? null : Number(row.amount_actual),
+  varianceAmount: row.variance_amount == null ? null : Number(row.variance_amount),
+  createdAt: row.created_at as string,
+  updatedAt: row.updated_at as string,
+  sortRank: Number(row.sort_rank ?? 999),
+});
+
 const mapCaseNote = (row: Record<string, unknown>): ReconciliationCaseNote => ({
   id: row.id as string,
   reconciliationCaseId: row.reconciliation_case_id as string,
@@ -397,6 +460,23 @@ export function useReconciliationInbox() {
 
       if (error) throw error;
       return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapCase);
+    },
+  });
+}
+
+export function useOperationsIssues() {
+  return useQuery({
+    queryKey: operationsKeys.issues,
+    queryFn: async (): Promise<OperationsIssue[]> => {
+      const { data, error } = await supabase
+        .from("v_operations_issue_inbox" as never)
+        .select("*")
+        .order("sort_rank" as never, { ascending: true })
+        .order("created_at" as never, { ascending: true })
+        .limit(500);
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapIssue);
     },
   });
 }
@@ -551,6 +631,7 @@ export function useUpdateReconciliationCaseStatus() {
       return data as unknown as { success?: boolean };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
     },
@@ -572,6 +653,7 @@ export function useUpdateReconciliationCaseWorkflow() {
       return data as unknown as { success?: boolean };
     },
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliationNotes(variables.id) });
@@ -605,6 +687,7 @@ export function useBulkUpdateReconciliationCases() {
       return data as unknown as { updated?: number; errors?: Array<Record<string, unknown>> };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
     },
@@ -626,10 +709,55 @@ export function useResolveReconciliationCase() {
       return data as unknown as { success?: boolean; action?: string };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
       queryClient.invalidateQueries({ queryKey: operationsKeys.rollingSettlement });
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+    },
+  });
+}
+
+export function useResolveOperationsIssue() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      action,
+      note,
+      evidence,
+    }: {
+      id: string;
+      action?: string | null;
+      note?: string | null;
+      evidence?: Record<string, unknown>;
+    }) => {
+      const { data, error } = await supabase.rpc("resolve_operations_issue" as never, {
+        p_issue_id: id,
+        p_action: action ?? null,
+        p_note: note ?? null,
+        p_evidence: evidence ?? {},
+      } as never);
+
+      if (error) throw error;
+      return data as unknown as {
+        success?: boolean;
+        issue_id?: string;
+        issue_key?: string;
+        action?: string;
+        source_table?: string;
+        source_id?: string | null;
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.health });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.rollingSettlement });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
+      queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellAccruals });
     },
   });
 }
@@ -649,6 +777,7 @@ export function useRefreshActualSettlements() {
       return Number(data ?? 0);
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
       queryClient.invalidateQueries({ queryKey: operationsKeys.rollingSettlement });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
@@ -677,6 +806,7 @@ export function useRunSubledgerScheduledJobs() {
       };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.jobRuns });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -701,6 +831,7 @@ export function useRunPostingIntentNow() {
       return data as { processed?: number; results?: unknown[] };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -721,6 +852,7 @@ export function useRunListingCommandNow() {
       return data as { processed?: number; results?: unknown[] };
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -741,6 +873,7 @@ export function useRetryListingCommand() {
       return data as unknown as string;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -761,6 +894,7 @@ export function useCancelListingCommand() {
       return data as unknown as string;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.listingCommands });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -781,6 +915,7 @@ export function useRetryPostingIntent() {
       return data as unknown as string;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -801,6 +936,7 @@ export function useCancelPostingIntent() {
       return data as unknown as string;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.postingIntents });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
@@ -824,6 +960,7 @@ export function useRefreshReconciliationCases() {
       return Number(financeData ?? 0) + Number(listingData ?? 0);
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
       queryClient.invalidateQueries({ queryKey: operationsKeys.rollingSettlement });
@@ -846,6 +983,7 @@ export function useCreateBlueBellSettlement() {
       return data as unknown as string;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: operationsKeys.issues });
       queryClient.invalidateQueries({ queryKey: operationsKeys.health });
       queryClient.invalidateQueries({ queryKey: operationsKeys.blueBellAccruals });
       queryClient.invalidateQueries({ queryKey: operationsKeys.reconciliation });
