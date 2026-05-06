@@ -6,6 +6,7 @@ const integrations = [
   { slug: "stripe", label: "Stripe", to: "/admin/integrations/stripe" },
   { slug: "qbo", label: "QuickBooks", to: "/admin/integrations/qbo" },
   { slug: "gmc", label: "Google Merchant Center", to: "/admin/gmc" },
+  { slug: "meta", label: "Meta", to: "/admin/settings/integrations?entity=meta" },
   { slug: "brickeconomy", label: "BrickEconomy", to: "/admin/integrations/brickeconomy" },
   { slug: "rebrickable", label: "Rebrickable", to: "/admin/integrations/rebrickable" },
 ];

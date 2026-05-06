@@ -71,6 +71,7 @@ const MarketingPlaceholderPage = lazy(() => import("./pages/admin-v2/MarketingPl
 const QboCallbackPage = lazy(() => import("./pages/admin/QboCallbackPage"));
 const EbayCallbackPage = lazy(() => import("./pages/admin/EbayCallbackPage"));
 const GmcCallbackPage = lazy(() => import("./pages/admin/GmcCallbackPage"));
+const MetaCallbackPage = lazy(() => import("./pages/admin/MetaCallbackPage"));
 const GmcAdminPage = lazy(() => import("./pages/admin-v2/GmcAdminPage"));
 
 // Lazy-load 404
@@ -191,6 +192,7 @@ const App = () => (
             <Route path="/admin/qbo-callback" element={<AdminRoute path="/admin/qbo-callback"><QboCallbackPage /></AdminRoute>} />
             <Route path="/admin/ebay-callback" element={<AdminRoute path="/admin/ebay-callback"><EbayCallbackPage /></AdminRoute>} />
             <Route path="/admin/gmc-callback" element={<AdminRoute path="/admin/gmc-callback"><GmcCallbackPage /></AdminRoute>} />
+            <Route path="/admin/meta-callback" element={<AdminRoute path="/admin/meta-callback"><MetaCallbackPage /></AdminRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
