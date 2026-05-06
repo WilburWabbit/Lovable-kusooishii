@@ -209,7 +209,7 @@ raw_issues AS (
       SELECT 1
       FROM public.qbo_posting_reference ref
       WHERE ref.local_entity_type = 'sales_order'
-        AND ref.local_entity_id = so.id::text
+        AND ref.local_entity_id = so.id
         AND ref.qbo_entity_type IN ('sales_receipt', 'SalesReceipt')
     )
     AND NOT EXISTS (
@@ -327,7 +327,7 @@ raw_issues AS (
       SELECT 1
       FROM public.qbo_posting_reference ref
       WHERE ref.local_entity_type IN ('purchase_batch', 'purchase')
-        AND ref.local_entity_id = pb.id::text
+        AND ref.local_entity_id = pb.id
         AND ref.qbo_entity_type IN ('purchase', 'Purchase')
     )
     AND NOT EXISTS (
