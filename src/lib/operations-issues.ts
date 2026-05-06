@@ -12,6 +12,8 @@ export interface OperationsIssueSummary {
   whyItMatters: string;
   recommendedAction: string;
   evidence: Record<string, unknown>;
+  targetRoute?: string | null;
+  targetLabel?: string | null;
 }
 
 export const issueDomainTabs: Array<{ key: OperationsIssueDomain; label: string }> = [
@@ -99,11 +101,14 @@ const navigationActions = new Set([
   "link_customer",
   "link_transaction",
   "merge_transaction",
+  "pause_listing",
   "reassign_customer",
   "refresh_price",
   "refresh_settlement",
+  "retry_integration",
   "review_duplicate",
   "review_qbo_landing",
+  "sync_listing_quantity",
 ]);
 
 const noteRequiredActions = new Set(["dismiss", "resolve", "suppress", "cancel_integration"]);
@@ -165,4 +170,46 @@ export function summarizeIssueEvidence(issue: OperationsIssueSummary): string[] 
     .map(([key]) => humanizeToken(key));
 
   return Array.from(new Set([...refs, ...rawEvidence])).slice(0, 4);
+}
+
+const productUuidRoutePattern = /^\/admin\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const skuPattern = /^(.+-\d+)\.[1-5]$/;
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function getEvidenceString(issue: OperationsIssueSummary, section: string, key: string): string | null {
+  const record = toRecord(issue.evidence?.[section]);
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function mpnFromSku(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = value.trim().match(skuPattern);
+  return match?.[1] ?? null;
+}
+
+export function getIssueProductMpn(issue: OperationsIssueSummary): string | null {
+  return (
+    getEvidenceString(issue, "product", "mpn") ??
+    mpnFromSku(getEvidenceString(issue, "product", "sku_code")) ??
+    mpnFromSku(getEvidenceString(issue, "listing", "external_sku")) ??
+    mpnFromSku(issue.primaryReference) ??
+    mpnFromSku(issue.secondaryReference) ??
+    mpnFromSku(issue.targetLabel)
+  );
+}
+
+export function getIssueNavigationRoute(issue: OperationsIssueSummary): string | null {
+  const targetRoute = issue.targetRoute ?? null;
+  if (!targetRoute) return null;
+
+  if (productUuidRoutePattern.test(targetRoute)) {
+    const mpn = getIssueProductMpn(issue);
+    return mpn ? `/admin/products/${mpn}` : targetRoute;
+  }
+
+  return targetRoute;
 }

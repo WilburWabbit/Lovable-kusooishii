@@ -29,6 +29,7 @@ import {
 import {
   getIssueActionGroupLabel,
   getIssueActionLabel,
+  getIssueNavigationRoute,
   getIssueSeverityColor,
   groupIssuesByAction,
   humanizeToken,
@@ -329,8 +330,10 @@ export function OperationsView() {
   };
 
   const handlePrimaryAction = (issue: OperationsIssue) => {
-    if (isIssueNavigationAction(issue.primaryAction) && issue.targetRoute) {
-      navigate(issue.targetRoute);
+    const targetRoute = getIssueNavigationRoute(issue);
+
+    if (isIssueNavigationAction(issue.primaryAction) && targetRoute) {
+      navigate(targetRoute);
       return;
     }
 
