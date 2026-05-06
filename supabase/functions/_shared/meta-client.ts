@@ -231,7 +231,7 @@ export async function discoverMetaAssets(accessToken: string): Promise<MetaAsset
   }
 
   const pages = await paginateMetaEdge<Record<string, unknown>>("me/accounts", accessToken, {
-    fields: "id,name,category,access_token,tasks,perms,instagram_business_account{id,username,name,profile_picture_url}",
+    fields: "id,name,category,access_token,tasks,instagram_business_account{id,username,name,profile_picture_url}",
   }, 3);
 
   for (const page of pages) {
