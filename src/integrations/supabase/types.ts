@@ -2518,6 +2518,56 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_raw_meta: {
+        Row: {
+          correlation_id: string | null
+          created_at: string
+          error: string | null
+          external_id: string | null
+          id: string
+          operation: string
+          processed_at: string | null
+          request_payload: Json
+          response_payload: Json
+          status: string
+          sync_run_id: string | null
+        }
+        Insert: {
+          correlation_id?: string | null
+          created_at?: string
+          error?: string | null
+          external_id?: string | null
+          id?: string
+          operation: string
+          processed_at?: string | null
+          request_payload?: Json
+          response_payload?: Json
+          status?: string
+          sync_run_id?: string | null
+        }
+        Update: {
+          correlation_id?: string | null
+          created_at?: string
+          error?: string | null
+          external_id?: string | null
+          id?: string
+          operation?: string
+          processed_at?: string | null
+          request_payload?: Json
+          response_payload?: Json
+          status?: string
+          sync_run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "landing_raw_meta_sync_run_id_fkey"
+            columns: ["sync_run_id"]
+            isOneToOne: false
+            referencedRelation: "meta_catalog_sync_run"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       landing_raw_qbo_customer: {
         Row: {
           cloud_event_id: string | null
@@ -3358,6 +3408,141 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      meta_business_asset: {
+        Row: {
+          access_token: string | null
+          asset_type: string
+          business_id: string | null
+          created_at: string
+          external_id: string
+          id: string
+          last_synced_at: string
+          name: string | null
+          raw_data: Json
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          access_token?: string | null
+          asset_type: string
+          business_id?: string | null
+          created_at?: string
+          external_id: string
+          id?: string
+          last_synced_at?: string
+          name?: string | null
+          raw_data?: Json
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          access_token?: string | null
+          asset_type?: string
+          business_id?: string | null
+          created_at?: string
+          external_id?: string
+          id?: string
+          last_synced_at?: string
+          name?: string | null
+          raw_data?: Json
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      meta_catalog_sync_run: {
+        Row: {
+          catalog_id: string
+          dry_run: boolean
+          error_items: number
+          finished_at: string | null
+          id: string
+          sent_items: number
+          skipped_items: number
+          started_at: string
+          status: string
+          summary: Json
+          total_items: number
+        }
+        Insert: {
+          catalog_id: string
+          dry_run?: boolean
+          error_items?: number
+          finished_at?: string | null
+          id?: string
+          sent_items?: number
+          skipped_items?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          total_items?: number
+        }
+        Update: {
+          catalog_id?: string
+          dry_run?: boolean
+          error_items?: number
+          finished_at?: string | null
+          id?: string
+          sent_items?: number
+          skipped_items?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          total_items?: number
+        }
+        Relationships: []
+      }
+      meta_connection: {
+        Row: {
+          access_token: string
+          connected_at: string
+          id: string
+          meta_user_id: string | null
+          meta_user_name: string | null
+          raw_data: Json
+          scopes: string[]
+          selected_ad_account_id: string | null
+          selected_business_id: string | null
+          selected_catalog_id: string | null
+          selected_instagram_account_id: string | null
+          selected_page_id: string | null
+          token_expires_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          connected_at?: string
+          id?: string
+          meta_user_id?: string | null
+          meta_user_name?: string | null
+          raw_data?: Json
+          scopes?: string[]
+          selected_ad_account_id?: string | null
+          selected_business_id?: string | null
+          selected_catalog_id?: string | null
+          selected_instagram_account_id?: string | null
+          selected_page_id?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          connected_at?: string
+          id?: string
+          meta_user_id?: string | null
+          meta_user_name?: string | null
+          raw_data?: Json
+          scopes?: string[]
+          selected_ad_account_id?: string | null
+          selected_business_id?: string | null
+          selected_catalog_id?: string | null
+          selected_instagram_account_id?: string | null
+          selected_page_id?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       operations_issue_suppression: {
         Row: {
