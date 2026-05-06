@@ -33,7 +33,7 @@ function formatMoney(value?: number | null): string {
 }
 
 function issueList(values: string[]): string {
-  return values.length > 0 ? values.join(" · ").replaceAll("_", " ") : "-";
+  return values.length > 0 ? values.join(" · ").replace(/_/g, " ") : "-";
 }
 
 function runBatchHandles(run: MetaCatalogSyncRun): string[] {
