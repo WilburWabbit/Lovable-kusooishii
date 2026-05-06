@@ -7,6 +7,7 @@ import { SurfaceCard, Mono, StatusBadge, GradeBadge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { GradeSlideOut } from "./GradeSlideOut";
 import { WriteOffDialog } from "./WriteOffDialog";
+import { TraceMetadata } from "./TraceMetadata";
 
 const UNIT_COLUMNS = [
   { key: "uid", label: "Unit ID" },
@@ -19,6 +20,7 @@ const UNIT_COLUMNS = [
 ];
 
 function unitAccessor(u: StockUnit, key: string): unknown {
+  if (key === "uid") return `${u.uid ?? ""} ${u.id}`;
   return (u as unknown as Record<string, unknown>)[key];
 }
 
@@ -127,7 +129,10 @@ export function StockUnitsTab({ mpn }: StockUnitsTabProps) {
                   />
                 </td>
                 <td className="px-2.5 py-2">
-                  <Mono>{u.uid ?? "—"}</Mono>
+                  <div className="space-y-1">
+                    <Mono>{u.uid ?? "—"}</Mono>
+                    <TraceMetadata items={[{ label: "Stock ID", value: u.id }]} />
+                  </div>
                 </td>
                 <td className="px-2.5 py-2">
                   {u.grade ? (

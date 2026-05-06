@@ -12,6 +12,7 @@ import { TableFilterInput } from "./TableFilterInput";
 import { CashSaleForm } from "./CashSaleForm";
 import { CompleteOrderModal } from "./CompleteOrderModal";
 import { StatusFilterDropdown } from "./StatusFilterDropdown";
+import { TraceMetadata } from "./TraceMetadata";
 import { Download, Search } from "lucide-react";
 
 // ─── Row type ────────────────────────────────────────────────
@@ -51,15 +52,27 @@ const COLUMNS: ColumnDef<OrderRow>[] = [
     defaultVisible: true,
     sortable: true,
     render: (r) => {
-      return <Mono color="amber">{r.orderNumber}</Mono>;
+      return (
+        <div className="space-y-1">
+          <Mono color="amber">{r.orderNumber}</Mono>
+          <TraceMetadata
+            items={[
+              { label: "Order ID", value: r.id },
+              { label: "QBO Doc", value: r.docNumber },
+              { label: "QBO ID", value: r.qboSalesReceiptId },
+              { label: "Channel", value: r.externalOrderId },
+            ]}
+          />
+        </div>
+      );
     },
   },
   {
-    key: "orderNumber",
-    label: "Internal ID",
+    key: "id",
+    label: "Order ID",
     defaultVisible: false,
     sortable: true,
-    render: (r) => <Mono color="dim">{r.orderNumber}</Mono>,
+    render: (r) => <Mono color="dim">{r.id}</Mono>,
   },
   {
     key: "customerName",
@@ -342,6 +355,7 @@ export function OrderList() {
       result = result.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(term) ||
+          r.id.toLowerCase().includes(term) ||
           (r.externalOrderId ?? "").toLowerCase().includes(term) ||
           (r.docNumber ?? "").toLowerCase().includes(term) ||
           (r.qboSalesReceiptId ?? "").toLowerCase().includes(term) ||
@@ -377,7 +391,7 @@ export function OrderList() {
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search order or customer…"
+              placeholder="Search order, customer, QBO, or channel ref..."
               className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>

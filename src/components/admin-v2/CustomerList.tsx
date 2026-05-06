@@ -10,6 +10,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { MultiSelectFilter } from "./MultiSelectFilter";
+import { TraceMetadata } from "./TraceMetadata";
 import { Download, Search } from "lucide-react";
 
 // ─── Value accessor ──────────────────────────────────────────
@@ -36,11 +37,29 @@ const formatDate = (iso: string | null) => {
 
 const COLUMNS: ColumnDef<CustomerRow>[] = [
   {
+    key: "id",
+    label: "Customer ID",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.id}</Mono>,
+  },
+  {
     key: "name",
     label: "Name",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <span className="text-zinc-900 font-medium">{r.name}</span>,
+    render: (r) => (
+      <div className="space-y-1">
+        <span className="text-zinc-900 font-medium">{r.name}</span>
+        <TraceMetadata
+          items={[
+            { label: "Customer ID", value: r.id },
+            { label: "QBO ID", value: r.qboCustomerId },
+            { label: "Stripe ID", value: r.stripeCustomerId },
+          ]}
+        />
+      </div>
+    ),
   },
   {
     key: "email",
@@ -228,6 +247,7 @@ export function CustomerList() {
       result = result.filter(
         (r) =>
           r.name.toLowerCase().includes(term) ||
+          r.id.toLowerCase().includes(term) ||
           (r.email ?? "").toLowerCase().includes(term) ||
           (r.qboCustomerId ?? "").toLowerCase().includes(term) ||
           (r.stripeCustomerId ?? "").toLowerCase().includes(term),
@@ -261,7 +281,7 @@ export function CustomerList() {
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search name or email…"
+              placeholder="Search name, email, QBO, Stripe, or ID..."
               className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>

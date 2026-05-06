@@ -13,6 +13,7 @@ import {
 import { CHANNEL_LISTING_STATUSES } from "@/lib/constants/unit-statuses";
 import type { ProductVariant, Product, Channel, ChannelListing } from "@/lib/types/admin";
 import { SurfaceCard, Mono, Badge, GradeBadge, SectionHead } from "./ui-primitives";
+import { TraceMetadata } from "./TraceMetadata";
 import { toast } from "sonner";
 import { generateEbayTitle } from "@/lib/utils/generate-ebay-title";
 import {
@@ -391,6 +392,16 @@ function VariantChannelsCard({
                   </span>
                 )}
               </div>
+              {listing && (
+                <TraceMetadata
+                  className="mb-2"
+                  items={[
+                    { label: "Listing ID", value: listing.id },
+                    { label: "SKU ID", value: variant.id },
+                    { label: "External", value: listing.externalId },
+                  ]}
+                />
+              )}
 
               {/* Title */}
               <div className="mb-2">

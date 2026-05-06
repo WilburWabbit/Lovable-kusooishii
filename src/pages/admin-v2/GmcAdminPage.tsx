@@ -20,6 +20,7 @@ import { AdminV2Layout } from "@/components/admin-v2/AdminV2Layout";
 import { GmcSettingsCard } from "@/components/admin-v2/GmcSettingsCard";
 import { MultiSelectFilter } from "@/components/admin-v2/MultiSelectFilter";
 import { TableFilterInput } from "@/components/admin-v2/TableFilterInput";
+import { TraceMetadata } from "@/components/admin-v2/TraceMetadata";
 import { Badge, Mono, SectionHead, SummaryCard, SurfaceCard } from "@/components/admin-v2/ui-primitives";
 import {
   type ChannelMappingRecord,
@@ -302,6 +303,14 @@ function ReadinessTable({
                   <td className="px-3 py-3">
                     <Mono color="amber">{row.sku_code}</Mono>
                     <div className="text-[11px] text-zinc-500">{row.gmc_offer_status ?? "draft"}</div>
+                    <TraceMetadata
+                      className="mt-1"
+                      items={[
+                        { label: "SKU ID", value: row.sku_id },
+                        { label: "Web listing", value: row.web_listing_id },
+                        { label: "GMC listing", value: row.gmc_listing_id },
+                      ]}
+                    />
                   </td>
                   <td className="max-w-[280px] px-3 py-3 text-xs text-zinc-700">
                     {href ? (
@@ -312,6 +321,7 @@ function ReadinessTable({
                       <div className="font-medium text-zinc-900">{row.product_name ?? "-"}</div>
                     )}
                     <div><Mono>{row.mpn ?? "-"}</Mono></div>
+                    <TraceMetadata className="mt-1" items={[{ label: "Product ID", value: row.product_id }]} />
                   </td>
                   <td className="px-3 py-3 text-right"><Mono>{formatCurrency(row.price)}</Mono></td>
                   <td className="px-3 py-3 text-right"><Mono color={row.stock_count > 0 ? "green" : "amber"}>{row.stock_count}</Mono></td>
@@ -365,13 +375,13 @@ function queueAccessor(event: GmcPublishEvent, key: string, productBySku: Map<st
     case "product":
       return `${product?.product_name ?? ""} ${product?.mpn ?? ""}`;
     case "command":
-      return event.command_type;
+      return `${event.command_type} ${event.id}`;
     case "retries":
       return event.retry_count;
     case "next":
       return event.next_attempt_at;
     case "external":
-      return event.external_listing_id;
+      return `${event.external_listing_id ?? ""} ${event.id} ${event.entity_id ?? ""}`;
     case "lastError":
       return event.last_error;
     default:
@@ -532,7 +542,7 @@ function PublishQueue({ events, readinessRows }: { events: GmcPublishEvent[]; re
               <th className="px-3 py-2"><MultiSelectFilter value={filters.command ?? ""} onChange={(value) => setFilter("command", value)} options={COMMAND_TYPE_OPTIONS} placeholder="All commands" /></th>
               <th className="px-3 py-2"><TableFilterInput value={filters.retries ?? ""} onChange={(value) => setFilter("retries", value)} placeholder="Retries" /></th>
               <th className="px-3 py-2"><TableFilterInput value={filters.next ?? ""} onChange={(value) => setFilter("next", value)} placeholder="Next" /></th>
-              <th className="px-3 py-2"><TableFilterInput value={filters.external ?? ""} onChange={(value) => setFilter("external", value)} placeholder="External" /></th>
+              <th className="px-3 py-2"><TableFilterInput value={filters.external ?? ""} onChange={(value) => setFilter("external", value)} placeholder="External or ID" /></th>
               <th className="px-4 py-2"><TableFilterInput value={filters.lastError ?? ""} onChange={(value) => setFilter("lastError", value)} placeholder="Error" /></th>
               <th className="px-4 py-2" />
             </tr>
@@ -573,10 +583,22 @@ function PublishQueue({ events, readinessRows }: { events: GmcPublishEvent[]; re
                     <Mono color="amber">{sku || "-"}</Mono>
                     <div className="text-[11px] text-zinc-500">{event.channel ?? event.target_system}</div>
                   </td>
-                  <td className="px-3 py-3 text-xs text-zinc-700">{event.command_type.replace(/_/g, " ")}</td>
+                  <td className="px-3 py-3 text-xs text-zinc-700">
+                    <div>{event.command_type.replace(/_/g, " ")}</div>
+                    <TraceMetadata
+                      className="mt-1"
+                      items={[
+                        { label: "Command ID", value: event.id },
+                        { label: "Listing ID", value: event.entity_id },
+                      ]}
+                    />
+                  </td>
                   <td className="px-3 py-3 text-right"><Mono color={event.retry_count > 0 ? "amber" : "dim"}>{event.retry_count}</Mono></td>
                   <td className="px-3 py-3 text-xs text-zinc-500">{formatDateTime(event.next_attempt_at)}</td>
-                  <td className="px-3 py-3 text-xs"><Mono>{event.external_listing_id ?? "-"}</Mono></td>
+                  <td className="px-3 py-3 text-xs">
+                    <Mono>{event.external_listing_id ?? "-"}</Mono>
+                    <TraceMetadata className="mt-1" items={[{ label: "Listing ID", value: event.entity_id }]} />
+                  </td>
                   <td className="max-w-[320px] px-4 py-3 text-xs text-red-600">{event.last_error ?? "-"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">

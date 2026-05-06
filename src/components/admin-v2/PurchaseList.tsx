@@ -11,6 +11,7 @@ import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { SurfaceCard, Mono, Badge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { MultiSelectFilter } from "./MultiSelectFilter";
+import { TraceMetadata } from "./TraceMetadata";
 import { supabase } from "@/integrations/supabase/client";
 import { Download, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -52,12 +53,22 @@ const COLUMNS: ColumnDef<PurchaseRow>[] = [
     label: "Ref",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <Mono color="amber">{r.reference || r.id}</Mono>,
+    render: (r) => (
+      <div className="space-y-1">
+        <Mono color="amber">{r.reference || r.id}</Mono>
+        <TraceMetadata
+          items={[
+            { label: "Batch ID", value: r.id },
+            { label: "QBO ID", value: r.qboPurchaseId },
+          ]}
+        />
+      </div>
+    ),
   },
   {
     key: "id",
     label: "Batch ID",
-    defaultVisible: true,
+    defaultVisible: false,
     sortable: true,
     render: (r) => <Mono color="dim">{r.id}</Mono>,
   },
@@ -291,7 +302,7 @@ export function PurchaseList() {
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search ref or supplier…"
+              placeholder="Search ref, supplier, batch, or QBO..."
               className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>

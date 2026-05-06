@@ -29,6 +29,8 @@ import {
 import {
   getIssueActionGroupLabel,
   getIssueActionLabel,
+  getIssueDisplayInfo,
+  getIssueNavigationRoute,
   getIssueSeverityColor,
   groupIssuesByAction,
   humanizeToken,
@@ -71,6 +73,7 @@ function formatAmount(value: number | null) {
 function issueMatchesSearch(issue: OperationsIssue, query: string) {
   if (!query.trim()) return true;
   const needle = query.trim().toLowerCase();
+  const display = getIssueDisplayInfo(issue);
   return [
     issue.title,
     issue.issueType,
@@ -80,9 +83,48 @@ function issueMatchesSearch(issue: OperationsIssue, query: string) {
     issue.recommendedAction,
     issue.whyItMatters,
     issue.sourceSystem,
+    ...display.searchableValues,
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(needle));
+}
+
+function filterOptionLabel(value: string) {
+  if (value === "all") return "All";
+  if (value === "85") return "85%+";
+  if (value === "95") return "95%+";
+  return humanizeToken(value);
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+  formatOption = filterOptionLabel,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  formatOption?: (value: string) => string;
+}) {
+  return (
+    <label className="flex min-w-[150px] flex-1 flex-col gap-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500 sm:flex-none">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-normal normal-case tracking-normal text-zinc-700 outline-none focus:border-amber-500"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {formatOption(option)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function EmptyIssueState({ hasSearch }: { hasSearch: boolean }) {
@@ -117,6 +159,40 @@ function EvidenceSummary({ issue }: { issue: OperationsIssue }) {
   );
 }
 
+function TraceChips({ issue }: { issue: OperationsIssue }) {
+  const display = getIssueDisplayInfo(issue);
+  const traceItems = display.traceItems.slice(0, 7);
+
+  if (traceItems.length === 0) return null;
+
+  const copyTrace = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error("Could not copy identifier");
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Trace</span>
+      {traceItems.map((item) => (
+        <button
+          key={`${item.label}:${item.value}`}
+          type="button"
+          title={`${item.label}: ${item.value}`}
+          onClick={() => void copyTrace(item.label, item.value)}
+          className="inline-flex max-w-full items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900"
+        >
+          <span className="font-medium text-zinc-500">{item.label}</span>
+          <Mono color="dim" className="text-[11px]">{item.displayValue}</Mono>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function IssueRow({
   issue,
   onPrimaryAction,
@@ -132,6 +208,7 @@ function IssueRow({
   const variance = formatAmount(issue.varianceAmount);
   const primaryAmount = formatAmount(issue.amountExpected);
   const actualAmount = formatAmount(issue.amountActual);
+  const display = getIssueDisplayInfo(issue);
 
   return (
     <div className="grid gap-3 px-4 py-4 hover:bg-zinc-50 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -152,14 +229,17 @@ function IssueRow({
           <Mono color="dim">{issue.sourceSystem}</Mono>
         </div>
 
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h3 className="text-sm font-semibold text-zinc-900">{issue.title}</h3>
-          <Mono color="default">{issue.primaryReference ?? issue.targetLabel ?? issue.id.slice(0, 12)}</Mono>
-          {issue.secondaryReference ? <Mono color="dim">{issue.secondaryReference}</Mono> : null}
+        <div className="max-w-4xl">
+          <h3 className="text-sm font-semibold text-zinc-900">{display.primaryLabel}</h3>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+            <span>{issue.title}</span>
+            {display.secondaryLabel ? <span>{display.secondaryLabel}</span> : null}
+          </div>
         </div>
 
         <p className="mt-1 max-w-4xl text-xs leading-5 text-zinc-600">{issue.whyItMatters}</p>
         <p className="mt-1 max-w-4xl text-xs font-medium leading-5 text-zinc-800">{issue.recommendedAction}</p>
+        <TraceChips issue={issue} />
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
           <EvidenceSummary issue={issue} />
@@ -256,6 +336,10 @@ export function OperationsView() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<OperationsIssueDomain>("all");
   const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("all");
+  const [confidenceFilter, setConfidenceFilter] = useState("all");
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const { data: issues = [], isLoading, isError, error, refetch, isFetching } = useOperationsIssues();
@@ -270,16 +354,50 @@ export function OperationsView() {
     }, {} as Record<OperationsIssueDomain, number>);
   }, [issues]);
 
+  const domainIssues = useMemo(() => {
+    return issues.filter((issue) => activeTab === "all" || issue.domain === activeTab);
+  }, [activeTab, issues]);
+
+  const filterOptions = useMemo(() => {
+    const severityOrder = ["critical", "high", "medium", "low"];
+    const severities = [...new Set(domainIssues.map((issue) => issue.severity).filter(Boolean))]
+      .sort((a, b) => severityOrder.indexOf(a) - severityOrder.indexOf(b));
+    const sources = [...new Set(domainIssues.map((issue) => issue.sourceSystem).filter(Boolean))]
+      .sort((a, b) => humanizeToken(a).localeCompare(humanizeToken(b)));
+    const actions = [...new Set(domainIssues.map((issue) => issue.primaryAction).filter(Boolean))]
+      .sort((a, b) => getIssueActionLabel(a).localeCompare(getIssueActionLabel(b)));
+
+    return {
+      severities: ["all", ...severities],
+      sources: ["all", ...sources],
+      actions: ["all", ...actions],
+      confidence: ["all", "85", "95"],
+    };
+  }, [domainIssues]);
+
   const filteredIssues = useMemo(() => {
-    return issues.filter((issue) => {
-      const tabMatches = activeTab === "all" || issue.domain === activeTab;
-      return tabMatches && issueMatchesSearch(issue, search);
+    return domainIssues.filter((issue) => {
+      const confidencePercent = Math.round(issue.confidence * 100);
+      const severityMatches = severityFilter === "all" || issue.severity === severityFilter;
+      const sourceMatches = sourceFilter === "all" || issue.sourceSystem === sourceFilter;
+      const actionMatches = actionFilter === "all" || issue.primaryAction === actionFilter;
+      const confidenceMatches = confidenceFilter === "all" || confidencePercent >= Number(confidenceFilter);
+      return severityMatches
+        && sourceMatches
+        && actionMatches
+        && confidenceMatches
+        && issueMatchesSearch(issue, search);
     });
-  }, [activeTab, issues, search]);
+  }, [actionFilter, confidenceFilter, domainIssues, search, severityFilter, sourceFilter]);
 
   const groupedIssues = useMemo(() => groupIssuesByAction(filteredIssues), [filteredIssues]);
   const highSeverityCount = issues.filter((issue) => issue.severity === "critical" || issue.severity === "high").length;
   const directActionCount = issues.filter((issue) => !isIssueNavigationAction(issue.primaryAction)).length;
+  const hasActiveFilters = Boolean(search.trim())
+    || severityFilter !== "all"
+    || sourceFilter !== "all"
+    || actionFilter !== "all"
+    || confidenceFilter !== "all";
 
   const tabs = issueDomainTabs.map((tab) => ({
     key: tab.key,
@@ -308,6 +426,7 @@ export function OperationsView() {
   };
 
   const resolveWithAction = async (issue: OperationsIssue, action: string, note?: string | null) => {
+    const display = getIssueDisplayInfo(issue);
     setResolvingId(issue.id);
     try {
       await resolveIssue.mutateAsync({
@@ -316,6 +435,8 @@ export function OperationsView() {
         note,
         evidence: {
           ui: "operations_issue_inbox",
+          primary_label: display.primaryLabel,
+          secondary_label: display.secondaryLabel,
           primary_reference: issue.primaryReference,
           secondary_reference: issue.secondaryReference,
         },
@@ -329,8 +450,9 @@ export function OperationsView() {
   };
 
   const handlePrimaryAction = (issue: OperationsIssue) => {
-    if (isIssueNavigationAction(issue.primaryAction) && issue.targetRoute) {
-      navigate(issue.targetRoute);
+    const navigationRoute = getIssueNavigationRoute(issue);
+    if (isIssueNavigationAction(issue.primaryAction) && navigationRoute) {
+      navigate(navigationRoute);
       return;
     }
 
@@ -348,6 +470,14 @@ export function OperationsView() {
     const note = window.prompt("Why should this issue stop appearing?");
     if (!note?.trim()) return;
     void resolveWithAction(issue, "dismiss", note.trim());
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setSeverityFilter("all");
+    setSourceFilter("all");
+    setActionFilter("all");
+    setConfidenceFilter("all");
   };
 
   return (
@@ -394,25 +524,43 @@ export function OperationsView() {
       </div>
 
       <SurfaceCard className="mb-4 p-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative max-w-xl flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by action, reference, source, customer, SKU, or issue type"
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-amber-500"
-            />
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative max-w-xl flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search order, customer, SKU, QBO doc, external listing, command ID, or issue type"
+                className="h-9 w-full rounded-md border border-zinc-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <span>{filteredIssues.length} of {domainIssues.length} visible</span>
+              <span className="inline-flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
+                Evidence required
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <PackageMinus className="h-3.5 w-3.5 text-amber-600" />
+                Domain-specific actions
+              </span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-            <span className="inline-flex items-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
-              Evidence required
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <PackageMinus className="h-3.5 w-3.5 text-amber-600" />
-              Domain-specific actions
-            </span>
+
+          <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <FilterSelect label="Severity" value={severityFilter} options={filterOptions.severities} onChange={setSeverityFilter} />
+            <FilterSelect label="Source" value={sourceFilter} options={filterOptions.sources} onChange={setSourceFilter} />
+            <FilterSelect label="Action" value={actionFilter} options={filterOptions.actions} onChange={setActionFilter} formatOption={(value) => value === "all" ? "All" : getIssueActionLabel(value)} />
+            <FilterSelect label="Confidence" value={confidenceFilter} options={filterOptions.confidence} onChange={setConfidenceFilter} />
+            <button
+              type="button"
+              onClick={clearFilters}
+              disabled={!hasActiveFilters}
+              className="h-9 rounded-md border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-600 hover:border-zinc-300 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Clear filters
+            </button>
           </div>
         </div>
       </SurfaceCard>
@@ -437,7 +585,7 @@ export function OperationsView() {
           </div>
         </SurfaceCard>
       ) : groupedIssues.length === 0 ? (
-        <EmptyIssueState hasSearch={Boolean(search.trim())} />
+        <EmptyIssueState hasSearch={hasActiveFilters} />
       ) : (
         <div className="space-y-4">
           {groupedIssues.map((group) => (

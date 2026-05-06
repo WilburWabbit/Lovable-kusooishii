@@ -12,6 +12,7 @@ import { SurfaceCard, Mono, Badge, GradeBadge } from "./ui-primitives";
 import { TableFilterInput } from "./TableFilterInput";
 import { MultiSelectFilter } from "./MultiSelectFilter";
 import { BulkCategoryAssignDialog } from "./BulkCategoryAssignDialog";
+import { TraceMetadata } from "./TraceMetadata";
 import { Download, Search, Tag } from "lucide-react";
 
 // ─── Flattened row type ──────────────────────────────────────
@@ -42,6 +43,13 @@ function getValue(row: ProductRow, key: string): unknown {
 
 const COLUMNS: ColumnDef<ProductRow>[] = [
   {
+    key: "id",
+    label: "Product ID",
+    defaultVisible: false,
+    sortable: true,
+    render: (r) => <Mono color="dim">{r.id}</Mono>,
+  },
+  {
     key: "mpn",
     label: "MPN",
     defaultVisible: true,
@@ -53,7 +61,18 @@ const COLUMNS: ColumnDef<ProductRow>[] = [
     label: "Product",
     defaultVisible: true,
     sortable: true,
-    render: (r) => <span className="text-zinc-900 font-medium">{r.name}</span>,
+    render: (r) => (
+      <div className="space-y-1">
+        <span className="text-zinc-900 font-medium">{r.name}</span>
+        <TraceMetadata
+          items={[
+            { label: "Product ID", value: r.id },
+            { label: "EAN", value: r.ean },
+            { label: "eBay Cat", value: r.ebayCategoryId },
+          ]}
+        />
+      </div>
+    ),
   },
   {
     key: "theme",
@@ -287,7 +306,15 @@ export function ProductList() {
     if (globalSearch) {
       const term = globalSearch.toLowerCase();
       result = result.filter(
-        (r) => r.mpn.toLowerCase().includes(term) || r.name.toLowerCase().includes(term),
+        (r) =>
+          r.mpn.toLowerCase().includes(term) ||
+          r.name.toLowerCase().includes(term) ||
+          r.id.toLowerCase().includes(term) ||
+          (r.ean ?? "").toLowerCase().includes(term) ||
+          (r.ebayCategoryId ?? "").toLowerCase().includes(term) ||
+          r.variants.some((variant) =>
+            variant.id.toLowerCase().includes(term) || variant.sku.toLowerCase().includes(term),
+          ),
       );
     }
 
@@ -341,7 +368,7 @@ export function ProductList() {
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search MPN or name…"
+              placeholder="Search MPN, name, SKU, or ID..."
               className="pl-8 pr-3 py-1.5 text-[13px] border border-zinc-300 rounded-md bg-white text-zinc-900 w-56 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>

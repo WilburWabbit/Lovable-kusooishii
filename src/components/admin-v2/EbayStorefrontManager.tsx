@@ -36,6 +36,7 @@ import {
   type EbayListingCommandType,
   type EbayStorefrontListing,
 } from "@/hooks/admin/use-ebay-storefront";
+import { TraceMetadata } from "./TraceMetadata";
 import { Badge, Mono, SectionHead, SurfaceCard } from "./ui-primitives";
 import { cn } from "@/lib/utils";
 
@@ -599,6 +600,12 @@ function ListingsTable({
                 <div className="space-y-1">
                   <Mono color="amber">{listing.skuCode ?? "-"}</Mono>
                   <div className="text-[11px] text-zinc-500">MPN {listing.mpn ?? "-"} G{listing.grade ?? "-"}</div>
+                  <TraceMetadata
+                    items={[
+                      { label: "SKU ID", value: listing.skuId },
+                      { label: "Listing ID", value: listing.id },
+                    ]}
+                  />
                 </div>
               </td>
               <td className="max-w-[340px] px-3 py-3">
@@ -623,6 +630,7 @@ function ListingsTable({
                   ) : (
                     <Mono color="dim">{listing.externalListingId ?? "-"}</Mono>
                   )}
+                  <TraceMetadata className="mt-1" items={[{ label: "Listing ID", value: listing.id }]} />
                 </td>
               ) : null}
               <td className="px-3 py-3 text-zinc-500">{formatDateTime(listing.updatedAt)}</td>
