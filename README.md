@@ -60,6 +60,18 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## Meta business integration
+
+Admin settings include a Meta connector for Facebook Pages, Instagram business accounts, ad accounts, and product catalogs. Configure these Supabase Edge Function secrets before using it:
+
+- `META_APP_ID`
+- `META_APP_SECRET`
+- `META_REDIRECT_URI` set to `https://YOUR-DOMAIN/admin/meta-callback`
+- Optional: `META_GRAPH_VERSION` (defaults to `v25.0`)
+- `SITE_URL` or `PUBLIC_SITE_URL` for catalog product URLs
+
+The Meta app should request the permissions needed for the selected workflows: `business_management`, `catalog_management`, `ads_management`, `ads_read`, `pages_show_list`, `pages_read_engagement`, and `instagram_basic`. Catalog sync lands raw Meta responses in `landing_raw_meta` before updating channel state.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.

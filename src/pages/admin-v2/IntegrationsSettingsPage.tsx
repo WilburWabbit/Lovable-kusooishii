@@ -7,11 +7,13 @@ import { EbaySettingsCard } from "@/components/admin-v2/EbaySettingsCard";
 import { BrickEconomySettingsCard } from "@/components/admin-v2/BrickEconomySettingsCard";
 import { GmcSettingsCard } from "@/components/admin-v2/GmcSettingsCard";
 import { GmcDeveloperRegistrationCard } from "@/components/admin-v2/GmcDeveloperRegistrationCard";
+import { MetaSettingsCard } from "@/components/admin-v2/MetaSettingsCard";
 import { AiProviderSettingsCard } from "@/components/admin-v2/AiProviderSettingsCard";
 import { useSearchParams } from "react-router-dom";
 
 const INTEGRATION_TABS = [
   { value: "google", label: "Google" },
+  { value: "meta", label: "Meta" },
   { value: "quickbooks", label: "QuickBooks" },
   { value: "stripe", label: "Stripe" },
   { value: "ebay", label: "eBay" },
@@ -57,6 +59,9 @@ export default function IntegrationsSettingsPage() {
         <TabsContent value="google" className="mt-0 space-y-3">
           <GmcSettingsCard />
           <GmcDeveloperRegistrationCard />
+        </TabsContent>
+        <TabsContent value="meta" className="mt-0 space-y-3">
+          <MetaSettingsCard />
         </TabsContent>
         <TabsContent value="quickbooks" className="mt-0 space-y-3">
           <QboSettingsCard />
